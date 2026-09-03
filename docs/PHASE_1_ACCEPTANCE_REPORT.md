@@ -1,10 +1,14 @@
 # ALEx Rewards Phase 1 Acceptance Report
 
-Status: **implementation complete; acceptance pending one host-dependent runtime gate**  
-Date: 2026-09-03  
+Status: **local/runtime gates passed; remote GitHub CI gates pending because no approved remote is configured**
+
+Date: 2026-09-03
+
 Source of truth: ALEx Rewards Master Product, Financial, Security & Engineering Specification v1.1
 
 Phase 2 has not started. No ledger, reward issuance, withdrawal, AdsGram monetary, TON payout, or KMS-signing implementation is present.
+
+The Final Acceptance Addendum at the end of this report supersedes the earlier runtime status captured in sections E through N.
 
 ## A. Exact repository tree
 
@@ -317,3 +321,214 @@ No source-level critical TODO, FIXME, placeholder security implementation, known
 **Not every Phase 1 acceptance criterion has passed yet.** The implementation, static gates, package builds, configuration safeguards, and five independent service boots pass. The full Docker dependency stack, Worker runtime, end-to-end smoke suite, clean-clone Docker startup, and remote GitHub CI gates remain unverified because the local Docker engine is unavailable and no GitHub remote run exists.
 
 Phase 1 must remain open, and Phase 2 must not begin, until those runtime gates pass.
+
+---
+
+# Phase 1 Final Acceptance Addendum
+
+This addendum records the final result of the runtime-gate closure work on 2026-09-03. It supersedes the earlier Docker/runtime status in this report. Phase 2 has not started.
+
+## A. Docker/host issue root cause
+
+Docker Desktop 4.80.0 / Engine 29.6.1 repeatedly terminated during backend initialization because its Windows AF_UNIX runtime socket paths had become inaccessible NTFS reparse points. The backend log identified failures removing `dockerInference` and Docker Secrets Engine sockets with `ERROR_CANT_ACCESS_FILE` / invalid-name errors. The engine itself and the existing Docker WSL data disk were intact; the failure was in Docker Desktop's transient Windows runtime socket state after an unclean backend shutdown.
+
+## B. Exact fix and host changes
+
+The local Docker Desktop environment was recovered non-destructively. No Docker image, container, volume, WSL distribution, Docker data disk, or project data was deleted, reset, pruned, or unregistered.
+
+Host-level changes made:
+
+1. Preserved the Docker Desktop settings file at `C:\Users\Master aLEX\AppData\Roaming\Docker\settings-store.phase1-pre-4.89.0-20260903.json`; its SHA-256 matched the active settings file when copied.
+2. Retained the earlier `EnableDockerAI=false` setting and added `EnableInference=false` to the active Docker Desktop settings.
+3. Stopped only Docker Desktop/backend processes and terminated only the `docker-desktop` WSL runtime between recovery attempts.
+4. Moved, rather than deleted, transient socket/runtime directories to these recoverable backups:
+   - `C:\Users\Master aLEX\AppData\Local\Docker\run.stale-phase1-20260903`
+   - `C:\Users\Master aLEX\AppData\Local\Docker\run.stale-phase1-20260903-second`
+   - `C:\Users\Master aLEX\AppData\Local\Docker\run.stale-phase1-20260903-third`
+   - `C:\Users\Master aLEX\AppData\Local\docker-secrets-engine.stale-phase1-20260903`
+   - `C:\Users\Master aLEX\AppData\Local\docker-secrets-engine.stale-phase1-20260903-second`
+5. Attempted a Docker Desktop upgrade with WinGet; the initial download stalled and was interrupted. An incomplete direct-download file remains at `C:\Users\Master aLEX\AppData\Local\Temp\DockerDesktop-4.89.0-238018.exe`; it was not executed manually.
+6. Attempted `wsl --install Ubuntu-24.04` using both the default path and `--web-download`; both stalled before installation and were interrupted. No Ubuntu distribution was created.
+7. Docker Desktop's updater subsequently completed the upgrade to Docker Desktop 4.89.0 build 238018. Current versions are Client/Engine 29.7.2 and Docker Compose 5.5.0. The engine remained stable after the transient socket directories were replaced.
+
+The existing Docker data disk remains present at `C:\Users\Master aLEX\AppData\Local\Docker\wsl\disk\docker_data.vhdx`. Unrelated containers occupying host ports 5432 and 6379 were not stopped or changed. The project used the documented alternate host ports 55432 and 56379 while container-internal ports remained unchanged.
+
+## C. Full-stack startup evidence
+
+`pnpm dev:stack` completed successfully from both the primary checkout and a clean clone. The pinned application image built all 25 workspaces from a frozen lockfile, and the following services were simultaneously running:
+
+- PostgreSQL, Redis, Temporal, Temporal UI, and OpenTelemetry Collector;
+- API, Bot, Worker, and isolated Signer;
+- Mini App and Admin.
+
+`docker compose ... up -d --no-build --wait` reported every service healthy or running. Application health checks for all six deployables passed simultaneously. The OTel Collector health endpoint returned 200, and the Temporal UI was reachable on its configured local port.
+
+The clean container build also exposed and closed a deterministic-build issue: host-generated TypeScript build metadata was entering the Docker context while generated declarations were excluded. `**/*.tsbuildinfo` is now excluded, so a clean image build produces dependency declarations in the correct Turbo graph order.
+
+## D. PostgreSQL readiness result
+
+**PASS.** The pinned PostgreSQL 18.6 container was healthy. `pg_isready` returned `accepting connections`, and a direct SQL query returned `alex_rewards|alex_rewards|1`. API readiness independently reported PostgreSQL state `ok`.
+
+## E. Redis readiness result
+
+**PASS.** The pinned Redis 8.8.2 container was healthy. `redis-cli ping` returned `PONG`; server info reported `redis_version:8.8.2` and internal `tcp_port:6379`. API readiness independently reported Redis state `ok`.
+
+## F. Temporal readiness result
+
+**PASS.** Temporal's workflow service health check returned `temporal.api.workflowservice.v1.WorkflowService: SERVING`. A real deterministic foundation workflow completed through the configured namespace/task queue during each smoke run. API readiness independently reported Temporal state `ok`.
+
+## G. Worker runtime result
+
+**PASS.** The Worker compiled its workflow bundle, entered `RUNNING`, registered a workflow poller on task queue `alex-rewards-foundation`, and served readiness 200. The final shutdown test showed `STOPPING` -> `DRAINING` -> `DRAINED` -> `STOPPED`, followed by `worker shutdown complete`, with container exit code 0. The Worker now disables the Temporal SDK's competing signal handler and awaits the Worker run/drain promise before closing its native connection.
+
+## H. Complete smoke-suite result
+
+**PASS.** Exact `pnpm smoke` results:
+
+```text
+miniapp-live: ok
+miniapp-ready: ok
+admin-live: ok
+admin-ready: ok
+api-live: ok
+api-ready: ok
+bot-live: ok
+bot-ready: ok
+worker-live: ok
+worker-ready: ok
+signer-live: ok
+signer-ready: ok
+temporal-foundation-workflow: ok
+Phase 1 smoke test passed.
+```
+
+The suite passed from the primary checkout and again from the clean clone. API readiness returned HTTP 200 with PostgreSQL, Redis, and Temporal all `ok`. `POST /sign` returned 404; the Signer reports `signingEnabled:false`, rejects production KMS configuration, contains no KMS SDK dependency, and exposes no signing capability.
+
+Graceful SIGTERM tests returned exit code 0 for API, Bot, Worker, and Signer, each with shutdown-started/shutdown-complete evidence. PostgreSQL, Redis, Temporal, and the OTel Collector also stopped with exit code 0. Next.js Mini App/Admin exit promptly with the upstream `next start` signal status 143; they have no stateful resource cleanup. Temporal UI exits with upstream wrapper status 2 on Compose stop; neither behavior strands application work or data.
+
+## I. GitHub Actions URLs/run IDs and results
+
+**FAIL / NOT RUN.** No Git remote is configured in the approved checkout, and no repository URL is named in the specification or project documentation. The authenticated GitHub account contains multiple similarly named repositories, including an empty `iAlexx/alexreward11`, but there is no authoritative evidence that any one is the approved destination. No remote was inferred, no repository was created, and nothing was pushed. Consequently there are no GitHub Actions URLs or run IDs, and neither remote `quality` nor remote `docker-smoke` can yet be marked passed.
+
+The workflow definition itself remains locally validated and contains both required jobs.
+
+## J. Clean-clone validation result
+
+**PASS locally.** Validation used commit `cad7877` in a new clean checkout at `C:\Users\Master aLEX\Desktop\project program\alex reward\alex-rewards-clean-validation-20260903-2`:
+
+1. clean Git clone and clean tracked status;
+2. `.env.example` copied to ignored `.env`, with documented alternate host ports because unrelated containers own 5432/6379;
+3. `pnpm install --frozen-lockfile` passed;
+4. format, lint (29/29), typecheck (29/29), Phase 1 tests (12/12), builds (25/25), boundary validation, migration validation, secret scan, and dependency audit passed;
+5. `pnpm dev:stack` rebuilt the full pinned image and started the exact Compose stack;
+6. all services converged simultaneously;
+7. `pnpm smoke` passed in full.
+
+An initial clean clone found Windows line-ending conversion would fail formatting. `.gitattributes` now enforces LF for text and marks common binary formats, and the second untouched clone proved the correction.
+
+## K. Files changed since the previous report
+
+Repository files modified or added while closing these gates:
+
+- `.dockerignore` — excludes generated build state, including `*.tsbuildinfo`;
+- `.env.example` — documents configurable PostgreSQL/Redis host ports;
+- `.gitattributes` — enforces portable LF checkouts;
+- `.gitignore` — ignores the pre-existing local `docs.zip` artifact;
+- `apps/api/src/main.ts` — gives the shared shutdown coordinator sole signal ownership;
+- `apps/worker/src/main.ts` — gives the shared coordinator sole signal ownership and awaits Temporal drain before connection close;
+- `docs/LOCAL_DEVELOPMENT.md` — documents safe alternate host ports;
+- `infra/docker/Dockerfile` — persistent pnpm cache mount and disabled build telemetry;
+- `infra/docker/compose.yaml` — configurable host ports and direct Node entrypoints so SIGTERM reaches application processes;
+- `docs/PHASE_1_ACCEPTANCE_REPORT.md` — this addendum.
+
+The ignored local `.env` was changed only to use ports 55432/56379. Repository-local Git author configuration was corrected to the authenticated GitHub account's noreply identity before commits; global Git configuration was not changed.
+
+## L. Commands executed
+
+Material diagnostic, recovery, validation, and evidence commands were:
+
+```text
+docker version
+docker info
+docker ps -a
+docker volume ls
+wsl --status
+wsl -l -v
+Get-CimInstance Win32_OperatingSystem
+Get-Process *docker*
+Get-Content <Docker Desktop backend logs>
+Get-Item / Get-ChildItem <Docker runtime socket paths>
+Copy-Item <Docker settings> <timestamped settings backup>
+Stop-Process <Docker Desktop/backend processes>
+wsl --terminate docker-desktop
+Move-Item <Docker runtime directory> <timestamped recoverable backup>
+winget upgrade --id Docker.DockerDesktop --exact
+curl.exe <official Docker Desktop installer URL>
+wsl --install Ubuntu-24.04
+wsl --install --web-download Ubuntu-24.04
+docker pull <each exact digest-pinned Compose image>
+docker compose -f infra/docker/compose.yaml --env-file .env --profile apps config --quiet
+pnpm verify:local
+pnpm peers check
+pnpm security:audit
+pnpm dev:stack
+pnpm smoke
+docker compose -f infra/docker/compose.yaml --env-file .env --profile apps up -d --no-build --wait
+docker compose -f infra/docker/compose.yaml --env-file .env --profile apps ps
+docker compose -f infra/docker/compose.yaml --env-file .env exec -T postgres pg_isready -U alex_rewards -d alex_rewards
+docker compose -f infra/docker/compose.yaml --env-file .env exec -T postgres psql -U alex_rewards -d alex_rewards -Atc "select current_database(), current_user, 1"
+docker compose -f infra/docker/compose.yaml --env-file .env exec -T redis redis-cli ping
+docker compose -f infra/docker/compose.yaml --env-file .env exec -T redis redis-cli INFO server
+docker compose -f infra/docker/compose.yaml --env-file .env exec -T temporal tctl --address temporal:7233 cluster health
+docker compose -f infra/docker/compose.yaml --env-file .env exec -T temporal tctl --address temporal:7233 taskqueue describe --taskqueue alex-rewards-foundation
+Invoke-WebRequest http://127.0.0.1:3002/health/ready
+Invoke-WebRequest http://127.0.0.1:13133/
+Invoke-WebRequest -Method Post http://127.0.0.1:3005/sign
+docker compose -f infra/docker/compose.yaml --env-file .env --profile apps stop --timeout 30
+docker compose -f infra/docker/compose.yaml --env-file .env --profile apps logs
+git remote -v
+gh auth status
+gh api user
+gh repo list iAlexx
+git config --local user.name iAlexx
+git config --local user.email 80723925+iAlexx@users.noreply.github.com
+git add .
+git commit -m "Complete Phase 1 foundation runtime gates"
+git commit -m "Enforce portable repository line endings"
+git clone --no-local <local Phase 1 repository> <clean-validation-directory>
+Copy-Item .env.example .env
+pnpm install --frozen-lockfile
+pnpm verify:local
+pnpm security:audit
+pnpm dev:stack
+pnpm smoke
+```
+
+The stalled WinGet/download/WSL installation attempts were interrupted; they did not install a WSL distribution, manually execute an installer, or delete Docker data.
+
+## M. Remaining issue
+
+One blocking issue remains: the exact approved GitHub repository URL is not configured or documented. Supplying that URL is required before adding the remote, pushing, and obtaining successful `quality` and `docker-smoke` run IDs. Temporal's bundled `tctl` emits an upstream deprecation notice; it does not affect health or workflow execution and can be replaced with Temporal CLI during a future infrastructure-only maintenance change.
+
+There is no remaining local runtime failure, source-level critical TODO/FIXME, placeholder security implementation, known high/critical dependency vulnerability, Phase 2 business implementation, mutable `users.balance`, signing capability, or production KMS integration.
+
+## N. Final acceptance results
+
+| Phase 1 acceptance criterion                                     | Result | Evidence summary                                                                   |
+| ---------------------------------------------------------------- | ------ | ---------------------------------------------------------------------------------- |
+| All approved apps/packages exist                                 | PASS   | 6 apps and 19 shared package boundaries validated                                  |
+| Monorepo dependency boundaries are clean                         | PASS   | automated architecture validation passed                                           |
+| All applications build                                           | PASS   | 25/25 builds, including clean container and clean-clone builds                     |
+| All required backend/runtime processes boot                      | PASS   | all 11 Compose services started                                                    |
+| All health/readiness checks pass simultaneously                  | PASS   | six app health checks plus dependency/collector checks passed                      |
+| PostgreSQL, Redis, and Temporal local dependencies work          | PASS   | SQL query, PONG, SERVING, API dependency probes, and workflow execution passed     |
+| Configuration validation works                                   | PASS   | five configuration assertions and fail-fast production/KMS guards passed           |
+| GitHub Actions `quality` is green                                | FAIL   | no approved/configured GitHub remote; no run exists                                |
+| GitHub Actions `docker-smoke` is green                           | FAIL   | no approved/configured GitHub remote; no run exists                                |
+| No secrets are exposed                                           | PASS   | secret scan, ignored `.env`, frontend allowlist, redaction, and image context pass |
+| Observability foundation works                                   | PASS   | OTel health 200; app telemetry initialized; Sentry is structurally integrated      |
+| Clean shutdown behavior works                                    | PASS   | API/Bot/Worker/Signer and stateful dependencies exit cleanly; Worker drains        |
+| Local setup works from a clean environment                       | PASS   | clean clone, frozen install, full stack, and smoke passed                          |
+| No critical TODOs or placeholder security implementations remain | PASS   | scans/review passed; Signer has no signing or KMS capability                       |
+
+**Overall Phase 1 acceptance: FAIL / pending.** All local and clean-clone gates pass, but the two mandatory GitHub Actions jobs have not run. Phase 2 must not begin.
