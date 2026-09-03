@@ -1,0 +1,15 @@
+.env
+.env.*
+!.env.example
+.next/
+coverage/
+dist/
+node_modules/
+.turbo/
+*.log
+*.tsbuildinfo
+.DS_Store
+.idea/
+.vscode/
+reports/
+docs.zip

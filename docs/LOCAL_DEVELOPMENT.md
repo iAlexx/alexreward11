@@ -7,6 +7,8 @@ From the repository root:
 ```powershell
 Copy-Item .env.example .env
 # Edit .env and replace SIGNER_SERVICE_TOKEN with a unique 32+ character local token.
+# If host ports 5432 or 6379 are already occupied, change POSTGRES_HOST_PORT and
+# REDIS_HOST_PORT and update the matching localhost ports in DATABASE_URL and REDIS_URL.
 corepack prepare pnpm@11.25.0 --activate
 pnpm install --frozen-lockfile
 pnpm verify:local

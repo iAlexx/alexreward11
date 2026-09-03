@@ -1,0 +1,30 @@
+{
+  "name": "@alex-rewards/admin",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev -p 3001",
+    "build": "next build",
+    "start": "next start -p 3001",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src next.config.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@alex-rewards/config": "workspace:*",
+    "@alex-rewards/contracts": "workspace:*",
+    "@sentry/nextjs": "10.73.0",
+    "@tanstack/react-query": "5.102.8",
+    "next": "16.3.4",
+    "next-intl": "4.14.2",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.3.3",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.5",
+    "tailwindcss": "4.3.3"
+  }
+}

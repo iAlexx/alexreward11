@@ -1,0 +1,23 @@
+{
+  "name": "@alex-rewards/signer",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src test",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@alex-rewards/config": "workspace:*",
+    "@alex-rewards/contracts": "workspace:*",
+    "@alex-rewards/observability": "workspace:*",
+    "fastify": "5.12.1"
+  },
+  "devDependencies": {
+    "tsx": "4.23.13"
+  }
+}

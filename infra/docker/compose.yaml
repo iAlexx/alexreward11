@@ -1,0 +1,278 @@
+name: alex-rewards
+
+x-app: &app
+  image: alex-rewards-foundation:1.1.0-phase1
+  build:
+    context: ../..
+    dockerfile: infra/docker/Dockerfile
+    args:
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:3002
+  restart: unless-stopped
+  init: true
+  read_only: true
+  tmpfs:
+    - /tmp:size=128m,mode=1777
+  security_opt:
+    - no-new-privileges:true
+  networks:
+    - alex-internal
+  profiles: [apps]
+
+x-runtime-env: &runtime-env
+  DEPLOYMENT_ENV: local
+  NODE_ENV: production
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  OTEL_ENABLED: ${OTEL_ENABLED:-true}
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+  SENTRY_DSN: ${SENTRY_DSN:-}
+
+services:
+  postgres:
+    image: postgres:18.6@sha256:4ef4dbc939d61acea57712655ddb4b4ab27419c913f94cca0cd57cb3ea3c2280
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    ports:
+      - 127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - alex-internal
+
+  redis:
+    image: redis:8.8.2@sha256:37227fff5638322f4ebea25d6d0dc3ee50848604e82b81426f11507b3ec7d2cc
+    restart: unless-stopped
+    command: [redis-server, --appendonly, 'yes', --save, '60', '1']
+    volumes:
+      - redis-data:/data
+    ports:
+      - 127.0.0.1:${REDIS_HOST_PORT:-6379}:6379
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - alex-internal
+
+  temporal:
+    image: temporalio/auto-setup:1.29.7@sha256:f14912b699cf73015ad5c4fc18d522d4b014db90e794039214dfb7c022c2644f
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PWD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_SEEDS: postgres
+    ports:
+      - 127.0.0.1:7233:7233
+    healthcheck:
+      test: [CMD-SHELL, 'tctl --address temporal:7233 cluster health 2>/dev/null | grep -q SERVING']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - alex-internal
+
+  temporal-ui:
+    image: temporalio/ui:2.53.3@sha256:eef301146e60fad34b47adaecfae4149016e34b2d44ba94fca5fd8e5441f182a
+    restart: unless-stopped
+    depends_on:
+      temporal:
+        condition: service_healthy
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: http://localhost:3000
+    ports:
+      - 127.0.0.1:8080:8080
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - alex-internal
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.159.0@sha256:1f2c54a30e713fac6b3ae77a1ec84010c2007e29ced8ec666214fc2f6739c1cc
+    restart: unless-stopped
+    command: [--config=/etc/otelcol-contrib/config.yaml]
+    volumes:
+      - ./otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
+    ports:
+      - 127.0.0.1:4317:4317
+      - 127.0.0.1:4318:4318
+      - 127.0.0.1:13133:13133
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - alex-internal
+
+  miniapp:
+    <<: *app
+    working_dir: /workspace/apps/miniapp
+    command: [node, node_modules/next/dist/bin/next, start, -p, '3000']
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:3002
+      NEXT_PUBLIC_SENTRY_DSN: ${NEXT_PUBLIC_SENTRY_DSN:-}
+    ports:
+      - 127.0.0.1:3000:3000
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "fetch('http://localhost:3000/api/health/ready').then(r=>{if(!r.ok)process.exit(1)})",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  admin:
+    <<: *app
+    working_dir: /workspace/apps/admin
+    command: [node, node_modules/next/dist/bin/next, start, -p, '3001']
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:3002
+      NEXT_PUBLIC_SENTRY_DSN: ${NEXT_PUBLIC_SENTRY_DSN:-}
+    ports:
+      - 127.0.0.1:3001:3001
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "fetch('http://localhost:3001/api/health/ready').then(r=>{if(!r.ok)process.exit(1)})",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    <<: *app
+    command: [node, apps/api/dist/main.js]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      temporal: { condition: service_healthy }
+      otel-collector: { condition: service_started }
+    environment:
+      <<: *runtime-env
+      API_PORT: 3002
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379/0
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
+    ports:
+      - 127.0.0.1:3002:3002
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "fetch('http://localhost:3002/health/ready').then(r=>{if(!r.ok)process.exit(1)})",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  bot:
+    <<: *app
+    command: [node, apps/bot/dist/main.js]
+    depends_on:
+      otel-collector: { condition: service_started }
+    environment:
+      <<: *runtime-env
+      BOT_PORT: 3003
+      BOT_TRANSPORT_MODE: ${BOT_TRANSPORT_MODE:-disabled}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+    ports:
+      - 127.0.0.1:3003:3003
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "fetch('http://localhost:3003/health/ready').then(r=>{if(!r.ok)process.exit(1)})",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  worker:
+    <<: *app
+    command: [node, apps/worker/dist/main.js]
+    depends_on:
+      temporal: { condition: service_healthy }
+      otel-collector: { condition: service_started }
+    environment:
+      <<: *runtime-env
+      WORKER_PORT: 3004
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379/0
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
+      TEMPORAL_TASK_QUEUE: ${TEMPORAL_TASK_QUEUE:-alex-rewards-foundation}
+    ports:
+      - 127.0.0.1:3004:3004
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "fetch('http://localhost:3004/health/ready').then(r=>{if(!r.ok)process.exit(1)})",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  signer:
+    <<: *app
+    command: [node, apps/signer/dist/main.js]
+    depends_on:
+      otel-collector: { condition: service_started }
+    environment:
+      <<: *runtime-env
+      SIGNER_PORT: 3005
+      SIGNER_SERVICE_TOKEN: ${SIGNER_SERVICE_TOKEN:?SIGNER_SERVICE_TOKEN is required}
+    ports:
+      - 127.0.0.1:3005:3005
+    healthcheck:
+      test:
+        [
+          CMD,
+          node,
+          -e,
+          "fetch('http://localhost:3005/health/ready').then(r=>{if(!r.ok)process.exit(1)})",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  postgres-data:
+  redis-data:
+
+networks:
+  alex-internal:
+    driver: bridge

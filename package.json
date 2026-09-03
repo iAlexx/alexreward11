@@ -1,0 +1,44 @@
+{
+  "name": "alex-rewards",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.25.0",
+  "engines": {
+    "node": "24.18.0",
+    "pnpm": "11.25.0"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "verify:boundaries": "node scripts/verify-boundaries.mjs",
+    "validate:migrations": "node scripts/validate-migrations.mjs",
+    "security:secrets": "node scripts/scan-secrets.mjs",
+    "security:audit": "pnpm audit --audit-level=high",
+    "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm build && pnpm verify:boundaries && pnpm validate:migrations && pnpm security:secrets",
+    "verify:local": "dotenv -e .env -- cross-env NODE_ENV=test pnpm run verify",
+    "dev:infra": "docker compose -f infra/docker/compose.yaml --env-file .env up -d postgres redis temporal temporal-ui otel-collector",
+    "dev:infra:down": "docker compose -f infra/docker/compose.yaml --env-file .env down",
+    "dev:stack": "docker compose -f infra/docker/compose.yaml --env-file .env --profile apps up -d --build",
+    "dev:stack:down": "docker compose -f infra/docker/compose.yaml --env-file .env --profile apps down",
+    "smoke": "node scripts/phase1-smoke.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@temporalio/client": "1.23.0",
+    "@types/node": "24.13.3",
+    "cross-env": "10.1.0",
+    "dependency-cruiser": "18.2.0",
+    "dotenv-cli": "11.0.0",
+    "eslint": "10.9.1",
+    "prettier": "3.9.6",
+    "turbo": "2.10.12",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.69.0",
+    "vitest": "4.1.11"
+  }
+}

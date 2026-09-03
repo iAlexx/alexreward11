@@ -1,0 +1,21 @@
+packages:
+  - apps/*
+  - packages/*
+
+catalogMode: strict
+
+linkWorkspacePackages: true
+
+preferWorkspacePackages: true
+
+sharedWorkspaceLockfile: true
+
+minimumReleaseAge: 1440
+
+allowBuilds:
+  '@parcel/watcher': true
+  '@scarf/scarf': false
+  '@sentry/cli': false
+  '@swc/core': true
+  esbuild: true
+  protobufjs: true
