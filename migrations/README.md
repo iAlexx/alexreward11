@@ -26,6 +26,7 @@ provider business behaviour is implemented here.
 | `0011_seed_local_fixtures.sql`                       | LOCAL FIXTURE ONLY reference data                                                                                                                             |
 | `0012_ledger_integrity.sql`                          | Phase 4: one-reversal-per-original unique index; ledger_accounts structural immutability trigger                                                              |
 | `0013_reward_engine_integrity.sql`                   | Phase 5: reward-rule ACTIVE overlap EXCLUDE; financial immutability triggers; quote applied_economics / source_started_at / bonus policy                      |
+| `0014_phase5_financial_corrections.sql`              | Phase 5 correction: simulated_reward_sources; frozen quote trigger; multi-period bonus reservations; economic exposure period counters                        |
 
 ## Conventions
 

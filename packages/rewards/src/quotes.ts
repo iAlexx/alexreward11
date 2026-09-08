@@ -6,12 +6,21 @@ import { amountAtomicToString } from '@alex-rewards/ledger';
 
 import { computeMembershipBonusAtomic, computeQuotedRewardAtomic } from './arithmetic.js';
 import {
+  assertPerUserBonusCap,
+  resolveApplicableBonusBudgetPeriods,
+  validateBaseBudgetPeriod,
+} from './budget-authority.js';
+import {
   releaseMembershipBonusBudgetReservation,
   reserveMembershipBonusBudget,
 } from './bonus-budgets.js';
 import { releaseRewardBudgetReservation, reserveRewardBudget } from './budgets.js';
 import { withLedgerTransaction, type LedgerDb } from './db.js';
-import { RewardDomainError } from './errors.js';
+import { isBonusEconomicUnavailability, RewardDomainError } from './errors.js';
+import {
+  releaseExposureReservationsForQuote,
+  reserveExposureForQuote,
+} from './exposure.js';
 import {
   assertNewQuotesAllowed,
   isMembershipBonusPaused,
@@ -19,7 +28,10 @@ import {
 } from './guardrails.js';
 import { insertOutboxEvent } from './outbox.js';
 import { resolveRewardRule } from './rules.js';
-import { markSimulatedSourceStarted } from './simulated.js';
+import {
+  assertSimulatedSourceEligibleForQuote,
+  markSimulatedSourceQuoted,
+} from './simulated.js';
 import {
   ELIGIBLE_REWARD_BONUS_CODE,
   type AppliedEconomics,
@@ -28,19 +40,107 @@ import {
   type RewardQuoteResult,
 } from './types.js';
 
+interface BonusCandidate {
+  readonly membershipId: string;
+  readonly membershipPlanId: string;
+  readonly entitlementRuleVersionId: string;
+  readonly bonusRuleVersion: number;
+  readonly bonusBps: number;
+}
+
 interface BonusResolution {
   readonly membershipId: string | null;
+  readonly membershipPlanId: string | null;
   readonly entitlementRuleVersionId: string | null;
   readonly bonusRuleVersion: number | null;
   readonly bonusBps: number | null;
   readonly bonusAmountAtomic: bigint;
   readonly bonusUnavailablePolicy: MembershipBonusUnavailablePolicy | null;
+  readonly bonusBudgetPeriodIds: string[];
+}
+
+/**
+ * Resolve FINANCIAL ELIGIBLE_REWARD_BONUS candidates across all active memberships.
+ * 0 → no bonus; 1 → use; >1 conflicting → FAIL CLOSED.
+ */
+async function resolveFinancialBonusCandidates(
+  client: PoolClient,
+  userId: string,
+  asOf: Date,
+): Promise<BonusCandidate[]> {
+  const result = await client.query<{
+    membership_id: string;
+    membership_plan_id: string;
+    rule_version_id: string;
+    rule_version: number;
+    value_bps: number;
+  }>(
+    `SELECT um.id AS membership_id,
+            um.membership_plan_id,
+            mbr.id AS rule_version_id,
+            mbr.rule_version,
+            mbr.value_bps
+     FROM user_memberships um
+     JOIN membership_plans mp ON mp.id = um.membership_plan_id
+     JOIN membership_plan_entitlements mpe ON mpe.membership_plan_id = mp.id
+     JOIN entitlements e ON e.id = mpe.entitlement_id
+     JOIN membership_benefit_rule_versions mbr ON mbr.id = mpe.rule_version_id
+     WHERE um.user_id = $1::uuid
+       AND um.status = 'ACTIVE'
+       AND (um.expires_at IS NULL OR um.expires_at > $2::timestamptz)
+       AND mp.status = 'ACTIVE'
+       AND mpe.status = 'ACTIVE'
+       AND mpe.valid_from <= $2::timestamptz
+       AND (mpe.valid_to IS NULL OR mpe.valid_to > $2::timestamptz)
+       AND mbr.status = 'ACTIVE'
+       AND mbr.effective_from <= $2::timestamptz
+       AND (mbr.effective_to IS NULL OR mbr.effective_to > $2::timestamptz)
+       AND e.code = $3
+       AND e.security_classification = 'FINANCIAL'
+       AND e.value_type = 'BPS'
+       AND mbr.value_bps IS NOT NULL
+     ORDER BY um.id ASC, mbr.id ASC`,
+    [userId, asOf.toISOString(), ELIGIBLE_REWARD_BONUS_CODE],
+  );
+
+  return result.rows.map((row) => ({
+    membershipId: row.membership_id,
+    membershipPlanId: row.membership_plan_id,
+    entitlementRuleVersionId: row.rule_version_id,
+    bonusRuleVersion: row.rule_version,
+    bonusBps: row.value_bps,
+  }));
+}
+
+function pickSingleBonusCandidate(candidates: BonusCandidate[]): BonusCandidate | null {
+  if (candidates.length === 0) return null;
+  if (candidates.length === 1) return candidates[0]!;
+
+  const keys = new Set(
+    candidates.map(
+      (c) => `${c.membershipId}:${c.entitlementRuleVersionId}:${c.bonusBps}`,
+    ),
+  );
+  if (keys.size > 1) {
+    throw new RewardDomainError(
+      'BONUS_RESOLUTION_CONFLICT',
+      'multiple conflicting FINANCIAL membership bonus entitlements; fail closed (no stacking)',
+      {
+        details: {
+          candidateCount: candidates.length,
+          membershipIds: candidates.map((c) => c.membershipId),
+        },
+      },
+    );
+  }
+  return candidates[0]!;
 }
 
 async function resolveMembershipBonus(
   client: PoolClient,
   input: {
     readonly userId: string;
+    readonly assetId: string;
     readonly baseAmountAtomic: bigint;
     readonly evaluateMembershipBonus: boolean;
     readonly policy: MembershipBonusUnavailablePolicy | null;
@@ -51,11 +151,13 @@ async function resolveMembershipBonus(
 ): Promise<BonusResolution> {
   const empty: BonusResolution = {
     membershipId: null,
+    membershipPlanId: null,
     entitlementRuleVersionId: null,
     bonusRuleVersion: null,
     bonusBps: null,
     bonusAmountAtomic: 0n,
     bonusUnavailablePolicy: input.policy,
+    bonusBudgetPeriodIds: [],
   };
 
   if (!input.evaluateMembershipBonus) {
@@ -64,114 +166,127 @@ async function resolveMembershipBonus(
 
   const policy = requireBonusUnavailablePolicy(true, input.policy);
   const paused = await isMembershipBonusPaused(client, input.environment);
+  const candidates = await resolveFinancialBonusCandidates(client, input.userId, input.asOf);
+  const candidate = pickSingleBonusCandidate(candidates);
 
-  const membership = await client.query<{
-    id: string;
-    membership_plan_id: string;
-  }>(
-    `SELECT um.id, um.membership_plan_id
-     FROM user_memberships um
-     WHERE um.user_id = $1::uuid
-       AND um.status = 'ACTIVE'
-       AND (um.expires_at IS NULL OR um.expires_at > $2::timestamptz)
-     ORDER BY um.granted_at ASC
-     LIMIT 1`,
-    [input.userId, input.asOf.toISOString()],
-  );
-  const membershipRow = membership.rows[0];
-  if (membershipRow === undefined) {
+  if (candidate === null) {
     return { ...empty, bonusUnavailablePolicy: policy };
   }
 
-  const benefit = await client.query<{
-    rule_version_id: string;
-    rule_version: number;
-    value_bps: number | null;
-  }>(
-    `SELECT mpe.rule_version_id, mbr.rule_version, mbr.value_bps
-     FROM membership_plan_entitlements mpe
-     JOIN entitlements e ON e.id = mpe.entitlement_id
-     JOIN membership_benefit_rule_versions mbr ON mbr.id = mpe.rule_version_id
-     WHERE mpe.membership_plan_id = $1::uuid
-       AND e.code = $2
-       AND mpe.status = 'ACTIVE'
-       AND mbr.status = 'ACTIVE'
-       AND mpe.valid_from <= $3::timestamptz
-       AND (mpe.valid_to IS NULL OR mpe.valid_to > $3::timestamptz)
-       AND mbr.effective_from <= $3::timestamptz
-       AND (mbr.effective_to IS NULL OR mbr.effective_to > $3::timestamptz)
-     ORDER BY mbr.rule_version DESC
-     LIMIT 2`,
-    [membershipRow.membership_plan_id, ELIGIBLE_REWARD_BONUS_CODE, input.asOf.toISOString()],
-  );
-
-  const benefitRow = benefit.rows[0];
-  if (benefit.rows.length !== 1 || benefitRow === undefined || benefitRow.value_bps === null) {
+  if (paused) {
     if (policy === 'BLOCK_QUOTE_BEFORE_START') {
       throw new RewardDomainError(
         'BONUS_BLOCKED',
         'membership bonus unavailable under BLOCK_QUOTE_BEFORE_START',
-        { details: { reason: 'ENTITLEMENT_MISSING' } },
+        { details: { reason: 'MEMBERSHIP_BONUS_PAUSE' } },
       );
     }
     return {
-      ...empty,
-      membershipId: membershipRow.id,
+      membershipId: candidate.membershipId,
+      membershipPlanId: candidate.membershipPlanId,
+      entitlementRuleVersionId: candidate.entitlementRuleVersionId,
+      bonusRuleVersion: candidate.bonusRuleVersion,
+      bonusBps: candidate.bonusBps,
+      bonusAmountAtomic: 0n,
       bonusUnavailablePolicy: policy,
+      bonusBudgetPeriodIds: [],
     };
   }
 
-  const bonusBps: number = benefitRow.value_bps;
-  if (
-    paused ||
-    input.membershipBonusBudgetPeriodId === undefined ||
-    input.membershipBonusBudgetPeriodId === null
-  ) {
+  const bonusAmount = computeMembershipBonusAtomic({
+    baseAmountAtomic: input.baseAmountAtomic,
+    bonusBps: candidate.bonusBps,
+  });
+
+  if (bonusAmount === 0n) {
+    return {
+      membershipId: candidate.membershipId,
+      membershipPlanId: candidate.membershipPlanId,
+      entitlementRuleVersionId: candidate.entitlementRuleVersionId,
+      bonusRuleVersion: candidate.bonusRuleVersion,
+      bonusBps: candidate.bonusBps,
+      bonusAmountAtomic: 0n,
+      bonusUnavailablePolicy: policy,
+      bonusBudgetPeriodIds: [],
+    };
+  }
+
+  try {
+    const locators =
+      input.membershipBonusBudgetPeriodId !== undefined &&
+      input.membershipBonusBudgetPeriodId !== null
+        ? [input.membershipBonusBudgetPeriodId]
+        : [];
+    const periods = await resolveApplicableBonusBudgetPeriods(client, {
+      assetId: input.assetId,
+      asOf: input.asOf,
+      userId: input.userId,
+      membershipPlanId: candidate.membershipPlanId,
+      locatorPeriodIds: locators,
+    });
+    if (periods.length === 0) {
+      throw new RewardDomainError('BONUS_UNAVAILABLE', 'no applicable membership bonus budget', {
+        details: { reason: 'BONUS_BUDGET_MISSING' },
+      });
+    }
+    for (const period of periods) {
+      const remaining =
+        BigInt(period.budgetAtomic) -
+        BigInt(period.reservedAtomic) -
+        BigInt(period.consumedAtomic);
+      if (bonusAmount > remaining) {
+        throw new RewardDomainError('BUDGET_EXHAUSTED', 'insufficient membership bonus budget', {
+          details: { budgetPeriodId: period.id, remaining: remaining.toString(10) },
+        });
+      }
+      if (period.perUserCapAtomic !== null) {
+        await assertPerUserBonusCap(client, {
+          budgetPeriodId: period.id,
+          userMembershipId: candidate.membershipId,
+          perUserCapAtomic: period.perUserCapAtomic,
+          amountAtomic: bonusAmount,
+        });
+      }
+    }
+    return {
+      membershipId: candidate.membershipId,
+      membershipPlanId: candidate.membershipPlanId,
+      entitlementRuleVersionId: candidate.entitlementRuleVersionId,
+      bonusRuleVersion: candidate.bonusRuleVersion,
+      bonusBps: candidate.bonusBps,
+      bonusAmountAtomic: bonusAmount,
+      bonusUnavailablePolicy: policy,
+      bonusBudgetPeriodIds: periods.map((p) => p.id),
+    };
+  } catch (error) {
+    if (!isBonusEconomicUnavailability(error)) {
+      throw error;
+    }
     if (policy === 'BLOCK_QUOTE_BEFORE_START') {
       throw new RewardDomainError(
         'BONUS_BLOCKED',
         'membership bonus unavailable under BLOCK_QUOTE_BEFORE_START',
         {
           details: {
-            reason: paused ? 'MEMBERSHIP_BONUS_PAUSE' : 'BONUS_BUDGET_MISSING',
+            reason: error.code,
+            causeMessage: error.publicMessage,
+            ...(error.details ?? {}),
           },
         },
       );
     }
+    // BASE_REWARD_ONLY: recognized economic unavailability → base-only.
     return {
-      membershipId: membershipRow.id,
-      entitlementRuleVersionId: benefitRow.rule_version_id,
-      bonusRuleVersion: benefitRow.rule_version,
-      bonusBps,
+      membershipId: candidate.membershipId,
+      membershipPlanId: candidate.membershipPlanId,
+      entitlementRuleVersionId: candidate.entitlementRuleVersionId,
+      bonusRuleVersion: candidate.bonusRuleVersion,
+      bonusBps: candidate.bonusBps,
       bonusAmountAtomic: 0n,
       bonusUnavailablePolicy: policy,
+      bonusBudgetPeriodIds: [],
     };
   }
-
-  const bonusAmount = computeMembershipBonusAtomic({
-    baseAmountAtomic: input.baseAmountAtomic,
-    bonusBps,
-  });
-
-  if (bonusAmount === 0n) {
-    return {
-      membershipId: membershipRow.id,
-      entitlementRuleVersionId: benefitRow.rule_version_id,
-      bonusRuleVersion: benefitRow.rule_version,
-      bonusBps,
-      bonusAmountAtomic: 0n,
-      bonusUnavailablePolicy: policy,
-    };
-  }
-
-  return {
-    membershipId: membershipRow.id,
-    entitlementRuleVersionId: benefitRow.rule_version_id,
-    bonusRuleVersion: benefitRow.rule_version,
-    bonusBps,
-    bonusAmountAtomic: bonusAmount,
-    bonusUnavailablePolicy: policy,
-  };
 }
 
 async function createRewardQuoteOnClient(
@@ -190,10 +305,20 @@ async function createRewardQuoteOnClient(
     throw new RewardDomainError('VALIDATION', 'sourceId must be a UUID');
   }
 
+  let providerId = command.providerId ?? null;
+  if (command.sourceType === 'PROMOTION') {
+    const simulated = await assertSimulatedSourceEligibleForQuote(client, {
+      sourceId: command.sourceId,
+      providerId,
+      userId: command.userId,
+    });
+    providerId = simulated.providerId;
+  }
+
   const rule = await resolveRewardRule(client, asOf, {
     sourceType: command.sourceType,
     assetId: command.assetId,
-    providerId: command.providerId ?? null,
+    providerId,
     countryGroup: command.countryGroup ?? null,
   });
 
@@ -206,18 +331,25 @@ async function createRewardQuoteOnClient(
     maxRewardAtomic: rule.maxRewardAtomic,
   });
 
-  const guardrails = await assertNewQuotesAllowed(client, {
-    environment,
+  if (command.budgetPeriodId === undefined || command.budgetPeriodId === null) {
+    throw new RewardDomainError(
+      'BUDGET_NOT_FOUND',
+      'budgetPeriodId is required for quote creation',
+    );
+  }
+
+  const baseBudget = await validateBaseBudgetPeriod(client, {
+    budgetPeriodId: command.budgetPeriodId,
     assetId: command.assetId,
-    rule,
-    baseAmountAtomic: baseAmount,
-    providerId: command.providerId ?? null,
-    countryGroup: command.countryGroup ?? null,
     asOf,
+    providerId,
+    countryGroup: command.countryGroup ?? null,
+    ruleVersion: rule.ruleVersion,
   });
 
   const bonus = await resolveMembershipBonus(client, {
     userId: command.userId,
+    assetId: command.assetId,
     baseAmountAtomic: baseAmount,
     evaluateMembershipBonus,
     policy: command.bonusUnavailablePolicy ?? null,
@@ -226,18 +358,23 @@ async function createRewardQuoteOnClient(
     membershipBonusBudgetPeriodId: command.membershipBonusBudgetPeriodId ?? null,
   });
 
-  if (command.budgetPeriodId === undefined || command.budgetPeriodId === null) {
-    throw new RewardDomainError(
-      'BUDGET_NOT_FOUND',
-      'budgetPeriodId is required for quote creation',
-    );
-  }
+  const guardrails = await assertNewQuotesAllowed(client, {
+    environment,
+    assetId: command.assetId,
+    rule,
+    baseAmountAtomic: baseAmount,
+    membershipBonusAmountAtomic: bonus.bonusAmountAtomic,
+    providerId,
+    countryGroup: command.countryGroup ?? null,
+    asOf,
+  });
 
   const quoteTtlSeconds = rule.quoteTtlSeconds > 0 ? rule.quoteTtlSeconds : 300;
   const expiresAt = new Date(asOf.getTime() + quoteTtlSeconds * 1000);
   const quoteId = randomUUID();
   const totalAmount = baseAmount + bonus.bonusAmountAtomic;
   const quoteCreatedAt = asOf.toISOString();
+  const bonusBudgetPeriodIds = bonus.bonusBudgetPeriodIds;
 
   const appliedEconomics: AppliedEconomics = {
     rewardRuleId: rule.id,
@@ -257,11 +394,10 @@ async function createRewardQuoteOnClient(
     entitlementRuleVersionId: bonus.entitlementRuleVersionId,
     bonusRuleVersion: bonus.bonusRuleVersion,
     bonusBps: bonus.bonusBps,
-    budgetPeriodIds: [
-      command.budgetPeriodId,
-      ...(command.membershipBonusBudgetPeriodId ? [command.membershipBonusBudgetPeriodId] : []),
-    ],
+    budgetPeriodIds: [baseBudget.id, ...bonusBudgetPeriodIds],
+    bonusBudgetPeriodIds,
     exposureLimitVersionIds: guardrails.exposureLimitVersionIds,
+    evaluatedExposureLimits: guardrails.evaluatedExposureLimits,
     bonusUnavailablePolicy: bonus.bonusUnavailablePolicy,
     quoteCreatedAt,
     sourceType: command.sourceType,
@@ -284,7 +420,7 @@ async function createRewardQuoteOnClient(
       command.userId,
       command.sourceType,
       command.sourceId,
-      command.providerId ?? null,
+      providerId,
       command.assetId,
       rule.id,
       rule.ruleVersion,
@@ -299,29 +435,45 @@ async function createRewardQuoteOnClient(
     ],
   );
 
+  if (command.sourceType === 'PROMOTION') {
+    await markSimulatedSourceQuoted(client, command.sourceId, asOf);
+  }
+
   const baseReservation = await reserveRewardBudget(client, {
-    budgetPeriodId: command.budgetPeriodId,
+    budgetPeriodId: baseBudget.id,
     rewardQuoteId: quoteId,
     amountAtomic: baseAmount,
   });
 
-  let bonusReservationId: string | null = null;
+  const bonusReservationIds: string[] = [];
   if (
     bonus.bonusAmountAtomic > 0n &&
     bonus.membershipId !== null &&
     bonus.entitlementRuleVersionId !== null &&
     bonus.bonusRuleVersion !== null &&
-    command.membershipBonusBudgetPeriodId
+    bonusBudgetPeriodIds.length > 0
   ) {
-    const bonusReservation = await reserveMembershipBonusBudget(client, {
-      budgetPeriodId: command.membershipBonusBudgetPeriodId,
-      userMembershipId: bonus.membershipId,
+    // Periods remain locked from resolveApplicableBonusBudgetPeriods in this transaction.
+    for (const periodId of [...bonusBudgetPeriodIds].sort()) {
+      const bonusReservation = await reserveMembershipBonusBudget(client, {
+        budgetPeriodId: periodId,
+        userMembershipId: bonus.membershipId,
+        rewardQuoteId: quoteId,
+        entitlementRuleVersionId: bonus.entitlementRuleVersionId,
+        bonusRuleVersion: bonus.bonusRuleVersion,
+        amountAtomic: bonus.bonusAmountAtomic,
+      });
+      bonusReservationIds.push(bonusReservation.id);
+    }
+  }
+
+  // Apply exposure reservations after quote exists (same transaction; periods already locked).
+  for (const pending of guardrails.pendingExposureReservations) {
+    await reserveExposureForQuote(client, {
       rewardQuoteId: quoteId,
-      entitlementRuleVersionId: bonus.entitlementRuleVersionId,
-      bonusRuleVersion: bonus.bonusRuleVersion,
-      amountAtomic: bonus.bonusAmountAtomic,
+      exposurePeriodId: pending.exposurePeriodId,
+      amountAtomic: pending.amountAtomic,
     });
-    bonusReservationId = bonusReservation.id;
   }
 
   await insertOutboxEvent(client, {
@@ -349,7 +501,8 @@ async function createRewardQuoteOnClient(
     membershipId: bonus.membershipId,
     appliedEconomics,
     baseReservationId: baseReservation.id,
-    bonusReservationId,
+    bonusReservationId: bonusReservationIds[0] ?? null,
+    bonusReservationIds,
   };
 }
 
@@ -412,14 +565,20 @@ export async function expireRewardQuote(
       await releaseRewardBudgetReservation(client, baseReservation.rows[0].id);
     }
 
-    const bonusReservation = await client.query<{ id: string; state: string }>(
+    const bonusReservations = await client.query<{ id: string; state: string }>(
       `SELECT id, state::text AS state FROM membership_bonus_budget_reservations
-       WHERE reward_quote_id = $1 FOR UPDATE`,
+       WHERE reward_quote_id = $1
+       ORDER BY id
+       FOR UPDATE`,
       [quoteId],
     );
-    if (bonusReservation.rows[0]?.state === 'ACTIVE') {
-      await releaseMembershipBonusBudgetReservation(client, bonusReservation.rows[0].id);
+    for (const bonusReservation of bonusReservations.rows) {
+      if (bonusReservation.state === 'ACTIVE') {
+        await releaseMembershipBonusBudgetReservation(client, bonusReservation.id);
+      }
     }
+
+    await releaseExposureReservationsForQuote(client, quoteId);
 
     await client.query(
       `UPDATE reward_quotes
@@ -437,5 +596,3 @@ export async function expireRewardQuote(
     return { quoteId, status: 'EXPIRED', released: true };
   });
 }
-
-export { markSimulatedSourceStarted };

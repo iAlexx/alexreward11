@@ -6,10 +6,11 @@ V1.2 relational baseline as ordered, immutable explicit SQL migrations in `migra
 Phase 2 delivered the **schema** baseline. Phase 4 implements Ledger Core posting in
 `@alex-rewards/ledger` (see `docs/LEDGER.md`) and adds forward migration
 `0012_ledger_integrity.sql`. Migrations `0001`–`0012` remain immutable after acceptance.
-Phase 5 adds `0013_reward_engine_integrity.sql` for Reward Engine financial integrity and enables
-the `@alex-rewards/rewards` engine (simulated PROMOTION source only). Migrations `0001`–`0012`
-remain immutable. Withdrawals, payouts, provider adapters, and KMS signing remain out of scope
-until later Owner-approved phases.
+Phase 5 adds `0013_reward_engine_integrity.sql` for Reward Engine financial integrity and
+`0014_phase5_financial_corrections.sql` for simulated source registry, frozen quote protection,
+multi-period bonus reservations, and atomic exposure period counters. Migrations `0001`–`0013`
+remain immutable after acceptance. Withdrawals, payouts, provider adapters, and KMS signing remain
+out of scope until later Owner-approved phases.
 
 ## Migration inventory
 
@@ -28,6 +29,7 @@ until later Owner-approved phases.
 | `0011_seed_local_fixtures.sql`                       | LOCAL FIXTURE ONLY reference data                                                                                                                    |
 | `0012_ledger_integrity.sql`                          | Phase 4: one-reversal-per-original unique index; ledger_accounts structural immutability                                                             |
 | `0013_reward_engine_integrity.sql`                   | Phase 5: ACTIVE reward-rule family overlap EXCLUDE; financial-rule immutability; quote reconstruction / started-source fields                        |
+| `0014_phase5_financial_corrections.sql`              | Phase 5 correction: `simulated_reward_sources`; frozen `reward_quotes` trigger; multi-period bonus reservations; economic exposure period counters  |
 
 ## Schema ownership
 

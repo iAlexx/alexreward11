@@ -112,11 +112,10 @@ window may exist per `code` (PostgreSQL `EXCLUDE` on `tstzrange(valid_from, vali
 `resolveRewardRule` still fails closed if zero or more than one `ACTIVE` row matches the resolution
 context (source_type / provider / country / asset), because multiple families could otherwise match.
 
-Financially authoritative fields on `reward_rules`, and entire rows of
-`membership_benefit_rule_versions` / `economic_exposure_limits`, are immutable in place (0013
-triggers). Lifecycle updates on `reward_rules` are limited to status / `valid_to` / reason /
-`source_reference` / `updated_at`. Benefit and exposure versions are append-only; overlapping
-`ACTIVE` windows fail closed at insert via `EXCLUDE`.
+Financially authoritative fields on `reward_rules`, `membership_benefit_rule_versions`, and
+`economic_exposure_limits` are immutable in place (0013 triggers). Approved lifecycle supersession
+is allowed (status / `valid_to` / `effective_to` / reason / `updated_at` as applicable). Overlapping
+`ACTIVE` windows fail closed via `EXCLUDE`.
 
 Quote reconstruction requires frozen `reward_quotes.applied_economics`, plus `source_started_at`
 and explicit `bonus_unavailable_policy` when bonus evaluation is in scope.
@@ -138,6 +137,25 @@ When membership bonus evaluation is in scope, an explicit pre-start policy is ma
 (`BASE_REWARD_ONLY` | `BLOCK_QUOTE_BEFORE_START`). Missing policy fails closed.
 
 - `BASE_REWARD_ONLY` — quote/issue the base reward; omit bonus reservation/issuance when bonus
-  cannot be honored (pause, missing entitlement/budget, zero after FLOOR).
+  cannot be honored (pause, missing entitlement/budget, exhausted caps, zero after FLOOR).
+  Only recognized economic unavailability may downgrade; arbitrary DB/internal errors must not.
 - `BLOCK_QUOTE_BEFORE_START` — refuse quote creation when bonus cannot be fully reserved/honored
-  before source start. Never silently drop a promised bonus after a valid start.
+  before source start. Never silently drop a promised bonus after a valid start. No surviving
+  quote/reservation state on failure.
+
+## ADR-015 — Phase 5 financial correction migration 0014
+
+Independent review found runtime gaps after the first Phase 5 archive (`a7da07d…`). Correction
+requires forward migration `0014_phase5_financial_corrections.sql` (do not edit `0001`–`0013`):
+
+1. `simulated_reward_sources` — DB-authoritative simulated PROMOTION identities (Outbox alone is
+   insufficient).
+2. `reward_quotes` financial snapshot trigger — reject in-place mutation of money/identity/
+   `applied_economics`; allow narrow lifecycle; `source_started_at` NULL→timestamp once.
+3. Multi-period membership bonus reservations — drop single-quote unique; unique
+   `(reward_quote_id, budget_period_id)` so daily/monthly/plan/user/global caps reserve together.
+4. `economic_exposure_periods` + `economic_exposure_reservations` — concurrency-safe, time-scoped
+   exposure authorization under PostgreSQL locks. Redis has zero financial authority.
+
+`MIN_EXPECTED_MARGIN_BPS` when ACTIVE fails closed (`MARGIN_POLICY_UNDEFINED`) until an
+Owner-approved expected-margin formula exists. Do not treat `10000 - user_share_bps` as margin.

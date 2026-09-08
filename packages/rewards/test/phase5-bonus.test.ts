@@ -58,6 +58,7 @@ describe.skipIf(phase5DatabaseUrl === '')('Phase 5 membership bonus', () => {
     const budgetPeriodId = await createTestOnlyBudget(pool, { assetId });
     const founder = await createFounderBonusFixture(pool, { userId, assetId, bonusBps: 500 });
     const source = await newSimulatedSource(pool);
+    if (founder.bonusBudgetPeriodId === null) throw new Error('expected bonus budget');
 
     const quote = await createRewardQuote(pool, {
       userId,
@@ -138,7 +139,7 @@ describe.skipIf(phase5DatabaseUrl === '')('Phase 5 membership bonus', () => {
       fixedRewardAtomic: '1000',
     });
     const budgetPeriodId = await createTestOnlyBudget(pool, { assetId });
-    await createFounderBonusFixture(pool, { userId, assetId });
+    await createFounderBonusFixture(pool, { userId, assetId, includeBonusBudget: false });
     const source = await newSimulatedSource(pool);
 
     const quote = await createRewardQuote(pool, {
@@ -150,7 +151,6 @@ describe.skipIf(phase5DatabaseUrl === '')('Phase 5 membership bonus', () => {
       budgetPeriodId,
       evaluateMembershipBonus: true,
       bonusUnavailablePolicy: 'BASE_REWARD_ONLY',
-      // no membershipBonusBudgetPeriodId
     });
 
     expect(quote.baseAmountAtomic).toBe('1000');
@@ -163,7 +163,7 @@ describe.skipIf(phase5DatabaseUrl === '')('Phase 5 membership bonus', () => {
       fixedRewardAtomic: '1000',
     });
     const budgetPeriodId = await createTestOnlyBudget(pool, { assetId });
-    await createFounderBonusFixture(pool, { userId, assetId });
+    await createFounderBonusFixture(pool, { userId, assetId, includeBonusBudget: false });
     const source = await newSimulatedSource(pool);
 
     await expect(

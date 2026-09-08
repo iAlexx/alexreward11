@@ -60,10 +60,13 @@ export async function truncateRewardTables(pool: Pool): Promise<void> {
     TRUNCATE TABLE
       outbox_events,
       reward_maturities,
+      economic_exposure_reservations,
+      economic_exposure_periods,
       membership_bonus_budget_reservations,
       reward_budget_reservations,
       reward_events,
       reward_quotes,
+      simulated_reward_sources,
       membership_bonus_budget_periods,
       reward_budget_periods,
       membership_plan_entitlements,
@@ -135,13 +138,19 @@ export async function createTestOnlyBudget(
 
 export async function createFounderBonusFixture(
   pool: Pool,
-  input: { readonly userId: string; readonly assetId: string; readonly bonusBps?: number },
+  input: {
+    readonly userId: string;
+    readonly assetId: string;
+    readonly bonusBps?: number;
+    /** When false, no membership_bonus_budget_periods row is created. Default true. */
+    readonly includeBonusBudget?: boolean;
+  },
 ): Promise<{
   membershipId: string;
   planId: string;
   entitlementId: string;
   benefitRuleVersionId: string;
-  bonusBudgetPeriodId: string;
+  bonusBudgetPeriodId: string | null;
 }> {
   return withLedgerTransaction(pool, async (client) => {
     const plan = await client.query<{ id: string }>(
@@ -157,8 +166,6 @@ export async function createFounderBonusFixture(
     const entitlementId = entitlement.rows[0]?.id;
     if (entitlementId === undefined) throw new Error('ELIGIBLE_REWARD_BONUS missing');
 
-    // Clear any prior ACTIVE benefit versions for this entitlement+plan (immutable rows:
-    // delete via truncate in beforeEach; here we insert a fresh ACTIVE version).
     const benefit = await createBenefitRuleVersion(client, {
       entitlementId,
       membershipPlanId: planId,
@@ -186,21 +193,25 @@ export async function createFounderBonusFixture(
     const membershipId = membership.rows[0]?.id;
     if (membershipId === undefined) throw new Error('membership insert failed');
 
-    const bonusBudget = await createMembershipBonusBudgetPeriod(client, {
-      membershipPlanId: planId,
-      assetId: input.assetId,
-      granularity: 'UTC_DAY',
-      periodStart: new Date('2026-01-01T00:00:00.000Z'),
-      periodEnd: new Date('2027-01-01T00:00:00.000Z'),
-      budgetAtomic: '100000000',
-    });
+    let bonusBudgetPeriodId: string | null = null;
+    if (input.includeBonusBudget !== false) {
+      const bonusBudget = await createMembershipBonusBudgetPeriod(client, {
+        membershipPlanId: planId,
+        assetId: input.assetId,
+        granularity: 'UTC_DAY',
+        periodStart: new Date('2026-01-01T00:00:00.000Z'),
+        periodEnd: new Date('2027-01-01T00:00:00.000Z'),
+        budgetAtomic: '100000000',
+      });
+      bonusBudgetPeriodId = bonusBudget.id;
+    }
 
     return {
       membershipId,
       planId,
       entitlementId,
       benefitRuleVersionId: benefit.id,
-      bonusBudgetPeriodId: bonusBudget.id,
+      bonusBudgetPeriodId,
     };
   });
 }

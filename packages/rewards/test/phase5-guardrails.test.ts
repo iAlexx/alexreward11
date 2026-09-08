@@ -117,7 +117,7 @@ describe.skipIf(phase5DatabaseUrl === '')('Phase 5 guardrails', () => {
     ).rejects.toMatchObject({ code: 'GUARDRAIL_BLOCKED' });
   });
 
-  it('blocks new quotes when min expected margin is breached', async () => {
+  it('fails closed when MIN_EXPECTED_MARGIN_BPS is ACTIVE (formula OWNER_DECISION_REQUIRED)', async () => {
     await withLedgerTransaction(pool, async (client) => {
       const provider = await ensureSimulatedRewardProvider(client);
       await createRewardRuleVersion(client, {
@@ -161,6 +161,6 @@ describe.skipIf(phase5DatabaseUrl === '')('Phase 5 guardrails', () => {
         budgetPeriodId,
         evaluateMembershipBonus: false,
       }),
-    ).rejects.toMatchObject({ code: 'GUARDRAIL_BLOCKED' });
+    ).rejects.toMatchObject({ code: 'MARGIN_POLICY_UNDEFINED' });
   });
 });

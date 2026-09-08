@@ -8,7 +8,10 @@ Phase 5 implements the monetary Reward Engine in `@alex-rewards/rewards`.
 | ----------------------------------------------- | ---------------------------------------------------------------------------------- |
 | `reward_rules` (versioned)                      | Authoritative economics for quotes; financial fields immutable after insert (0013) |
 | `reward_quotes.applied_economics`               | Frozen reconstruction evidence for every material rule/version used at quote time  |
-| `reward_budget_*` / `membership_bonus_budget_*` | Atomic reservation / consume / release projections in PostgreSQL                   |
+| `reward_quotes` financial snapshot              | Immutable after insert (0014 trigger); lifecycle fields only                         |
+| `simulated_reward_sources`                      | Server-authoritative simulated PROMOTION source registry                             |
+| `economic_exposure_periods` / reservations      | Time-scoped atomic exposure counters (0014); Redis has zero authority                |
+| `reward_budget_*` / `membership_bonus_budget_*` | Atomic reservation / consume / release projections in PostgreSQL                     |
 | Ledger (`@alex-rewards/ledger`)                 | Financial source of truth for issued Pending/Available balances                    |
 | Outbox                                          | Same-transaction domain events (`dedupe_key` unique)                               |
 | Redis                                           | **Zero** reward authority                                                          |
@@ -21,9 +24,11 @@ Phase 5 does **not** enable AdsGram / provider monetary traffic.
 
 - `source_type = PROMOTION`
 - Internal provider code `SIMULATED_REWARD_SOURCE` with `production_monetary_status = BLOCKED`
-- `source_id` is a server UUID
-- Completion/start is server-only (`completeSimulatedRewardSource` / `markSimulatedSourceStarted`)
-- Issuance requires `source_started_at` set; expiry release is skipped after a protected start
+- `source_id` is a server UUID persisted in `simulated_reward_sources` before quote authorization
+- Completion/start is server-only via `completeSimulatedRewardSource` (binding + expiry checks)
+- `markSimulatedSourceStarted` is **not** part of the public runtime API
+- Start requires `completedAt <= expires_at`; late starts return `QUOTE_EXPIRED` and leave the quote releasable
+- Issuance after `expires_at` requires `source_started_at IS NOT NULL AND source_started_at <= expires_at`
 
 ## Arithmetic
 
@@ -48,15 +53,16 @@ Zero after `FLOOR` means **no bonus** (amount `0`), not an error.
 
 `createRewardQuote` (one PostgreSQL transaction via `withLedgerTransaction`):
 
-1. Resolve exactly one `ACTIVE` reward rule for context (`resolveRewardRule` fails closed on 0 or >1 matches). Rule family = `reward_rules.code`.
-2. Evaluate guardrails (global pause, exposure limits, margin) — **new quotes only**.
-3. Compute base amount; optionally evaluate Founder/`ELIGIBLE_REWARD_BONUS`.
-4. Require `bonusUnavailablePolicy` when bonus evaluation is in scope (`BASE_REWARD_ONLY` | `BLOCK_QUOTE_BEFORE_START`).
-5. Insert quote + `applied_economics` + base budget reservation (`base_amount_atomic` only).
-6. Optionally reserve membership bonus budget separately.
-7. Insert outbox `reward_quote.created`.
+1. For `PROMOTION`, prove `simulated_reward_sources` eligibility (server-created, correct provider).
+2. Resolve exactly one `ACTIVE` reward rule for context (`resolveRewardRule` fails closed on 0 or >1 matches). Rule family = `reward_rules.code`.
+3. Validate base budget period as locator only (ACTIVE, asset, window, scope).
+4. Resolve FINANCIAL `ELIGIBLE_REWARD_BONUS` candidates across all active memberships (0 → none; 1 → use; >1 → fail closed).
+5. Under `BASE_REWARD_ONLY`, recognized bonus economic unavailability (exhausted/missing/inactive/cap/pause) yields bonus `0` with valid base; `BLOCK_QUOTE_BEFORE_START` fails closed with no surviving quote.
+6. Evaluate guardrails with **candidate base + bonus**, lock current UTC exposure periods, snapshot all evaluated limit versions (ALLOW and BLOCK). `MIN_EXPECTED_MARGIN_BPS` when ACTIVE → `MARGIN_POLICY_UNDEFINED` / OWNER_DECISION_REQUIRED (no invented margin formula).
+7. Insert quote + frozen `applied_economics` + reserve base budget + **all** applicable bonus budget periods + exposure reservations.
+8. Insert outbox `reward_quote.created`.
 
-`expireRewardQuote` is idempotent; releases ACTIVE reservations once; **skips** release when `source_started_at` is set.
+`expireRewardQuote` is idempotent; releases ACTIVE base, bonus (multi-period), and exposure reservations once; **skips** release when `source_started_at` is set.
 
 ## Issuance ledger
 
@@ -90,13 +96,16 @@ No `AD_NETWORK_RECEIVABLE` / `AD_REVENUE` posts in Phase 5.
 
 - `GLOBAL_REWARDS_PAUSE` — block new quotes
 - `MEMBERSHIP_BONUS_PAUSE` — treat bonus as unavailable (policy decides base-only vs block)
-- `economic_exposure_limits` — block new quotes when breached; never rewrite started quotes
+- Exposure limits use exact UTC hour/day/month windows and exact provider/country scope via `economic_exposure_periods`
+- Successful quotes freeze **all** materially evaluated active limit IDs/versions in `applied_economics` (not only breaches)
+- `MIN_EXPECTED_MARGIN_BPS` — fail closed until an Owner-approved expected-margin formula exists
 
 ## Owner config primitives
 
 `createExposureLimitVersion`, `createBenefitRuleVersion`, `bindPlanEntitlement`, `setFeatureFlagEnabled` — internal only; no public HTTP.
 
-Benefit / exposure rows are **append-only** after insert (0013). Overlapping `ACTIVE` windows fail closed via `EXCLUDE`.
+Financial values/identity on benefit, exposure, and quote rows are **immutable** after insert.
+Approved lifecycle supersession is allowed (e.g. `status`, `effective_to`, quote `status` / `source_started_at` NULL→once / `consumed_at` / `cancelled_at`). Do not treat entire rows as append-only if lifecycle fields may change.
 
 ## Tests
 

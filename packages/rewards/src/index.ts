@@ -46,7 +46,7 @@ export {
   requireBonusUnavailablePolicy,
 } from './guardrails.js';
 
-export { createRewardQuote, expireRewardQuote, markSimulatedSourceStarted } from './quotes.js';
+export { createRewardQuote, expireRewardQuote } from './quotes.js';
 
 export {
   createSimulatedRewardSourceIdentity,
@@ -93,6 +93,8 @@ export type {
   CreateExposureLimitVersionCommand,
   CreateBenefitRuleVersionCommand,
   GuardrailEvaluation,
+  PendingExposureReservation,
+  EvaluatedExposureLimitSnapshot,
 } from './types.js';
 
 export {
@@ -100,3 +102,13 @@ export {
   DEFAULT_PENDING_HOLD_SECONDS,
   ELIGIBLE_REWARD_BONUS_CODE,
 } from './types.js';
+
+export {
+  validateBaseBudgetPeriod,
+  resolveApplicableBonusBudgetPeriods,
+} from './budget-authority.js';
+
+export {
+  releaseExposureReservationsForQuote,
+  consumeExposureReservationsForQuote,
+} from './exposure.js';

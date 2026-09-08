@@ -22,6 +22,24 @@ export interface AppliedEconomicsFormulaInputs {
   readonly fixedRewardAtomic: string | null;
 }
 
+/** Snapshot of every ACTIVE exposure limit evaluated for a quote. */
+export interface EvaluatedExposureLimitSnapshot {
+  readonly id: string;
+  readonly ruleVersion: number;
+  readonly limitCode: string;
+  readonly scopeReferenceId: string | null;
+  readonly countryGroup: string | null;
+  readonly assetId: string | null;
+  readonly limitAtomic: string | null;
+  readonly limitBps: number | null;
+  readonly effectiveFrom: string;
+  readonly effectiveTo: string | null;
+  readonly periodStart: string | null;
+  readonly periodEnd: string | null;
+  readonly decision: 'ALLOW' | 'BLOCK' | 'OWNER_DECISION_REQUIRED';
+  readonly candidateAmountAtomic: string | null;
+}
+
 /** Frozen reconstruction evidence stored on reward_quotes.applied_economics. */
 export interface AppliedEconomics {
   readonly rewardRuleId: string;
@@ -35,7 +53,10 @@ export interface AppliedEconomics {
   readonly bonusRuleVersion: number | null;
   readonly bonusBps: number | null;
   readonly budgetPeriodIds: string[];
+  readonly bonusBudgetPeriodIds: string[];
+  /** IDs of all materially evaluated active financial limits (allowed and blocked). */
   readonly exposureLimitVersionIds: string[];
+  readonly evaluatedExposureLimits: EvaluatedExposureLimitSnapshot[];
   readonly bonusUnavailablePolicy: MembershipBonusUnavailablePolicy | null;
   readonly quoteCreatedAt: string;
   readonly sourceType: RewardSourceType;
@@ -125,10 +146,11 @@ export interface CreateRewardQuoteCommand {
   readonly countryGroup?: string | null;
   readonly asOf?: Date;
   readonly environment?: EnvironmentName;
-  /** When true (default for Founder evaluation), policy is required. */
   readonly evaluateMembershipBonus?: boolean;
   readonly bonusUnavailablePolicy?: MembershipBonusUnavailablePolicy | null;
+  /** Locator only — all authority fields are validated server-side. */
   readonly budgetPeriodId?: string | null;
+  /** Optional locator; engine resolves ALL applicable bonus periods. */
   readonly membershipBonusBudgetPeriodId?: string | null;
 }
 
@@ -145,6 +167,7 @@ export interface RewardQuoteResult {
   readonly appliedEconomics: AppliedEconomics;
   readonly baseReservationId: string;
   readonly bonusReservationId: string | null;
+  readonly bonusReservationIds: string[];
 }
 
 export interface SimulatedSourceIdentity {
@@ -224,8 +247,17 @@ export interface CreateBenefitRuleVersionCommand {
   readonly activate?: boolean;
 }
 
+export interface PendingExposureReservation {
+  readonly exposurePeriodId: string;
+  readonly amountAtomic: bigint;
+  readonly limitId: string;
+  readonly limitCode: string;
+}
+
 export interface GuardrailEvaluation {
   readonly blocked: boolean;
   readonly reasons: string[];
   readonly exposureLimitVersionIds: string[];
+  readonly evaluatedExposureLimits: EvaluatedExposureLimitSnapshot[];
+  readonly pendingExposureReservations: PendingExposureReservation[];
 }

@@ -1,92 +1,63 @@
-# ALEx Rewards Phase 5 Acceptance Report
+# ALEx Rewards Phase 5 Acceptance Report (Corrected)
 
-Status: **PASS** — Phase 5 Reward Engine + bonus budgets complete; GitHub Actions `quality` (including Phase 5 gates) and `docker-smoke` are green on the accepted archival commit.
+Status: **PASS (corrected)** — Phase 5 Reward Engine financial corrections complete after independent review of archive `a7da07d…`. GitHub Actions `quality` (including Phase 5 gates) and `docker-smoke` must be green on **this** corrected archival commit.
 
 Date: 2026-09-09
 
 Source of truth: ALEx Rewards Master Product, Financial, Security & Engineering Specification **v1.2**.
 
-| Item                             | Value                                                           |
-| -------------------------------- | --------------------------------------------------------------- |
-| Accepted archival commit         | `a7da07d623c63819344dc72ebb2266d7ad0bcc06`                      |
-| Implementation commit            | `2108c7fd90c0b0a36338915b7780585c01ddbaa3`                      |
-| GitHub Actions run               | https://github.com/iAlexx/alexreward11/actions/runs/34287585475 |
-| `quality`                        | PASS — job `102266633613`                                       |
-| `docker-smoke`                   | PASS — job `102267465402`                                       |
-| New migration                    | `0013_reward_engine_integrity.sql`                              |
-| Phase 4 accepted archival source | `34bb15455f98f9ae298289453f274d5f2f9d0ee2`                      |
+| Item                                      | Value                                      |
+| ----------------------------------------- | ------------------------------------------ |
+| Corrected accepted Phase 5 commit         | _(filled after CI-green push)_             |
+| Historical Phase 5 archive (retained)     | `a7da07d623c63819344dc72ebb2266d7ad0bcc06` |
+| New migration                             | `0014_phase5_financial_corrections.sql`    |
+| Migrations `0001`–`0013`                  | **unchanged**                              |
+| Phase 4 accepted archival source          | `34bb15455f98f9ae298289453f274d5f2f9d0ee2` |
 
-Phase 6 has **not** started. Phase 5 is Reward Engine (simulated source) only.
+Phase 6 has **not** started. Phase 5 remains Reward Engine (simulated source) only.
 
-## A. Scope delivered
+## Correction scope (vs historical `a7da07d`)
 
-- Integer FLOOR arithmetic + clamp + membership bonus FLOOR (ADR-013)
-- Versioned reward rules; family = `code`; resolve fail-closed
-- Quotes + `applied_economics` freeze + `source_started_at` protection
-- Base + membership bonus budget reserve/consume/release
-- Simulated `PROMOTION` source (`SIMULATED_REWARD_SOURCE`, BLOCKED)
-- Issuance composing base + bonus ledger posts in one outer txn + outbox
-- Idempotent maturity; guardrails (pause / exposure / margin)
-- Docs: `docs/REWARDS.md`, ADR-012/013/014, this report
+1. `BASE_REWARD_ONLY` covers exhausted/inactive/out-of-window/cap/pause bonus unavailability (not only missing period / pause).
+2. Quote start requires `completedAt <= expires_at`; issuance proves timely `source_started_at`.
+3. `markSimulatedSourceStarted` removed from public runtime API; `completeSimulatedRewardSource` enforces binding + expiry.
+4. `simulated_reward_sources` is DB-authoritative; arbitrary client source UUIDs rejected.
+5. Membership bonus resolves FINANCIAL `ELIGIBLE_REWARD_BONUS` candidates (fail closed on conflict).
+6. Budget periods validated as locators against authoritative metadata.
+7. All applicable bonus caps reserved atomically (multi-period reservations).
+8. Exposure limits use exact UTC windows + scope; concurrency-safe period counters.
+9. Successful quotes freeze all evaluated active guardrail versions (ALLOW included).
+10. `MIN_EXPECTED_MARGIN_BPS` fail-closed (`MARGIN_POLICY_UNDEFINED`) until Owner formula.
+11. `reward_quotes` financial snapshot protected by DB trigger (0014).
+12. Docs corrected: financial immutability + approved lifecycle supersession (not full-row append-only).
 
-Explicitly **not** delivered: AdsGram monetary flow, withdrawals/payouts, TON/signer/KMS, public money HTTP APIs, Phase 6 engines.
+## Schema
 
-## B. Schema
+| Migration                               | Change                                                                                                      |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `0014_phase5_financial_corrections.sql` | `simulated_reward_sources`; frozen quote trigger; multi-period bonus reservations; exposure period counters |
 
-| Migration                          | Change                                                                                                                                           |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `0013_reward_engine_integrity.sql` | ACTIVE reward-rule family EXCLUDE; financial immutability triggers; quote `applied_economics` / `source_started_at` / `bonus_unavailable_policy` |
+## Tests (local gate)
 
-Migrations `0001`–`0012` unchanged.
+| Suite                               | Count  |
+| ----------------------------------- | ------ |
+| Phase 5 arithmetic                  | 6      |
+| Phase 5 rules                       | 5      |
+| Phase 5 quotes/budgets              | 4      |
+| Phase 5 issuance                    | 3      |
+| Phase 5 Founder/membership bonus    | 4      |
+| Phase 5 maturity                    | 2      |
+| Phase 5 guardrails                  | 3      |
+| Phase 5 failure injection           | 2      |
+| Phase 5 concurrency/composition     | 5      |
+| Phase 5 financial corrections       | 14     |
+| **Phase 5 total**                   | **48** |
+| Phase 4 regression                  | 41     |
+| Phase 2 migration regression        | 27     |
+| Phase 3 auth + throttle             | 21     |
 
-## C. Tests
+## Explicit non-goals
 
-| Suite                            | Count  |
-| -------------------------------- | ------ |
-| Phase 5 arithmetic               | 6      |
-| Phase 5 rules                    | 5      |
-| Phase 5 quotes/budgets           | 4      |
-| Phase 5 issuance                 | 3      |
-| Phase 5 Founder/membership bonus | 4      |
-| Phase 5 maturity                 | 2      |
-| Phase 5 guardrails               | 3      |
-| Phase 5 failure injection        | 2      |
-| Phase 5 concurrency/composition  | 5      |
-| **Phase 5 total**                | **34** |
-| Phase 4 regression               | 41     |
-| Phase 2 migration regression     | 27     |
-| Phase 3 auth + throttle          | 21     |
+AdsGram monetary flow, withdrawals/payouts, TON/signer/KMS, public money HTTP APIs, Phase 6 engines.
 
-## D–N. Gate checklist
-
-| Gate                                      | Result |
-| ----------------------------------------- | ------ |
-| Integer-only FLOOR arithmetic             | PASS   |
-| Quote freeze + started-source expiry skip | PASS   |
-| Budget reserve base-only; bonus separate  | PASS   |
-| Bonus policy fail-closed when in scope    | PASS   |
-| Separate bonus event with null quote_id   | PASS   |
-| One outer txn issuance + outbox           | PASS   |
-| Maturity idempotent                       | PASS   |
-| Concurrent budget/maturity/issuance       | PASS   |
-| Base+bonus Phase 4 invariants PASS        | PASS   |
-| Failure injection rollback                | PASS   |
-| No AdsGram / AD_REVENUE posts             | PASS   |
-| No Phase 6 engines                        | PASS   |
-| `quality` / `docker-smoke`                | PASS   |
-
-## O. Archive verification
-
-Verified for accepted commit `a7da07d623c63819344dc72ebb2266d7ad0bcc06` using `scripts/create-phase-archive.mjs` v2.1.0 (stamp `20260909-020000`).
-
-| Item                                                                   | Result                                                                          |
-| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| Canonical source ZIP                                                   | `ALEx_Rewards_PHASE_05_REWARD_ENGINE_20260909-020000_a7da07d.zip`               |
-| Canonical source SHA-256                                               | `47be46b3f7868c6dbdc9c0d926ad0efd850eacb0d6f343128e391ce908e37f06`              |
-| Review-package ZIP                                                     | `PHASE_05_REWARD_ENGINE_PACKAGE_20260909-020000_a7da07d.zip`                    |
-| Outer package SHA-256                                                  | See external `PACKAGE_SHA256.txt` beside the review package (not embedded here) |
-| Source extraction / prohibited-path scan                               | PASS / PASS                                                                     |
-| Review-package extraction / prohibited-path / nested source validation | PASS / PASS / PASS                                                              |
-| Forward-slash ZIP entry names                                          | PASS — `PHASE_05_REWARD_ENGINE/...` only                                        |
-
-Per `AGENTS.md` and `docs/PHASE_ARCHIVE.md`, the SHA-256 of the **outer** review package is published beside it in `PACKAGE_SHA256.txt` and is deliberately **not** embedded in this section.
+**No Phase 6 work started.**

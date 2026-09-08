@@ -1,7 +1,7 @@
 import { Pool } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { createRewardQuote, expireRewardQuote, markSimulatedSourceStarted } from '../src/index.js';
+import { completeSimulatedRewardSource, createRewardQuote, expireRewardQuote } from '../src/index.js';
 import {
   createTestOnlyBudget,
   createTestOnlyPromotionRule,
@@ -133,9 +133,11 @@ describe.skipIf(phase5DatabaseUrl === '')('Phase 5 quotes and budgets', () => {
       evaluateMembershipBonus: false,
     });
 
-    await markSimulatedSourceStarted(pool, {
+    await completeSimulatedRewardSource(pool, {
       quoteId: quote.quoteId,
-      startedAt: new Date(createdAt.getTime() + 500),
+      sourceId: source.sourceId,
+      userId,
+      completedAt: new Date(createdAt.getTime() + 500),
     });
 
     const result = await expireRewardQuote(pool, quote.quoteId, new Date());

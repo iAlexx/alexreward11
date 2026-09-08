@@ -10,6 +10,7 @@ import {
 import { consumeMembershipBonusBudgetReservation } from './bonus-budgets.js';
 import { consumeRewardBudgetReservation } from './budgets.js';
 import { RewardDomainError } from './errors.js';
+import { consumeExposureReservationsForQuote } from './exposure.js';
 import { insertOutboxEvent } from './outbox.js';
 import { membershipBonusSourceIdFromBase } from './simulated.js';
 import {
@@ -128,8 +129,21 @@ async function loadOpenQuoteForIssuance(
       'simulated source must be started/completed before issuance',
     );
   }
-  if (row.expires_at.getTime() < asOf.getTime() && row.source_started_at === null) {
-    throw new RewardDomainError('QUOTE_EXPIRED', 'quote expired before start');
+  // After expires_at, issuance is allowed only if authoritative start was on/before expiry.
+  if (
+    asOf.getTime() > row.expires_at.getTime() &&
+    !(
+      row.source_started_at !== null &&
+      row.source_started_at.getTime() <= row.expires_at.getTime()
+    )
+  ) {
+    throw new RewardDomainError('QUOTE_EXPIRED', 'quote expired without a timely source start', {
+      details: {
+        expiresAt: row.expires_at.toISOString(),
+        sourceStartedAt: row.source_started_at.toISOString(),
+        asOf: asOf.toISOString(),
+      },
+    });
   }
   return { kind: 'open', quote: row };
 }
@@ -237,13 +251,15 @@ export async function issueSimulatedReward(
     const bonusAmount = BigInt(quote.membership_bonus_amount_atomic);
 
     if (bonusAmount > 0n) {
-      const bonusReservation = await client.query<{ id: string; state: string }>(
+      const bonusReservations = await client.query<{ id: string; state: string }>(
         `SELECT id, state::text AS state FROM membership_bonus_budget_reservations
-         WHERE reward_quote_id = $1 FOR UPDATE`,
+         WHERE reward_quote_id = $1
+         ORDER BY id
+         FOR UPDATE`,
         [quote.id],
       );
-      const bonusReservationRow = bonusReservation.rows[0];
-      if (bonusReservationRow === undefined || bonusReservationRow.state !== 'ACTIVE') {
+      const activeBonus = bonusReservations.rows.filter((r) => r.state === 'ACTIVE');
+      if (activeBonus.length === 0) {
         throw new RewardDomainError(
           'BUDGET_NOT_FOUND',
           'active membership bonus reservation required for quoted bonus',
@@ -314,12 +330,16 @@ export async function issueSimulatedReward(
         [bonusRewardEventId, pendingUntil.toISOString(), `reward-maturity/${bonusRewardEventId}`],
       );
 
-      await consumeMembershipBonusBudgetReservation(client, {
-        reservationId: bonusReservationRow.id,
-        originatingRewardEventId: baseRewardEventId,
-        bonusRewardEventId,
-      });
+      for (const bonusReservationRow of activeBonus) {
+        await consumeMembershipBonusBudgetReservation(client, {
+          reservationId: bonusReservationRow.id,
+          originatingRewardEventId: baseRewardEventId,
+          bonusRewardEventId,
+        });
+      }
     }
+
+    await consumeExposureReservationsForQuote(client, quote.id);
 
     await client.query(
       `UPDATE reward_quotes
