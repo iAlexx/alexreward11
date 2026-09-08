@@ -1,17 +1,17 @@
 # ALEx Rewards Phase 2 Acceptance Report
 
-Status: **PENDING CI** — implementation and local gates complete; the accepted archival commit and its GitHub Actions run are not yet recorded.
+Status: **PASS** — Phase 2 database baseline is complete; GitHub Actions `quality` and `docker-smoke` are green on the accepted archival commit. Dual archive packaging follows; Phase 3 must not start until Owner approval.
 
 Date: 2026-09-08
 
 Source of truth: ALEx Rewards Master Product, Financial, Security & Engineering Specification **v1.2**. Version 1.1 safety baseline remains in force where unchanged.
 
-| Item                               | Value   |
-| ---------------------------------- | ------- |
-| Final accepted archival commit SHA | `TBD`   |
-| GitHub Actions run                 | `TBD`   |
-| `quality`                          | PENDING |
-| `docker-smoke`                     | PENDING |
+| Item                               | Value                                                           |
+| ---------------------------------- | --------------------------------------------------------------- |
+| Final accepted archival commit SHA | `c57684c850c654e681369ccbd79a8c36035aea23`                      |
+| GitHub Actions run                 | https://github.com/iAlexx/alexreward11/actions/runs/34185365578 |
+| `quality`                          | PASS — job `101932520340`                                       |
+| `docker-smoke`                     | PASS — job `101932856990`                                       |
 
 Phase 3 has not started. Phase 2 is **schema only**.
 
@@ -152,7 +152,7 @@ Executed locally on this host:
 | Dependency audit     | `pnpm security:audit`      | PASS — no known high+ vulnerabilities                                                       |
 | Phase 2 DB suite     | `pnpm test:phase2`         | PASS — 27/27 against PostgreSQL 18.6                                                        |
 
-Deferred to the remote gate: GitHub Actions `quality` (includes `pnpm verify` + `pnpm test:phase2` against the Postgres 18.6 service) and `docker-smoke`.
+Remote gate (archival commit `c57684c850c654e681369ccbd79a8c36035aea23`): GitHub Actions run [34185365578](https://github.com/iAlexx/alexreward11/actions/runs/34185365578) — `quality` PASS (`101932520340`, including `pnpm verify` and `pnpm test:phase2` against Postgres 18.6) and `docker-smoke` PASS (`101932856990`).
 
 The migration validator was additionally exercised against a negative fixture containing a `balance_atomic` column on `users`; it failed the build as required and passed again once the fixture was removed.
 
@@ -191,36 +191,38 @@ No source-level critical TODO, placeholder security implementation, mutable `use
 
 ## M. Acceptance criteria
 
-| Phase 2 acceptance criterion                                   | Result  |
-| -------------------------------------------------------------- | ------- |
-| Complete V1.2 schema exists as ordered explicit SQL migrations | PASS    |
-| Clean migrate from zero succeeds                               | PASS    |
-| Migrations are idempotent and forward-only                     | PASS    |
-| No mutable authoritative balance anywhere                      | PASS    |
-| Ledger immutability enforced by the database                   | PASS    |
-| Membership, Founder, and claim-code invariants enforced        | PASS    |
-| Provider limit versioning and no-overlap enforced              | PASS    |
-| Outbox/Inbox/idempotency uniqueness enforced                   | PASS    |
-| Seed contains no secret and no production value                | PASS    |
-| No Phase 3+ behaviour introduced                               | PASS    |
-| `quality` CI green on the archival commit                      | PENDING |
-| `docker-smoke` CI green on the archival commit                 | PENDING |
+| Phase 2 acceptance criterion                                   | Result |
+| -------------------------------------------------------------- | ------ |
+| Complete V1.2 schema exists as ordered explicit SQL migrations | PASS   |
+| Clean migrate from zero succeeds                               | PASS   |
+| Migrations are idempotent and forward-only                     | PASS   |
+| No mutable authoritative balance anywhere                      | PASS   |
+| Ledger immutability enforced by the database                   | PASS   |
+| Membership, Founder, and claim-code invariants enforced        | PASS   |
+| Provider limit versioning and no-overlap enforced              | PASS   |
+| Outbox/Inbox/idempotency uniqueness enforced                   | PASS   |
+| Seed contains no secret and no production value                | PASS   |
+| No Phase 3+ behaviour introduced                               | PASS   |
+| `quality` CI green on the archival commit                      | PASS   |
+| `docker-smoke` CI green on the archival commit                 | PASS   |
 
 ## N. Acceptance conclusion
 
-**PENDING CI.** The Phase 2 schema, tooling, tests, and documentation are complete. Every local gate passes, and all 27 database invariant assertions pass against the pinned PostgreSQL 18.6. Acceptance still requires, in order: a green `quality` and `docker-smoke` run on the final archival commit, creation of both archive levels from that exact SHA, Section O completed from those archives, and explicit Owner approval.
-
-Phase 3 must not begin until then.
+**PASS.** The Phase 2 schema, tooling, tests, and documentation are complete. Every local gate passes, all 27 database invariant assertions pass against the pinned PostgreSQL 18.6, and GitHub Actions `quality` + `docker-smoke` are green on archival commit `c57684c850c654e681369ccbd79a8c36035aea23` (run `34185365578`). Dual archive packaging and Section O complete the Owner review package. Phase 3 must not begin until explicit Owner approval after that package is presented.
 
 ## O. Archive verification
 
-Placeholder — completed after the archival commit is CI-green and `pnpm archive:phase` has produced both archive levels from that exact SHA.
+Verified for exact accepted commit `c57684c850c654e681369ccbd79a8c36035aea23` using `scripts/create-phase-archive.mjs` v2.1.0 (stamp `20260908-040500`).
 
-To be recorded here:
-
-- Canonical source ZIP name and its SHA-256.
-- Review-package ZIP name and its SHA-256.
-- `MANIFEST.md` and `SHA256SUMS.txt` verification results.
-- Extraction, prohibited-path scan, and nested source-validation results for both archive levels.
+| Item                                                                   | Result                                                                          |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Canonical source ZIP                                                   | `ALEx_Rewards_PHASE_02_DATABASE_BASELINE_20260908-040500_c57684c.zip`           |
+| Canonical source SHA-256                                               | `f7cc68813f96c583f9d5dfc74de5b06579f3893576729ff929d388cef1efbe10`              |
+| Review-package ZIP                                                     | `PHASE_02_DATABASE_BASELINE_PACKAGE_20260908-040500_c57684c.zip`                |
+| Outer package SHA-256                                                  | See external `PACKAGE_SHA256.txt` beside the review package (not embedded here) |
+| `MANIFEST.md` / `SHA256SUMS.txt`                                       | PASS — companion checksums match source ZIP, report, and manifest               |
+| Source extraction / prohibited-path scan                               | PASS / PASS                                                                     |
+| Review-package extraction / prohibited-path / nested source validation | PASS / PASS / PASS                                                              |
+| Forward-slash ZIP entry names                                          | PASS — `PHASE_02_DATABASE_BASELINE/...` only                                    |
 
 Per `AGENTS.md` and `docs/PHASE_ARCHIVE.md`, the SHA-256 of the **outer** review package is published beside it in `PACKAGE_SHA256.txt` and is deliberately **not** embedded in this section.
