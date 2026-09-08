@@ -137,6 +137,8 @@ describe.skipIf(databaseUrl === '')('Phase 3 auth + membership binding', () => {
         audit_logs,
         membership_grant_events,
         membership_claim_codes,
+        membership_plan_entitlements,
+        membership_benefit_rule_versions,
         user_memberships,
         user_sessions,
         user_settings,
@@ -291,7 +293,15 @@ describe.skipIf(databaseUrl === '')('Phase 3 auth + membership binding', () => {
     });
     await expect(
       claimFounderCode(pool, { userId: login.user.id, rawClaimCode: 'NOPE-NOT-REAL' }),
-    ).rejects.toMatchObject({ code: 'CLAIM_REJECTED' });
+    ).rejects.toMatchObject({
+      code: 'CLAIM_REJECTED',
+      message: 'Claim could not be completed',
+    });
+    const unknownErr = await claimFounderCode(pool, {
+      userId: login.user.id,
+      rawClaimCode: 'NOPE-NOT-REAL-EITHER',
+    }).catch((error: unknown) => error);
+    expect(String((unknownErr as Error).message)).not.toMatch(/exist|not found|unknown code/i);
 
     const expired = await insertOpenClaimCode(pool, adminId, {
       expiresAt: new Date(Date.now() - 60_000),
@@ -424,5 +434,219 @@ describe.skipIf(databaseUrl === '')('Phase 3 auth + membership binding', () => {
         [login.user.id],
       ),
     ).toBe(1);
+  });
+
+  it('resolves concurrent first logins for the same Telegram ID to one user', async () => {
+    const raw = signedInitData(777001);
+    const [a, b] = await Promise.all([
+      authenticateWithTelegramInitData(pool, {
+        rawInitData: raw,
+        botToken: BOT,
+        maxAgeSeconds: 86_400,
+        session: sessionConfig,
+      }),
+      authenticateWithTelegramInitData(pool, {
+        rawInitData: raw,
+        botToken: BOT,
+        maxAgeSeconds: 86_400,
+        session: sessionConfig,
+      }),
+    ]);
+    expect(a.user.id).toBe(b.user.id);
+    expect(a.session.sessionId).not.toBe(b.session.sessionId);
+    expect(
+      await countRows(pool, `SELECT count(*)::int AS c FROM users WHERE telegram_user_id = 777001`),
+    ).toBe(1);
+    expect(
+      await countRows(pool, `SELECT count(*)::int AS c FROM user_sessions WHERE user_id = $1`, [
+        a.user.id,
+      ]),
+    ).toBe(2);
+  });
+
+  it('does not overwrite security state or preferred locale on concurrent re-login', async () => {
+    const first = await authenticateWithTelegramInitData(pool, {
+      rawInitData: signedInitData(777002, { language_code: 'en' }),
+      botToken: BOT,
+      maxAgeSeconds: 86_400,
+      session: sessionConfig,
+    });
+    await pool.query(
+      `UPDATE users SET status = 'LIMITED', withdrawal_status = 'RESTRICTED', preferred_locale = 'ru' WHERE id = $1`,
+      [first.user.id],
+    );
+    const second = await authenticateWithTelegramInitData(pool, {
+      rawInitData: signedInitData(777002, { language_code: 'ar', username: 'changed' }),
+      botToken: BOT,
+      maxAgeSeconds: 86_400,
+      session: sessionConfig,
+    });
+    expect(second.user.id).toBe(first.user.id);
+    expect(second.user.username).toBe('changed');
+    expect(second.user.status).toBe('LIMITED');
+    expect(second.user.withdrawalStatus).toBe('RESTRICTED');
+    expect(second.user.preferredLocale).toBe('ru');
+  });
+
+  it('returns only applicable non-financial plan entitlements', async () => {
+    const login = await authenticateWithTelegramInitData(pool, {
+      rawInitData: signedInitData(888001),
+      botToken: BOT,
+      maxAgeSeconds: 86_400,
+      session: sessionConfig,
+    });
+    const plans = await pool.query<{ id: string; code: string }>(
+      `SELECT id, code FROM membership_plans WHERE code IN ('STANDARD', 'FOUNDER_LIFETIME')`,
+    );
+    const standardId = plans.rows.find((row) => row.code === 'STANDARD')?.id;
+    const founderId = plans.rows.find((row) => row.code === 'FOUNDER_LIFETIME')?.id;
+    if (standardId === undefined || founderId === undefined) throw new Error('plans missing');
+
+    await pool.query(
+      `INSERT INTO user_memberships (user_id, membership_plan_id, status, source)
+       VALUES ($1, $2, 'ACTIVE', 'OWNER_GRANT')`,
+      [login.user.id, standardId],
+    );
+
+    // No mappings yet => empty list
+    let view = await getMembershipView(pool, login.user.id);
+    expect(view.planCode).toBe('STANDARD');
+    expect(view.isFounder).toBe(false);
+    expect(view.entitlements).toEqual([]);
+    expect(view.securityBypass).toBe(false);
+
+    const badge = await pool.query<{ id: string }>(
+      `SELECT id FROM entitlements WHERE code = 'FOUNDER_BADGE'`,
+    );
+    const priority = await pool.query<{ id: string }>(
+      `SELECT id FROM entitlements WHERE code = 'PRIORITY_SUPPORT'`,
+    );
+    const bonus = await pool.query<{ id: string }>(
+      `SELECT id FROM entitlements WHERE code = 'ELIGIBLE_REWARD_BONUS'`,
+    );
+    const badgeId = badge.rows[0]?.id;
+    const priorityId = priority.rows[0]?.id;
+    const bonusId = bonus.rows[0]?.id;
+    if (badgeId === undefined || priorityId === undefined || bonusId === undefined) {
+      throw new Error('entitlements missing');
+    }
+
+    async function mapEntitlement(input: {
+      planId: string;
+      entitlementId: string;
+      valueType: 'BOOLEAN' | 'BPS';
+      status: 'DRAFT' | 'ACTIVE';
+      ruleStatus: 'DRAFT' | 'ACTIVE';
+      validFrom?: string;
+      validTo?: string | null;
+      effectiveFrom?: string;
+      effectiveTo?: string | null;
+      booleanValue?: boolean;
+      bpsValue?: number;
+    }): Promise<void> {
+      const rule = await pool.query<{ id: string }>(
+        `INSERT INTO membership_benefit_rule_versions (
+           entitlement_id, membership_plan_id, rule_version, value_boolean, value_bps,
+           status, effective_from, effective_to, reason
+         ) VALUES (
+           $1, $2,
+           (SELECT COALESCE(MAX(rule_version), 0) + 1 FROM membership_benefit_rule_versions
+            WHERE entitlement_id = $1 AND membership_plan_id IS NOT DISTINCT FROM $2),
+           $3, $4, $5, $6::timestamptz, $7::timestamptz, 'phase3-test-only'
+         ) RETURNING id`,
+        [
+          input.entitlementId,
+          input.planId,
+          input.valueType === 'BOOLEAN' ? (input.booleanValue ?? true) : null,
+          input.valueType === 'BPS' ? (input.bpsValue ?? 100) : null,
+          input.ruleStatus,
+          input.effectiveFrom ?? new Date(Date.now() - 60_000).toISOString(),
+          input.effectiveTo === undefined ? null : input.effectiveTo,
+        ],
+      );
+      const ruleId = rule.rows[0]?.id;
+      if (ruleId === undefined) throw new Error('rule insert failed');
+      await pool.query(
+        `INSERT INTO membership_plan_entitlements (
+           membership_plan_id, entitlement_id, rule_version_id, valid_from, valid_to, status
+         ) VALUES ($1, $2, $3, $4::timestamptz, $5::timestamptz, $6)`,
+        [
+          input.planId,
+          input.entitlementId,
+          ruleId,
+          input.validFrom ?? new Date(Date.now() - 60_000).toISOString(),
+          input.validTo === undefined ? null : input.validTo,
+          input.status,
+        ],
+      );
+    }
+
+    // Founder-only PUBLIC mapping must not appear for STANDARD members.
+    await mapEntitlement({
+      planId: founderId,
+      entitlementId: badgeId,
+      valueType: 'BOOLEAN',
+      status: 'ACTIVE',
+      ruleStatus: 'ACTIVE',
+    });
+    view = await getMembershipView(pool, login.user.id);
+    expect(view.entitlements.map((item) => item.code)).not.toContain('FOUNDER_BADGE');
+
+    // Active PUBLIC/INTERNAL mapping for STANDARD is returned; FINANCIAL is excluded.
+    await mapEntitlement({
+      planId: standardId,
+      entitlementId: priorityId,
+      valueType: 'BOOLEAN',
+      status: 'ACTIVE',
+      ruleStatus: 'ACTIVE',
+    });
+    await mapEntitlement({
+      planId: standardId,
+      entitlementId: bonusId,
+      valueType: 'BPS',
+      status: 'ACTIVE',
+      ruleStatus: 'ACTIVE',
+      bpsValue: 250,
+    });
+    // Expired / draft exclusions
+    await mapEntitlement({
+      planId: standardId,
+      entitlementId: badgeId,
+      valueType: 'BOOLEAN',
+      status: 'ACTIVE',
+      ruleStatus: 'DRAFT',
+    });
+    await mapEntitlement({
+      planId: standardId,
+      entitlementId: badgeId,
+      valueType: 'BOOLEAN',
+      status: 'DRAFT',
+      ruleStatus: 'ACTIVE',
+    });
+    // Use a different entitlement for expired window to avoid GiST overlap with active draft attempts
+    const early = await pool.query<{ id: string }>(
+      `SELECT id FROM entitlements WHERE code = 'EARLY_FEATURE_ACCESS'`,
+    );
+    const earlyId = early.rows[0]?.id;
+    if (earlyId === undefined) throw new Error('EARLY_FEATURE_ACCESS missing');
+    await mapEntitlement({
+      planId: standardId,
+      entitlementId: earlyId,
+      valueType: 'BOOLEAN',
+      status: 'ACTIVE',
+      ruleStatus: 'ACTIVE',
+      validFrom: new Date(Date.now() - 3600_000).toISOString(),
+      validTo: new Date(Date.now() - 60_000).toISOString(),
+      effectiveFrom: new Date(Date.now() - 3600_000).toISOString(),
+      effectiveTo: new Date(Date.now() - 60_000).toISOString(),
+    });
+
+    view = await getMembershipView(pool, login.user.id);
+    expect(view.entitlements.map((item) => item.code).sort()).toEqual(['PRIORITY_SUPPORT']);
+    expect(view.entitlements.some((item) => item.securityClassification === 'FINANCIAL')).toBe(
+      false,
+    );
+    expect(JSON.stringify(view.entitlements)).not.toMatch(/250|value_bps|valueBps/);
+    expect(view.securityBypass).toBe(false);
   });
 });

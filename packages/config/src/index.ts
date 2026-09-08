@@ -42,38 +42,46 @@ const serviceSchema = commonSchema.extend({
   TEMPORAL_NAMESPACE: z.string().min(1).default('default'),
 });
 
+/** Local/test-only policy defaults. Staging/production must set every key explicitly. */
+const LOCAL_API_AUTH_POLICY_DEFAULTS = {
+  SESSION_ACCESS_TTL_SECONDS: '900',
+  SESSION_REFRESH_TTL_SECONDS: '2592000',
+  INITDATA_MAX_AGE_SECONDS: '86400',
+  CORS_ORIGINS: '',
+  AUTH_RATE_LIMIT_WINDOW_SECONDS: '60',
+  AUTH_RATE_LIMIT_MAX: '30',
+  CLAIM_RATE_LIMIT_WINDOW_SECONDS: '300',
+  CLAIM_RATE_LIMIT_MAX: '10',
+} as const;
+
 const apiSchema = serviceSchema
   .extend({
     API_PORT: z.coerce.number().int().min(1024).max(65535).default(3002),
     TELEGRAM_BOT_TOKEN: z.string().min(20),
     SESSION_ACCESS_SECRET: z.string().min(32),
-    // Local/test defaults only. Production cookie topology/TTLs remain environment-specific.
-    SESSION_ACCESS_TTL_SECONDS: z.coerce.number().int().min(60).max(3600).default(900),
+    // No Zod defaults: staging/production must supply these explicitly (fail closed).
+    SESSION_ACCESS_TTL_SECONDS: z.coerce.number().int().min(60).max(3600),
     SESSION_REFRESH_TTL_SECONDS: z.coerce
       .number()
       .int()
       .min(300)
-      .max(60 * 60 * 24 * 90)
-      .default(2_592_000),
-    INITDATA_MAX_AGE_SECONDS: z.coerce.number().int().min(60).max(86_400).default(86_400),
-    CORS_ORIGINS: z
-      .string()
-      .default('')
-      .transform((value) =>
-        value
-          .split(',')
-          .map((item) => item.trim())
-          .filter((item) => item.length > 0),
-      ),
-    AUTH_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().min(1).max(3600).default(60),
-    AUTH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(10_000).default(30),
-    CLAIM_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().min(1).max(3600).default(300),
-    CLAIM_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(10_000).default(10),
+      .max(60 * 60 * 24 * 90),
+    INITDATA_MAX_AGE_SECONDS: z.coerce.number().int().min(60).max(86_400),
+    CORS_ORIGINS: z.string().transform((value) =>
+      value
+        .split(',')
+        .map((item) => item.trim())
+        .filter((item) => item.length > 0),
+    ),
+    AUTH_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().min(1).max(3600),
+    AUTH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(10_000),
+    CLAIM_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().min(1).max(3600),
+    CLAIM_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(10_000),
   })
   .superRefine((value, context) => {
+    const outsideLocal = value.DEPLOYMENT_ENV !== 'local' && value.DEPLOYMENT_ENV !== 'test';
     if (
-      value.DEPLOYMENT_ENV !== 'local' &&
-      value.DEPLOYMENT_ENV !== 'test' &&
+      outsideLocal &&
       (value.TELEGRAM_BOT_TOKEN.includes('local-only') ||
         value.SESSION_ACCESS_SECRET.includes('local-only'))
     ) {
@@ -81,6 +89,13 @@ const apiSchema = serviceSchema
         code: 'custom',
         path: ['TELEGRAM_BOT_TOKEN'],
         message: 'local-only auth secrets are forbidden outside local/test',
+      });
+    }
+    if (outsideLocal && value.CORS_ORIGINS.length === 0) {
+      context.addIssue({
+        code: 'custom',
+        path: ['CORS_ORIGINS'],
+        message: 'must list at least one explicit origin outside local/test',
       });
     }
   });
@@ -192,8 +207,14 @@ function assertSecureEnvironment(config: CommonConfig & Record<string, unknown>)
   }
 }
 
-export const loadApiConfig = (environment: NodeJS.ProcessEnv = process.env): ApiConfig =>
-  parseEnvironment(apiSchema, environment);
+export const loadApiConfig = (environment: NodeJS.ProcessEnv = process.env): ApiConfig => {
+  const deployment = environment.DEPLOYMENT_ENV ?? 'local';
+  const merged =
+    deployment === 'local' || deployment === 'test'
+      ? { ...LOCAL_API_AUTH_POLICY_DEFAULTS, ...environment }
+      : environment;
+  return parseEnvironment(apiSchema, merged);
+};
 export const loadBotConfig = (environment: NodeJS.ProcessEnv = process.env): BotConfig =>
   parseEnvironment(botSchema, environment);
 export const loadWorkerConfig = (environment: NodeJS.ProcessEnv = process.env): WorkerConfig =>

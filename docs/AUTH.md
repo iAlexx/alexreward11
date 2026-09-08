@@ -23,10 +23,23 @@ sessions, and Founder claim-code binding. Money engines remain out of scope.
 4. `@alex-rewards/telegram` validates HMAC per Telegram WebApp docs (`WebAppData` secret key).
 5. `auth_date` freshness is checked against `INITDATA_MAX_AGE_SECONDS`.
 6. Only after success is the Telegram user JSON parsed.
-7. User row is created/updated by `telegram_user_id` (username changes never create a second user).
-8. Profile/settings metadata may update; `status` / `withdrawal_status` / risk fields are not overwritten from Telegram profile data.
+7. User row is upserted atomically by `telegram_user_id` (`INSERT ... ON CONFLICT DO UPDATE`). Concurrent first logins for the same Telegram ID resolve to exactly one `users` row; each request may still mint its own session.
+8. Profile/settings creation is idempotent. Username/name/`telegram_language_code`/`last_active_at` may update; `status`, `withdrawal_status`, risk/security fields, user-chosen `preferred_locale`, and financial state are never overwritten from Telegram profile data.
 9. A PostgreSQL session row is created with hashed session/refresh secrets.
 10. A short-lived access JWT and opaque refresh token are returned (Bearer transport; production cookie topology remains environment-specific / Owner-approved).
+
+## Membership entitlement read model
+
+`GET /v1/membership` and `GET /v1/membership/entitlements` return only **non-financial** entitlement metadata that is actively mapped to the caller's **active membership plan**:
+
+- join `membership_plan_entitlements` → `membership_benefit_rule_versions` → `entitlements`;
+- mapping `status = ACTIVE`, `valid_from <= now()`, and open or future `valid_to`;
+- linked rule version `status = ACTIVE`, `effective_from <= now()`, and open or future `effective_to`;
+- entitlement `security_classification` in (`PUBLIC`, `INTERNAL`) only — **FINANCIAL** metadata/values are never returned in Phase 3;
+- benefit scalar values from rule versions are never selected;
+- if the plan has no approved applicable mappings, the entitlement list is `[]`;
+- Founder identity (`isFounder`, `founderNumber`) still comes from `user_memberships`;
+- `securityBypass` is always `false`.
 
 ## Session lifecycle
 
@@ -62,18 +75,27 @@ Owner direct grant remains admin-only and is not exposed on user routes.
 
 ## Threat model (Phase 3)
 
-| Threat                     | Control                                                                       |
-| -------------------------- | ----------------------------------------------------------------------------- |
-| Spoofed Telegram identity  | HMAC signature + auth_date                                                    |
-| initDataUnsafe trust       | Not accepted by API                                                           |
-| Username identity swap     | Unique `telegram_user_id` only                                                |
-| Refresh theft / replay     | Rotation + hashed storage + revoke                                            |
-| Claim brute force          | Rate limits + opaque errors                                                   |
-| Claim races                | `FOR UPDATE` + uniqueness constraints                                         |
-| Self-assign Founder        | No public grant endpoint; client cannot supply Founder number/purchase fields |
-| Membership as trust bypass | `securityBypass: false`; account status still authoritative                   |
+| Threat                      | Control                                                                       |
+| --------------------------- | ----------------------------------------------------------------------------- |
+| Spoofed Telegram identity   | HMAC signature + auth_date                                                    |
+| initDataUnsafe trust        | Not accepted by API                                                           |
+| Username identity swap      | Unique `telegram_user_id` + race-safe upsert                                  |
+| Concurrent first login      | `ON CONFLICT (telegram_user_id)` — one user, multiple sessions allowed        |
+| Refresh theft / replay      | Rotation + hashed storage + revoke                                            |
+| Claim brute force           | Rate limits (proven in CI against Redis) + opaque errors                      |
+| Auth/refresh brute force    | Fixed-window Redis throttle; N ok / N+1 `RATE_LIMITED`; fail-closed on Redis  |
+| Claim races                 | `FOR UPDATE` + uniqueness constraints                                         |
+| Entitlement over-disclosure | Plan-mapped PUBLIC/INTERNAL only; FINANCIAL excluded                          |
+| Self-assign Founder         | No public grant endpoint; client cannot supply Founder number/purchase fields |
+| Membership as trust bypass  | `securityBypass: false`; account status still authoritative                   |
 
 ## Configuration
 
-See `.env.example`. Local/test defaults are explicitly marked `local-only-*`. Production
-must supply managed secrets and Owner-approved CORS/session policy values.
+See `.env.example`.
+
+| Environment              | Auth policy (`SESSION_*` TTLs, `INITDATA_MAX_AGE_SECONDS`, `CORS_ORIGINS`, auth/claim rate limits)                                                                                 |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `local` / `test`         | Built-in local defaults may apply when unset (empty CORS is allowed for local Mini App tooling).                                                                                   |
+| `staging` / `production` | **Fail closed**: every policy key must be set explicitly. Empty `CORS_ORIGINS` fails. Local-only secrets remain forbidden. No production values are invented by the config loader. |
+
+Redis throttles (`consumeThrottle`) fail closed on Redis errors — traffic is not silently allowed when abuse protection is unavailable. PostgreSQL remains authoritative for sessions and claim state.

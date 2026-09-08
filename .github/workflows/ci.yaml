@@ -30,6 +30,15 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      redis:
+        image: redis:8.8.2@sha256:37227fff5638322f4ebea25d6d0dc3ee50848604e82b81426f11507b3ec7d2cc
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Check out repository
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
@@ -58,7 +67,9 @@ jobs:
       - name: Phase 3 auth and membership gates
         env:
           PHASE3_DATABASE_URL: postgresql://alex_rewards:local-alex-rewards-only@127.0.0.1:5432/alex_rewards_phase2
+          PHASE3_REDIS_URL: redis://127.0.0.1:6379/0
           PHASE3_AUTH_TESTS: '1'
+          REDIS_URL: redis://127.0.0.1:6379/0
         run: pnpm test:phase3
       - name: Dependency vulnerability gate
         run: pnpm security:audit

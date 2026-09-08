@@ -10,20 +10,25 @@ export interface ThrottlePolicy {
 
 /**
  * Redis-assisted fixed-window throttle. PostgreSQL remains authoritative for sessions/claims;
- * Redis only limits abuse. Fail-open is forbidden for claim/auth when Redis is required —
- * callers may choose fail-closed by not catching.
+ * Redis only limits abuse. Failures are fail-closed: never silently allow traffic when Redis
+ * is unavailable.
  */
 export async function consumeThrottle(
   redis: Redis,
   policy: ThrottlePolicy,
   identityKey: string,
 ): Promise<void> {
-  const key = `${policy.keyPrefix}:${identityKey}`;
-  const count = await redis.incr(key);
-  if (count === 1) {
-    await redis.expire(key, policy.windowSeconds);
-  }
-  if (count > policy.limit) {
-    throw new AuthDomainError('RATE_LIMITED', 'Too many attempts. Try again later.');
+  try {
+    const key = `${policy.keyPrefix}:${identityKey}`;
+    const count = await redis.incr(key);
+    if (count === 1) {
+      await redis.expire(key, policy.windowSeconds);
+    }
+    if (count > policy.limit) {
+      throw new AuthDomainError('RATE_LIMITED', 'Too many attempts. Try again later.');
+    }
+  } catch (error) {
+    if (error instanceof AuthDomainError) throw error;
+    throw new AuthDomainError('INTERNAL', 'Abuse protection unavailable', { cause: error });
   }
 }

@@ -59,6 +59,7 @@ export async function getMembershipView(pool: Pool, userId: string): Promise<Mem
 
   const membership = await pool.query<{
     id: string;
+    membership_plan_id: string;
     status: string;
     source: string;
     founder_number: number | null;
@@ -66,7 +67,8 @@ export async function getMembershipView(pool: Pool, userId: string): Promise<Mem
     claimed_at: Date | null;
     plan_code: string;
   }>(
-    `SELECT um.id, um.status, um.source, um.founder_number, um.granted_at, um.claimed_at, mp.code AS plan_code
+    `SELECT um.id, um.membership_plan_id, um.status, um.source, um.founder_number, um.granted_at,
+            um.claimed_at, mp.code AS plan_code
      FROM user_memberships um
      INNER JOIN membership_plans mp ON mp.id = um.membership_plan_id
      WHERE um.user_id = $1 AND um.status = 'ACTIVE'
@@ -76,8 +78,8 @@ export async function getMembershipView(pool: Pool, userId: string): Promise<Mem
   );
   const row = membership.rows[0];
 
-  // Non-sensitive vocabulary only. FINANCIAL entitlement values are never returned here;
-  // benefit resolution/execution belongs to later phases.
+  // Only NON-FINANCIAL entitlements that are actively mapped to this membership's plan
+  // through approved, currently-effective plan bindings and rule versions.
   const entitlements =
     row === undefined
       ? {
@@ -97,9 +99,22 @@ export async function getMembershipView(pool: Pool, userId: string): Promise<Mem
           description: string | null;
         }>(
           `SELECT e.code, e.name, e.value_type, e.security_classification, e.description
-           FROM entitlements e
-           WHERE e.security_classification IN ('PUBLIC', 'INTERNAL')
+           FROM membership_plan_entitlements mpe
+           INNER JOIN membership_benefit_rule_versions mbrv
+             ON mbrv.id = mpe.rule_version_id
+           INNER JOIN entitlements e
+             ON e.id = mpe.entitlement_id
+           WHERE mpe.membership_plan_id = $1
+             AND mpe.status = 'ACTIVE'
+             AND mpe.valid_from <= now()
+             AND (mpe.valid_to IS NULL OR mpe.valid_to > now())
+             AND mbrv.status = 'ACTIVE'
+             AND mbrv.effective_from <= now()
+             AND (mbrv.effective_to IS NULL OR mbrv.effective_to > now())
+             AND e.security_classification IN ('PUBLIC', 'INTERNAL')
            ORDER BY e.code`,
+          // Note: rule version scalar values are intentionally not selected.
+          [row.membership_plan_id],
         );
 
   return {

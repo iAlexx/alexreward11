@@ -14,7 +14,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src test",
     "test": "vitest run",
-    "test:phase3": "cross-env PHASE3_AUTH_TESTS=1 vitest run test/phase3-auth.test.ts"
+    "test:phase3": "cross-env PHASE3_AUTH_TESTS=1 vitest run test/phase3-auth.test.ts test/phase3-throttle.test.ts"
   },
   "dependencies": {
     "@alex-rewards/db": "workspace:*",
