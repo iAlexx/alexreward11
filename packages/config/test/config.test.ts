@@ -9,15 +9,32 @@ const common = {
   OTEL_ENABLED: 'false',
 };
 
+const apiAuth = {
+  TELEGRAM_BOT_TOKEN: 'local-only-telegram-bot-token-for-tests',
+  SESSION_ACCESS_SECRET: 'local-only-session-access-secret-32b',
+};
+
 describe('environment validation', () => {
   it('fails fast when an API dependency is missing', () => {
     expect(() =>
       loadApiConfig({
         ...common,
+        ...apiAuth,
         REDIS_URL: 'redis://localhost:6379',
         TEMPORAL_ADDRESS: 'localhost:7233',
       }),
     ).toThrow(/DATABASE_URL/);
+  });
+
+  it('requires Telegram bot token and session access secret for the API', () => {
+    expect(() =>
+      loadApiConfig({
+        ...common,
+        DATABASE_URL: 'postgresql://alex:local@localhost:5432/db',
+        REDIS_URL: 'redis://localhost:6379',
+        TEMPORAL_ADDRESS: 'localhost:7233',
+      }),
+    ).toThrow(/TELEGRAM_BOT_TOKEN|SESSION_ACCESS_SECRET/);
   });
 
   it('requires a Telegram token only when transport is enabled', () => {
@@ -51,6 +68,8 @@ describe('environment validation', () => {
         DATABASE_URL: 'postgresql://user:pass@localhost:5432/db',
         REDIS_URL: 'rediss://redis.example.com:6379',
         TEMPORAL_ADDRESS: 'temporal.example.com:7233',
+        TELEGRAM_BOT_TOKEN: 'production-grade-telegram-bot-token-value',
+        SESSION_ACCESS_SECRET: 'production-grade-session-access-secret',
       }),
     ).toThrow(/DATABASE_URL/);
   });

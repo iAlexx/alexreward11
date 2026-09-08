@@ -22,6 +22,9 @@ expressly changed by Version 1.2 remain in force.
   postings, reward issuance, withdrawal financial logic, TON payout logic, AdsGram monetary
   issuance, and KMS signing remain forbidden until the later phase that approves each engine.
   Outside an approved Phase 2, do not add business database tables either.
+- Phase 3 may implement Telegram `initData` authentication, PostgreSQL sessions, locale/profile
+  binding, and identity-safe Founder claim/status reads. It must not post ledger entries, issue
+  rewards/bonuses, execute withdrawals, or treat Founder status as a security/trust bypass.
 - PostgreSQL is the future financial source of truth. Never add `users.balance` or another
   mutable authoritative balance shortcut.
 - Keep `apps/signer` isolated. No other service may import a KMS client or receive signing

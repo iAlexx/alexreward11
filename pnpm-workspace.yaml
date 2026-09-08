@@ -19,3 +19,6 @@ allowBuilds:
   '@swc/core': true
   esbuild: true
   protobufjs: true
+
+catalog:
+  fastify: 5.2.1

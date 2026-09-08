@@ -65,3 +65,10 @@ Values explicitly marked `OWNER_DECISION_REQUIRED` or proposed in V1.2 (includin
 reward economics/share/eCPM/safety-factor/budgets, Founder bonus launch value/caps, unlocked
 referral/mission values, and new-provider limits without an approved contract/documentation
 source) remain unset until Owner approval.
+
+## ADR-008 — Phase 3 Bearer session transport
+
+Phase 3 uses short-lived Bearer access JWTs plus opaque refresh tokens persisted only as
+hashes in PostgreSQL. Production cookie names, domains, SameSite, and CSRF topology remain
+environment-specific and are not invented here. CORS is an explicit allowlist (`CORS_ORIGINS`);
+an empty list disables browser cross-origin calls.

@@ -12,7 +12,17 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint src",
-    "test": "vitest run --passWithNoTests"
+    "lint": "eslint src test",
+    "test": "vitest run",
+    "test:phase3": "cross-env PHASE3_AUTH_TESTS=1 vitest run test/phase3-auth.test.ts"
+  },
+  "dependencies": {
+    "@alex-rewards/db": "workspace:*",
+    "@alex-rewards/telegram": "workspace:*",
+    "ioredis": "6.0.0",
+    "pg": "8.23.0"
+  },
+  "devDependencies": {
+    "@types/pg": "8.23.1"
   }
 }

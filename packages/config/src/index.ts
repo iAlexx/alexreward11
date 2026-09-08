@@ -42,9 +42,48 @@ const serviceSchema = commonSchema.extend({
   TEMPORAL_NAMESPACE: z.string().min(1).default('default'),
 });
 
-const apiSchema = serviceSchema.extend({
-  API_PORT: z.coerce.number().int().min(1024).max(65535).default(3002),
-});
+const apiSchema = serviceSchema
+  .extend({
+    API_PORT: z.coerce.number().int().min(1024).max(65535).default(3002),
+    TELEGRAM_BOT_TOKEN: z.string().min(20),
+    SESSION_ACCESS_SECRET: z.string().min(32),
+    // Local/test defaults only. Production cookie topology/TTLs remain environment-specific.
+    SESSION_ACCESS_TTL_SECONDS: z.coerce.number().int().min(60).max(3600).default(900),
+    SESSION_REFRESH_TTL_SECONDS: z.coerce
+      .number()
+      .int()
+      .min(300)
+      .max(60 * 60 * 24 * 90)
+      .default(2_592_000),
+    INITDATA_MAX_AGE_SECONDS: z.coerce.number().int().min(60).max(86_400).default(86_400),
+    CORS_ORIGINS: z
+      .string()
+      .default('')
+      .transform((value) =>
+        value
+          .split(',')
+          .map((item) => item.trim())
+          .filter((item) => item.length > 0),
+      ),
+    AUTH_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().min(1).max(3600).default(60),
+    AUTH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(10_000).default(30),
+    CLAIM_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().min(1).max(3600).default(300),
+    CLAIM_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(10_000).default(10),
+  })
+  .superRefine((value, context) => {
+    if (
+      value.DEPLOYMENT_ENV !== 'local' &&
+      value.DEPLOYMENT_ENV !== 'test' &&
+      (value.TELEGRAM_BOT_TOKEN.includes('local-only') ||
+        value.SESSION_ACCESS_SECRET.includes('local-only'))
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['TELEGRAM_BOT_TOKEN'],
+        message: 'local-only auth secrets are forbidden outside local/test',
+      });
+    }
+  });
 
 const botSchema = commonSchema
   .extend({

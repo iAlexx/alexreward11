@@ -55,6 +55,11 @@ jobs:
           PHASE2_DATABASE_URL: postgresql://alex_rewards:local-alex-rewards-only@127.0.0.1:5432/alex_rewards_phase2
           PHASE2_MIGRATION_TESTS: '1'
         run: pnpm test:phase2
+      - name: Phase 3 auth and membership gates
+        env:
+          PHASE3_DATABASE_URL: postgresql://alex_rewards:local-alex-rewards-only@127.0.0.1:5432/alex_rewards_phase2
+          PHASE3_AUTH_TESTS: '1'
+        run: pnpm test:phase3
       - name: Dependency vulnerability gate
         run: pnpm security:audit
 

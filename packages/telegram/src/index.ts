@@ -1,2 +1,8 @@
-/** Phase 1 boundary only. telegram behavior is intentionally not implemented. */
-export {};
+export { InitDataValidationError } from './errors.js';
+export type { InitDataErrorCode } from './errors.js';
+export {
+  buildSignedInitDataForTests,
+  validateTelegramInitData,
+  type ValidateInitDataOptions,
+  type ValidatedTelegramUser,
+} from './init-data.js';

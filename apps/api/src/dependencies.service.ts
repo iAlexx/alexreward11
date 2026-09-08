@@ -10,19 +10,24 @@ import { API_CONFIG } from './tokens.js';
 
 @Injectable()
 export class DependenciesService implements OnApplicationShutdown {
-  readonly #database: Pool;
-  readonly #redis: Redis;
+  readonly database: Pool;
+  readonly redis: Redis;
   #temporal: Connection | undefined;
 
   constructor(@Inject(API_CONFIG) private readonly config: ApiConfig) {
-    this.#database = createDatabasePool(config.DATABASE_URL);
-    this.#redis = new Redis(config.REDIS_URL, {
+    this.database = createDatabasePool(config.DATABASE_URL);
+    this.redis = new Redis(config.REDIS_URL, {
       lazyConnect: true,
       enableOfflineQueue: false,
       maxRetriesPerRequest: 1,
       connectTimeout: 5_000,
     });
-    this.#redis.on('error', () => undefined);
+    this.redis.on('error', () => undefined);
+  }
+
+  async ensureRedis(): Promise<Redis> {
+    if (this.redis.status === 'wait') await this.redis.connect();
+    return this.redis;
   }
 
   async probeAll(): Promise<readonly HealthComponent[]> {
@@ -31,13 +36,13 @@ export class DependenciesService implements OnApplicationShutdown {
 
   async onApplicationShutdown(): Promise<void> {
     await this.#temporal?.close();
-    if (this.#redis.status !== 'end') this.#redis.disconnect(false);
-    await this.#database.end();
+    if (this.redis.status !== 'end') this.redis.disconnect(false);
+    await this.database.end();
   }
 
   private async probePostgres(): Promise<HealthComponent> {
     try {
-      const result = await probeDatabase(this.#database);
+      const result = await probeDatabase(this.database);
       return { name: 'postgresql', state: 'ok', latencyMs: result.latencyMs };
     } catch {
       return { name: 'postgresql', state: 'unavailable' };
@@ -47,8 +52,8 @@ export class DependenciesService implements OnApplicationShutdown {
   private async probeRedis(): Promise<HealthComponent> {
     const started = performance.now();
     try {
-      if (this.#redis.status === 'wait') await this.#redis.connect();
-      await this.#redis.ping();
+      await this.ensureRedis();
+      await this.redis.ping();
       return { name: 'redis', state: 'ok', latencyMs: Math.round(performance.now() - started) };
     } catch {
       return { name: 'redis', state: 'unavailable' };
