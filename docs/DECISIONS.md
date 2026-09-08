@@ -40,5 +40,6 @@ Phase 0/Phase 1 archive gates pass and the Owner explicitly approves.
 Every accepted phase must produce both a deterministic canonical source ZIP (`git archive` of
 the exact accepted commit) and a final Owner review-package ZIP containing that source ZIP plus
 acceptance report, `MANIFEST.md`, and `SHA256SUMS.txt`, with `PACKAGE_SHA256.txt` beside the
-outer package. Changing the outer review-package format does not invalidate sealed canonical
-source ZIPs. Helper: `scripts/create-phase-archive.mjs`. Docs: `docs/PHASE_ARCHIVE.md`.
+outer package. Outer ZIP entry names use forward slashes. Acceptance report Section O must not
+embed the outer package hash. Changing the outer review-package format does not invalidate sealed
+canonical source ZIPs. Helper: `scripts/create-phase-archive.mjs`. Docs: `docs/PHASE_ARCHIVE.md`.

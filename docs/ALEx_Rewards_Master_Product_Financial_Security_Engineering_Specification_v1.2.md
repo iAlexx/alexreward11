@@ -5450,7 +5450,9 @@ PHASE_<NN>_<SLUG>/
 └── SHA256SUMS.txt
 ```
 
-The review package MUST NOT contain itself. `PACKAGE_SHA256.txt` stays beside the final package ZIP and records only the SHA-256 of the outer review-package ZIP:
+The review package MUST NOT contain itself. Outer review-package ZIP entry names MUST use
+forward-slash path separators (`/`) on every platform; backslash entry names are prohibited.
+`PACKAGE_SHA256.txt` stays beside the final package ZIP and records only the SHA-256 of the outer review-package ZIP:
 
 ```text
 <sha256>  PHASE_<NN>_<SLUG>_PACKAGE_<TIMESTAMP>_<SHORT_SHA>.zip
@@ -5518,11 +5520,32 @@ N. Final PASS/FAIL for every gate
 O. Archive verification
 ```
 
-Section O must record canonical source ZIP path/SHA256, final review-package path/SHA256, source extraction result, outer package extraction result, prohibited-path scan result, and nested archive validation result.
+Section O must record:
+
+```text
+- canonical source ZIP filename/path
+- canonical source ZIP SHA256
+- final review-package filename
+- source extraction result
+- outer package extraction result
+- prohibited-path scan result
+- nested source validation result
+- statement: "Final review-package SHA256 is recorded externally in PACKAGE_SHA256.txt beside the package."
+```
+
+Section O MUST NOT embed the final outer review-package SHA256 value. Embedding that hash inside a file contained by the ZIP would change the ZIP hash and create an impossible self-reference. The ONLY authoritative final outer package hash is `PACKAGE_SHA256.txt`, which remains outside the review-package ZIP.
 
 ## 156U.6 Manifest requirements
 
-`MANIFEST.md` must include at minimum: project name ALEx Rewards; phase number/slug; roadmap/spec version; acceptance status; full accepted commit SHA and short SHA; branch; source ZIP filename; acceptance-report filename; final review-package filename; archive creation timestamp UTC; historical CI evidence if relevant; final CI run URL; quality and docker-smoke job IDs/results when applicable; toolchain versions; archive helper version; and an explicit statement that Phase N+1 has not started at packaging time.
+`MANIFEST.md` must include at minimum: project name ALEx Rewards; phase number/slug; roadmap/spec version; acceptance status; full accepted commit SHA and short SHA; branch; source ZIP filename; acceptance-report filename; final review-package filename; archive creation timestamp UTC; historical CI evidence if relevant; final CI run URL; quality and docker-smoke job IDs/results when applicable; toolchain versions (including an actual pnpm version, never `unknown` when `packageManager` is pinned); archive helper version; and an explicit next-phase status note.
+
+The next-phase status note MUST NOT invent historical state. For normal future phases the default is:
+
+```text
+No Phase <N+1> work has started at packaging time.
+```
+
+Exceptional/backfill packaging MUST pass an explicit truthful next-phase status note. Example: Phase 00 packaging after Phase 1 foundation already exists must not claim that Phase 1 had not started.
 
 ## 156U.7 Helper and stop rule
 

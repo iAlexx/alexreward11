@@ -12,8 +12,9 @@ expressly changed by Version 1.2 remain in force.
      ZIP plus `PHASE_<NN>_ACCEPTANCE_REPORT.md`, `MANIFEST.md`, and `SHA256SUMS.txt`, with
      `PACKAGE_SHA256.txt` beside the outer package.
      Then verify both archive levels (extract, prohibited-path scan, nested source validation,
-     checksums), **stop**, present the review package, and wait for explicit Owner approval before
-     the next phase. See `docs/PHASE_ARCHIVE.md`.
+     checksums), **stop**, present the review package and external `PACKAGE_SHA256.txt`, and wait
+     for explicit Owner approval before the next phase. Acceptance report Section O must not embed
+     the outer package hash. See `docs/PHASE_ARCHIVE.md`.
 - Do not invent production values marked `OWNER_DECISION_REQUIRED`, `PROPOSED_DEFAULT`, or
   configurable without Owner approval.
 - Phase 1 is foundation only. Do not add business database tables, ledger postings, reward

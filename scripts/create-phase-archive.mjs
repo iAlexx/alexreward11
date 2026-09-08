@@ -5,8 +5,8 @@
  * Default behavior (every phase):
  *   1) deterministic canonical source ZIP via git archive
  *   2) acceptance report + MANIFEST + SHA256SUMS
- *   3) final Owner review-package ZIP
- *   4) PACKAGE_SHA256.txt
+ *   3) final Owner review-package ZIP (forward-slash ZIP entry names)
+ *   4) PACKAGE_SHA256.txt (external authoritative outer hash)
  *   5) extract / prohibited-path / nested / checksum verification at both levels
  *
  * Usage:
@@ -14,12 +14,13 @@
  *     --phase 01 --slug FOUNDATION --commit <sha> --report <file> \
  *     [--roadmap-version 1.2] [--final-ci-url <url>] [--quality-job <id:result>] \
  *     [--docker-smoke-job <id:result>] [--historical-ci <text>] \
- *     [--expected-source-sha256 <hex>]
+ *     [--expected-source-sha256 <hex>] [--next-phase-status <text>]
  *
  * Backfill outer package around a sealed canonical source ZIP (does not mutate it):
  *   node scripts/create-phase-archive.mjs \
  *     --from-existing phase-archives/PHASE_01_FOUNDATION \
  *     --phase 01 --slug FOUNDATION --commit <sha> \
+ *     --next-phase-status "No Phase 2 work had started at packaging time." \
  *     [--expected-source-sha256 <hex>]
  */
 import { createHash } from 'node:crypto';
@@ -40,7 +41,7 @@ import { tmpdir } from 'node:os';
 import { basename, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const ARCHIVE_HELPER_VERSION = '2.0.0';
+export const ARCHIVE_HELPER_VERSION = '2.1.0';
 
 export const PROHIBITED_PATH_PATTERNS = [
   /(^|\/)node_modules(\/|$)/i,
@@ -60,6 +61,26 @@ export const PROHIBITED_PATH_PATTERNS = [
   /(secret|credentials)\.(json|txt|pem|key)$/i,
 ];
 
+const CRC_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let i = 0; i < 256; i += 1) {
+    let c = i;
+    for (let k = 0; k < 8; k += 1) {
+      c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    }
+    table[i] = c >>> 0;
+  }
+  return table;
+})();
+
+export function crc32(buffer) {
+  let crc = 0xffffffff;
+  for (let i = 0; i < buffer.length; i += 1) {
+    crc = CRC_TABLE[(crc ^ buffer[i]) & 0xff] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
 export function usage(exitCode = 1) {
   console.error(
     [
@@ -67,7 +88,7 @@ export function usage(exitCode = 1) {
       '  node scripts/create-phase-archive.mjs --phase <NN> --slug <SLUG> --commit <sha> --report <file> [options]',
       '  node scripts/create-phase-archive.mjs --from-existing <dir> --phase <NN> --slug <SLUG> --commit <sha> [options]',
       '',
-      'Options: --roadmap-version --final-ci-url --quality-job --docker-smoke-job --historical-ci --expected-source-sha256',
+      'Options: --roadmap-version --final-ci-url --quality-job --docker-smoke-job --historical-ci --expected-source-sha256 --next-phase-status',
     ].join('\n'),
   );
   process.exit(exitCode);
@@ -86,6 +107,7 @@ export function parseArgs(argv) {
     dockerSmokeJob: null,
     historicalCi: null,
     expectedSourceSha256: null,
+    nextPhaseStatus: null,
   };
   for (let i = 2; i < argv.length; i += 1) {
     const key = argv[i];
@@ -125,6 +147,9 @@ export function parseArgs(argv) {
       case '--expected-source-sha256':
         out.expectedSourceSha256 = value.toLowerCase();
         break;
+      case '--next-phase-status':
+        out.nextPhaseStatus = value;
+        break;
       default:
         usage();
     }
@@ -141,6 +166,11 @@ export function parseArgs(argv) {
     process.exit(1);
   }
   return out;
+}
+
+export function defaultNextPhaseStatus(phase) {
+  const next = String(Number.parseInt(phase, 10) + 1).padStart(2, '0');
+  return `No Phase ${next} work has started at packaging time.`;
 }
 
 export function runGit(args, cwd) {
@@ -255,10 +285,139 @@ export async function verifySha256Sums(sumsPath, directory) {
   return expected;
 }
 
-function toolVersion(command) {
-  const result = spawnSync(command, ['--version'], { encoding: 'utf8', shell: false });
-  if (result.status !== 0) return 'unknown';
-  return (result.stdout || result.stderr || '').trim().split(/\r?\n/)[0] || 'unknown';
+export function resolvePnpmVersion(repoRoot) {
+  const runtime = spawnSync('pnpm', ['--version'], { encoding: 'utf8', shell: false });
+  if (runtime.status === 0) {
+    const version = (runtime.stdout || '').trim().replace(/^v/, '');
+    if (version && version.toLowerCase() !== 'unknown') return version;
+  }
+  const pkgPath = join(repoRoot, 'package.json');
+  if (!existsSync(pkgPath)) {
+    throw new Error('Unable to resolve pnpm version: package.json missing');
+  }
+  const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
+  const match = /^pnpm@(.+)$/.exec(pkg.packageManager || '');
+  if (match?.[1]) return match[1];
+  throw new Error('Unable to resolve pnpm version from runtime or packageManager pin');
+}
+
+function u16(n) {
+  const buf = Buffer.alloc(2);
+  buf.writeUInt16LE(n, 0);
+  return buf;
+}
+
+function u32(n) {
+  const buf = Buffer.alloc(4);
+  buf.writeUInt32LE(n >>> 0, 0);
+  return buf;
+}
+
+/**
+ * Create a ZIP archive using STORE compression and forward-slash entry names only.
+ * @param {{ name: string, data: Buffer }[]} entries
+ * @returns {Buffer}
+ */
+export function buildZipBuffer(entries) {
+  const localParts = [];
+  const centralParts = [];
+  let offset = 0;
+
+  for (const entry of entries) {
+    if (entry.name.includes('\\')) {
+      throw new Error(`ZIP entry name must not contain backslashes: ${entry.name}`);
+    }
+    const name = entry.name;
+    if (!name || name.startsWith('/')) {
+      throw new Error(`Invalid ZIP entry name: ${name}`);
+    }
+    const data = Buffer.isBuffer(entry.data) ? entry.data : Buffer.from(entry.data);
+    const nameBuf = Buffer.from(name, 'utf8');
+    const crc = crc32(data);
+    const localHeader = Buffer.concat([
+      u32(0x04034b50),
+      u16(20),
+      u16(0),
+      u16(0),
+      u16(0),
+      u16(0),
+      u32(crc),
+      u32(data.length),
+      u32(data.length),
+      u16(nameBuf.length),
+      u16(0),
+      nameBuf,
+    ]);
+    localParts.push(localHeader, data);
+
+    const centralHeader = Buffer.concat([
+      u32(0x02014b50),
+      u16(20),
+      u16(20),
+      u16(0),
+      u16(0),
+      u16(0),
+      u16(0),
+      u32(crc),
+      u32(data.length),
+      u32(data.length),
+      u16(nameBuf.length),
+      u16(0),
+      u16(0),
+      u16(0),
+      u16(0),
+      u32(0),
+      u32(offset),
+      nameBuf,
+    ]);
+    centralParts.push(centralHeader);
+    offset += localHeader.length + data.length;
+  }
+
+  const central = Buffer.concat(centralParts);
+  const end = Buffer.concat([
+    u32(0x06054b50),
+    u16(0),
+    u16(0),
+    u16(entries.length),
+    u16(entries.length),
+    u32(central.length),
+    u32(offset),
+    u16(0),
+  ]);
+  return Buffer.concat([...localParts, central, end]);
+}
+
+export function listZipEntryNames(zipBuffer) {
+  const names = [];
+  let i = 0;
+  while (i + 4 <= zipBuffer.length) {
+    const sig = zipBuffer.readUInt32LE(i);
+    if (sig === 0x04034b50) {
+      const nameLen = zipBuffer.readUInt16LE(i + 26);
+      const extraLen = zipBuffer.readUInt16LE(i + 28);
+      const compSize = zipBuffer.readUInt32LE(i + 18);
+      const nameStart = i + 30;
+      const name = zipBuffer.subarray(nameStart, nameStart + nameLen).toString('utf8');
+      names.push(name);
+      i = nameStart + nameLen + extraLen + compSize;
+      continue;
+    }
+    if (sig === 0x02014b50 || sig === 0x06054b50) break;
+    i += 1;
+  }
+  return names;
+}
+
+export function assertForwardSlashZipEntries(zipBuffer) {
+  const names = listZipEntryNames(zipBuffer);
+  if (names.length === 0) throw new Error('ZIP contains no local file entries');
+  for (const name of names) {
+    if (name.includes('\\')) {
+      throw new Error(`ZIP entry uses backslash path separator: ${name}`);
+    }
+  }
+  return names;
 }
 
 function findCanonicalSourceZip(dir, phase, slug) {
@@ -274,50 +433,14 @@ function findCanonicalSourceZip(dir, phase, slug) {
   return matches[0];
 }
 
-async function createZipFromDirectory(sourceDir, zipPath, { storeRootName, includeNames }) {
-  const stagingParent = mkdtempSync(join(tmpdir(), 'alex-package-stage-'));
-  const stagedRoot = join(stagingParent, storeRootName);
-  try {
-    mkdirSync(stagedRoot, { recursive: true });
-    for (const name of includeNames) {
-      const src = join(sourceDir, name);
-      if (!existsSync(src) || !statSync(src).isFile()) {
-        throw new Error(`Missing package member: ${name}`);
-      }
-      copyFileSync(src, join(stagedRoot, name));
-    }
-
-    if (existsSync(zipPath)) rmSync(zipPath, { force: true });
-
-    if (process.platform === 'win32') {
-      const ps = spawnSync(
-        'powershell.exe',
-        [
-          '-NoProfile',
-          '-Command',
-          `Compress-Archive -Path '${stagedRoot.replace(/'/g, "''")}' -DestinationPath '${zipPath.replace(/'/g, "''")}' -Force`,
-        ],
-        { encoding: 'utf8' },
-      );
-      if (ps.status !== 0) {
-        throw new Error(`Compress-Archive failed: ${ps.stderr || ps.stdout}`);
-      }
-    } else {
-      const zip = spawnSync('zip', ['-r', '-X', zipPath, storeRootName], {
-        cwd: stagingParent,
-        encoding: 'utf8',
-      });
-      if (zip.status !== 0) {
-        throw new Error(`zip failed: ${zip.stderr || zip.stdout}`);
-      }
-    }
-  } finally {
-    rmSync(stagingParent, { recursive: true, force: true });
-  }
+async function createZipFromFiles(zipPath, entries) {
+  const buffer = buildZipBuffer(entries);
+  assertForwardSlashZipEntries(buffer);
+  writeFileSync(zipPath, buffer);
+  return buffer;
 }
 
 function buildManifest(fields) {
-  const phaseNumber = Number.parseInt(fields.phase, 10);
   return [
     '# Phase archive manifest',
     '',
@@ -341,8 +464,8 @@ function buildManifest(fields) {
     `- Node.js: ${fields.nodeVersion}`,
     `- pnpm: ${fields.pnpmVersion}`,
     `- Archive helper version: ${ARCHIVE_HELPER_VERSION}`,
-    '- Archive method: deterministic `git archive --format=zip` for canonical source; outer review package wraps companions',
-    `- Phase ${String(phaseNumber + 1).padStart(2, '0')} has not started at packaging time.`,
+    '- Archive method: deterministic `git archive --format=zip` for canonical source; outer review package uses forward-slash ZIP entries',
+    `- Next-phase status: ${fields.nextPhaseStatus}`,
     '',
   ].join('\n');
 }
@@ -373,6 +496,16 @@ async function verifyReviewPackage({
   expectedNames,
   sourceZipName,
 }) {
+  const zipBuffer = readFileSync(packageZipPath);
+  const entryNames = assertForwardSlashZipEntries(zipBuffer);
+  const expectedEntryNames = expectedNames.map((name) => `${phaseDirName}/${name}`).sort();
+  const actualSorted = [...entryNames].sort();
+  if (actualSorted.join('\n') !== expectedEntryNames.join('\n')) {
+    throw new Error(
+      `Review package ZIP entry mismatch.\nExpected:\n${expectedEntryNames.join('\n')}\nActual:\n${actualSorted.join('\n')}`,
+    );
+  }
+
   const extractRoot = mkdtempSync(join(tmpdir(), 'alex-package-extract-'));
   try {
     extractZip(packageZipPath, extractRoot);
@@ -403,6 +536,7 @@ async function verifyReviewPackage({
       nestedArchiveValidation: nested.extractionVerification,
       nestedProhibitedPathScan: nested.prohibitedPathScan,
       nestedExtractedFiles: nested.extractedFiles,
+      zipEntryNames: entryNames,
     };
   } finally {
     rmSync(extractRoot, { recursive: true, force: true });
@@ -420,7 +554,7 @@ export async function createPhaseArchive(args, { cwd = process.cwd(), now = new 
   const shortSha = fullSha.slice(0, 7);
   const branch = runGit(['rev-parse', '--abbrev-ref', 'HEAD'], repoRoot);
   const nodeVersion = process.version.replace(/^v/, '');
-  const pnpmVersion = toolVersion('pnpm').replace(/^v/, '') || 'unknown';
+  const pnpmVersion = resolvePnpmVersion(repoRoot);
   const stamp = timestampUtc(now);
   const phaseDirName = `PHASE_${args.phase}_${args.slug}`;
   const outDir = args.fromExisting
@@ -432,6 +566,7 @@ export async function createPhaseArchive(args, { cwd = process.cwd(), now = new 
   const reportOutPath = join(outDir, reportOutName);
   const manifestPath = join(outDir, 'MANIFEST.md');
   const sumsPath = join(outDir, 'SHA256SUMS.txt');
+  const nextPhaseStatus = args.nextPhaseStatus || defaultNextPhaseStatus(args.phase);
 
   let sourceZipName;
   let sourceZipPath;
@@ -480,6 +615,13 @@ export async function createPhaseArchive(args, { cwd = process.cwd(), now = new 
     throw new Error('Canonical source ZIP checksum changed during verification');
   }
 
+  // Remove previous outer packages for this directory so backfill replaces them cleanly.
+  for (const name of readdirSync(outDir)) {
+    if (name.includes('_PACKAGE_') && name.endsWith('.zip')) {
+      rmSync(join(outDir, name), { force: true });
+    }
+  }
+
   const packageZipName = `${phaseDirName}_PACKAGE_${stamp}_${shortSha}.zip`;
   const packageZipPath = join(outDir, packageZipName);
   const packageShaPath = join(outDir, 'PACKAGE_SHA256.txt');
@@ -501,6 +643,7 @@ export async function createPhaseArchive(args, { cwd = process.cwd(), now = new 
     qualityJob: args.qualityJob,
     dockerSmokeJob: args.dockerSmokeJob,
     historicalCi: args.historicalCi,
+    nextPhaseStatus,
   });
   writeFileSync(manifestPath, manifest, 'utf8');
 
@@ -517,16 +660,18 @@ export async function createPhaseArchive(args, { cwd = process.cwd(), now = new 
     throw new Error('Canonical source ZIP mutated while writing companions');
   }
 
-  await createZipFromDirectory(outDir, packageZipPath, {
-    storeRootName: phaseDirName,
-    includeNames: [sourceZipName, reportOutName, 'MANIFEST.md', 'SHA256SUMS.txt'],
-  });
+  const includeNames = [sourceZipName, reportOutName, 'MANIFEST.md', 'SHA256SUMS.txt'];
+  const zipEntries = includeNames.map((name) => ({
+    name: `${phaseDirName}/${name}`,
+    data: readFileSync(join(outDir, name)),
+  }));
+  await createZipFromFiles(packageZipPath, zipEntries);
 
   const packageVerify = await verifyReviewPackage({
     packageZipPath,
     packageZipName,
     phaseDirName,
-    expectedNames: [sourceZipName, reportOutName, 'MANIFEST.md', 'SHA256SUMS.txt'],
+    expectedNames: includeNames,
     sourceZipName,
   });
 
@@ -556,11 +701,14 @@ export async function createPhaseArchive(args, { cwd = process.cwd(), now = new 
     packageZip: packageZipPath,
     packageSha256: packageHash,
     packageShaFile: packageShaPath,
+    pnpmVersion,
+    nextPhaseStatus,
     sourceExtraction: sourceVerify.extractionVerification,
     sourceProhibitedPathScan: sourceVerify.prohibitedPathScan,
     packageExtraction: packageVerify.extractionVerification,
     packageProhibitedPathScan: packageVerify.prohibitedPathScan,
     nestedArchiveValidation: packageVerify.nestedArchiveValidation,
+    zipEntryNames: packageVerify.zipEntryNames,
     overall: 'PASS',
   };
 
