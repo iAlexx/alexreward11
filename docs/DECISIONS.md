@@ -43,3 +43,25 @@ acceptance report, `MANIFEST.md`, and `SHA256SUMS.txt`, with `PACKAGE_SHA256.txt
 outer package. Outer ZIP entry names use forward slashes. Acceptance report Section O must not
 embed the outer package hash. Changing the outer review-package format does not invalidate sealed
 canonical source ZIPs. Helper: `scripts/create-phase-archive.mjs`. Docs: `docs/PHASE_ARCHIVE.md`.
+
+## ADR-007 — V1.2 locked initial economic values vs OWNER_DECISION_REQUIRED
+
+Version 1.2 already locks certain **initial** production values. Those values remain authoritative
+and must not be treated as undefined `OWNER_DECISION_REQUIRED` placeholders. Locked examples
+include: minimum withdrawal 0.20 USDT gross; initial fixed platform withdrawal fee 0.01 USDT;
+maximum single withdrawal 5 USDT gross; per-user hourly withdrawal 5 USDT gross; per-user daily
+withdrawal 10 USDT gross / UTC day; Hot Wallet hourly payout volume 25 USDT gross; Hot Wallet
+daily payout volume 100 USDT gross / UTC day; current AdsGram provider safety request limit of
+maximum 30 requests/user/day; Founder Lifetime catalogue price 50 USD one-time.
+
+Phase 2 does not seed production reward/payout rule rows. Locked V1.2 initials are instantiated
+and versioned by their owning implementation phase. The AdsGram 30-request/user/day safety limit
+remains the current provider hard/safety basis until approved evidence changes it. Changing a
+provider limit such as 30 → 100 later creates a new approved `provider_limit_rules` version and
+does not require application-code changes. Founder catalogue price remains 50 USD one-time;
+Founder reward bonus remains configurable/proposed and must not be treated as guaranteed.
+
+Values explicitly marked `OWNER_DECISION_REQUIRED` or proposed in V1.2 (including unset final
+reward economics/share/eCPM/safety-factor/budgets, Founder bonus launch value/caps, unlocked
+referral/mission values, and new-provider limits without an approved contract/documentation
+source) remain unset until Owner approval.

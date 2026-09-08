@@ -34,7 +34,7 @@ Explicitly **not** delivered, and forbidden until the Owner approves the relevan
 - No KMS signing capability; `apps/signer` remains isolated and signing-disabled.
 - No membership purchase, claim-code issuance/consumption service, or entitlement resolver.
 - No admin authentication, RBAC enforcement, or Control Center actions.
-- No production financial value. Reward economics, fees, withdrawal limits, provider limits, budgets, and the Founder bonus rate remain `OWNER_DECISION_REQUIRED` and are created at runtime as approved, audited rule versions — never seeded.
+- No production reward/payout rule rows were seeded in Phase 2. Initial values already locked by V1.2 remain authoritative and will be instantiated/versioned by their owning implementation phase. Values explicitly marked `OWNER_DECISION_REQUIRED` or proposed remain unset.
 
 No Phase 3+ behaviour is present in this commit.
 
