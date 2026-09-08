@@ -17,9 +17,7 @@ import {
   createRewardQuote,
   createSimulatedRewardSourceIdentity,
   ELIGIBLE_REWARD_BONUS_CODE,
-  ensureSimulatedRewardProvider,
   expireRewardQuote,
-  issueSimulatedReward,
   withLedgerTransaction,
 } from '../src/index.js';
 import {
