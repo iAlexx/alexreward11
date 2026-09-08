@@ -12,7 +12,16 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint src",
-    "test": "vitest run --passWithNoTests"
+    "lint": "eslint src test",
+    "test": "vitest run --passWithNoTests",
+    "test:phase5": "cross-env PHASE5_REWARD_TESTS=1 vitest run --fileParallelism=false test/phase5-arithmetic.test.ts test/phase5-rules.test.ts test/phase5-quotes-budgets.test.ts test/phase5-issuance.test.ts test/phase5-bonus.test.ts test/phase5-maturity.test.ts test/phase5-guardrails.test.ts test/phase5-failure-injection.test.ts test/phase5-concurrency.test.ts"
+  },
+  "dependencies": {
+    "@alex-rewards/db": "workspace:*",
+    "@alex-rewards/ledger": "workspace:*",
+    "pg": "8.23.0"
+  },
+  "devDependencies": {
+    "@types/pg": "8.23.1"
   }
 }

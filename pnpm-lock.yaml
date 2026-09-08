@@ -336,7 +336,21 @@ importers:
 
   packages/referrals: {}
 
-  packages/rewards: {}
+  packages/rewards:
+    dependencies:
+      '@alex-rewards/db':
+        specifier: workspace:*
+        version: link:../db
+      '@alex-rewards/ledger':
+        specifier: workspace:*
+        version: link:../ledger
+      pg:
+        specifier: 8.23.0
+        version: 8.23.0
+    devDependencies:
+      '@types/pg':
+        specifier: 8.23.1
+        version: 8.23.1
 
   packages/support: {}
 

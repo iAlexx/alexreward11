@@ -27,9 +27,9 @@ const requiredPackages = [
 const financialShells = [
   'ads',
   'fraud',
-  // ledger is implemented in Phase 4 (Ledger Core); other money domains remain shells.
+  // ledger is implemented in Phase 4 (Ledger Core).
+  // rewards is implemented in Phase 5 (Reward Engine); other money domains remain shells.
   'referrals',
-  'rewards',
   'tasks',
   'ton',
   'wallets',

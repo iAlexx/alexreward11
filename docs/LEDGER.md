@@ -27,7 +27,9 @@ Callers cannot invent `account_class` / `normal_side` / `owner_type`. Semantics 
 
 `TREASURY_FUNDING_CLEARING` and `INVALID_TRAFFIC_RECOVERY` remain in the enum but **refuse silent provision** (`OWNER_DECISION_REQUIRED`) until an explicit Owner accounting decision (V1.2 §24).
 
-`MEMBERSHIP_BONUS_EXPENSE` is provisionable for classification/tests. Phase 4 does **not** issue Founder/membership bonus domain events.
+`MEMBERSHIP_BONUS_EXPENSE` is provisionable. Phase 5 Reward Engine issues Founder/membership
+bonus domain events and `MEMBERSHIP_BONUS_ISSUANCE` posts when a quoted bonus is honored
+(see `docs/REWARDS.md`). Phase 4 itself did not issue those domain events.
 
 ### Account-type / asset compatibility
 
@@ -99,9 +101,17 @@ Rebuild/compare are **tie-aware**: they do not invent a total order by random UU
 
 ## Schema (Phase 4)
 
-- Does **not** edit `0001`–`0012` for this correction
-- No `0013` added — projection chronology uses Option 1 (tie-aware validation)
+- Does **not** edit `0001`–`0011` for Ledger Core
 - Historical `0012_ledger_integrity.sql` remains: one-reversal unique index; structural immutability trigger on `ledger_accounts` (status still mutable)
+- Projection chronology uses Option 1 (tie-aware validation) — **no ledger posting-sequence migration**
+- Forward migration `0013_reward_engine_integrity.sql` is Phase 5 Reward Engine integrity (not a ledger sequence column)
+
+## Phase 5 composition
+
+`@alex-rewards/rewards` calls `withLedgerTransaction` and posts one or more ledger transactions
+(base issuance, optional membership-bonus issuance, later maturity) on the **same** `PoolClient`
+as quote/reservation/outbox work. Callers must pass the outer client into
+`postLedgerTransaction` so domain + ledger + outbox commit atomically.
 
 ## Money representation
 

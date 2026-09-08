@@ -5,9 +5,11 @@ V1.2 relational baseline as ordered, immutable explicit SQL migrations in `migra
 
 Phase 2 delivered the **schema** baseline. Phase 4 implements Ledger Core posting in
 `@alex-rewards/ledger` (see `docs/LEDGER.md`) and adds forward migration
-`0012_ledger_integrity.sql`. Migrations `0001`–`0011` remain immutable. Reward Engine,
-withdrawals, payouts, provider adapters, and KMS signing remain out of scope until later
-Owner-approved phases.
+`0012_ledger_integrity.sql`. Migrations `0001`–`0012` remain immutable after acceptance.
+Phase 5 adds `0013_reward_engine_integrity.sql` for Reward Engine financial integrity and enables
+the `@alex-rewards/rewards` engine (simulated PROMOTION source only). Migrations `0001`–`0012`
+remain immutable. Withdrawals, payouts, provider adapters, and KMS signing remain out of scope
+until later Owner-approved phases.
 
 ## Migration inventory
 
@@ -25,6 +27,7 @@ Owner-approved phases.
 | `0010_review_notifications_flags_reconciliation.sql` | support, review cases, notifications and campaigns, feature flags, exposure limits, reconciliation                                                   |
 | `0011_seed_local_fixtures.sql`                       | LOCAL FIXTURE ONLY reference data                                                                                                                    |
 | `0012_ledger_integrity.sql`                          | Phase 4: one-reversal-per-original unique index; ledger_accounts structural immutability                                                             |
+| `0013_reward_engine_integrity.sql`                   | Phase 5: ACTIVE reward-rule family overlap EXCLUDE; financial-rule immutability; quote reconstruction / started-source fields                        |
 
 ## Schema ownership
 

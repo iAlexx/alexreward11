@@ -22,6 +22,7 @@
     "test:phase2": "pnpm --filter @alex-rewards/db run test:phase2",
     "test:phase3": "pnpm --filter @alex-rewards/auth run test:phase3",
     "test:phase4": "pnpm --filter @alex-rewards/ledger run test:phase4",
+    "test:phase5": "pnpm --filter @alex-rewards/rewards run test:phase5",
     "security:secrets": "node scripts/scan-secrets.mjs",
     "security:audit": "pnpm audit --audit-level=high",
     "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm test:archive && pnpm build && pnpm verify:boundaries && pnpm validate:migrations && pnpm security:secrets",

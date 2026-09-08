@@ -25,6 +25,7 @@ provider business behaviour is implemented here.
 | `0010_review_notifications_flags_reconciliation.sql` | support, review cases, notifications and campaigns, feature flags, exposure limits, reconciliation                                                            |
 | `0011_seed_local_fixtures.sql`                       | LOCAL FIXTURE ONLY reference data                                                                                                                             |
 | `0012_ledger_integrity.sql`                          | Phase 4: one-reversal-per-original unique index; ledger_accounts structural immutability trigger                                                              |
+| `0013_reward_engine_integrity.sql`                   | Phase 5: reward-rule ACTIVE overlap EXCLUDE; financial immutability triggers; quote applied_economics / source_started_at / bonus policy                      |
 
 ## Conventions
 

@@ -104,3 +104,40 @@ total order beyond what `posted_at` cohorts + the posting engine’s stored poin
 through `reverseLedgerTransaction` → `postLedgerTransactionWithReversalLink`, which enforces an
 order-safe exact economic reversal multiset **before** insert so malformed linked attempts cannot
 consume the one-reversal unique slot.
+
+## ADR-012 — Reward rule family, immutability, and migration 0013
+
+Phase 5 treats `reward_rules.code` as the logical rule **family**. At most one `ACTIVE` validity
+window may exist per `code` (PostgreSQL `EXCLUDE` on `tstzrange(valid_from, valid_to)`). Application
+`resolveRewardRule` still fails closed if zero or more than one `ACTIVE` row matches the resolution
+context (source_type / provider / country / asset), because multiple families could otherwise match.
+
+Financially authoritative fields on `reward_rules`, and entire rows of
+`membership_benefit_rule_versions` / `economic_exposure_limits`, are immutable in place (0013
+triggers). Lifecycle updates on `reward_rules` are limited to status / `valid_to` / reason /
+`source_reference` / `updated_at`. Benefit and exposure versions are append-only; overlapping
+`ACTIVE` windows fail closed at insert via `EXCLUDE`.
+
+Quote reconstruction requires frozen `reward_quotes.applied_economics`, plus `source_started_at`
+and explicit `bonus_unavailable_policy` when bonus evaluation is in scope.
+
+## ADR-013 — Membership bonus FLOOR formula (interim)
+
+Until an Owner locks a different production formula, membership bonus amount is:
+
+```text
+FLOOR(base_amount_atomic * bonus_bps / 10000)
+```
+
+using the post-clamp quoted base. A zero result after `FLOOR` is treated as **no bonus** (amount 0),
+not an error. Base and bonus remain separately reserved, posted, and audited.
+
+## ADR-014 — Membership bonus unavailable policies
+
+When membership bonus evaluation is in scope, an explicit pre-start policy is mandatory
+(`BASE_REWARD_ONLY` | `BLOCK_QUOTE_BEFORE_START`). Missing policy fails closed.
+
+- `BASE_REWARD_ONLY` — quote/issue the base reward; omit bonus reservation/issuance when bonus
+  cannot be honored (pause, missing entitlement/budget, zero after FLOOR).
+- `BLOCK_QUOTE_BEFORE_START` — refuse quote creation when bonus cannot be fully reserved/honored
+  before source start. Never silently drop a promised bonus after a valid start.
