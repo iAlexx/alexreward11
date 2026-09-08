@@ -33,7 +33,7 @@ Version 1.2 adds or strengthens:
 - a generic **Mission Engine** replacing hardcoded task growth, while preserving the V1 basic task requirements;
 - notification campaign/segmentation foundations, granular feature flags and kill switches, domain-event conventions, and safe experimentation boundaries;
 - explicit future support for Premium/Partner/Influencer memberships, advertiser self-service, more providers, multiple payout networks/assets, and scale-out without making those items Initial V1 blockers;
-- a mandatory **phase archive rule**: after every accepted phase, create an immutable review ZIP under `phase-archives/` with an acceptance report, commit metadata, manifest and SHA-256 checksum, then stop for Owner approval before the next phase.
+- a mandatory **phase archive rule**: after every accepted phase, create under `phase-archives/` both a deterministic canonical source ZIP and a single self-contained final review-package ZIP (plus acceptance report, MANIFEST, SHA256SUMS, and PACKAGE_SHA256), verify both levels, then stop for Owner approval before the next phase.
 
 All Version 1.2 language supersedes conflicting Version 1.1 language. All Version 1.1 requirements not expressly changed by Version 1.2 remain fully in force.
 
@@ -221,7 +221,7 @@ Rewarded advertising is an optional earning action, not a requirement to access 
 | Review operations | Unified review queue/control surface; domain systems remain the source of state and money truth |
 | Mission model | Generic versioned Mission Engine; all monetary mission rewards still flow Reward Engine -> immutable Ledger |
 | Feature flags | Granular, versioned/environment-aware flags and kill switches; never used to weaken required financial/security invariants |
-| Phase archives | Mandatory immutable review ZIP after every accepted phase under `phase-archives/`; archives excluded from normal source commits |
+| Phase archives | Mandatory dual-archive after every accepted phase under `phase-archives/`: deterministic canonical source ZIP + final Owner review-package ZIP with report/MANIFEST/SHA256SUMS/PACKAGE_SHA256; archives excluded from normal source commits |
 | Support | In-app ticket system |
 | Account deletion | Anonymize eligible personal data; never delete required financial/audit history |
 
@@ -5403,7 +5403,7 @@ Financial experiments require explicit Owner approval, versioned budgets and ful
 
 # 156U. PHASE ARCHIVE / ZIP REQUIREMENT — MANDATORY
 
-After **every phase** reaches its acceptance gate, Cursor/Codex MUST create a review archive before asking permission to start the next phase.
+After **every phase** reaches its acceptance gate, Cursor/Codex MUST create the dual-archive package below before asking permission to start the next phase.
 
 Repository folder:
 
@@ -5421,25 +5421,60 @@ phase-archives/
     ├── ALEx_Rewards_PHASE_<NN>_<SLUG>_<YYYYMMDD-HHMMSS>_<SHORT_SHA>.zip
     ├── PHASE_<NN>_ACCEPTANCE_REPORT.md
     ├── MANIFEST.md
-    └── SHA256SUMS.txt
+    ├── SHA256SUMS.txt
+    ├── PHASE_<NN>_<SLUG>_PACKAGE_<YYYYMMDD-HHMMSS>_<SHORT_SHA>.zip
+    └── PACKAGE_SHA256.txt
 ```
 
-The ZIP must represent the accepted source state, preferably from the exact clean Git commit using `git archive` or an equivalent deterministic tracked-source archive.
+## 156U.1 Canonical source ZIP (A)
 
-Before archive creation:
+Filename: `ALEx_Rewards_PHASE_<NN>_<SLUG>_<TIMESTAMP>_<SHORT_SHA>.zip`
+
+- Built from the exact accepted Git commit.
+- Prefer deterministic `git archive`.
+- This is the canonical sealed source snapshot.
+- It must never include `phase-archives` itself.
+- It must never contain secrets/generated/runtime files.
+
+## 156U.2 Final review-package ZIP (B)
+
+Filename: `PHASE_<NN>_<SLUG>_PACKAGE_<TIMESTAMP>_<SHORT_SHA>.zip`
+
+This is the single ZIP the Owner sends for review. It MUST contain exactly:
+
+```text
+PHASE_<NN>_<SLUG>/
+├── ALEx_Rewards_PHASE_<NN>_<SLUG>_<TIMESTAMP>_<SHORT_SHA>.zip
+├── PHASE_<NN>_ACCEPTANCE_REPORT.md
+├── MANIFEST.md
+└── SHA256SUMS.txt
+```
+
+The review package MUST NOT contain itself. `PACKAGE_SHA256.txt` stays beside the final package ZIP and records only the SHA-256 of the outer review-package ZIP:
+
+```text
+<sha256>  PHASE_<NN>_<SLUG>_PACKAGE_<TIMESTAMP>_<SHORT_SHA>.zip
+```
+
+`SHA256SUMS.txt` inside the review package must contain SHA-256 values for the canonical source ZIP, acceptance report, and `MANIFEST.md` only. Do not include the outer package hash inside itself.
+
+## 156U.3 Before archive creation
 
 1. all phase tests/gates must have passed;
 2. documentation must be updated;
 3. no secrets may be staged or committed;
 4. `git status` must be understood and the accepted source state must be committed;
 5. record full commit SHA and branch;
-6. do not silently overwrite an older phase archive.
+6. do not silently overwrite an older phase archive;
+7. where applicable, final CI for the accepted commit must be green before treating that commit as archival source.
 
-Exclude from the ZIP/phase archive:
+## 156U.4 Prohibited content — both archive levels
+
+Both the source ZIP and the final review-package ZIP must be scanned. Reject:
 
 ```text
 .env
-.env.* secrets
+.env.* except approved .env.example
 node_modules
 dist
 .next
@@ -5447,12 +5482,21 @@ dist
 .git
 local databases
 Docker volumes
-wallet seeds/private keys
-KMS material
-provider secrets
+wallet seed phrases
+private keys
+KMS private/signing material
+provider API secrets
+Telegram bot secrets
+production credentials
 runtime logs containing secrets
-phase-archives itself
+phase-archives recursively
+temporary extraction folders
+the outer package ZIP inside itself
 ```
+
+Never weaken this list.
+
+## 156U.5 Acceptance report requirements
 
 The acceptance report must contain:
 
@@ -5471,17 +5515,20 @@ K. Security/financial invariant checks
 L. Rollback/recovery notes
 M. Exact commit SHA
 N. Final PASS/FAIL for every gate
+O. Archive verification
 ```
 
-`MANIFEST.md` records archive filename, phase, timestamp, branch, commit SHA, roadmap version, toolchain versions, and acceptance status.
+Section O must record canonical source ZIP path/SHA256, final review-package path/SHA256, source extraction result, outer package extraction result, prohibited-path scan result, and nested archive validation result.
 
-`SHA256SUMS.txt` records the SHA-256 checksum of the ZIP and key report files.
+## 156U.6 Manifest requirements
 
-The archive must be test-extracted to a temporary directory and checked for prohibited secret/generated paths before the phase is considered archived.
+`MANIFEST.md` must include at minimum: project name ALEx Rewards; phase number/slug; roadmap/spec version; acceptance status; full accepted commit SHA and short SHA; branch; source ZIP filename; acceptance-report filename; final review-package filename; archive creation timestamp UTC; historical CI evidence if relevant; final CI run URL; quality and docker-smoke job IDs/results when applicable; toolchain versions; archive helper version; and an explicit statement that Phase N+1 has not started at packaging time.
 
-After creating the archive, Cursor/Codex MUST stop and wait for explicit Owner approval before beginning the next phase.
+## 156U.7 Helper and stop rule
 
-For an already-implemented phase that predates Version 1.2, create the archive when that phase's remaining acceptance gate actually passes; do not falsely mark it accepted merely because implementation exists.
+The repository helper `scripts/create-phase-archive.mjs` MUST implement the dual-ZIP workflow as its default behavior for every phase. After successful packaging and verification of both levels, Cursor/Codex MUST present the final review-package ZIP to the Owner, then stop and wait for explicit Owner approval before beginning the next phase.
+
+For an already-implemented phase that predates Version 1.2, create the archive when that phase's remaining acceptance gate actually passes; do not falsely mark it accepted merely because implementation exists. Changing the outer review-package format does not invalidate or reopen already-sealed canonical source ZIPs.
 
 ---
 

@@ -6,8 +6,14 @@ The authoritative product, financial, security, and engineering requirements are
 expressly changed by Version 1.2 remain in force.
 
 - Work only in the phase explicitly approved by the Owner.
-- After every accepted phase, create an immutable review archive under `phase-archives/`
-  (ignored by Git), then **stop** and wait for explicit Owner approval before the next phase.
+- After every accepted phase, create under `phase-archives/` (ignored by Git) both:
+  1. a deterministic canonical source ZIP from the exact accepted commit (`git archive`), and
+  2. a single final review-package ZIP the Owner can send for review, containing that source
+     ZIP plus `PHASE_<NN>_ACCEPTANCE_REPORT.md`, `MANIFEST.md`, and `SHA256SUMS.txt`, with
+     `PACKAGE_SHA256.txt` beside the outer package.
+     Then verify both archive levels (extract, prohibited-path scan, nested source validation,
+     checksums), **stop**, present the review package, and wait for explicit Owner approval before
+     the next phase. See `docs/PHASE_ARCHIVE.md`.
 - Do not invent production values marked `OWNER_DECISION_REQUIRED`, `PROPOSED_DEFAULT`, or
   configurable without Owner approval.
 - Phase 1 is foundation only. Do not add business database tables, ledger postings, reward

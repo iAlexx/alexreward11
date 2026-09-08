@@ -34,3 +34,11 @@ No `OWNER_DECISION_REQUIRED`, `PROPOSED_DEFAULT`, or otherwise undecided product
 policy value was invented during this adoption. Existing Phase 1 foundation code is retained;
 Version 1.2 does not authorize rebuilding correct Phase 1 work. Phase 2 must not begin until
 Phase 0/Phase 1 archive gates pass and the Owner explicitly approves.
+
+## ADR-006 — Dual phase-archive review package
+
+Every accepted phase must produce both a deterministic canonical source ZIP (`git archive` of
+the exact accepted commit) and a final Owner review-package ZIP containing that source ZIP plus
+acceptance report, `MANIFEST.md`, and `SHA256SUMS.txt`, with `PACKAGE_SHA256.txt` beside the
+outer package. Changing the outer review-package format does not invalidate sealed canonical
+source ZIPs. Helper: `scripts/create-phase-archive.mjs`. Docs: `docs/PHASE_ARCHIVE.md`.
