@@ -72,3 +72,12 @@ Phase 3 uses short-lived Bearer access JWTs plus opaque refresh tokens persisted
 hashes in PostgreSQL. Production cookie names, domains, SameSite, and CSRF topology remain
 environment-specific and are not invented here. CORS is an explicit allowlist (`CORS_ORIGINS`);
 an empty list disables browser cross-origin calls.
+
+## ADR-009 — Unresolved ledger account classifications stay blocked
+
+V1.2 requires an explicit accounting decision before production reporting for
+`TREASURY_FUNDING_CLEARING`. Phase 4 therefore supports the enum/account type in the
+catalogue but refuses silent get-or-create provision (`OWNER_DECISION_REQUIRED`) unless a
+later Owner decision documents production class/side. The same fail-closed stance applies to
+`INVALID_TRAFFIC_RECOVERY` until recognition policy is approved. No speculative production
+classification is invented in Phase 4.

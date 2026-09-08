@@ -292,7 +292,18 @@ importers:
 
   packages/i18n: {}
 
-  packages/ledger: {}
+  packages/ledger:
+    dependencies:
+      '@alex-rewards/db':
+        specifier: workspace:*
+        version: link:../db
+      pg:
+        specifier: 8.23.0
+        version: 8.23.0
+    devDependencies:
+      '@types/pg':
+        specifier: 8.23.1
+        version: 8.23.1
 
   packages/notifications: {}
 

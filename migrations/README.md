@@ -24,6 +24,7 @@ provider business behaviour is implemented here.
 | `0009_provider_v12_ops.sql`                          | provider contracts, limit rules, country rules, routing policy versions, certification, settlement, reporting imports, trust snapshots, eligibility decisions |
 | `0010_review_notifications_flags_reconciliation.sql` | support, review cases, notifications and campaigns, feature flags, exposure limits, reconciliation                                                            |
 | `0011_seed_local_fixtures.sql`                       | LOCAL FIXTURE ONLY reference data                                                                                                                             |
+| `0012_ledger_integrity.sql`                          | Phase 4: one-reversal-per-original unique index; ledger_accounts structural immutability trigger                                                              |
 
 ## Conventions
 

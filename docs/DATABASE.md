@@ -3,9 +3,11 @@
 PostgreSQL is the financial source of truth for ALEx Rewards. Phase 2 delivers the complete
 V1.2 relational baseline as ordered, immutable explicit SQL migrations in `migrations/`.
 
-Phase 2 is **schema only**. No reward issuance, ledger posting, withdrawal, payout, provider
-adapter or KMS-signing behaviour is implemented. Those engines remain forbidden until the Owner
-approves the phase that introduces them.
+Phase 2 delivered the **schema** baseline. Phase 4 implements Ledger Core posting in
+`@alex-rewards/ledger` (see `docs/LEDGER.md`) and adds forward migration
+`0012_ledger_integrity.sql`. Migrations `0001`–`0011` remain immutable. Reward Engine,
+withdrawals, payouts, provider adapters, and KMS signing remain out of scope until later
+Owner-approved phases.
 
 ## Migration inventory
 
@@ -22,6 +24,7 @@ approves the phase that introduces them.
 | `0009_provider_v12_ops.sql`                          | provider contracts, limit rules, country rules, routing policy versions, certification, settlement, reporting imports, trust, eligibility            |
 | `0010_review_notifications_flags_reconciliation.sql` | support, review cases, notifications and campaigns, feature flags, exposure limits, reconciliation                                                   |
 | `0011_seed_local_fixtures.sql`                       | LOCAL FIXTURE ONLY reference data                                                                                                                    |
+| `0012_ledger_integrity.sql`                          | Phase 4: one-reversal-per-original unique index; ledger_accounts structural immutability                                                             |
 
 ## Schema ownership
 
