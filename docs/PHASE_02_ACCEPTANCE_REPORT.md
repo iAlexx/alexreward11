@@ -212,12 +212,12 @@ No source-level critical TODO, placeholder security implementation, mutable `use
 
 ## O. Archive verification
 
-Verified for exact accepted commit `c57684c850c654e681369ccbd79a8c36035aea23` using `scripts/create-phase-archive.mjs` v2.1.0 (stamp `20260908-040500`).
+Verified for exact accepted commit `c57684c850c654e681369ccbd79a8c36035aea23` using `scripts/create-phase-archive.mjs` v2.1.0 (stamp `20260908-040500`). The outer review package was regenerated after documentation clarification commit `ac2817b00ae7578bcf947fc9dc89044fa5ff38ca` (CI run `34226156238`) so companions reflect locked V1.2 initial-value wording; the sealed canonical source ZIP was not rebuilt.
 
 | Item                                                                   | Result                                                                          |
 | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
 | Canonical source ZIP                                                   | `ALEx_Rewards_PHASE_02_DATABASE_BASELINE_20260908-040500_c57684c.zip`           |
-| Canonical source SHA-256                                               | `f7cc68813f96c583f9d5dfc74de5b06579f3893576729ff929d388cef1efbe10`              |
+| Canonical source SHA-256                                               | `f7cc68813f96c583f9d5dfc74de5b06579f3893576729ff929d388cef1efbe10` (unchanged)  |
 | Review-package ZIP                                                     | `PHASE_02_DATABASE_BASELINE_PACKAGE_20260908-040500_c57684c.zip`                |
 | Outer package SHA-256                                                  | See external `PACKAGE_SHA256.txt` beside the review package (not embedded here) |
 | `MANIFEST.md` / `SHA256SUMS.txt`                                       | PASS — companion checksums match source ZIP, report, and manifest               |
