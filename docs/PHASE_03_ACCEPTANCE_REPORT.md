@@ -1,17 +1,17 @@
 # ALEx Rewards Phase 3 Acceptance Report
 
-Status: **PENDING CI** — implementation and local gates complete; archival commit CI not yet recorded.
+Status: **PASS** — Phase 3 Telegram auth + membership identity binding is complete; GitHub Actions `quality` and `docker-smoke` are green on the accepted archival commit. Dual archive packaging follows; Phase 4 must not start until Owner approval.
 
 Date: 2026-09-08
 
 Source of truth: ALEx Rewards Master Product, Financial, Security & Engineering Specification **v1.2**.
 
-| Item                               | Value   |
-| ---------------------------------- | ------- |
-| Final accepted archival commit SHA | `TBD`   |
-| GitHub Actions run                 | `TBD`   |
-| `quality`                          | PENDING |
-| `docker-smoke`                     | PENDING |
+| Item                               | Value                                                           |
+| ---------------------------------- | --------------------------------------------------------------- |
+| Final accepted archival commit SHA | `421ea529cad487ff59b46cb1c9cb176f9450893b`                      |
+| GitHub Actions run                 | https://github.com/iAlexx/alexreward11/actions/runs/34273751201 |
+| `quality`                          | PASS — job `102221546933`                                       |
+| `docker-smoke`                     | PASS — job `102222392491`                                       |
 
 Phase 4 has not started. Phase 3 is Telegram auth + membership identity binding only.
 
@@ -26,7 +26,7 @@ Delivered:
 - Membership read model (status/plan/Founder number + non-FINANCIAL entitlement vocabulary).
 - Atomic Founder claim-code consumption with audit/grant events and zero money/ledger impact.
 - Redis throttles for auth/refresh/claim; CORS allowlist; security response headers; redaction helper.
-- Docs: `docs/AUTH.md`, this report; ADR-007 remains the locked-initials reference.
+- Docs: `docs/AUTH.md`, this report; ADR-007 remains the locked-initials reference; ADR-008 records Bearer transport.
 
 Explicitly **not** delivered:
 
@@ -79,23 +79,36 @@ POST   /v1/membership/founder/claim
 | `@alex-rewards/telegram` initData unit tests | PASS (8)               |
 | `@alex-rewards/auth` Phase 3 integration     | PASS (12)              |
 | Phase 2 migration/constraint gates           | PASS (27) — regression |
-| `packages/config` env validation             | PASS                   |
+| `packages/config` env validation             | PASS (6)               |
 
 ## G–N. Gate checklist
 
-| Gate                                                  | Result  |
-| ----------------------------------------------------- | ------- |
-| Spoofed/invalid/stale/malformed initData rejected     | PASS    |
-| Telegram ID string-safe                               | PASS    |
-| Session rotate/revoke/replay/race                     | PASS    |
-| Founder claim single-use / race / rollback / no money | PASS    |
-| No self-assign Founder values                         | PASS    |
-| Membership cannot bypass account security state       | PASS    |
-| No Phase 2 migration edits                            | PASS    |
-| Signer remains signing-disabled                       | PASS    |
-| No Phase 4+ engines                                   | PASS    |
-| `quality` / `docker-smoke`                            | PENDING |
+| Gate                                                  | Result |
+| ----------------------------------------------------- | ------ |
+| Spoofed/invalid/stale/malformed initData rejected     | PASS   |
+| Telegram ID string-safe                               | PASS   |
+| Session rotate/revoke/replay/race                     | PASS   |
+| Founder claim single-use / race / rollback / no money | PASS   |
+| No self-assign Founder values                         | PASS   |
+| Membership cannot bypass account security state       | PASS   |
+| No Phase 2 migration edits                            | PASS   |
+| Signer remains signing-disabled                       | PASS   |
+| No Phase 4+ engines                                   | PASS   |
+| `quality` / `docker-smoke`                            | PASS   |
 
 ## O. Archive verification
 
-Placeholder — filled after CI-green archival commit and `pnpm archive:phase`.
+Verified for exact accepted commit `421ea529cad487ff59b46cb1c9cb176f9450893b` using `scripts/create-phase-archive.mjs` v2.1.0 (stamp `20260908-202100`).
+
+| Item                                                                   | Result                                                                               |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Canonical source ZIP                                                   | `ALEx_Rewards_PHASE_03_TELEGRAM_AUTH_MEMBERSHIP_BINDING_20260908-202100_421ea52.zip` |
+| Canonical source SHA-256                                               | `f6ab932a03a05d8f60e6b56db4782852f14c27fb61f0d28b1f950ccb0be6ac7e`                   |
+| Review-package ZIP                                                     | `PHASE_03_TELEGRAM_AUTH_MEMBERSHIP_BINDING_PACKAGE_20260908-202100_421ea52.zip`      |
+| Outer package SHA-256                                                  | See external `PACKAGE_SHA256.txt` beside the review package (not embedded here)      |
+| `MANIFEST.md` / `SHA256SUMS.txt`                                       | PASS — companion checksums match source ZIP, report, and manifest                    |
+| Source extraction / prohibited-path scan                               | PASS / PASS                                                                          |
+| Review-package extraction / prohibited-path / nested source validation | PASS / PASS / PASS                                                                   |
+| Forward-slash ZIP entry names                                          | PASS — `PHASE_03_TELEGRAM_AUTH_MEMBERSHIP_BINDING/...` only                          |
+
+Per `AGENTS.md` and `docs/PHASE_ARCHIVE.md`, the SHA-256 of the **outer** review package is published beside it in `PACKAGE_SHA256.txt` and is deliberately **not** embedded in this section.
