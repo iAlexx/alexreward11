@@ -9,7 +9,7 @@ Source of truth: ALEx Rewards Master Product, Financial, Security & Engineering 
 Phase 2 has not started. No ledger, reward issuance, withdrawal, AdsGram monetary, TON payout, or KMS-signing implementation is present.
 
 Historical foundation evidence SHA: `8c479dac8d209250a4f5c68d2948863a82276f35`  
-Historical foundation GitHub Actions run: https://github.com/iAlexx/alexreward11/actions/runs/34002303780  
+Historical foundation GitHub Actions run: https://github.com/iAlexx/alexreward11/actions/runs/34002303780
 
 Final accepted archival commit SHA: `PENDING_FINAL_SHA`  
 Final V1.2 closure GitHub Actions run: `PENDING_NEW_CI_RUN`
@@ -525,22 +525,22 @@ There is no remaining local runtime failure, source-level critical TODO/FIXME, p
 
 ## N. Final acceptance results
 
-| Phase 1 acceptance criterion                                     | Result | Evidence summary                                                                   |
-| ---------------------------------------------------------------- | ------ | ---------------------------------------------------------------------------------- |
-| All approved apps/packages exist                                 | PASS   | 6 apps and 19 shared package boundaries validated                                  |
-| Monorepo dependency boundaries are clean                         | PASS   | automated architecture validation passed                                           |
-| All applications build                                           | PASS   | 25/25 builds, including clean container and clean-clone builds                     |
-| All required backend/runtime processes boot                      | PASS   | all 11 Compose services started                                                    |
-| All health/readiness checks pass simultaneously                  | PASS   | six app health checks plus dependency/collector checks passed                      |
-| PostgreSQL, Redis, and Temporal local dependencies work          | PASS   | SQL query, PONG, SERVING, API dependency probes, and workflow execution passed     |
-| Configuration validation works                                   | PASS   | five configuration assertions and fail-fast production/KMS guards passed           |
+| Phase 1 acceptance criterion                                     | Result | Evidence summary                                                                          |
+| ---------------------------------------------------------------- | ------ | ----------------------------------------------------------------------------------------- |
+| All approved apps/packages exist                                 | PASS   | 6 apps and 19 shared package boundaries validated                                         |
+| Monorepo dependency boundaries are clean                         | PASS   | automated architecture validation passed                                                  |
+| All applications build                                           | PASS   | 25/25 builds, including clean container and clean-clone builds                            |
+| All required backend/runtime processes boot                      | PASS   | all 11 Compose services started                                                           |
+| All health/readiness checks pass simultaneously                  | PASS   | six app health checks plus dependency/collector checks passed                             |
+| PostgreSQL, Redis, and Temporal local dependencies work          | PASS   | SQL query, PONG, SERVING, API dependency probes, and workflow execution passed            |
+| Configuration validation works                                   | PASS   | five configuration assertions and fail-fast production/KMS guards passed                  |
 | GitHub Actions `quality` is green                                | PASS*  | historical run 34002303780 / job 101403226368 on SHA 8c479dac…; final archival CI PENDING |
 | GitHub Actions `docker-smoke` is green                           | PASS*  | historical run 34002303780 / job 101403517140 on SHA 8c479dac…; final archival CI PENDING |
-| No secrets are exposed                                           | PASS   | secret scan, ignored `.env`, frontend allowlist, redaction, and image context pass |
-| Observability foundation works                                   | PASS   | OTel health 200; app telemetry initialized; Sentry is structurally integrated      |
-| Clean shutdown behavior works                                    | PASS   | API/Bot/Worker/Signer and stateful dependencies exit cleanly; Worker drains        |
-| Local setup works from a clean environment                       | PASS   | clean clone, frozen install, full stack, and smoke passed                          |
-| No critical TODOs or placeholder security implementations remain | PASS   | scans/review passed; Signer has no signing or KMS capability                       |
+| No secrets are exposed                                           | PASS   | secret scan, ignored `.env`, frontend allowlist, redaction, and image context pass        |
+| Observability foundation works                                   | PASS   | OTel health 200; app telemetry initialized; Sentry is structurally integrated             |
+| Clean shutdown behavior works                                    | PASS   | API/Bot/Worker/Signer and stateful dependencies exit cleanly; Worker drains               |
+| Local setup works from a clean environment                       | PASS   | clean clone, frozen install, full stack, and smoke passed                                 |
+| No critical TODOs or placeholder security implementations remain | PASS   | scans/review passed; Signer has no signing or KMS capability                              |
 
 **Overall Phase 1 acceptance (as of historical foundation SHA 8c479dac…): PASS for foundation gates; V1.2 closure archival commit CI still PENDING.** Phase 2 must not begin until the final archival commit is CI-green, archives exist, and the Owner approves.
 
@@ -552,12 +552,12 @@ This addendum records Version 1.2 adoption, phase-archive scaffolding, and the r
 
 ## A. Historical foundation CI evidence (not archival SHA)
 
-| Item | Value |
-| --- | --- |
-| Historical foundation commit | `8c479dac8d209250a4f5c68d2948863a82276f35` |
+| Item                          | Value                                                           |
+| ----------------------------- | --------------------------------------------------------------- |
+| Historical foundation commit  | `8c479dac8d209250a4f5c68d2948863a82276f35`                      |
 | Historical GitHub Actions run | https://github.com/iAlexx/alexreward11/actions/runs/34002303780 |
-| Historical `quality` job | `101403226368` — success |
-| Historical `docker-smoke` job | `101403517140` — success |
+| Historical `quality` job      | `101403226368` — success                                        |
+| Historical `docker-smoke` job | `101403517140` — success                                        |
 
 ## B. V1.2 closure changes in this commit
 
@@ -571,12 +571,12 @@ This addendum records Version 1.2 adoption, phase-archive scaffolding, and the r
 
 ## C. Final archival commit and CI (filled after push)
 
-| Item | Value |
-| --- | --- |
-| Final accepted archival commit SHA | `PENDING_FINAL_SHA` |
-| V1.2 closure GitHub Actions run | `PENDING_NEW_CI_RUN` |
-| `quality` | PENDING |
-| `docker-smoke` | PENDING |
+| Item                               | Value                |
+| ---------------------------------- | -------------------- |
+| Final accepted archival commit SHA | `PENDING_FINAL_SHA`  |
+| V1.2 closure GitHub Actions run    | `PENDING_NEW_CI_RUN` |
+| `quality`                          | PENDING              |
+| `docker-smoke`                     | PENDING              |
 
 ## D. Overall Phase 1 acceptance after closure CI
 

@@ -73,14 +73,14 @@ Revert the V1.2 adoption commit and restore `AGENTS.md` / decisions pointers to 
 
 ## N. Final PASS/FAIL for every gate
 
-| Gate | Result |
-| --- | --- |
-| Version 1.2 present in-repo as source of truth | PASS |
-| AGENTS.md points to Version 1.2 | PASS |
-| ADR records adoption without inventing undecided values | PASS |
-| Phase-archive procedure scaffolding present | PASS |
-| No Phase 2 implementation started | PASS |
-| Phase 1 code treated as pre-existing, not Phase 0 deliverable | PASS |
-| Final archival commit CI green (quality + docker-smoke) | PENDING |
+| Gate                                                          | Result  |
+| ------------------------------------------------------------- | ------- |
+| Version 1.2 present in-repo as source of truth                | PASS    |
+| AGENTS.md points to Version 1.2                               | PASS    |
+| ADR records adoption without inventing undecided values       | PASS    |
+| Phase-archive procedure scaffolding present                   | PASS    |
+| No Phase 2 implementation started                             | PASS    |
+| Phase 1 code treated as pre-existing, not Phase 0 deliverable | PASS    |
+| Final archival commit CI green (quality + docker-smoke)       | PENDING |
 
 **Overall Phase 0 acceptance: PENDING final CI on archival commit.**
