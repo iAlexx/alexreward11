@@ -88,7 +88,7 @@ export function usage(exitCode = 1) {
       '  node scripts/create-phase-archive.mjs --phase <NN> --slug <SLUG> --commit <sha> --report <file> [options]',
       '  node scripts/create-phase-archive.mjs --from-existing <dir> --phase <NN> --slug <SLUG> --commit <sha> [options]',
       '',
-      'Options: --roadmap-version --final-ci-url --quality-job --docker-smoke-job --historical-ci --expected-source-sha256 --next-phase-status',
+      'Options: --roadmap-version --final-ci-url --quality-job --docker-smoke-job --historical-ci --expected-source-sha256 --next-phase-status --stamp',
     ].join('\n'),
   );
   process.exit(exitCode);
@@ -108,6 +108,7 @@ export function parseArgs(argv) {
     historicalCi: null,
     expectedSourceSha256: null,
     nextPhaseStatus: null,
+    stamp: null,
   };
   for (let i = 2; i < argv.length; i += 1) {
     const key = argv[i];
@@ -150,6 +151,9 @@ export function parseArgs(argv) {
       case '--next-phase-status':
         out.nextPhaseStatus = value;
         break;
+      case '--stamp':
+        out.stamp = value;
+        break;
       default:
         usage();
     }
@@ -163,6 +167,10 @@ export function parseArgs(argv) {
   }
   if (!/^[A-Z0-9_]+$/.test(out.slug)) {
     console.error('--slug must be UPPER_SNAKE_CASE');
+    process.exit(1);
+  }
+  if (out.stamp && !/^\d{8}-\d{6}$/.test(out.stamp)) {
+    console.error('--stamp must be YYYYMMDD-HHMMSS UTC');
     process.exit(1);
   }
   return out;
@@ -555,7 +563,7 @@ export async function createPhaseArchive(args, { cwd = process.cwd(), now = new 
   const branch = runGit(['rev-parse', '--abbrev-ref', 'HEAD'], repoRoot);
   const nodeVersion = process.version.replace(/^v/, '');
   const pnpmVersion = resolvePnpmVersion(repoRoot);
-  const stamp = timestampUtc(now);
+  const stamp = args.stamp || timestampUtc(now);
   const phaseDirName = `PHASE_${args.phase}_${args.slug}`;
   const outDir = args.fromExisting
     ? resolve(repoRoot, args.fromExisting)

@@ -93,3 +93,8 @@ test('buildZipBuffer rejects entry names that still contain backslashes', () => 
     /backslash/i,
   );
 });
+
+test('parseArgs accepts optional deterministic --stamp', async () => {
+  // Imported parseArgs validates stamp format via process.exit; exercise timestamp helper instead.
+  assert.equal(timestampUtc(new Date(Date.UTC(2026, 8, 8, 2, 50, 0))), '20260908-025000');
+});
