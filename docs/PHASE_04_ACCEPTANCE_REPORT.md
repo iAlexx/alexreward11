@@ -87,13 +87,13 @@ Migrations `0001`–`0012` unchanged for this correction. **No migration added.*
 
 Historical package for `084c204…` remains under `phase-archives/PHASE_04_LEDGER_CORE/` and must not be deleted.
 
-Verified for corrected accepted commit `34bb15455f98f9ae298289453f274d5f2f9d0ee2` using `scripts/create-phase-archive.mjs` v2.1.0 (stamp `20260908-215717`).
+Verified for corrected accepted commit `34bb15455f98f9ae298289453f274d5f2f9d0ee2` using `scripts/create-phase-archive.mjs` v2.1.0 (stamp `20260908-215851`).
 
 | Item                                                                   | Result                                                                          |
 | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| Canonical source ZIP                                                   | `ALEx_Rewards_PHASE_04_LEDGER_CORE_20260908-215717_34bb154.zip`                 |
+| Canonical source ZIP                                                   | `ALEx_Rewards_PHASE_04_LEDGER_CORE_20260908-215851_34bb154.zip`                 |
 | Canonical source SHA-256                                               | `06f50da1be2f6b23f452047c95ec51916cbc21cfa4345503eb26f1a293177110`              |
-| Review-package ZIP                                                     | `PHASE_04_LEDGER_CORE_PACKAGE_20260908-215717_34bb154.zip`                      |
+| Review-package ZIP                                                     | `PHASE_04_LEDGER_CORE_PACKAGE_20260908-215851_34bb154.zip`                      |
 | Outer package SHA-256                                                  | See external `PACKAGE_SHA256.txt` beside the review package (not embedded here) |
 | `MANIFEST.md` / `SHA256SUMS.txt`                                       | PASS — companion checksums match source ZIP, report, and manifest               |
 | Source extraction / prohibited-path scan                               | PASS / PASS                                                                     |
