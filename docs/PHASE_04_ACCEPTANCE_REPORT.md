@@ -1,18 +1,18 @@
 # ALEx Rewards Phase 4 Acceptance Report
 
-Status: **PASS** — Phase 4 Ledger Core complete pending CI green on the accepted archival commit.
+Status: **PASS** — Phase 4 Ledger Core is complete; GitHub Actions `quality` and `docker-smoke` are green on the accepted archival commit.
 
 Date: 2026-09-09
 
 Source of truth: ALEx Rewards Master Product, Financial, Security & Engineering Specification **v1.2**.
 
-| Item                               | Value                                      |
-| ---------------------------------- | ------------------------------------------ |
-| Final accepted archival commit SHA | _(filled after CI-green push)_             |
-| GitHub Actions run                 | _(filled after CI-green push)_             |
-| `quality`                          | _(filled after CI)_                        |
-| `docker-smoke`                     | _(filled after CI)_                        |
-| Phase 3 accepted archival source   | `be08e7fe91309fe42da74d14558ebdaa353215e5` |
+| Item                               | Value                                                           |
+| ---------------------------------- | --------------------------------------------------------------- |
+| Final accepted archival commit SHA | `084c204af3c1d1869946cde7368de3eb3e0f4b30`                      |
+| GitHub Actions run                 | https://github.com/iAlexx/alexreward11/actions/runs/34280114227 |
+| `quality`                          | PASS — job `102242573176`                                       |
+| `docker-smoke`                     | PASS — job `102243390316`                                       |
+| Phase 3 accepted archival source   | `be08e7fe91309fe42da74d14558ebdaa353215e5`                      |
 
 Phase 5 has not started. Phase 4 is Ledger Core only.
 
@@ -38,7 +38,7 @@ Explicitly **not** delivered: Reward Engine, Founder bonus issuance, referral/ta
 
 Migrations `0001`–`0011` unchanged.
 
-## C. Tests (local evidence; CI re-confirms)
+## C. Tests
 
 | Suite                         | Count  |
 | ----------------------------- | ------ |
@@ -68,8 +68,21 @@ Migrations `0001`–`0011` unchanged.
 | Membership bonus classification only | PASS   |
 | No Phase 5 engines                   | PASS   |
 | Phase 2/3 regression                 | PASS   |
-| `quality` / `docker-smoke`           | _(CI)_ |
+| `quality` / `docker-smoke`           | PASS   |
 
 ## O. Archive verification
 
-_(Filled after packaging from the CI-green accepted commit.)_
+Verified for exact accepted commit `084c204af3c1d1869946cde7368de3eb3e0f4b30` using `scripts/create-phase-archive.mjs` v2.1.0 (stamp `20260909-001800`).
+
+| Item                                                                   | Result                                                                          |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Canonical source ZIP                                                   | `ALEx_Rewards_PHASE_04_LEDGER_CORE_20260909-001800_084c204.zip`                 |
+| Canonical source SHA-256                                               | `5209422bef7416725655e81aab33de109abb869e029a2a1b5851d53617d86203`              |
+| Review-package ZIP                                                     | `PHASE_04_LEDGER_CORE_PACKAGE_20260909-001800_084c204.zip`                      |
+| Outer package SHA-256                                                  | See external `PACKAGE_SHA256.txt` beside the review package (not embedded here) |
+| `MANIFEST.md` / `SHA256SUMS.txt`                                       | PASS — companion checksums match source ZIP, report, and manifest               |
+| Source extraction / prohibited-path scan                               | PASS / PASS                                                                     |
+| Review-package extraction / prohibited-path / nested source validation | PASS / PASS / PASS                                                              |
+| Forward-slash ZIP entry names                                          | PASS — `PHASE_04_LEDGER_CORE/...` only                                          |
+
+Per `AGENTS.md` and `docs/PHASE_ARCHIVE.md`, the SHA-256 of the **outer** review package is published beside it in `PACKAGE_SHA256.txt` and is deliberately **not** embedded in this section.
