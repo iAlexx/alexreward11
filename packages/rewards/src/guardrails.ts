@@ -253,9 +253,7 @@ export async function evaluateNewQuoteGuardrails(
       window,
     });
     const remaining =
-      BigInt(period.limit_atomic) -
-      BigInt(period.reserved_atomic) -
-      BigInt(period.consumed_atomic);
+      BigInt(period.limit_atomic) - BigInt(period.reserved_atomic) - BigInt(period.consumed_atomic);
     const decision: 'ALLOW' | 'BLOCK' = candidate <= remaining ? 'ALLOW' : 'BLOCK';
     evaluatedExposureLimits.push({
       id: limit.id,

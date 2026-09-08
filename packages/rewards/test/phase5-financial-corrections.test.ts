@@ -229,8 +229,9 @@ describe.skipIf(phase5DatabaseUrl === '')('Phase 5 financial corrections', () =>
     const fulfilled = results.filter((r) => r.status === 'fulfilled');
     expect(fulfilled).toHaveLength(2);
     const bonuses = fulfilled.map(
-      (r) => (r as PromiseFulfilledResult<{ membershipBonusAmountAtomic: string }>).value
-        .membershipBonusAmountAtomic,
+      (r) =>
+        (r as PromiseFulfilledResult<{ membershipBonusAmountAtomic: string }>).value
+          .membershipBonusAmountAtomic,
     );
     expect(bonuses.sort()).toEqual(['0', '50']);
   });
@@ -418,10 +419,7 @@ describe.skipIf(phase5DatabaseUrl === '')('Phase 5 financial corrections', () =>
     expect(providerRow.rows[0]?.code).toBe('SIMULATED_REWARD_SOURCE');
     expect(providerRow.rows[0]?.production_monetary_status).toBe('BLOCKED');
     await expect(
-      pool.query(
-        `UPDATE reward_quotes SET provider_id = NULL WHERE id = $1`,
-        [quote.quoteId],
-      ),
+      pool.query(`UPDATE reward_quotes SET provider_id = NULL WHERE id = $1`, [quote.quoteId]),
     ).rejects.toMatchObject({ code: '23001' });
   });
 
@@ -459,7 +457,10 @@ describe.skipIf(phase5DatabaseUrl === '')('Phase 5 financial corrections', () =>
     expect(quoteA.membershipId).toBe(founderA.membershipId);
 
     await truncateRewardTables(pool);
-    userId = await createTestUser(pool, String(961_000_000_000 + Math.floor(Math.random() * 1_000_000)));
+    userId = await createTestUser(
+      pool,
+      String(961_000_000_000 + Math.floor(Math.random() * 1_000_000)),
+    );
     assetId = await usdtAssetId(pool);
     const { providerId: providerB } = await createTestOnlyPromotionRule(pool, {
       assetId,
@@ -805,10 +806,10 @@ describe.skipIf(phase5DatabaseUrl === '')('Phase 5 financial corrections', () =>
       completedAt: new Date('2026-06-01T12:00:00.000Z'),
     });
     await expect(
-      pool.query(
-        `UPDATE reward_quotes SET source_started_at = $2::timestamptz WHERE id = $1`,
-        [quote.quoteId, new Date('2026-06-02T00:00:00.000Z').toISOString()],
-      ),
+      pool.query(`UPDATE reward_quotes SET source_started_at = $2::timestamptz WHERE id = $1`, [
+        quote.quoteId,
+        new Date('2026-06-02T00:00:00.000Z').toISOString(),
+      ]),
     ).rejects.toMatchObject({ code: '23001' });
   });
 

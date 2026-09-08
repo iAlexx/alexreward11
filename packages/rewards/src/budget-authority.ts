@@ -79,9 +79,13 @@ export async function validateBaseBudgetPeriod(
     });
   }
   if (row.asset_id !== input.assetId) {
-    throw new RewardDomainError('BUDGET_SCOPE_MISMATCH', 'budget period asset does not match quote', {
-      details: { budgetPeriodId: input.budgetPeriodId, expectedAssetId: input.assetId },
-    });
+    throw new RewardDomainError(
+      'BUDGET_SCOPE_MISMATCH',
+      'budget period asset does not match quote',
+      {
+        details: { budgetPeriodId: input.budgetPeriodId, expectedAssetId: input.assetId },
+      },
+    );
   }
   const asOfMs = input.asOf.getTime();
   if (asOfMs < row.period_start.getTime() || asOfMs >= row.period_end.getTime()) {
@@ -275,9 +279,13 @@ export async function validateBonusBudgetPeriodLocator(
     });
   }
   if (row.status !== 'ACTIVE') {
-    throw new RewardDomainError('BUDGET_EXHAUSTED', 'membership bonus budget period is not ACTIVE', {
-      details: { budgetPeriodId: input.budgetPeriodId, status: row.status },
-    });
+    throw new RewardDomainError(
+      'BUDGET_EXHAUSTED',
+      'membership bonus budget period is not ACTIVE',
+      {
+        details: { budgetPeriodId: input.budgetPeriodId, status: row.status },
+      },
+    );
   }
   if (row.asset_id !== input.assetId) {
     throw new RewardDomainError(
@@ -294,10 +302,7 @@ export async function validateBonusBudgetPeriodLocator(
       { details: { budgetPeriodId: input.budgetPeriodId } },
     );
   }
-  if (
-    row.membership_plan_id !== null &&
-    row.membership_plan_id !== input.membershipPlanId
-  ) {
+  if (row.membership_plan_id !== null && row.membership_plan_id !== input.membershipPlanId) {
     throw new RewardDomainError(
       'BUDGET_SCOPE_MISMATCH',
       'membership bonus budget plan scope does not match',

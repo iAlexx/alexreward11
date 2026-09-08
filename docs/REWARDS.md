@@ -8,10 +8,10 @@ Phase 5 implements the monetary Reward Engine in `@alex-rewards/rewards`.
 | ----------------------------------------------- | ---------------------------------------------------------------------------------- |
 | `reward_rules` (versioned)                      | Authoritative economics for quotes; financial fields immutable after insert (0013) |
 | `reward_quotes.applied_economics`               | Frozen reconstruction evidence for every material rule/version used at quote time  |
-| `reward_quotes` financial snapshot              | Immutable after insert (0014 trigger); lifecycle fields only                         |
-| `simulated_reward_sources`                      | Server-authoritative simulated PROMOTION source registry                             |
-| `economic_exposure_periods` / reservations      | Time-scoped atomic exposure counters (0014); Redis has zero authority                |
-| `reward_budget_*` / `membership_bonus_budget_*` | Atomic reservation / consume / release projections in PostgreSQL                     |
+| `reward_quotes` financial snapshot              | Immutable after insert (0014 trigger); lifecycle fields only                       |
+| `simulated_reward_sources`                      | Server-authoritative simulated PROMOTION source registry                           |
+| `economic_exposure_periods` / reservations      | Time-scoped atomic exposure counters (0014); Redis has zero authority              |
+| `reward_budget_*` / `membership_bonus_budget_*` | Atomic reservation / consume / release projections in PostgreSQL                   |
 | Ledger (`@alex-rewards/ledger`)                 | Financial source of truth for issued Pending/Available balances                    |
 | Outbox                                          | Same-transaction domain events (`dedupe_key` unique)                               |
 | Redis                                           | **Zero** reward authority                                                          |

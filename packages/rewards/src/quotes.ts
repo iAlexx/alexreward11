@@ -17,10 +17,7 @@ import {
 import { releaseRewardBudgetReservation, reserveRewardBudget } from './budgets.js';
 import { withLedgerTransaction, type LedgerDb } from './db.js';
 import { isBonusEconomicUnavailability, RewardDomainError } from './errors.js';
-import {
-  releaseExposureReservationsForQuote,
-  reserveExposureForQuote,
-} from './exposure.js';
+import { releaseExposureReservationsForQuote, reserveExposureForQuote } from './exposure.js';
 import {
   assertNewQuotesAllowed,
   isMembershipBonusPaused,
@@ -28,10 +25,7 @@ import {
 } from './guardrails.js';
 import { insertOutboxEvent } from './outbox.js';
 import { resolveRewardRule } from './rules.js';
-import {
-  assertSimulatedSourceEligibleForQuote,
-  markSimulatedSourceQuoted,
-} from './simulated.js';
+import { assertSimulatedSourceEligibleForQuote, markSimulatedSourceQuoted } from './simulated.js';
 import {
   ELIGIBLE_REWARD_BONUS_CODE,
   type AppliedEconomics,
@@ -117,9 +111,7 @@ function pickSingleBonusCandidate(candidates: BonusCandidate[]): BonusCandidate 
   if (candidates.length === 1) return candidates[0]!;
 
   const keys = new Set(
-    candidates.map(
-      (c) => `${c.membershipId}:${c.entitlementRuleVersionId}:${c.bonusBps}`,
-    ),
+    candidates.map((c) => `${c.membershipId}:${c.entitlementRuleVersionId}:${c.bonusBps}`),
   );
   if (keys.size > 1) {
     throw new RewardDomainError(
@@ -231,9 +223,7 @@ async function resolveMembershipBonus(
     }
     for (const period of periods) {
       const remaining =
-        BigInt(period.budgetAtomic) -
-        BigInt(period.reservedAtomic) -
-        BigInt(period.consumedAtomic);
+        BigInt(period.budgetAtomic) - BigInt(period.reservedAtomic) - BigInt(period.consumedAtomic);
       if (bonusAmount > remaining) {
         throw new RewardDomainError('BUDGET_EXHAUSTED', 'insufficient membership bonus budget', {
           details: { budgetPeriodId: period.id, remaining: remaining.toString(10) },

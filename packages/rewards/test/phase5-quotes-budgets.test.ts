@@ -1,7 +1,11 @@
 import { Pool } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { completeSimulatedRewardSource, createRewardQuote, expireRewardQuote } from '../src/index.js';
+import {
+  completeSimulatedRewardSource,
+  createRewardQuote,
+  expireRewardQuote,
+} from '../src/index.js';
 import {
   createTestOnlyBudget,
   createTestOnlyPromotionRule,

@@ -130,7 +130,11 @@ export async function assertSimulatedSourceEligibleForQuote(
       'SIMULATED_REWARD_SOURCE must remain production_monetary_status BLOCKED',
     );
   }
-  if (input.providerId !== undefined && input.providerId !== null && input.providerId !== provider.id) {
+  if (
+    input.providerId !== undefined &&
+    input.providerId !== null &&
+    input.providerId !== provider.id
+  ) {
     throw new RewardDomainError(
       'SOURCE_INVALID',
       'simulated quotes must use SIMULATED_REWARD_SOURCE provider',
@@ -162,9 +166,13 @@ export async function assertSimulatedSourceEligibleForQuote(
     throw new RewardDomainError('SOURCE_INVALID', 'simulated source provider mismatch');
   }
   if (row.status !== 'CREATED') {
-    throw new RewardDomainError('SOURCE_INVALID', 'simulated source is not eligible for a new quote', {
-      details: { status: row.status },
-    });
+    throw new RewardDomainError(
+      'SOURCE_INVALID',
+      'simulated source is not eligible for a new quote',
+      {
+        details: { status: row.status },
+      },
+    );
   }
   if (row.user_id !== null && row.user_id !== input.userId) {
     throw new RewardDomainError('SOURCE_INVALID', 'simulated source is bound to a different user');
@@ -275,20 +283,28 @@ export async function completeSimulatedRewardSource(
     if (sourceRow.status === 'COMPLETED' && sourceRow.completed_at !== null) {
       // Idempotent completion path if quote somehow lacks source_started_at — still require start.
     } else if (sourceRow.status !== 'QUOTED' && sourceRow.status !== 'CREATED') {
-      throw new RewardDomainError('SOURCE_INVALID', 'simulated source is not eligible to complete', {
-        details: { status: sourceRow.status },
-      });
+      throw new RewardDomainError(
+        'SOURCE_INVALID',
+        'simulated source is not eligible to complete',
+        {
+          details: { status: sourceRow.status },
+        },
+      );
     }
 
     const completedAt = command.completedAt ?? new Date();
     // Boundary: startedAt <= expires_at is permitted; startedAt > expires_at is rejected.
     if (completedAt.getTime() > row.expires_at.getTime()) {
-      throw new RewardDomainError('QUOTE_EXPIRED', 'cannot start simulated source after quote expiry', {
-        details: {
-          expiresAt: row.expires_at.toISOString(),
-          completedAt: completedAt.toISOString(),
+      throw new RewardDomainError(
+        'QUOTE_EXPIRED',
+        'cannot start simulated source after quote expiry',
+        {
+          details: {
+            expiresAt: row.expires_at.toISOString(),
+            completedAt: completedAt.toISOString(),
+          },
         },
-      });
+      );
     }
 
     const updated = await client.query<{ source_started_at: Date }>(

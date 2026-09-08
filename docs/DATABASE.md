@@ -29,7 +29,7 @@ out of scope until later Owner-approved phases.
 | `0011_seed_local_fixtures.sql`                       | LOCAL FIXTURE ONLY reference data                                                                                                                    |
 | `0012_ledger_integrity.sql`                          | Phase 4: one-reversal-per-original unique index; ledger_accounts structural immutability                                                             |
 | `0013_reward_engine_integrity.sql`                   | Phase 5: ACTIVE reward-rule family overlap EXCLUDE; financial-rule immutability; quote reconstruction / started-source fields                        |
-| `0014_phase5_financial_corrections.sql`              | Phase 5 correction: `simulated_reward_sources`; frozen `reward_quotes` trigger; multi-period bonus reservations; economic exposure period counters  |
+| `0014_phase5_financial_corrections.sql`              | Phase 5 correction: `simulated_reward_sources`; frozen `reward_quotes` trigger; multi-period bonus reservations; economic exposure period counters   |
 
 ## Schema ownership
 

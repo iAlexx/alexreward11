@@ -132,10 +132,7 @@ async function loadOpenQuoteForIssuance(
   // After expires_at, issuance is allowed only if authoritative start was on/before expiry.
   if (
     asOf.getTime() > row.expires_at.getTime() &&
-    !(
-      row.source_started_at !== null &&
-      row.source_started_at.getTime() <= row.expires_at.getTime()
-    )
+    !(row.source_started_at !== null && row.source_started_at.getTime() <= row.expires_at.getTime())
   ) {
     throw new RewardDomainError('QUOTE_EXPIRED', 'quote expired without a timely source start', {
       details: {

@@ -184,10 +184,9 @@ export async function releaseExposureReservationsForQuote(
   );
   let released = 0;
   for (const reservation of active.rows) {
-    await client.query(
-      `SELECT id FROM economic_exposure_periods WHERE id = $1 FOR UPDATE`,
-      [reservation.exposure_period_id],
-    );
+    await client.query(`SELECT id FROM economic_exposure_periods WHERE id = $1 FOR UPDATE`, [
+      reservation.exposure_period_id,
+    ]);
     await client.query(
       `UPDATE economic_exposure_periods
        SET reserved_atomic = reserved_atomic - $2::bigint,
@@ -235,10 +234,9 @@ export async function consumeExposureReservationsForQuote(
         details: { reservationId: reservation.id, state: reservation.state },
       });
     }
-    await client.query(
-      `SELECT id FROM economic_exposure_periods WHERE id = $1 FOR UPDATE`,
-      [reservation.exposure_period_id],
-    );
+    await client.query(`SELECT id FROM economic_exposure_periods WHERE id = $1 FOR UPDATE`, [
+      reservation.exposure_period_id,
+    ]);
     await client.query(
       `UPDATE economic_exposure_periods
        SET reserved_atomic = reserved_atomic - $2::bigint,
