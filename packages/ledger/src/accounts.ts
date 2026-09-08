@@ -1,5 +1,6 @@
 import type { PoolClient } from 'pg';
 
+import { assertAccountTypeAssetCompatibility } from './assets.js';
 import { resolveProvisionableSemantics } from './catalogue.js';
 import { LedgerDomainError } from './errors.js';
 import type { LedgerAccountRecord, LedgerAccountType, LedgerOwnerType } from './types.js';
@@ -37,7 +38,8 @@ async function ensureBalanceRow(client: PoolClient, accountId: string): Promise<
 
 /**
  * Race-safe get-or-create for a catalogue account + zero projection row.
- * Callers must not invent class/side/owner_type — catalogue is authoritative.
+ * Callers cannot invent class/side/owner_type — catalogue is authoritative.
+ * Account-type/asset compatibility and ACTIVE asset status are enforced.
  */
 export async function getOrCreateLedgerAccount(
   client: PoolClient,
@@ -48,6 +50,8 @@ export async function getOrCreateLedgerAccount(
     readonly acknowledgeUnresolvedAccounting?: boolean;
   },
 ): Promise<LedgerAccountRecord> {
+  await assertAccountTypeAssetCompatibility(client, input.accountType, input.assetId);
+
   const semantics = resolveProvisionableSemantics(
     input.accountType,
     input.acknowledgeUnresolvedAccounting === undefined

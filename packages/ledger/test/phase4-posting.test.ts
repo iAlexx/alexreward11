@@ -504,6 +504,58 @@ describe.skipIf(phase4DatabaseUrl === '')('Phase 4 ledger posting', () => {
     expect(events.rows[0]?.c).toBe(0);
   });
 
+  it('treats entry-order permutation as the same idempotent intent', async () => {
+    const biz = randomUUID();
+    const first = await withLedgerTransaction(pool, async (client) => {
+      const expense = await getOrCreateLedgerAccount(client, {
+        accountType: 'PLATFORM_REWARD_EXPENSE',
+        assetId,
+      });
+      const pending = await getOrCreateLedgerAccount(client, {
+        accountType: 'USER_PENDING_LIABILITY',
+        assetId,
+        ownerId: userId,
+      });
+      return postLedgerTransaction(client, {
+        transactionType: 'REWARD_ISSUANCE',
+        businessReferenceType: 'order-idem',
+        businessReferenceId: biz,
+        idempotencyScope: 'phase4',
+        idempotencyKey: 'order-idem',
+        assetId,
+        entries: [
+          { ledgerAccountId: expense.id, direction: 'DEBIT', amountAtomic: '13' },
+          { ledgerAccountId: pending.id, direction: 'CREDIT', amountAtomic: '13' },
+        ],
+      });
+    });
+    const second = await withLedgerTransaction(pool, async (client) => {
+      const expense = await getOrCreateLedgerAccount(client, {
+        accountType: 'PLATFORM_REWARD_EXPENSE',
+        assetId,
+      });
+      const pending = await getOrCreateLedgerAccount(client, {
+        accountType: 'USER_PENDING_LIABILITY',
+        assetId,
+        ownerId: userId,
+      });
+      return postLedgerTransaction(client, {
+        transactionType: 'REWARD_ISSUANCE',
+        businessReferenceType: 'order-idem',
+        businessReferenceId: biz,
+        idempotencyScope: 'phase4',
+        idempotencyKey: 'order-idem',
+        assetId,
+        entries: [
+          { ledgerAccountId: pending.id, direction: 'CREDIT', amountAtomic: '13' },
+          { ledgerAccountId: expense.id, direction: 'DEBIT', amountAtomic: '13' },
+        ],
+      });
+    });
+    expect(second.id).toBe(first.id);
+    expect(second.created).toBe(false);
+  });
+
   it('refuses silent TREASURY_FUNDING_CLEARING provision without Owner acknowledgement', async () => {
     await expect(
       withLedgerTransaction(pool, async (client) =>

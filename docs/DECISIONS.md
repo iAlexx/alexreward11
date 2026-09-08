@@ -81,3 +81,26 @@ catalogue but refuses silent get-or-create provision (`OWNER_DECISION_REQUIRED`)
 later Owner decision documents production class/side. The same fail-closed stance applies to
 `INVALID_TRAFFIC_RECOVERY` until recognition policy is approved. No speculative production
 classification is invented in Phase 4.
+
+## ADR-010 — Projection chronology without a posting sequence column
+
+Phase 5 will compose multiple ledger posts inside one outer PostgreSQL transaction. Those posts
+can share identical `posted_at` values, so ordering by `posted_at` then UUID/`entry_index` is not
+durable financial chronology and produced false CRITICAL last-pointer mismatches.
+
+Decision: **Option 1 — no schema migration.**
+
+- `balance_atomic` rebuilds exactly from immutable entries.
+- `version` means the count of DISTINCT ledger transactions that touched the account.
+- `last_ledger_transaction_id` is validated as: null iff no history; otherwise must touch the
+  account and belong to the latest `posted_at` cohort (tie-aware; UUID order is not used).
+
+A monotonic posting sequence (`0013`) is deferred until an Owner-approved requirement needs a
+total order beyond what `posted_at` cohorts + the posting engine’s stored pointer already provide.
+
+## ADR-011 — Linked reversals only via guarded posting path
+
+`PostLedgerCommand` no longer accepts `reversesTransactionId`. Linked reversals are created only
+through `reverseLedgerTransaction` → `postLedgerTransactionWithReversalLink`, which enforces an
+order-safe exact economic reversal multiset **before** insert so malformed linked attempts cannot
+consume the one-reversal unique slot.

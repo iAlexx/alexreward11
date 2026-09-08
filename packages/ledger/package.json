@@ -14,7 +14,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src test",
     "test": "vitest run --passWithNoTests",
-    "test:phase4": "cross-env PHASE4_LEDGER_TESTS=1 vitest run --fileParallelism=false test/phase4-posting.test.ts test/phase4-concurrency.test.ts test/phase4-reversal.test.ts test/phase4-invariants.test.ts"
+    "test:phase4": "cross-env PHASE4_LEDGER_TESTS=1 vitest run --fileParallelism=false test/phase4-posting.test.ts test/phase4-concurrency.test.ts test/phase4-reversal.test.ts test/phase4-invariants.test.ts test/phase4-assets.test.ts"
   },
   "dependencies": {
     "@alex-rewards/db": "workspace:*",

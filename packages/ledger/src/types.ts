@@ -81,10 +81,18 @@ export interface PostLedgerCommand {
   readonly idempotencyKey: string;
   readonly assetId: string;
   readonly entries: ReadonlyArray<LedgerEntryInput>;
-  readonly reversesTransactionId?: string | null;
   readonly metadata?: Readonly<Record<string, unknown>>;
   readonly createdByType?: ActorType;
   readonly createdById?: string | null;
+}
+
+/**
+ * Restricted posting command that links a reversal.
+ * Must only be used via reverseLedgerTransaction (or guarded tests).
+ * Entries must be an exact economic reversal of the original.
+ */
+export interface PostLedgerCommandWithReversalLink extends PostLedgerCommand {
+  readonly reversesTransactionId: string;
 }
 
 export interface PostedLedgerEntry {

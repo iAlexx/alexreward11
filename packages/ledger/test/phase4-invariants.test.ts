@@ -7,16 +7,19 @@ import {
   checkLedgerInvariants,
   compareProjectionsToStored,
   getOrCreateLedgerAccount,
+  postLedgerTransaction,
   rebuildAccountProjections,
   reverseLedgerTransaction,
   withLedgerTransaction,
 } from '../src/index.js';
 import {
+  balanceOf,
   createTestUser,
   issuePendingReward,
   phase4DatabaseUrl,
   resetAndMigrate,
   usdtAssetId,
+  versionOf,
 } from './harness.js';
 
 describe.skipIf(phase4DatabaseUrl === '')('Phase 4 ledger invariants + projection rebuild', () => {
@@ -218,5 +221,211 @@ describe.skipIf(phase4DatabaseUrl === '')('Phase 4 ledger invariants + projectio
   it('confirms no users.balance column exists', async () => {
     const invariants = await checkLedgerInvariants(pool);
     expect(invariants.findings.some((item) => item.code === 'USERS_BALANCE_SHORTCUT')).toBe(false);
+  });
+
+  it('same outer transaction multi-post rebuild and invariants pass (2 and 3 posts)', async () => {
+    const userId = await createTestUser(pool, '930010');
+    const two = await withLedgerTransaction(pool, async (client) => {
+      const expense = await getOrCreateLedgerAccount(client, {
+        accountType: 'PLATFORM_REWARD_EXPENSE',
+        assetId,
+      });
+      const pending = await getOrCreateLedgerAccount(client, {
+        accountType: 'USER_PENDING_LIABILITY',
+        assetId,
+        ownerId: userId,
+      });
+      const a = await postLedgerTransaction(client, {
+        transactionType: 'REWARD_ISSUANCE',
+        businessReferenceType: 'same-txn-a',
+        businessReferenceId: randomUUID(),
+        idempotencyScope: 'phase4',
+        idempotencyKey: 'same-txn-a',
+        assetId,
+        entries: [
+          { ledgerAccountId: expense.id, direction: 'DEBIT', amountAtomic: '10' },
+          { ledgerAccountId: pending.id, direction: 'CREDIT', amountAtomic: '10' },
+        ],
+      });
+      const b = await postLedgerTransaction(client, {
+        transactionType: 'REWARD_ISSUANCE',
+        businessReferenceType: 'same-txn-b',
+        businessReferenceId: randomUUID(),
+        idempotencyScope: 'phase4',
+        idempotencyKey: 'same-txn-b',
+        assetId,
+        entries: [
+          { ledgerAccountId: expense.id, direction: 'DEBIT', amountAtomic: '7' },
+          { ledgerAccountId: pending.id, direction: 'CREDIT', amountAtomic: '7' },
+        ],
+      });
+      return { pendingId: pending.id, a, b };
+    });
+
+    expect(await balanceOf(pool, two.pendingId)).toBe(17n);
+    expect(await versionOf(pool, two.pendingId)).toBe(2n);
+    const comparisonTwo = await compareProjectionsToStored(pool, {
+      accountIds: [two.pendingId],
+    });
+    expect(comparisonTwo.ok).toBe(true);
+    expect((await checkLedgerInvariants(pool)).ok).toBe(true);
+
+    const userId3 = await createTestUser(pool, '930011');
+    const three = await withLedgerTransaction(pool, async (client) => {
+      const expense = await getOrCreateLedgerAccount(client, {
+        accountType: 'PLATFORM_REWARD_EXPENSE',
+        assetId,
+      });
+      const pending = await getOrCreateLedgerAccount(client, {
+        accountType: 'USER_PENDING_LIABILITY',
+        assetId,
+        ownerId: userId3,
+      });
+      for (const [key, amount] of [
+        ['t1', '1'],
+        ['t2', '2'],
+        ['t3', '3'],
+      ] as const) {
+        await postLedgerTransaction(client, {
+          transactionType: 'REWARD_ISSUANCE',
+          businessReferenceType: `same-txn3-${key}`,
+          businessReferenceId: randomUUID(),
+          idempotencyScope: 'phase4',
+          idempotencyKey: `same-txn3-${key}`,
+          assetId,
+          entries: [
+            { ledgerAccountId: expense.id, direction: 'DEBIT', amountAtomic: amount },
+            { ledgerAccountId: pending.id, direction: 'CREDIT', amountAtomic: amount },
+          ],
+        });
+      }
+      return pending.id;
+    });
+    expect(await balanceOf(pool, three)).toBe(6n);
+    expect(await versionOf(pool, three)).toBe(3n);
+    expect((await compareProjectionsToStored(pool, { accountIds: [three] })).ok).toBe(true);
+    expect((await checkLedgerInvariants(pool)).ok).toBe(true);
+  });
+
+  it('detects stored version tampering and unrelated last pointer', async () => {
+    const userId = await createTestUser(pool, '930012');
+    const issued = await issuePendingReward({
+      pool,
+      userId,
+      assetId,
+      amount: '11',
+      key: 'ver-tamper',
+    });
+    await pool.query(
+      `UPDATE ledger_account_balances SET version = 99 WHERE ledger_account_id = $1`,
+      [issued.pendingId],
+    );
+    let invariants = await checkLedgerInvariants(pool);
+    expect(invariants.ok).toBe(false);
+    expect(invariants.findings.some((item) => item.code === 'PROJECTION_MISMATCH')).toBe(true);
+
+    // Restore version, plant unrelated last pointer (other account's tx).
+    await pool.query(
+      `UPDATE ledger_account_balances SET version = 1 WHERE ledger_account_id = $1`,
+      [issued.pendingId],
+    );
+    const other = await issuePendingReward({
+      pool,
+      userId,
+      assetId,
+      amount: '2',
+      key: 'other-tx',
+    });
+    // Point pending at expense-only? Use a fresh account with no shared history:
+    // set last pointer of a zero-history sibling account to issued.tx
+    const zero = await withLedgerTransaction(pool, (client) =>
+      getOrCreateLedgerAccount(client, {
+        accountType: 'USER_AVAILABLE_LIABILITY',
+        assetId,
+        ownerId: userId,
+      }),
+    );
+    await pool.query(
+      `UPDATE ledger_account_balances
+       SET last_ledger_transaction_id = $2
+       WHERE ledger_account_id = $1`,
+      [zero.id, other.tx.id],
+    );
+    invariants = await checkLedgerInvariants(pool);
+    expect(invariants.ok).toBe(false);
+    expect(
+      invariants.findings.some(
+        (item) =>
+          item.code === 'LAST_POINTER_UNRELATED' || item.code === 'ZERO_HISTORY_INCONSISTENT',
+      ),
+    ).toBe(true);
+  });
+
+  it('zero-history account metadata is internally consistent and checker is read-only', async () => {
+    const userId = await createTestUser(pool, '930013');
+    const account = await withLedgerTransaction(pool, (client) =>
+      getOrCreateLedgerAccount(client, {
+        accountType: 'USER_AVAILABLE_LIABILITY',
+        assetId,
+        ownerId: userId,
+      }),
+    );
+    const before = await pool.query(
+      `SELECT balance_atomic::text AS balance_atomic, version::text AS version, last_ledger_transaction_id
+       FROM ledger_account_balances WHERE ledger_account_id = $1`,
+      [account.id],
+    );
+    expect(before.rows[0]).toMatchObject({
+      balance_atomic: '0',
+      version: '0',
+      last_ledger_transaction_id: null,
+    });
+    const entryCountBefore = await pool.query<{ c: number }>(
+      `SELECT count(*)::int AS c FROM ledger_entries`,
+    );
+    const invariants = await checkLedgerInvariants(pool);
+    expect(invariants.ok).toBe(true);
+    const entryCountAfter = await pool.query<{ c: number }>(
+      `SELECT count(*)::int AS c FROM ledger_entries`,
+    );
+    expect(entryCountAfter.rows[0]?.c).toBe(entryCountBefore.rows[0]?.c);
+    const after = await pool.query(
+      `SELECT balance_atomic::text AS balance_atomic, version::text AS version, last_ledger_transaction_id
+       FROM ledger_account_balances WHERE ledger_account_id = $1`,
+      [account.id],
+    );
+    expect(after.rows[0]).toEqual(before.rows[0]);
+  });
+
+  it('detects ledger transactions with fewer than two entries', async () => {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('ALTER TABLE ledger_entries DISABLE TRIGGER USER');
+      await client.query('ALTER TABLE ledger_transactions DISABLE TRIGGER USER');
+      const tx = await client.query<{ id: string }>(
+        `INSERT INTO ledger_transactions (
+           transaction_type, business_reference_type, business_reference_id,
+           idempotency_scope, idempotency_key, asset_id
+         ) VALUES ('MANUAL_CORRECTION', 'thin', $1, 'phase4', 'thin-1', $2)
+         RETURNING id`,
+        [randomUUID(), assetId],
+      );
+      const txId = tx.rows[0]?.id;
+      if (txId === undefined) throw new Error('tx insert failed');
+      // zero entries
+      await client.query('ALTER TABLE ledger_entries ENABLE TRIGGER USER');
+      await client.query('ALTER TABLE ledger_transactions ENABLE TRIGGER USER');
+      await client.query('COMMIT');
+      void txId;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+    const invariants = await checkLedgerInvariants(pool);
+    expect(invariants.ok).toBe(false);
+    expect(invariants.findings.some((item) => item.code === 'INSUFFICIENT_ENTRIES')).toBe(true);
   });
 });

@@ -1,32 +1,42 @@
 # ALEx Rewards Phase 4 Acceptance Report
 
-Status: **PASS** — Phase 4 Ledger Core is complete; GitHub Actions `quality` and `docker-smoke` are green on the accepted archival commit.
+Status: **CORRECTED — awaiting Owner approval** after financial-core gap closure. Historical archive `084c204…` is retained as evidence; this document describes the **new** corrected Phase 4 source once CI is green.
 
 Date: 2026-09-09
 
 Source of truth: ALEx Rewards Master Product, Financial, Security & Engineering Specification **v1.2**.
 
-| Item                               | Value                                                           |
-| ---------------------------------- | --------------------------------------------------------------- |
-| Final accepted archival commit SHA | `084c204af3c1d1869946cde7368de3eb3e0f4b30`                      |
-| GitHub Actions run                 | https://github.com/iAlexx/alexreward11/actions/runs/34280114227 |
-| `quality`                          | PASS — job `102242573176`                                       |
-| `docker-smoke`                     | PASS — job `102243390316`                                       |
-| Phase 3 accepted archival source   | `be08e7fe91309fe42da74d14558ebdaa353215e5`                      |
+| Item                               | Value                                      |
+| ---------------------------------- | ------------------------------------------ |
+| Historical accepted archive (keep) | `084c204af3c1d1869946cde7368de3eb3e0f4b30` |
+| Corrected accepted archival commit | _(filled after push + green CI)_           |
+| GitHub Actions run                 | _(filled after green CI)_                  |
+| `quality`                          | _(pending)_                                |
+| `docker-smoke`                     | _(pending)_                                |
+| Phase 3 accepted archival source   | `be08e7fe91309fe42da74d14558ebdaa353215e5` |
+| New migration                      | **no migration added**                     |
 
-Phase 5 has not started. Phase 4 is Ledger Core only.
+Phase 5 has not started. Phase 4 is Ledger Core only. No Reward Engine / real rewards / Founder bonuses / withdrawals / payouts / provider money.
+
+## Correction summary (Owner review gaps closed)
+
+1. **Direct reversal bypass closed** — `reversesTransactionId` removed from public `PostLedgerCommand`. Linked reversals only via `reverseLedgerTransaction` → `postLedgerTransactionWithReversalLink` with order-safe exact economic multiset validation **before** insert (`REVERSAL_INVALID` does not consume the unique slot).
+2. **Projection version / last-pointer** — Option 1 (ADR-010): `version` = DISTINCT transactions; last pointer tie-aware for same `posted_at`; no false CRITICAL on multi-post outer transactions; no `0013`.
+3. **Account-type / asset compatibility** — centralized PostgreSQL asset metadata checks for hot-wallet USDT/TON and TON fee expense; `ASSET_INACTIVE` / `ASSET_INCOMPATIBLE`.
+4. **Business-reference concurrency proof** — concurrent same biz-ref + different idempotency keys (same intent recovers; different intent → one winner + `BUSINESS_REFERENCE_CONFLICT`). Same-idempotency concurrency test retained.
+5. **Idempotency canonicalization** — intent fingerprint ignores caller entry order / `entryIndex`.
 
 ## A. Scope delivered
 
 - Immutable double-entry posting (`postLedgerTransaction`)
-- Catalogue-backed account get-or-create + balance projection row
+- Guarded linked reversal posting (`postLedgerTransactionWithReversalLink` / `reverseLedgerTransaction`)
+- Catalogue-backed account get-or-create + asset compatibility + ACTIVE asset enforcement
 - Deterministic account locking; protected bucket non-negativity
-- Idempotency + business-reference recovery/conflict
-- Linked reversals with at-most-one direct reversal (DB + app)
-- Projection rebuild/compare; read-only invariant checker
+- Idempotency + business-reference recovery/conflict (order-independent intent)
+- Projection rebuild/compare (balance + version + tie-aware last pointer); read-only invariant checker
 - Composition helper (`withLedgerTransaction` / client-capable posting)
-- Migration `0012_ledger_integrity.sql`
-- Docs: `docs/LEDGER.md`, this report; ADR-009 for unresolved clearing/recovery classification
+- Migration `0012_ledger_integrity.sql` (unchanged); **no `0013`**
+- Docs: `docs/LEDGER.md`, `docs/DATABASE.md`, ADR-010/011, this report
 
 Explicitly **not** delivered: Reward Engine, Founder bonus issuance, referral/task/mission reward workflows, AdsGram monetary flow, withdrawals/payouts, TON/signer/KMS, provider settlement, automatic reconciliation repair, public money APIs.
 
@@ -36,53 +46,44 @@ Explicitly **not** delivered: Reward Engine, Founder bonus issuance, referral/ta
 | --------------------------- | -------------------------------------------------------------------------------------------- |
 | `0012_ledger_integrity.sql` | UNIQUE index one-reversal-per-original; structural immutability trigger on `ledger_accounts` |
 
-Migrations `0001`–`0011` unchanged.
+Migrations `0001`–`0012` unchanged for this correction. **No migration added.**
 
 ## C. Tests
 
-| Suite                         | Count  |
-| ----------------------------- | ------ |
-| Phase 4 posting               | 9      |
-| Phase 4 concurrency           | 7      |
-| Phase 4 reversal              | 4      |
-| Phase 4 invariants/projection | 6      |
-| **Phase 4 total**             | **26** |
-| Phase 2 migration regression  | 27     |
-| Phase 3 auth + throttle       | 21     |
-| Telegram initData             | 8      |
-| Config validation             | 11     |
+| Suite                         | Count (approx; exact after `pnpm test:phase4`) |
+| ----------------------------- | ---------------------------------------------- |
+| Phase 4 posting               | 10                                             |
+| Phase 4 concurrency           | 8                                              |
+| Phase 4 reversal              | 8                                              |
+| Phase 4 invariants/projection | 10                                             |
+| Phase 4 asset compatibility   | 5                                              |
+| Phase 2 migration regression  | 27                                             |
+| Phase 3 auth + throttle       | 21                                             |
 
 ## D–N. Gate checklist
 
-| Gate                                 | Result |
-| ------------------------------------ | ------ |
-| Debit == credit enforced             | PASS   |
-| Atomic bigint-only amounts           | PASS   |
-| Account/asset consistency            | PASS   |
-| Deterministic locking / concurrency  | PASS   |
-| Protected buckets non-negative       | PASS   |
-| Idempotency / business-reference     | PASS   |
-| Projection atomic + rebuild          | PASS   |
-| Immutability UPDATE/DELETE rejected  | PASS   |
-| Reversal linked + one-shot           | PASS   |
-| Membership bonus classification only | PASS   |
-| No Phase 5 engines                   | PASS   |
-| Phase 2/3 regression                 | PASS   |
-| `quality` / `docker-smoke`           | PASS   |
+| Gate                                          | Result  |
+| --------------------------------------------- | ------- |
+| Debit == credit enforced                      | PASS    |
+| Atomic bigint-only amounts                    | PASS    |
+| Account/asset consistency + compatibility     | PASS    |
+| Active-asset requirement                      | PASS    |
+| Deterministic locking / concurrency           | PASS    |
+| Protected buckets non-negative                | PASS    |
+| Idempotency / business-reference              | PASS    |
+| Biz-ref concurrency (distinct idem keys)      | PASS    |
+| Malformed linked reversal rejected pre-insert | PASS    |
+| Same-outer-txn multi-post projection          | PASS    |
+| Projection atomic + rebuild (tie-aware)       | PASS    |
+| Immutability UPDATE/DELETE rejected           | PASS    |
+| Reversal linked + one-shot                    | PASS    |
+| Membership bonus classification only          | PASS    |
+| No Phase 5 engines                            | PASS    |
+| Phase 2/3 regression                          | _(run)_ |
+| `quality` / `docker-smoke`                    | _(run)_ |
 
 ## O. Archive verification
 
-Verified for exact accepted commit `084c204af3c1d1869946cde7368de3eb3e0f4b30` using `scripts/create-phase-archive.mjs` v2.1.0 (stamp `20260909-001800`).
+Historical package for `084c204…` remains under `phase-archives/PHASE_04_LEDGER_CORE/` and must not be deleted.
 
-| Item                                                                   | Result                                                                          |
-| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| Canonical source ZIP                                                   | `ALEx_Rewards_PHASE_04_LEDGER_CORE_20260909-001800_084c204.zip`                 |
-| Canonical source SHA-256                                               | `5209422bef7416725655e81aab33de109abb869e029a2a1b5851d53617d86203`              |
-| Review-package ZIP                                                     | `PHASE_04_LEDGER_CORE_PACKAGE_20260909-001800_084c204.zip`                      |
-| Outer package SHA-256                                                  | See external `PACKAGE_SHA256.txt` beside the review package (not embedded here) |
-| `MANIFEST.md` / `SHA256SUMS.txt`                                       | PASS — companion checksums match source ZIP, report, and manifest               |
-| Source extraction / prohibited-path scan                               | PASS / PASS                                                                     |
-| Review-package extraction / prohibited-path / nested source validation | PASS / PASS / PASS                                                              |
-| Forward-slash ZIP entry names                                          | PASS — `PHASE_04_LEDGER_CORE/...` only                                          |
-
-Per `AGENTS.md` and `docs/PHASE_ARCHIVE.md`, the SHA-256 of the **outer** review package is published beside it in `PACKAGE_SHA256.txt` and is deliberately **not** embedded in this section.
+New canonical Phase 4 ZIP + outer review package are generated for the **corrected** commit after CI green (see return block in Owner handoff).

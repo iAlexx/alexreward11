@@ -2,7 +2,7 @@ import type { PoolClient } from 'pg';
 
 import { type LedgerDb, withLedgerTransaction } from './db.js';
 import { LedgerDomainError } from './errors.js';
-import { postLedgerTransaction } from './posting.js';
+import { postLedgerTransactionWithReversalLink } from './posting.js';
 import type { LedgerSide, PostedLedgerTransaction, ReverseLedgerCommand } from './types.js';
 
 async function loadOriginal(
@@ -52,6 +52,7 @@ async function loadOriginal(
 /**
  * Post a NEW linked reversal transaction. Never mutates the original header/entries.
  * At-most-one direct reversal is enforced by DB unique index + application check.
+ * Exact economic reversal is built here; the linked posting path re-validates before insert.
  */
 export async function reverseLedgerTransaction(
   db: LedgerDb,
@@ -82,7 +83,7 @@ export async function reverseLedgerTransaction(
         existingRow.idempotency_scope === command.idempotencyScope &&
         existingRow.idempotency_key === command.idempotencyKey
       ) {
-        return postLedgerTransaction(client, {
+        return postLedgerTransactionWithReversalLink(client, {
           transactionType: command.transactionType,
           businessReferenceType: command.businessReferenceType,
           businessReferenceId: command.businessReferenceId ?? null,
@@ -103,7 +104,7 @@ export async function reverseLedgerTransaction(
       );
     }
 
-    return postLedgerTransaction(client, {
+    return postLedgerTransactionWithReversalLink(client, {
       transactionType: command.transactionType,
       businessReferenceType: command.businessReferenceType,
       businessReferenceId: command.businessReferenceId ?? null,

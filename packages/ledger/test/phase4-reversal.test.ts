@@ -3,7 +3,13 @@ import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { reverseLedgerTransaction, withLedgerTransaction } from '../src/index.js';
+import {
+  getOrCreateLedgerAccount,
+  postLedgerTransaction,
+  postLedgerTransactionWithReversalLink,
+  reverseLedgerTransaction,
+  withLedgerTransaction,
+} from '../src/index.js';
 import {
   balanceOf,
   createTestUser,
@@ -11,6 +17,7 @@ import {
   phase4DatabaseUrl,
   resetAndMigrate,
   usdtAssetId,
+  versionOf,
 } from './harness.js';
 
 describe.skipIf(phase4DatabaseUrl === '')('Phase 4 ledger reversals', () => {
@@ -170,6 +177,232 @@ describe.skipIf(phase4DatabaseUrl === '')('Phase 4 ledger reversals', () => {
     );
     expect(reversals.rows[0]?.c).toBe(0);
     expect(await balanceOf(pool, issued.pendingId)).toBe(9n);
+  });
+
+  it('rejects malformed direct linked reversal (wrong amount) before insert', async () => {
+    const userId = await createTestUser(pool, '920010');
+    const issued = await issuePendingReward({
+      pool,
+      userId,
+      assetId,
+      amount: '30',
+      key: 'mal-amt',
+    });
+    const pendingBefore = await balanceOf(pool, issued.pendingId);
+    const versionBefore = await versionOf(pool, issued.pendingId);
+
+    await expect(
+      withLedgerTransaction(pool, async (client) =>
+        postLedgerTransactionWithReversalLink(client, {
+          transactionType: 'REWARD_REVERSAL',
+          businessReferenceType: 'mal-amt',
+          businessReferenceId: randomUUID(),
+          idempotencyScope: 'phase4',
+          idempotencyKey: 'mal-amt',
+          assetId,
+          reversesTransactionId: issued.tx.id,
+          entries: [
+            { ledgerAccountId: issued.expenseId, direction: 'CREDIT', amountAtomic: '29' },
+            { ledgerAccountId: issued.pendingId, direction: 'DEBIT', amountAtomic: '29' },
+          ],
+        }),
+      ),
+    ).rejects.toMatchObject({ code: 'REVERSAL_INVALID' });
+
+    const linked = await pool.query<{ c: number }>(
+      `SELECT count(*)::int AS c FROM ledger_transactions WHERE reverses_transaction_id = $1`,
+      [issued.tx.id],
+    );
+    expect(linked.rows[0]?.c).toBe(0);
+    expect(await balanceOf(pool, issued.pendingId)).toBe(pendingBefore);
+    expect(await versionOf(pool, issued.pendingId)).toBe(versionBefore);
+  });
+
+  it('rejects malformed direct linked reversal (wrong account / same direction / missing entry)', async () => {
+    const userId = await createTestUser(pool, '920011');
+    const issued = await issuePendingReward({
+      pool,
+      userId,
+      assetId,
+      amount: '18',
+      key: 'mal-shape',
+    });
+    const otherUser = await createTestUser(pool, '920012');
+    const otherPending = await withLedgerTransaction(pool, (client) =>
+      getOrCreateLedgerAccount(client, {
+        accountType: 'USER_PENDING_LIABILITY',
+        assetId,
+        ownerId: otherUser,
+      }),
+    );
+
+    await expect(
+      postLedgerTransactionWithReversalLink(pool, {
+        transactionType: 'REWARD_REVERSAL',
+        businessReferenceType: 'mal-acct',
+        businessReferenceId: randomUUID(),
+        idempotencyScope: 'phase4',
+        idempotencyKey: 'mal-acct',
+        assetId,
+        reversesTransactionId: issued.tx.id,
+        entries: [
+          { ledgerAccountId: issued.expenseId, direction: 'CREDIT', amountAtomic: '18' },
+          { ledgerAccountId: otherPending.id, direction: 'DEBIT', amountAtomic: '18' },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: 'REVERSAL_INVALID' });
+
+    await expect(
+      postLedgerTransactionWithReversalLink(pool, {
+        transactionType: 'REWARD_REVERSAL',
+        businessReferenceType: 'mal-dir',
+        businessReferenceId: randomUUID(),
+        idempotencyScope: 'phase4',
+        idempotencyKey: 'mal-dir',
+        assetId,
+        reversesTransactionId: issued.tx.id,
+        entries: [
+          { ledgerAccountId: issued.expenseId, direction: 'DEBIT', amountAtomic: '18' },
+          { ledgerAccountId: issued.pendingId, direction: 'CREDIT', amountAtomic: '18' },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: 'REVERSAL_INVALID' });
+
+    await expect(
+      postLedgerTransactionWithReversalLink(pool, {
+        transactionType: 'REWARD_REVERSAL',
+        businessReferenceType: 'mal-extra',
+        businessReferenceId: randomUUID(),
+        idempotencyScope: 'phase4',
+        idempotencyKey: 'mal-extra',
+        assetId,
+        reversesTransactionId: issued.tx.id,
+        entries: [
+          { ledgerAccountId: issued.expenseId, direction: 'CREDIT', amountAtomic: '9' },
+          { ledgerAccountId: issued.pendingId, direction: 'DEBIT', amountAtomic: '9' },
+          { ledgerAccountId: issued.expenseId, direction: 'CREDIT', amountAtomic: '9' },
+          { ledgerAccountId: issued.pendingId, direction: 'DEBIT', amountAtomic: '9' },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: 'REVERSAL_INVALID' });
+
+    const linked = await pool.query<{ c: number }>(
+      `SELECT count(*)::int AS c FROM ledger_transactions WHERE reverses_transaction_id = $1`,
+      [issued.tx.id],
+    );
+    expect(linked.rows[0]?.c).toBe(0);
+
+    // Valid reverseLedgerTransaction still succeeds and consumes the slot once.
+    const ok = await reverseLedgerTransaction(pool, {
+      originalTransactionId: issued.tx.id,
+      transactionType: 'REWARD_REVERSAL',
+      businessReferenceType: 'mal-then-ok',
+      businessReferenceId: randomUUID(),
+      idempotencyScope: 'phase4',
+      idempotencyKey: 'mal-then-ok',
+    });
+    expect(ok.reversesTransactionId).toBe(issued.tx.id);
+    expect(await balanceOf(pool, issued.pendingId)).toBe(0n);
+
+    const after = await pool.query<{ c: number }>(
+      `SELECT count(*)::int AS c FROM ledger_transactions WHERE reverses_transaction_id = $1`,
+      [issued.tx.id],
+    );
+    expect(after.rows[0]?.c).toBe(1);
+  });
+
+  it('malformed attempt does not consume reversal slot so concurrent proper reversal still wins once', async () => {
+    const userId = await createTestUser(pool, '920013');
+    const issued = await issuePendingReward({
+      pool,
+      userId,
+      assetId,
+      amount: '22',
+      key: 'mal-slot',
+    });
+
+    await expect(
+      postLedgerTransactionWithReversalLink(pool, {
+        transactionType: 'REWARD_REVERSAL',
+        businessReferenceType: 'mal-slot',
+        businessReferenceId: randomUUID(),
+        idempotencyScope: 'phase4',
+        idempotencyKey: 'mal-slot',
+        assetId,
+        reversesTransactionId: issued.tx.id,
+        entries: [
+          { ledgerAccountId: issued.expenseId, direction: 'CREDIT', amountAtomic: '1' },
+          { ledgerAccountId: issued.pendingId, direction: 'DEBIT', amountAtomic: '1' },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: 'REVERSAL_INVALID' });
+
+    const results = await Promise.allSettled([
+      reverseLedgerTransaction(pool, {
+        originalTransactionId: issued.tx.id,
+        transactionType: 'REWARD_REVERSAL',
+        businessReferenceType: 'slot-a',
+        businessReferenceId: randomUUID(),
+        idempotencyScope: 'phase4',
+        idempotencyKey: 'slot-a',
+      }),
+      reverseLedgerTransaction(pool, {
+        originalTransactionId: issued.tx.id,
+        transactionType: 'REWARD_REVERSAL',
+        businessReferenceType: 'slot-b',
+        businessReferenceId: randomUUID(),
+        idempotencyScope: 'phase4',
+        idempotencyKey: 'slot-b',
+      }),
+    ]);
+    expect(results.filter((item) => item.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((item) => item.status === 'rejected')).toHaveLength(1);
+    const count = await pool.query<{ c: number }>(
+      `SELECT count(*)::int AS c FROM ledger_transactions WHERE reverses_transaction_id = $1`,
+      [issued.tx.id],
+    );
+    expect(count.rows[0]?.c).toBe(1);
+  });
+
+  it('public postLedgerTransaction cannot attach reversesTransactionId via typed API', async () => {
+    const userId = await createTestUser(pool, '920014');
+    const issued = await issuePendingReward({
+      pool,
+      userId,
+      assetId,
+      amount: '5',
+      key: 'no-public-rev',
+    });
+    // Runtime guard: even if a caller smuggles the field, linked posting is the only path.
+    await withLedgerTransaction(pool, async (client) => {
+      const expense = await getOrCreateLedgerAccount(client, {
+        accountType: 'PLATFORM_REWARD_EXPENSE',
+        assetId,
+      });
+      const pending = await getOrCreateLedgerAccount(client, {
+        accountType: 'USER_PENDING_LIABILITY',
+        assetId,
+        ownerId: userId,
+      });
+      const posted = await postLedgerTransaction(client, {
+        transactionType: 'REWARD_ISSUANCE',
+        businessReferenceType: 'no-public-rev',
+        businessReferenceId: randomUUID(),
+        idempotencyScope: 'phase4',
+        idempotencyKey: 'no-public-rev',
+        assetId,
+        entries: [
+          { ledgerAccountId: expense.id, direction: 'DEBIT', amountAtomic: '1' },
+          { ledgerAccountId: pending.id, direction: 'CREDIT', amountAtomic: '1' },
+        ],
+      });
+      expect(posted.reversesTransactionId).toBeNull();
+    });
+    const linked = await pool.query<{ c: number }>(
+      `SELECT count(*)::int AS c FROM ledger_transactions WHERE reverses_transaction_id = $1`,
+      [issued.tx.id],
+    );
+    expect(linked.rows[0]?.c).toBe(0);
   });
 
   it('refuses a reversal that would drive a protected bucket negative', async () => {

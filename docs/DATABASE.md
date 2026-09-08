@@ -154,7 +154,10 @@ carried by `direction`, and a correction is a new reversal transaction linked th
 balance shortcut of any other name. Pending, Available and Reserved buckets are derived from
 ledger entries. `ledger_account_balances` and `ledger_balance_snapshots` are transactionally
 maintained projections used for row locking and fast reads; both are fully rebuildable from
-entries and are never an independent source of truth. `scripts/validate-migrations.mjs` fails the
+entries and are never an independent source of truth. Projection `version` equals the count of
+DISTINCT ledger transactions that touched the account. `last_ledger_transaction_id` is validated
+tie-aware when multiple posts share one PostgreSQL `posted_at` (no `0013` posting-sequence column).
+`scripts/validate-migrations.mjs` fails the
 build if any migration introduces `users.balance` or a `*balance*` column on `users`.
 
 **Evidence is not money.** `ad_client_events`, `ad_session_signals`, `ad_provider_events`,

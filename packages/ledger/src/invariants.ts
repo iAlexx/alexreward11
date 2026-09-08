@@ -3,6 +3,7 @@ import type { PoolClient } from 'pg';
 import { isProtectedUserBucket } from './catalogue.js';
 import type { LedgerDb } from './db.js';
 import { isPool } from './db.js';
+import { economicMultisetsEqual } from './intent.js';
 import { compareProjectionsToStored } from './projection.js';
 import type { LedgerAccountType, LedgerSide } from './types.js';
 
@@ -69,6 +70,23 @@ export async function checkLedgerInvariants(db: LedgerDb): Promise<InvariantChec
         debitTotal: row.debit_total,
         creditTotal: row.credit_total,
       });
+    }
+
+    // Every posted transaction must have a valid double-entry set (>= 2 entries)
+    const thinTx = await client.query<{ id: string; entry_count: string }>(
+      `SELECT t.id, count(e.id)::text AS entry_count
+       FROM ledger_transactions t
+       LEFT JOIN ledger_entries e ON e.ledger_transaction_id = t.id
+       GROUP BY t.id
+       HAVING count(e.id) < 2`,
+    );
+    for (const row of thinTx.rows) {
+      critical(
+        findings,
+        'INSUFFICIENT_ENTRIES',
+        'Ledger transaction must have at least two ledger entries',
+        { transactionId: row.id, entryCount: row.entry_count },
+      );
     }
 
     // Amount > 0 (defense in depth beyond CHECK)
@@ -144,7 +162,7 @@ export async function checkLedgerInvariants(db: LedgerDb): Promise<InvariantChec
       }
     }
 
-    // Projection rebuild comparison
+    // Projection rebuild comparison (balance + version + tie-aware last pointer)
     const comparison = await compareProjectionsToStored(client);
     for (const mismatch of comparison.mismatches) {
       critical(findings, 'PROJECTION_MISMATCH', 'Stored projection differs from rebuilt entries', {
@@ -164,6 +182,67 @@ export async function checkLedgerInvariants(db: LedgerDb): Promise<InvariantChec
       });
     }
 
+    // last pointer must reference a transaction that actually touched the account
+    const badLast = await client.query<{
+      ledger_account_id: string;
+      last_ledger_transaction_id: string;
+    }>(
+      `SELECT b.ledger_account_id, b.last_ledger_transaction_id
+       FROM ledger_account_balances b
+       WHERE b.last_ledger_transaction_id IS NOT NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM ledger_entries e
+           WHERE e.ledger_account_id = b.ledger_account_id
+             AND e.ledger_transaction_id = b.last_ledger_transaction_id
+         )`,
+    );
+    for (const row of badLast.rows) {
+      critical(
+        findings,
+        'LAST_POINTER_UNRELATED',
+        'last_ledger_transaction_id does not touch this account',
+        {
+          accountId: row.ledger_account_id,
+          lastLedgerTransactionId: row.last_ledger_transaction_id,
+        },
+      );
+    }
+
+    // Zero-history accounts: balance 0, version 0, last null
+    const zeroHistory = await client.query<{
+      ledger_account_id: string;
+      balance_atomic: string;
+      version: string;
+      last_ledger_transaction_id: string | null;
+    }>(
+      `SELECT b.ledger_account_id,
+              b.balance_atomic::text AS balance_atomic,
+              b.version::text AS version,
+              b.last_ledger_transaction_id
+       FROM ledger_account_balances b
+       WHERE NOT EXISTS (
+         SELECT 1 FROM ledger_entries e WHERE e.ledger_account_id = b.ledger_account_id
+       )
+         AND (
+           b.balance_atomic <> 0
+           OR b.version <> 0
+           OR b.last_ledger_transaction_id IS NOT NULL
+         )`,
+    );
+    for (const row of zeroHistory.rows) {
+      critical(
+        findings,
+        'ZERO_HISTORY_INCONSISTENT',
+        'Account with no entries must have balance 0, version 0, null last pointer',
+        {
+          accountId: row.ledger_account_id,
+          balanceAtomic: row.balance_atomic,
+          version: row.version,
+          lastLedgerTransactionId: row.last_ledger_transaction_id,
+        },
+      );
+    }
+
     // At most one direct reversal (index should enforce; detect anyway)
     const multiReversal = await client.query<{ reverses_transaction_id: string; c: string }>(
       `SELECT reverses_transaction_id, count(*)::text AS c
@@ -179,7 +258,7 @@ export async function checkLedgerInvariants(db: LedgerDb): Promise<InvariantChec
       });
     }
 
-    // Reversal asset / amounts consistency
+    // Reversal asset / exact economic multiset consistency (order-safe)
     const reversals = await client.query<{
       reversal_id: string;
       original_id: string;
@@ -201,44 +280,38 @@ export async function checkLedgerInvariants(db: LedgerDb): Promise<InvariantChec
       const originalEntries = await client.query<{
         direction: LedgerSide;
         amount_atomic: string;
-        entry_index: number;
         ledger_account_id: string;
       }>(
-        `SELECT direction, amount_atomic::text AS amount_atomic, entry_index, ledger_account_id
-         FROM ledger_entries WHERE ledger_transaction_id = $1 ORDER BY entry_index`,
+        `SELECT direction, amount_atomic::text AS amount_atomic, ledger_account_id
+         FROM ledger_entries WHERE ledger_transaction_id = $1`,
         [row.original_id],
       );
       const reversalEntries = await client.query<{
         direction: LedgerSide;
         amount_atomic: string;
-        entry_index: number;
         ledger_account_id: string;
       }>(
-        `SELECT direction, amount_atomic::text AS amount_atomic, entry_index, ledger_account_id
-         FROM ledger_entries WHERE ledger_transaction_id = $1 ORDER BY entry_index`,
+        `SELECT direction, amount_atomic::text AS amount_atomic, ledger_account_id
+         FROM ledger_entries WHERE ledger_transaction_id = $1`,
         [row.reversal_id],
       );
-      if (originalEntries.rows.length !== reversalEntries.rows.length) {
-        critical(findings, 'REVERSAL_ENTRY_COUNT', 'Reversal entry count differs from original', {
-          reversalId: row.reversal_id,
-        });
-        continue;
-      }
-      for (let i = 0; i < originalEntries.rows.length; i += 1) {
-        const o = originalEntries.rows[i];
-        const r = reversalEntries.rows[i];
-        if (o === undefined || r === undefined) continue;
-        const expectedDirection = o.direction === 'DEBIT' ? 'CREDIT' : 'DEBIT';
-        if (
-          r.ledger_account_id !== o.ledger_account_id ||
-          r.amount_atomic !== o.amount_atomic ||
-          r.direction !== expectedDirection
-        ) {
-          critical(findings, 'REVERSAL_ENTRY_MISMATCH', 'Reversal entries do not swap original', {
-            reversalId: row.reversal_id,
-            entryIndex: i,
-          });
-        }
+      const expected = originalEntries.rows.map((entry) => ({
+        ledgerAccountId: entry.ledger_account_id,
+        direction: entry.direction === 'DEBIT' ? ('CREDIT' as const) : ('DEBIT' as const),
+        amountAtomic: BigInt(entry.amount_atomic),
+      }));
+      const actual = reversalEntries.rows.map((entry) => ({
+        ledgerAccountId: entry.ledger_account_id,
+        direction: entry.direction,
+        amountAtomic: BigInt(entry.amount_atomic),
+      }));
+      if (!economicMultisetsEqual(expected, actual)) {
+        critical(
+          findings,
+          'REVERSAL_ENTRY_MISMATCH',
+          'Reversal entries do not exactly swap the original economic multiset',
+          { reversalId: row.reversal_id, originalId: row.original_id },
+        );
       }
     }
 

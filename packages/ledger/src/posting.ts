@@ -2,10 +2,12 @@ import type { PoolClient } from 'pg';
 
 import { getLedgerAccountById, getOrCreateLedgerAccount } from './accounts.js';
 import { amountAtomicToString, parsePositiveAtomicAmount } from './amounts.js';
+import { assertAssetActive } from './assets.js';
 import { isProtectedUserBucket, normalSideDelta } from './catalogue.js';
 import { isUniqueViolation, type LedgerDb, withLedgerTransaction } from './db.js';
 import { LedgerDomainError } from './errors.js';
 import { intentsMatch, ledgerIntentFingerprint, type LedgerIntent } from './intent.js';
+import { assertExactReversalOfOriginal } from './reversal-guard.js';
 import type {
   CanonicalLedgerEntry,
   LedgerAccountRecord,
@@ -13,9 +15,15 @@ import type {
   LedgerOwnerType,
   LedgerSide,
   PostLedgerCommand,
+  PostLedgerCommandWithReversalLink,
   PostedLedgerEntry,
   PostedLedgerTransaction,
 } from './types.js';
+
+/** Internal command shape; reversesTransactionId only via guarded path. */
+type InternalPostCommand = PostLedgerCommand & {
+  readonly reversesTransactionId?: string | null;
+};
 
 interface BalanceLockRow {
   ledger_account_id: string;
@@ -106,7 +114,7 @@ async function loadIntentFromPosted(
 
 async function resolveEntryAccounts(
   client: PoolClient,
-  command: PostLedgerCommand,
+  command: InternalPostCommand,
 ): Promise<{ accountsById: Map<string, LedgerAccountRecord>; canonical: CanonicalLedgerEntry[] }> {
   if (command.entries.length < 2) {
     throw new LedgerDomainError('VALIDATION', 'At least two ledger entries are required');
@@ -223,16 +231,9 @@ async function lockBalancesDeterministically(
   return locked;
 }
 
-async function assertAssetExists(client: PoolClient, assetId: string): Promise<void> {
-  const result = await client.query(`SELECT id FROM assets WHERE id = $1`, [assetId]);
-  if ((result.rowCount ?? 0) === 0) {
-    throw new LedgerDomainError('VALIDATION', 'Unknown assetId', { details: { assetId } });
-  }
-}
-
 async function recoverByIdempotency(
   client: PoolClient,
-  command: PostLedgerCommand,
+  command: InternalPostCommand,
   intent: LedgerIntent,
 ): Promise<PostedLedgerTransaction> {
   const existing = await client.query<{ id: string; metadata: { intentFingerprint?: string } }>(
@@ -263,7 +264,7 @@ async function recoverByIdempotency(
 
 async function recoverByBusinessReference(
   client: PoolClient,
-  command: PostLedgerCommand,
+  command: InternalPostCommand,
   intent: LedgerIntent,
 ): Promise<PostedLedgerTransaction> {
   const existing = await client.query<{ id: string }>(
@@ -290,7 +291,7 @@ async function recoverByBusinessReference(
 
 async function postInsideClient(
   client: PoolClient,
-  command: PostLedgerCommand,
+  command: InternalPostCommand,
 ): Promise<PostedLedgerTransaction> {
   if (!command.idempotencyScope?.trim() || !command.idempotencyKey?.trim()) {
     throw new LedgerDomainError('VALIDATION', 'idempotencyScope and idempotencyKey are required');
@@ -298,23 +299,20 @@ async function postInsideClient(
   if (!command.businessReferenceType?.trim()) {
     throw new LedgerDomainError('VALIDATION', 'businessReferenceType is required');
   }
-  await assertAssetExists(client, command.assetId);
-
-  if (command.reversesTransactionId) {
-    const original = await client.query<{ id: string; asset_id: string }>(
-      `SELECT id, asset_id FROM ledger_transactions WHERE id = $1`,
-      [command.reversesTransactionId],
-    );
-    if ((original.rowCount ?? 0) === 0) {
-      throw new LedgerDomainError('TRANSACTION_NOT_FOUND', 'Original transaction not found');
-    }
-    if (original.rows[0]?.asset_id !== command.assetId) {
-      throw new LedgerDomainError('ASSET_MISMATCH', 'Reversal asset must match original');
-    }
-  }
+  await assertAssetActive(client, command.assetId);
 
   const { accountsById, canonical } = await resolveEntryAccounts(client, command);
   assertBalanced(canonical);
+
+  // Exact reversal semantics MUST pass before any ledger_transaction insert.
+  if (command.reversesTransactionId) {
+    await assertExactReversalOfOriginal(
+      client,
+      command.reversesTransactionId,
+      command.assetId,
+      canonical,
+    );
+  }
 
   const intent: LedgerIntent = {
     transactionType: command.transactionType,
@@ -459,6 +457,7 @@ async function postInsideClient(
     );
   }
 
+  // version += 1 once per distinct transaction affecting the account (not per entry line).
   for (const accountId of [...locked.keys()].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))) {
     const next = nextBalances.get(accountId);
     if (next === undefined) continue;
@@ -476,7 +475,7 @@ async function postInsideClient(
 }
 
 /**
- * Authoritative ledger posting path.
+ * Authoritative ledger posting path (no linked-reversal creation).
  * Pass a PoolClient to compose with domain/outbox writes in the same transaction.
  * Pass a Pool to let the ledger open and commit its own transaction.
  */
@@ -485,6 +484,23 @@ export async function postLedgerTransaction(
   command: PostLedgerCommand,
 ): Promise<PostedLedgerTransaction> {
   return withLedgerTransaction(db, (client) => postInsideClient(client, command));
+}
+
+/**
+ * Restricted posting path that links reverses_transaction_id.
+ * Prefer reverseLedgerTransaction. This path enforces exact economic reversal
+ * before insert so malformed linked reversals cannot consume the unique slot.
+ */
+export async function postLedgerTransactionWithReversalLink(
+  db: LedgerDb,
+  command: PostLedgerCommandWithReversalLink,
+): Promise<PostedLedgerTransaction> {
+  return withLedgerTransaction(db, (client) =>
+    postInsideClient(client, {
+      ...command,
+      reversesTransactionId: command.reversesTransactionId,
+    }),
+  );
 }
 
 export type { LedgerAccountType, LedgerOwnerType };

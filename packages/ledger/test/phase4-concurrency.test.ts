@@ -272,7 +272,7 @@ describe.skipIf(phase4DatabaseUrl === '')('Phase 4 ledger concurrency', () => {
     expect(count.rows[0]?.c).toBe(1);
   });
 
-  it('concurrent same business reference creates one economic transaction', async () => {
+  it('concurrent same business reference with different idempotency keys recovers one economic transaction', async () => {
     const userId = await createTestUser(pool, '910006');
     const biz = randomUUID();
     const run = (key: string) =>
@@ -299,17 +299,76 @@ describe.skipIf(phase4DatabaseUrl === '')('Phase 4 ledger concurrency', () => {
           ],
         });
       });
-    const results = await Promise.allSettled([run('biz-key-1'), run('biz-key-1')]);
-    // Same key+same biz → both recover same; if one uses different key it would conflict.
-    // Using same key to prove one economic row under contention.
-    const fulfilled = results.filter((item) => item.status === 'fulfilled');
-    expect(fulfilled.length).toBeGreaterThanOrEqual(1);
+    // Different idempotency keys, identical financial intent — proves business-reference contention.
+    const results = await Promise.all([run('biz-key-a'), run('biz-key-b')]);
+    expect(results[0].id).toBe(results[1].id);
     const count = await pool.query<{ c: number }>(
       `SELECT count(*)::int AS c FROM ledger_transactions
        WHERE business_reference_type = 'conc-biz' AND business_reference_id = $1`,
       [biz],
     );
     expect(count.rows[0]?.c).toBe(1);
+    const pending = await withLedgerTransaction(pool, (client) =>
+      getOrCreateLedgerAccount(client, {
+        accountType: 'USER_PENDING_LIABILITY',
+        assetId,
+        ownerId: userId,
+      }),
+    );
+    expect(await balanceOf(pool, pending.id)).toBe(12n);
+  });
+
+  it('concurrent same business reference with different intent yields one winner and BUSINESS_REFERENCE_CONFLICT', async () => {
+    const userId = await createTestUser(pool, '910008');
+    const biz = randomUUID();
+    const run = (key: string, amount: string) =>
+      withLedgerTransaction(pool, async (client) => {
+        const expense = await getOrCreateLedgerAccount(client, {
+          accountType: 'PLATFORM_REWARD_EXPENSE',
+          assetId,
+        });
+        const pending = await getOrCreateLedgerAccount(client, {
+          accountType: 'USER_PENDING_LIABILITY',
+          assetId,
+          ownerId: userId,
+        });
+        return postLedgerTransaction(client, {
+          transactionType: 'REWARD_ISSUANCE',
+          businessReferenceType: 'conc-biz-conflict',
+          businessReferenceId: biz,
+          idempotencyScope: 'phase4',
+          idempotencyKey: key,
+          assetId,
+          entries: [
+            { ledgerAccountId: expense.id, direction: 'DEBIT', amountAtomic: amount },
+            { ledgerAccountId: pending.id, direction: 'CREDIT', amountAtomic: amount },
+          ],
+        });
+      });
+    const results = await Promise.allSettled([run('conflict-a', '12'), run('conflict-b', '99')]);
+    const ok = results.filter((item) => item.status === 'fulfilled');
+    const bad = results.filter((item) => item.status === 'rejected');
+    expect(ok).toHaveLength(1);
+    expect(bad).toHaveLength(1);
+    if (bad[0]?.status === 'rejected') {
+      expect(bad[0].reason).toMatchObject({ code: 'BUSINESS_REFERENCE_CONFLICT' });
+    }
+    const count = await pool.query<{ c: number }>(
+      `SELECT count(*)::int AS c FROM ledger_transactions
+       WHERE business_reference_type = 'conc-biz-conflict' AND business_reference_id = $1`,
+      [biz],
+    );
+    expect(count.rows[0]?.c).toBe(1);
+    const pending = await withLedgerTransaction(pool, (client) =>
+      getOrCreateLedgerAccount(client, {
+        accountType: 'USER_PENDING_LIABILITY',
+        assetId,
+        ownerId: userId,
+      }),
+    );
+    const winnerAmount =
+      ok[0]?.status === 'fulfilled' ? BigInt(ok[0].value.entries[0]!.amountAtomic) : 0n;
+    expect(await balanceOf(pool, pending.id)).toBe(winnerAmount);
   });
 
   it('concurrent double reversal produces one reversal', async () => {

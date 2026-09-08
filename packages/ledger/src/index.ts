@@ -25,7 +25,7 @@ export type { LedgerDb } from './db.js';
 
 export { ledgerIntentFingerprint, intentsMatch } from './intent.js';
 
-export { postLedgerTransaction } from './posting.js';
+export { postLedgerTransaction, postLedgerTransactionWithReversalLink } from './posting.js';
 export { reverseLedgerTransaction } from './reverse.js';
 
 export {
@@ -53,6 +53,7 @@ export type {
   LedgerSide,
   LedgerTransactionType,
   PostLedgerCommand,
+  PostLedgerCommandWithReversalLink,
   PostedLedgerEntry,
   PostedLedgerTransaction,
   ReverseLedgerCommand,
