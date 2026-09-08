@@ -1,9 +1,15 @@
 # ALEx Rewards engineering rules
 
 The authoritative product, financial, security, and engineering requirements are in
-`../ALEx_Rewards_Master_Product_Financial_Security_Engineering_Specification_v1.1.md`.
+`docs/ALEx_Rewards_Master_Product_Financial_Security_Engineering_Specification_v1.2.md`
+(Version 1.2). Version 1.2 supersedes conflicting Version 1.1 language. Requirements not
+expressly changed by Version 1.2 remain in force.
 
 - Work only in the phase explicitly approved by the Owner.
+- After every accepted phase, create an immutable review archive under `phase-archives/`
+  (ignored by Git), then **stop** and wait for explicit Owner approval before the next phase.
+- Do not invent production values marked `OWNER_DECISION_REQUIRED`, `PROPOSED_DEFAULT`, or
+  configurable without Owner approval.
 - Phase 1 is foundation only. Do not add business database tables, ledger postings, reward
   issuance, withdrawal financial logic, TON payout logic, AdsGram monetary issuance, or KMS
   signing.

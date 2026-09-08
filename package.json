@@ -25,7 +25,8 @@
     "dev:infra:down": "docker compose -f infra/docker/compose.yaml --env-file .env down",
     "dev:stack": "docker compose -f infra/docker/compose.yaml --env-file .env --profile apps up -d --build",
     "dev:stack:down": "docker compose -f infra/docker/compose.yaml --env-file .env --profile apps down",
-    "smoke": "node scripts/phase1-smoke.mjs"
+    "smoke": "node scripts/phase1-smoke.mjs",
+    "archive:phase": "node scripts/create-phase-archive.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

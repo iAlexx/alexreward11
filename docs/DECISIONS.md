@@ -20,3 +20,17 @@ without a production or test Bot token. Polling/webhook modes fail fast unless a
 
 The Signer exposes health endpoints only. Any KMS-key environment variable is rejected, and CI
 forbids KMS imports outside `apps/signer` for the later implementation.
+
+## ADR-005 — Version 1.2 adoption as source of truth
+
+On 2026-09-08 the Owner adopted
+`docs/ALEx_Rewards_Master_Product_Financial_Security_Engineering_Specification_v1.2.md` as the
+active source of truth. Version 1.2 preserves the Version 1.1 financial, security, payout,
+ledger, fraud, reconciliation, signer, and provider-safety baseline and adds product/platform
+expansion architecture (membership/entitlements, provider limits/adapters, policy center,
+eligibility/trust, economics, review queue, mission engine, phase archives).
+
+No `OWNER_DECISION_REQUIRED`, `PROPOSED_DEFAULT`, or otherwise undecided production economic or
+policy value was invented during this adoption. Existing Phase 1 foundation code is retained;
+Version 1.2 does not authorize rebuilding correct Phase 1 work. Phase 2 must not begin until
+Phase 0/Phase 1 archive gates pass and the Owner explicitly approves.

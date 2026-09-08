@@ -1,14 +1,20 @@
 # ALEx Rewards Phase 1 Acceptance Report
 
-Status: **local/runtime gates passed; remote GitHub CI gates pending because no approved remote is configured**
+Status: **PASS pending final archival commit CI** (historical foundation CI green; V1.2 closure commit CI recorded after push)
 
-Date: 2026-09-03
+Date: 2026-09-03 (foundation); updated 2026-09-08 (V1.2 closure)
 
-Source of truth: ALEx Rewards Master Product, Financial, Security & Engineering Specification v1.1
+Source of truth: ALEx Rewards Master Product, Financial, Security & Engineering Specification **v1.2** (adopted 2026-09-08). Version 1.1 safety baseline remains in force where unchanged.
 
 Phase 2 has not started. No ledger, reward issuance, withdrawal, AdsGram monetary, TON payout, or KMS-signing implementation is present.
 
-The Final Acceptance Addendum at the end of this report supersedes the earlier runtime status captured in sections E through N.
+Historical foundation evidence SHA: `8c479dac8d209250a4f5c68d2948863a82276f35`  
+Historical foundation GitHub Actions run: https://github.com/iAlexx/alexreward11/actions/runs/34002303780  
+
+Final accepted archival commit SHA: `PENDING_FINAL_SHA`  
+Final V1.2 closure GitHub Actions run: `PENDING_NEW_CI_RUN`
+
+The Final Acceptance Addendum and the V1.2 Closure Addendum at the end of this report supersede earlier pending CI status.
 
 ## A. Exact repository tree
 
@@ -408,9 +414,12 @@ Graceful SIGTERM tests returned exit code 0 for API, Bot, Worker, and Signer, ea
 
 ## I. GitHub Actions URLs/run IDs and results
 
-**FAIL / NOT RUN.** No Git remote is configured in the approved checkout, and no repository URL is named in the specification or project documentation. The authenticated GitHub account contains multiple similarly named repositories, including an empty `iAlexx/alexreward11`, but there is no authoritative evidence that any one is the approved destination. No remote was inferred, no repository was created, and nothing was pushed. Consequently there are no GitHub Actions URLs or run IDs, and neither remote `quality` nor remote `docker-smoke` can yet be marked passed.
+**PASS (historical foundation).** Remote `origin` is `https://github.com/iAlexx/alexreward11.git`. Push of commit `8c479dac8d209250a4f5c68d2948863a82276f35` produced GitHub Actions run [34002303780](https://github.com/iAlexx/alexreward11/actions/runs/34002303780):
 
-The workflow definition itself remains locally validated and contains both required jobs.
+- `quality` job `101403226368` — success
+- `docker-smoke` job `101403517140` — success
+
+This historical run is evidence that the original Phase 1 foundation implementation already passed remote CI. It is **not** the final archival source SHA after Version 1.2 adoption/scaffolding. The V1.2 Closure Addendum records the new commit CI.
 
 ## J. Clean-clone validation result
 
@@ -508,7 +517,9 @@ The stalled WinGet/download/WSL installation attempts were interrupted; they did
 
 ## M. Remaining issue
 
-One blocking issue remains: the exact approved GitHub repository URL is not configured or documented. Supplying that URL is required before adding the remote, pushing, and obtaining successful `quality` and `docker-smoke` run IDs. Temporal's bundled `tctl` emits an upstream deprecation notice; it does not affect health or workflow execution and can be replaced with Temporal CLI during a future infrastructure-only maintenance change.
+**Resolved for remote configuration.** `origin` is `https://github.com/iAlexx/alexreward11.git`. Historical foundation CI run `34002303780` is green for SHA `8c479dac8d209250a4f5c68d2948863a82276f35`.
+
+Remaining before final Phase 1 archival acceptance: the Version 1.2 adoption/scaffolding commit must be pushed and must obtain a new green `quality` + `docker-smoke` run; that new SHA becomes the sole archival source. Temporal's bundled `tctl` emits an upstream deprecation notice; it does not affect health or workflow execution and can be replaced with Temporal CLI during a future infrastructure-only maintenance change.
 
 There is no remaining local runtime failure, source-level critical TODO/FIXME, placeholder security implementation, known high/critical dependency vulnerability, Phase 2 business implementation, mutable `users.balance`, signing capability, or production KMS integration.
 
@@ -523,12 +534,50 @@ There is no remaining local runtime failure, source-level critical TODO/FIXME, p
 | All health/readiness checks pass simultaneously                  | PASS   | six app health checks plus dependency/collector checks passed                      |
 | PostgreSQL, Redis, and Temporal local dependencies work          | PASS   | SQL query, PONG, SERVING, API dependency probes, and workflow execution passed     |
 | Configuration validation works                                   | PASS   | five configuration assertions and fail-fast production/KMS guards passed           |
-| GitHub Actions `quality` is green                                | FAIL   | no approved/configured GitHub remote; no run exists                                |
-| GitHub Actions `docker-smoke` is green                           | FAIL   | no approved/configured GitHub remote; no run exists                                |
+| GitHub Actions `quality` is green                                | PASS*  | historical run 34002303780 / job 101403226368 on SHA 8c479dac…; final archival CI PENDING |
+| GitHub Actions `docker-smoke` is green                           | PASS*  | historical run 34002303780 / job 101403517140 on SHA 8c479dac…; final archival CI PENDING |
 | No secrets are exposed                                           | PASS   | secret scan, ignored `.env`, frontend allowlist, redaction, and image context pass |
 | Observability foundation works                                   | PASS   | OTel health 200; app telemetry initialized; Sentry is structurally integrated      |
 | Clean shutdown behavior works                                    | PASS   | API/Bot/Worker/Signer and stateful dependencies exit cleanly; Worker drains        |
 | Local setup works from a clean environment                       | PASS   | clean clone, frozen install, full stack, and smoke passed                          |
 | No critical TODOs or placeholder security implementations remain | PASS   | scans/review passed; Signer has no signing or KMS capability                       |
 
-**Overall Phase 1 acceptance: FAIL / pending.** All local and clean-clone gates pass, but the two mandatory GitHub Actions jobs have not run. Phase 2 must not begin.
+**Overall Phase 1 acceptance (as of historical foundation SHA 8c479dac…): PASS for foundation gates; V1.2 closure archival commit CI still PENDING.** Phase 2 must not begin until the final archival commit is CI-green, archives exist, and the Owner approves.
+
+---
+
+# Phase 1 V1.2 Closure Addendum — 2026-09-08
+
+This addendum records Version 1.2 adoption, phase-archive scaffolding, and the requirement that the **new** closure commit (not historical SHA `8c479dac8d209250a4f5c68d2948863a82276f35`) is the final accepted archival source state after its own CI is green.
+
+## A. Historical foundation CI evidence (not archival SHA)
+
+| Item | Value |
+| --- | --- |
+| Historical foundation commit | `8c479dac8d209250a4f5c68d2948863a82276f35` |
+| Historical GitHub Actions run | https://github.com/iAlexx/alexreward11/actions/runs/34002303780 |
+| Historical `quality` job | `101403226368` — success |
+| Historical `docker-smoke` job | `101403517140` — success |
+
+## B. V1.2 closure changes in this commit
+
+- Adopted `docs/ALEx_Rewards_Master_Product_Financial_Security_Engineering_Specification_v1.2.md` as source of truth.
+- Updated `AGENTS.md` and `docs/DECISIONS.md` (ADR-005).
+- Added `phase-archives/` to `.gitignore` and `.prettierignore`.
+- Added/tested `scripts/create-phase-archive.mjs` and `pnpm archive:phase`.
+- Added `docs/PHASE_00_ACCEPTANCE_REPORT.md`.
+- Updated this Phase 1 acceptance report.
+- Confirmed no Phase 2 SQL migrations or financial/business implementation were introduced.
+
+## C. Final archival commit and CI (filled after push)
+
+| Item | Value |
+| --- | --- |
+| Final accepted archival commit SHA | `PENDING_FINAL_SHA` |
+| V1.2 closure GitHub Actions run | `PENDING_NEW_CI_RUN` |
+| `quality` | PENDING |
+| `docker-smoke` | PENDING |
+
+## D. Overall Phase 1 acceptance after closure CI
+
+**PENDING** until both jobs on the final archival commit are PASS. After that, Phase 1 is **PASS**, archives may be created from that exact SHA only, and Phase 2 must still wait for explicit Owner approval.
