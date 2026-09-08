@@ -623,15 +623,12 @@ export async function createPhaseArchive(args, { cwd = process.cwd(), now = new 
     throw new Error('Canonical source ZIP checksum changed during verification');
   }
 
-  // Remove previous outer packages for this directory so backfill replaces them cleanly.
-  for (const name of readdirSync(outDir)) {
-    if (name.includes('_PACKAGE_') && name.endsWith('.zip')) {
-      rmSync(join(outDir, name), { force: true });
-    }
-  }
-
   const packageZipName = `${phaseDirName}_PACKAGE_${stamp}_${shortSha}.zip`;
   const packageZipPath = join(outDir, packageZipName);
+  // Replace only this stamp's outer package; leave other stamped packages intact.
+  if (existsSync(packageZipPath)) {
+    rmSync(packageZipPath, { force: true });
+  }
   const packageShaPath = join(outDir, 'PACKAGE_SHA256.txt');
 
   const manifest = buildManifest({

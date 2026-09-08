@@ -1,18 +1,18 @@
 # ALEx Rewards Phase 3 Acceptance Report
 
-Status: **PASS (CORRECTED)** — Phase 3 Telegram auth + membership identity binding correctness gaps closed; GitHub Actions `quality` and `docker-smoke` must be green on the **new** accepted archival commit below. The prior Phase 3 archive for `421ea529…` remains historical evidence only and must not be deleted or rewritten.
+Status: **PASS (CORRECTED)** — Phase 3 Telegram auth + membership identity binding correctness gaps closed; GitHub Actions `quality` and `docker-smoke` are green on the **new** accepted archival commit. The prior Phase 3 archive for `421ea529…` remains historical evidence only and must not be deleted or rewritten.
 
 Date: 2026-09-08 (correction pass)
 
 Source of truth: ALEx Rewards Master Product, Financial, Security & Engineering Specification **v1.2**.
 
-| Item                               | Value                                      |
-| ---------------------------------- | ------------------------------------------ |
-| Final accepted archival commit SHA | _(filled after CI-green push)_             |
-| GitHub Actions run                 | _(filled after CI-green push)_             |
-| `quality`                          | _(filled after CI)_                        |
-| `docker-smoke`                     | _(filled after CI)_                        |
-| Historical Phase 3 archive commit  | `421ea529cad487ff59b46cb1c9cb176f9450893b` |
+| Item                               | Value                                                           |
+| ---------------------------------- | --------------------------------------------------------------- |
+| Final accepted archival commit SHA | `be08e7fe91309fe42da74d14558ebdaa353215e5`                      |
+| GitHub Actions run                 | https://github.com/iAlexx/alexreward11/actions/runs/34276079046 |
+| `quality`                          | PASS — job `102229292112`                                       |
+| `docker-smoke`                     | PASS — job `102230237284`                                       |
+| Historical Phase 3 archive commit  | `421ea529cad487ff59b46cb1c9cb176f9450893b`                      |
 
 Phase 4 has not started. Phase 3 is Telegram auth + membership identity binding only.
 
@@ -104,11 +104,11 @@ POST   /v1/membership/founder/claim
 
 | Suite                                             | Result                                           |
 | ------------------------------------------------- | ------------------------------------------------ |
-| `@alex-rewards/telegram` initData unit tests      | PASS                                             |
-| `@alex-rewards/auth` Phase 3 auth/membership      | PASS (incl. entitlement auth + concurrent login) |
-| `@alex-rewards/auth` Phase 3 throttle/brute-force | PASS (real Redis)                                |
+| `@alex-rewards/telegram` initData unit tests      | PASS (8)                                         |
+| `@alex-rewards/auth` Phase 3 auth/membership      | PASS (15 — entitlements + concurrent login)      |
+| `@alex-rewards/auth` Phase 3 throttle/brute-force | PASS (6 — real Redis)                            |
 | Phase 2 migration/constraint gates                | PASS (27) — regression                           |
-| `packages/config` env validation                  | PASS (incl. staging/production fail-closed)      |
+| `packages/config` env validation                  | PASS (11 — incl. staging/production fail-closed) |
 
 ## G–N. Gate checklist
 
@@ -127,10 +127,21 @@ POST   /v1/membership/founder/claim
 | No Phase 2 migration edits                            | PASS   |
 | Signer remains signing-disabled                       | PASS   |
 | No Phase 4+ engines                                   | PASS   |
-| `quality` / `docker-smoke`                            | _(CI)_ |
+| `quality` / `docker-smoke`                            | PASS   |
 
 ## O. Archive verification
 
-New dual archive will be created from the **new** accepted CI-green commit only. Historical package for `421ea529…` is retained under `phase-archives/PHASE_03_TELEGRAM_AUTH_MEMBERSHIP_BINDING/` and must not be deleted or rewritten.
+Verified for exact accepted commit `be08e7fe91309fe42da74d14558ebdaa353215e5` using `scripts/create-phase-archive.mjs` v2.1.0 (stamp `20260908-204500`). Historical package for `421ea529…` / stamp `20260908-202100` remains in the same phase-archives directory and was not rewritten.
 
-_(Filled after packaging.)_
+| Item                                                                   | Result                                                                               |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Canonical source ZIP                                                   | `ALEx_Rewards_PHASE_03_TELEGRAM_AUTH_MEMBERSHIP_BINDING_20260908-204500_be08e7f.zip` |
+| Canonical source SHA-256                                               | `20fb0018d451e35b7fdb2f08af5cebd49e915065a7ec451cf7949508bb58cd06`                   |
+| Review-package ZIP                                                     | `PHASE_03_TELEGRAM_AUTH_MEMBERSHIP_BINDING_PACKAGE_20260908-204500_be08e7f.zip`      |
+| Outer package SHA-256                                                  | See external `PACKAGE_SHA256.txt` beside the review package (not embedded here)      |
+| `MANIFEST.md` / `SHA256SUMS.txt`                                       | PASS — companion checksums match source ZIP, report, and manifest                    |
+| Source extraction / prohibited-path scan                               | PASS / PASS                                                                          |
+| Review-package extraction / prohibited-path / nested source validation | PASS / PASS / PASS                                                                   |
+| Forward-slash ZIP entry names                                          | PASS — `PHASE_03_TELEGRAM_AUTH_MEMBERSHIP_BINDING/...` only                          |
+
+Per `AGENTS.md` and `docs/PHASE_ARCHIVE.md`, the SHA-256 of the **outer** review package is published beside it in `PACKAGE_SHA256.txt` and is deliberately **not** embedded in this section.
