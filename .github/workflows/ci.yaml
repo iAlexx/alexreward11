@@ -16,6 +16,20 @@ jobs:
   quality:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:18.6@sha256:4ef4dbc939d61acea57712655ddb4b4ab27419c913f94cca0cd57cb3ea3c2280
+        env:
+          POSTGRES_USER: alex_rewards
+          POSTGRES_PASSWORD: local-alex-rewards-only
+          POSTGRES_DB: alex_rewards_phase2
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U alex_rewards -d alex_rewards_phase2"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Check out repository
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
@@ -36,6 +50,11 @@ jobs:
           NODE_ENV: test
           NEXT_PUBLIC_API_BASE_URL: http://localhost:3002
         run: pnpm run verify
+      - name: Phase 2 migration and constraint gates
+        env:
+          PHASE2_DATABASE_URL: postgresql://alex_rewards:local-alex-rewards-only@127.0.0.1:5432/alex_rewards_phase2
+          PHASE2_MIGRATION_TESTS: '1'
+        run: pnpm test:phase2
       - name: Dependency vulnerability gate
         run: pnpm security:audit
 

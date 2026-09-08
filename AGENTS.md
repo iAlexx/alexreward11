@@ -17,9 +17,11 @@ expressly changed by Version 1.2 remain in force.
      the outer package hash. See `docs/PHASE_ARCHIVE.md`.
 - Do not invent production values marked `OWNER_DECISION_REQUIRED`, `PROPOSED_DEFAULT`, or
   configurable without Owner approval.
-- Phase 1 is foundation only. Do not add business database tables, ledger postings, reward
-  issuance, withdrawal financial logic, TON payout logic, AdsGram monetary issuance, or KMS
-  signing.
+- Phase 1 is foundation only. Phase 2 adds the approved database schema and nothing else: once
+  the Owner has approved it, business tables and explicit SQL migrations may exist, but ledger
+  postings, reward issuance, withdrawal financial logic, TON payout logic, AdsGram monetary
+  issuance, and KMS signing remain forbidden until the later phase that approves each engine.
+  Outside an approved Phase 2, do not add business database tables either.
 - PostgreSQL is the future financial source of truth. Never add `users.balance` or another
   mutable authoritative balance shortcut.
 - Keep `apps/signer` isolated. No other service may import a KMS client or receive signing

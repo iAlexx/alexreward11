@@ -23,4 +23,7 @@ export async function probeDatabase(pool: Pool): Promise<DatabaseProbeResult> {
   return { latencyMs: Math.round(performance.now() - started) };
 }
 
+export { defaultMigrationsDirectory, listMigrationFiles, migrateDatabase } from './migrate.js';
+export type { MigrateDatabaseOptions, MigrateDatabaseResult, MigrationFile } from './migrate.js';
+
 export type { Pool } from 'pg';
