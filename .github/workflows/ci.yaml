@@ -76,6 +76,11 @@ jobs:
           PHASE4_DATABASE_URL: postgresql://alex_rewards:local-alex-rewards-only@127.0.0.1:5432/alex_rewards_phase2
           PHASE4_LEDGER_TESTS: '1'
         run: pnpm test:phase4
+      - name: Phase 5 reward engine gates
+        env:
+          PHASE5_DATABASE_URL: postgresql://alex_rewards:local-alex-rewards-only@127.0.0.1:5432/alex_rewards_phase2
+          PHASE5_REWARD_TESTS: '1'
+        run: pnpm test:phase5
       - name: Dependency vulnerability gate
         run: pnpm security:audit
 
