@@ -1,18 +1,21 @@
 # ALEx Rewards Phase 5 Acceptance Report (Corrected)
 
-Status: **PASS (corrected)** — Phase 5 Reward Engine financial corrections complete after independent review of archive `a7da07d…`. GitHub Actions `quality` (including Phase 5 gates) and `docker-smoke` must be green on **this** corrected archival commit.
+Status: **PASS (corrected)** — Phase 5 Reward Engine financial corrections complete after independent review of archive `a7da07d…`. GitHub Actions `quality` (including Phase 5 gates) and `docker-smoke` are green on the corrected archival commit.
 
 Date: 2026-09-09
 
 Source of truth: ALEx Rewards Master Product, Financial, Security & Engineering Specification **v1.2**.
 
-| Item                                  | Value                                      |
-| ------------------------------------- | ------------------------------------------ |
-| Corrected accepted Phase 5 commit     | _(filled after CI-green push)_             |
-| Historical Phase 5 archive (retained) | `a7da07d623c63819344dc72ebb2266d7ad0bcc06` |
-| New migration                         | `0014_phase5_financial_corrections.sql`    |
-| Migrations `0001`–`0013`              | **unchanged**                              |
-| Phase 4 accepted archival source      | `34bb15455f98f9ae298289453f274d5f2f9d0ee2` |
+| Item                                  | Value                                                           |
+| ------------------------------------- | --------------------------------------------------------------- |
+| Corrected accepted Phase 5 commit     | `82d73cfcefd8368493f24219d89ba1b680dcc48a`                      |
+| Historical Phase 5 archive (retained) | `a7da07d623c63819344dc72ebb2266d7ad0bcc06`                      |
+| GitHub Actions run                    | https://github.com/iAlexx/alexreward11/actions/runs/34290555816 |
+| `quality`                             | PASS — job `102275913607`                                       |
+| `docker-smoke`                        | PASS — job `102276707087`                                       |
+| New migration                         | `0014_phase5_financial_corrections.sql`                         |
+| Migrations `0001`–`0013`              | **unchanged**                                                   |
+| Phase 4 accepted archival source      | `34bb15455f98f9ae298289453f274d5f2f9d0ee2`                      |
 
 Phase 6 has **not** started. Phase 5 remains Reward Engine (simulated source) only.
 
@@ -37,7 +40,7 @@ Phase 6 has **not** started. Phase 5 remains Reward Engine (simulated source) on
 | --------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | `0014_phase5_financial_corrections.sql` | `simulated_reward_sources`; frozen quote trigger; multi-period bonus reservations; exposure period counters |
 
-## Tests (local gate)
+## Tests (local + CI gate)
 
 | Suite                            | Count  |
 | -------------------------------- | ------ |
