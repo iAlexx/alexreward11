@@ -1,8 +1,8 @@
 # ALEx Rewards Phase 7 Acceptance Report — Withdrawal Engine (Fake Chain)
 
-Status: **PASS pending CI/archive fill-in** — Withdrawal engine with deterministic fake chain,
-fee/priority entitlements, reservation/settlement/reconcile invariants implemented. Phase 6
-remains closed. Phase 8 has **not** started.
+Status: **PASS** — Withdrawal engine with deterministic fake chain, fee/priority entitlements,
+reservation/settlement/reconcile invariants implemented. Phase 6 remains closed. Phase 8 has
+**not** started.
 
 Date: 2026-09-09
 
@@ -12,10 +12,10 @@ Source of truth: ALEx Rewards Master Product, Financial, Security & Engineering 
 | ------------------------ | ------------------------------------------------------------------------------- |
 | Phase 6 accepted commit  | `79fbf90b0d07ad786ee616ad1c7e51b7f1004d3c`                                      |
 | Phase 7 start tip        | `3bf245d782416ef46c3685b5f7e8ad2b48494435` (Phase 6 companion/archive evidence) |
-| Accepted Phase 7 commit  | `PENDING_COMMIT`                                                                |
-| GitHub Actions run       | `PENDING_CI_RUN_URL`                                                            |
-| `quality`                | PENDING                                                                         |
-| `docker-smoke`           | PENDING                                                                         |
+| Accepted Phase 7 commit  | `5efbf57a8133ea02c2ab99654e637815ce4fb282`                                      |
+| GitHub Actions run       | https://github.com/iAlexx/alexreward11/actions/runs/34312445398                 |
+| `quality`                | PASS — job `102341712336`                                                       |
+| `docker-smoke`           | PASS — job `102342524358`                                                       |
 | New migration            | `0017_withdrawal_engine_integrity.sql`                                          |
 | Migrations `0001`–`0016` | **unchanged**                                                                   |
 
@@ -119,13 +119,11 @@ tests (FLOOR discount / net / atomic parse). Mentioned separately; official gate
 
 ## H. CI
 
-| Item                   | Value                                    |
-| ---------------------- | ---------------------------------------- |
-| GitHub Actions run URL | `PENDING_CI_RUN_URL`                     |
-| `quality`              | PENDING — job `PENDING_QUALITY_JOB`      |
-| `docker-smoke`         | PENDING — job `PENDING_DOCKER_SMOKE_JOB` |
-
-(Fill after push of accepted commit.)
+| Item                   | Value                                                           |
+| ---------------------- | --------------------------------------------------------------- |
+| GitHub Actions run URL | https://github.com/iAlexx/alexreward11/actions/runs/34312445398 |
+| `quality`              | PASS — job `102341712336`                                       |
+| `docker-smoke`         | PASS — job `102342524358`                                       |
 
 ## I. Known deviations
 
@@ -142,7 +140,6 @@ tests (FLOOR discount / net / atomic parse). Mentioned separately; official gate
 - Phase 8 Control Center / Owner action-token surface for `decideWithdrawal`.
 - Production fee/limit rule provisioning (not seeded by `0017`).
 - Real Testnet signer/payout deferred to later phases.
-- Fill CI URLs, regression re-run confirmation, accepted SHA, and archive hashes before final seal.
 
 ## K. Security / financial invariants checklist
 
@@ -175,7 +172,7 @@ tests (FLOOR discount / net / atomic parse). Mentioned separately; official gate
 
 ## M. Exact accepted SHA
 
-`PENDING_COMMIT` — filled after Owner-approved archival commit (not before).
+`5efbf57a8133ea02c2ab99654e637815ce4fb282`
 
 ## N. PASS/FAIL — Owner section 66 gates
 
@@ -209,8 +206,8 @@ tests (FLOOR discount / net / atomic parse). Mentioned separately; official gate
 | Fake chain impossible in staging/production                         | PASS                              |
 | No real signing/broadcast introduced                                | PASS                              |
 | Previous phases remain green                                        | PASS (2/3/4/5/6 = 27/21/41/55/35) |
-| `quality` PASS                                                      | PENDING (CI)                      |
-| `docker-smoke` PASS                                                 | PENDING (CI)                      |
+| `quality` PASS                                                      | PASS                              |
+| `docker-smoke` PASS                                                 | PASS                              |
 | No Phase 8 work introduced                                          | PASS                              |
 
 ## O. Archive verification
