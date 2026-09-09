@@ -111,11 +111,11 @@ tests (FLOOR discount / net / atomic parse). Mentioned separately; official gate
 
 ## G. Build/health
 
-| Check                                        | Result                                         |
-| -------------------------------------------- | ---------------------------------------------- |
-| Typecheck / build / lint (via `pnpm verify`) | PASS (local)                                   |
-| App health endpoints                         | Covered by docker-smoke in CI                  |
-| Migrations apply cleanly through `0017`      | PASS (local migrate + Phase 2 gates)           |
+| Check                                        | Result                               |
+| -------------------------------------------- | ------------------------------------ |
+| Typecheck / build / lint (via `pnpm verify`) | PASS (local)                         |
+| App health endpoints                         | Covered by docker-smoke in CI        |
+| Migrations apply cleanly through `0017`      | PASS (local migrate + Phase 2 gates) |
 
 ## H. CI
 
@@ -179,35 +179,35 @@ tests (FLOOR discount / net / atomic parse). Mentioned separately; official gate
 
 ## N. PASS/FAIL — Owner section 66 gates
 
-| Gate                                                                | Result                      |
-| ------------------------------------------------------------------- | --------------------------- |
-| Quote lifecycle correct                                             | PASS                        |
-| Quote money snapshot immutable                                      | PASS                        |
-| Fixed fee exact                                                     | PASS                        |
-| Initial locked limits exact                                         | PASS                        |
-| Fee entitlement version reconstructable                             | PASS                        |
-| Priority entitlement version reconstructable                        | PASS                        |
-| Founder without entitlement → no special financial behavior         | PASS                        |
-| Gross limits unaffected by fee discount                             | PASS                        |
-| Available → Reserved atomic                                         | PASS                        |
-| Duplicate request cannot double reserve                             | PASS                        |
-| 100-concurrent test cannot overdraw Available                       | PASS                        |
-| User/hot-wallet volume concurrency safe                             | PASS                        |
-| V1 risk policy never auto-approves                                  | PASS                        |
-| Manual approval idempotent                                          | PASS                        |
-| Priority cannot bypass review state                                 | PASS                        |
-| Deterministic workflow starts through Outbox                        | PASS                        |
-| One workflow per withdrawal                                         | PASS                        |
-| Attempt duplication prevented                                       | PASS                        |
-| Definite pre-broadcast failure safely retryable                     | PASS                        |
-| Possible-broadcast ambiguity always reconciles                      | PASS                        |
-| Ambiguous payout preserves Reserved                                 | PASS                        |
-| No blind resend exists                                              | PASS                        |
-| Definitive pre-broadcast rejection releases full gross exactly once | PASS                        |
-| Confirmation settles Reserved/net/fee exactly once                  | PASS                        |
-| Fee revenue recognized only at confirmation                         | PASS                        |
-| Fake chain impossible in staging/production                         | PASS                        |
-| No real signing/broadcast introduced                                | PASS                        |
+| Gate                                                                | Result                            |
+| ------------------------------------------------------------------- | --------------------------------- |
+| Quote lifecycle correct                                             | PASS                              |
+| Quote money snapshot immutable                                      | PASS                              |
+| Fixed fee exact                                                     | PASS                              |
+| Initial locked limits exact                                         | PASS                              |
+| Fee entitlement version reconstructable                             | PASS                              |
+| Priority entitlement version reconstructable                        | PASS                              |
+| Founder without entitlement → no special financial behavior         | PASS                              |
+| Gross limits unaffected by fee discount                             | PASS                              |
+| Available → Reserved atomic                                         | PASS                              |
+| Duplicate request cannot double reserve                             | PASS                              |
+| 100-concurrent test cannot overdraw Available                       | PASS                              |
+| User/hot-wallet volume concurrency safe                             | PASS                              |
+| V1 risk policy never auto-approves                                  | PASS                              |
+| Manual approval idempotent                                          | PASS                              |
+| Priority cannot bypass review state                                 | PASS                              |
+| Deterministic workflow starts through Outbox                        | PASS                              |
+| One workflow per withdrawal                                         | PASS                              |
+| Attempt duplication prevented                                       | PASS                              |
+| Definite pre-broadcast failure safely retryable                     | PASS                              |
+| Possible-broadcast ambiguity always reconciles                      | PASS                              |
+| Ambiguous payout preserves Reserved                                 | PASS                              |
+| No blind resend exists                                              | PASS                              |
+| Definitive pre-broadcast rejection releases full gross exactly once | PASS                              |
+| Confirmation settles Reserved/net/fee exactly once                  | PASS                              |
+| Fee revenue recognized only at confirmation                         | PASS                              |
+| Fake chain impossible in staging/production                         | PASS                              |
+| No real signing/broadcast introduced                                | PASS                              |
 | Previous phases remain green                                        | PASS (2/3/4/5/6 = 27/21/41/55/35) |
 | `quality` PASS                                                      | PENDING (CI)                      |
 | `docker-smoke` PASS                                                 | PENDING (CI)                      |
