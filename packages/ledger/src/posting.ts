@@ -458,15 +458,28 @@ async function postInsideClient(
   }
 
   // version += 1 once per distinct transaction affecting the account (not per entry line).
+  // last_ledger_transaction_id must track max(posted_at), not last commit-under-lock:
+  // concurrent posters can commit out of posted_at order after waiting on FOR UPDATE.
   for (const accountId of [...locked.keys()].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))) {
     const next = nextBalances.get(accountId);
     if (next === undefined) continue;
     await client.query(
-      `UPDATE ledger_account_balances
+      `UPDATE ledger_account_balances AS b
        SET balance_atomic = $2,
-           version = version + 1,
-           last_ledger_transaction_id = $3
-       WHERE ledger_account_id = $1`,
+           version = b.version + 1,
+           last_ledger_transaction_id = CASE
+             WHEN b.last_ledger_transaction_id IS NULL THEN $3::uuid
+             WHEN (
+               SELECT t_new.posted_at FROM ledger_transactions AS t_new WHERE t_new.id = $3::uuid
+             ) >= (
+               SELECT t_old.posted_at
+               FROM ledger_transactions AS t_old
+               WHERE t_old.id = b.last_ledger_transaction_id
+             )
+             THEN $3::uuid
+             ELSE b.last_ledger_transaction_id
+           END
+       WHERE b.ledger_account_id = $1`,
       [accountId, next.toString(10), transactionId],
     );
   }

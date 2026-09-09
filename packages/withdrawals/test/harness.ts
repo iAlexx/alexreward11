@@ -145,8 +145,13 @@ export async function platformAccountBalance(
 export async function assertLedgerBalanced(pool: Pool): Promise<void> {
   const invariants = await checkLedgerInvariants(pool);
   if (!invariants.ok) {
+    const projection = invariants.findings
+      .filter((f) => f.code === 'PROJECTION_MISMATCH')
+      .slice(0, 3)
+      .map((f) => f.details);
     throw new Error(
-      `ledger invariants failed: ${invariants.findings.map((f) => f.code).join(',')}`,
+      `ledger invariants failed: ${invariants.findings.map((f) => f.code).join(',')}` +
+        (projection.length > 0 ? `; ${JSON.stringify(projection)}` : ''),
     );
   }
   const comparison = await compareProjectionsToStored(pool);
