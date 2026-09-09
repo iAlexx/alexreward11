@@ -176,14 +176,23 @@ Phase 6 therefore adds forward migration `0016_wallet_proof_nonce_lifecycle.sql`
 Domain authority for `ton_proof` remains server config (`expectedTonProofDomain`), never request
 Host/Origin. Staging/production reject localhost domain inheritance.
 
-## ADR-017 — Phase 7 fake payout pipeline as Temporal substitute (LOCAL/TEST)
+## ADR-017 — Phase 7 Outbox → Temporal withdrawal payout (fake activities LOCAL/TEST)
 
 Phase 7 requires Outbox-started payout work with deterministic workflow ID
-`withdrawal/{withdrawalId}`, but production Temporal worker wiring is deferred.
+`withdrawal/{withdrawalId}`.
 
-Decision: LOCAL/TEST use an **in-process** `FakePayoutChain` + Outbox-driven
-`runFakePayoutPipeline` as a Temporal substitute that exercises the same state machine,
-attempts, fencing, ambiguity → reconcile, release, and settlement invariants. Staging/production
-must keep `fakeChainEnabled = false` (config validation fails closed). A later real Temporal
-worker may wrap the same activities without changing the workflow ID contract or ledger posting
-rules. No real signer/KMS/TON broadcast is introduced in Phase 7.
+Decision:
+
+1. **Approval transaction** writes withdrawal APPROVED + `withdrawal.approved` Outbox row and
+   commits. There is **no** Temporal call inside that DB transaction.
+2. **Outbox relay** (worker) claims PENDING `withdrawal.approved` rows and starts Temporal workflow
+   `withdrawalPayoutWorkflow` with `workflowId = withdrawal/{withdrawalId}`.
+   `WorkflowExecutionAlreadyStarted` is treated as recovery of the original workflow (mark Outbox
+   DISPATCHED); Temporal unavailable leaves Outbox PENDING/retryable with Reserved untouched.
+3. **Workflow code is deterministic**; PostgreSQL/network/domain mutation lives in Activities.
+4. Activities call the **FakePayoutChain** pipeline for LOCAL/TEST only
+   (`WITHDRAWAL_FAKE_CHAIN_ENABLED`). Staging/production keep fake chain disabled (fail closed).
+   Real TON/signer/KMS remains Phase 9/10.
+
+In-process `runFakePayoutPipeline` remains available for unit/integration tests that do not need a
+full Temporal env; official Phase 7 Temporal gates use `@temporalio/testing`.

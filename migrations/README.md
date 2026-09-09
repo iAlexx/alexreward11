@@ -30,8 +30,9 @@ provider business behaviour is implemented here.
 | `0015_budget_period_utc_window_integrity.sql`        | Phase 5 narrow: canonical HOUR/UTC_DAY/UTC_MONTH window CHECKs for reward + membership bonus budget periods                                                                                                                                                  |
 | `0016_wallet_proof_nonce_lifecycle.sql`              | Phase 6: `invalidated_at` / `invalidation_reason` so CONSUMED vs SECURITY_INVALIDATED stay distinct for primary-wallet change                                                                                                                                |
 | `0017_withdrawal_engine_integrity.sql`               | Phase 7: withdrawal quote/withdrawal provenance; fee/limit ACTIVE overlap EXCLUDE + financial immutability triggers; frozen quotes; `withdrawal_volume_periods` / reservations; append-only `withdrawal_payout_reconciliations`; attempt intent immutability |
+| `0018_membership_plan_entitlement_rule_binding.sql`  | Phase 7.1: `membership_plan_entitlements` trigger binding rule entitlement/plan to mapping (no new tables)                                                                                                                                                   |
 
-Migrations `0001`–`0016` are **unchanged**. Phase 7 adds only forward migration `0017`.
+Migrations `0001`–`0017` are **unchanged** by the Phase 7.1 correction. Only forward migration `0018` was added.
 
 ## Conventions
 

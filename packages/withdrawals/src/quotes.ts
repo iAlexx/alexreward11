@@ -47,15 +47,31 @@ async function resolveNetworkAndAsset(
   if (networkId === undefined) {
     throw new WithdrawalDomainError('CONFIG', 'Accepted network not found');
   }
-  const asset = await client.query<{ id: string }>(
-    `SELECT id FROM assets WHERE symbol = $1 AND status = 'ACTIVE'`,
-    [config.usdtSymbol],
-  );
-  const assetId = asset.rows[0]?.id;
-  if (assetId === undefined) {
-    throw new WithdrawalDomainError('CONFIG', 'USDT asset not found');
+  if ((network.rowCount ?? 0) > 1) {
+    throw new WithdrawalDomainError('CONFIG', 'Ambiguous accepted networks');
   }
-  return { networkId, assetId };
+
+  // Authoritative: asset must belong to the selected network (no cross-network USDT).
+  const asset = await client.query<{ id: string; is_native: boolean }>(
+    `SELECT id, is_native
+     FROM assets
+     WHERE network_id = $1::uuid
+       AND symbol = $2
+       AND status = 'ACTIVE'
+     FOR SHARE`,
+    [networkId, config.usdtSymbol],
+  );
+  if (asset.rowCount === 0) {
+    throw new WithdrawalDomainError('CONFIG', 'Withdrawal asset not found for network');
+  }
+  if ((asset.rowCount ?? 0) > 1) {
+    throw new WithdrawalDomainError('CONFIG', 'Ambiguous withdrawal assets for network');
+  }
+  const row = asset.rows[0]!;
+  if (config.usdtSymbol === 'USDT' && row.is_native) {
+    throw new WithdrawalDomainError('CONFIG', 'USDT withdrawal asset must be non-native');
+  }
+  return { networkId, assetId: row.id };
 }
 
 export async function createWithdrawalQuote(

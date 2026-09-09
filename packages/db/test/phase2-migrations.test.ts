@@ -27,7 +27,7 @@ const optedInUrl =
   process.env.PHASE2_MIGRATION_TESTS === '1' ? (process.env.DATABASE_URL ?? '') : '';
 const databaseUrl = explicitUrl !== '' ? explicitUrl : optedInUrl;
 
-const EXPECTED_MIGRATION_COUNT = 17;
+const EXPECTED_MIGRATION_COUNT = 18;
 
 const UNIQUE_VIOLATION = '23505';
 const CHECK_VIOLATION = '23514';
@@ -162,6 +162,7 @@ const REQUIRED_TABLES = [
   'withdrawal_volume_periods',
   'withdrawal_volume_reservations',
   'withdrawal_payout_reconciliations',
+  // 0018 adds trigger-only entitlement binding integrity (no new tables)
 ] as const;
 
 /** Column-name fragments that would signal a mutable balance shortcut on `users`. */

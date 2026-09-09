@@ -28,6 +28,16 @@ export interface WithdrawalEngineConfig {
   readonly usdtSymbol: string;
 }
 
+/** Validated API/env subset used to build engine config (no Record casts). */
+export interface ValidatedWithdrawalApiConfig {
+  readonly DEPLOYMENT_ENV: 'local' | 'test' | 'staging' | 'production';
+  readonly WITHDRAWAL_QUOTE_TTL_SECONDS: number;
+  readonly WITHDRAWAL_RISK_POLICY_VERSION: number;
+  readonly WITHDRAWAL_NETWORK_CODE: string;
+  readonly WITHDRAWAL_ASSET_SYMBOL: string;
+  readonly WITHDRAWAL_FAKE_CHAIN_ENABLED: boolean;
+}
+
 export function assertWithdrawalEngineConfig(config: WithdrawalEngineConfig): void {
   if (!Number.isInteger(config.quoteTtlSeconds) || config.quoteTtlSeconds <= 0) {
     throw new WithdrawalDomainError('CONFIG', 'quoteTtlSeconds must be a positive integer');
@@ -38,6 +48,9 @@ export function assertWithdrawalEngineConfig(config: WithdrawalEngineConfig): vo
   if (config.acceptedNetworkCode.trim() === '') {
     throw new WithdrawalDomainError('CONFIG', 'acceptedNetworkCode is required');
   }
+  if (config.usdtSymbol.trim() === '') {
+    throw new WithdrawalDomainError('CONFIG', 'usdtSymbol is required');
+  }
   const stagingOrProd =
     config.deploymentEnvironment === 'STAGING' || config.deploymentEnvironment === 'PRODUCTION';
   if (stagingOrProd && config.fakeChainEnabled) {
@@ -46,8 +59,52 @@ export function assertWithdrawalEngineConfig(config: WithdrawalEngineConfig): vo
       'Fake payout chain cannot be enabled in staging/production',
     );
   }
+  if (stagingOrProd && config.acceptedNetworkCode === 'TON_TESTNET') {
+    throw new WithdrawalDomainError(
+      'CONFIG',
+      'TON_TESTNET is forbidden for staging/production withdrawal config',
+    );
+  }
 }
 
+/**
+ * Build engine config from validated ApiConfig fields only.
+ * Local/test may use documented fixture defaults via config loader merge.
+ * Staging/production must supply reviewed explicit values (fail closed upstream).
+ */
+export function withdrawalEngineConfigFromValidatedApi(
+  api: ValidatedWithdrawalApiConfig,
+): WithdrawalEngineConfig {
+  const deploymentEnvironment: DeploymentEnvironment = (() => {
+    switch (api.DEPLOYMENT_ENV) {
+      case 'local':
+        return 'LOCAL';
+      case 'test':
+        return 'DEV';
+      case 'staging':
+        return 'STAGING';
+      case 'production':
+        return 'PRODUCTION';
+      default: {
+        const exhaustive: never = api.DEPLOYMENT_ENV;
+        return exhaustive;
+      }
+    }
+  })();
+
+  const config: WithdrawalEngineConfig = {
+    deploymentEnvironment,
+    quoteTtlSeconds: api.WITHDRAWAL_QUOTE_TTL_SECONDS,
+    riskPolicyVersion: api.WITHDRAWAL_RISK_POLICY_VERSION,
+    fakeChainEnabled: api.WITHDRAWAL_FAKE_CHAIN_ENABLED,
+    acceptedNetworkCode: api.WITHDRAWAL_NETWORK_CODE,
+    usdtSymbol: api.WITHDRAWAL_ASSET_SYMBOL,
+  };
+  assertWithdrawalEngineConfig(config);
+  return config;
+}
+
+/** LOCAL/TEST fixture helper for domain tests — never call for staging/production API. */
 export function localWithdrawalEngineFixtureConfig(
   overrides: Partial<WithdrawalEngineConfig> = {},
 ): WithdrawalEngineConfig {

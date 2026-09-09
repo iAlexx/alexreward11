@@ -72,10 +72,18 @@ export async function createOwnerAdmin(pool: Pool, email?: string): Promise<stri
 export const createTestAdmin = createOwnerAdmin;
 
 export async function usdtAssetId(pool: Pool): Promise<string> {
-  const result = await pool.query<{ id: string }>(`SELECT id FROM assets WHERE symbol = 'USDT'`);
-  const id = result.rows[0]?.id;
-  if (id === undefined) throw new Error('USDT asset missing');
-  return id;
+  const result = await pool.query<{ id: string }>(
+    `SELECT a.id
+     FROM assets a
+     JOIN networks n ON n.id = a.network_id
+     WHERE a.symbol = 'USDT'
+       AND a.status = 'ACTIVE'
+       AND n.code = 'TON_TESTNET'`,
+  );
+  if ((result.rowCount ?? 0) !== 1) {
+    throw new Error('expected exactly one ACTIVE TON_TESTNET USDT asset');
+  }
+  return result.rows[0]!.id;
 }
 
 export async function networkId(pool: Pool, code = 'TON_TESTNET'): Promise<string> {
@@ -513,6 +521,36 @@ export async function approveWithdrawal(
     reason: 'phase7-approve',
     idempotencyKey: idempotencyKey ?? randomUUID(),
   });
+}
+
+/** Quote → create → Owner APPROVE with funded Available + hot wallet. */
+export async function createApprovedWithdrawal(
+  pool: Pool,
+  input: {
+    userId: string;
+    networkId: string;
+    assetId: string;
+    adminUserId: string;
+    hotWalletId: string;
+    amountAtomic: string;
+  },
+): Promise<string> {
+  await fundUserAvailable({
+    pool,
+    userId: input.userId,
+    assetId: input.assetId,
+    amountAtomic: '5000000',
+    key: randomUUID(),
+  });
+  await fundHotWalletUsdt(pool, input.hotWalletId, '10000000');
+  const { withdrawalId } = await quoteAndCreate(
+    pool,
+    input.userId,
+    input.amountAtomic,
+    randomUUID(),
+  );
+  await approveWithdrawal(pool, input.adminUserId, withdrawalId);
+  return withdrawalId;
 }
 
 export async function truncateWithdrawalTables(pool: Pool): Promise<void> {

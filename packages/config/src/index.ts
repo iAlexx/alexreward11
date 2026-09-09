@@ -52,6 +52,11 @@ const LOCAL_API_AUTH_POLICY_DEFAULTS = {
   AUTH_RATE_LIMIT_MAX: '30',
   CLAIM_RATE_LIMIT_WINDOW_SECONDS: '300',
   CLAIM_RATE_LIMIT_MAX: '10',
+  WITHDRAWAL_QUOTE_TTL_SECONDS: '300',
+  WITHDRAWAL_RISK_POLICY_VERSION: '1',
+  WITHDRAWAL_NETWORK_CODE: 'TON_TESTNET',
+  WITHDRAWAL_ASSET_SYMBOL: 'USDT',
+  WITHDRAWAL_FAKE_CHAIN_ENABLED: 'true',
 } as const;
 
 const apiSchema = serviceSchema
@@ -77,6 +82,12 @@ const apiSchema = serviceSchema
     AUTH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(10_000),
     CLAIM_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().min(1).max(3600),
     CLAIM_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(10_000),
+    // Withdrawal engine — no Zod defaults; local/test merge supplies fixture defaults only.
+    WITHDRAWAL_QUOTE_TTL_SECONDS: z.coerce.number().int().min(1).max(86_400),
+    WITHDRAWAL_RISK_POLICY_VERSION: z.coerce.number().int().min(1).max(10_000),
+    WITHDRAWAL_NETWORK_CODE: z.string().min(1).max(64),
+    WITHDRAWAL_ASSET_SYMBOL: z.string().min(1).max(32),
+    WITHDRAWAL_FAKE_CHAIN_ENABLED: booleanFromString,
   })
   .superRefine((value, context) => {
     const outsideLocal = value.DEPLOYMENT_ENV !== 'local' && value.DEPLOYMENT_ENV !== 'test';
@@ -96,6 +107,20 @@ const apiSchema = serviceSchema
         code: 'custom',
         path: ['CORS_ORIGINS'],
         message: 'must list at least one explicit origin outside local/test',
+      });
+    }
+    if (outsideLocal && value.WITHDRAWAL_FAKE_CHAIN_ENABLED) {
+      context.addIssue({
+        code: 'custom',
+        path: ['WITHDRAWAL_FAKE_CHAIN_ENABLED'],
+        message: 'fake payout chain is forbidden outside local/test',
+      });
+    }
+    if (outsideLocal && value.WITHDRAWAL_NETWORK_CODE === 'TON_TESTNET') {
+      context.addIssue({
+        code: 'custom',
+        path: ['WITHDRAWAL_NETWORK_CODE'],
+        message: 'TON_TESTNET cannot be inherited by staging/production',
       });
     }
   });
@@ -123,10 +148,41 @@ const botSchema = commonSchema
     }
   });
 
-const workerSchema = serviceSchema.extend({
-  WORKER_PORT: z.coerce.number().int().min(1024).max(65535).default(3004),
-  TEMPORAL_TASK_QUEUE: z.string().min(3),
-});
+const LOCAL_WORKER_WITHDRAWAL_DEFAULTS = {
+  WITHDRAWAL_QUOTE_TTL_SECONDS: '300',
+  WITHDRAWAL_RISK_POLICY_VERSION: '1',
+  WITHDRAWAL_NETWORK_CODE: 'TON_TESTNET',
+  WITHDRAWAL_ASSET_SYMBOL: 'USDT',
+  WITHDRAWAL_FAKE_CHAIN_ENABLED: 'true',
+} as const;
+
+const workerSchema = serviceSchema
+  .extend({
+    WORKER_PORT: z.coerce.number().int().min(1024).max(65535).default(3004),
+    TEMPORAL_TASK_QUEUE: z.string().min(3),
+    WITHDRAWAL_QUOTE_TTL_SECONDS: z.coerce.number().int().min(1).max(86_400),
+    WITHDRAWAL_RISK_POLICY_VERSION: z.coerce.number().int().min(1).max(10_000),
+    WITHDRAWAL_NETWORK_CODE: z.string().min(1).max(64),
+    WITHDRAWAL_ASSET_SYMBOL: z.string().min(1).max(32),
+    WITHDRAWAL_FAKE_CHAIN_ENABLED: booleanFromString,
+  })
+  .superRefine((value, context) => {
+    const outsideLocal = value.DEPLOYMENT_ENV !== 'local' && value.DEPLOYMENT_ENV !== 'test';
+    if (outsideLocal && value.WITHDRAWAL_FAKE_CHAIN_ENABLED) {
+      context.addIssue({
+        code: 'custom',
+        path: ['WITHDRAWAL_FAKE_CHAIN_ENABLED'],
+        message: 'fake payout chain is forbidden outside local/test',
+      });
+    }
+    if (outsideLocal && value.WITHDRAWAL_NETWORK_CODE === 'TON_TESTNET') {
+      context.addIssue({
+        code: 'custom',
+        path: ['WITHDRAWAL_NETWORK_CODE'],
+        message: 'TON_TESTNET cannot be inherited by staging/production',
+      });
+    }
+  });
 
 const signerSchema = commonSchema
   .extend({
@@ -217,8 +273,14 @@ export const loadApiConfig = (environment: NodeJS.ProcessEnv = process.env): Api
 };
 export const loadBotConfig = (environment: NodeJS.ProcessEnv = process.env): BotConfig =>
   parseEnvironment(botSchema, environment);
-export const loadWorkerConfig = (environment: NodeJS.ProcessEnv = process.env): WorkerConfig =>
-  parseEnvironment(workerSchema, environment);
+export const loadWorkerConfig = (environment: NodeJS.ProcessEnv = process.env): WorkerConfig => {
+  const deployment = environment.DEPLOYMENT_ENV ?? 'local';
+  const merged =
+    deployment === 'local' || deployment === 'test'
+      ? { ...LOCAL_WORKER_WITHDRAWAL_DEFAULTS, ...environment }
+      : environment;
+  return parseEnvironment(workerSchema, merged);
+};
 export const loadSignerConfig = (environment: NodeJS.ProcessEnv = process.env): SignerConfig =>
   parseEnvironment(signerSchema, environment);
 export const loadWebConfig = (environment: NodeJS.ProcessEnv = process.env): WebConfig =>

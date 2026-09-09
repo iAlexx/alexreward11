@@ -13,10 +13,10 @@ multi-period bonus reservations, and atomic exposure period counters, and
 Phase 6 adds `0016_wallet_proof_nonce_lifecycle.sql` so open `ton_proof` challenges can be
 security-invalidated (distinct from successful consumption) when the primary wallet changes.
 Phase 7 adds `0017_withdrawal_engine_integrity.sql` for withdrawal engine integrity (quote/
-withdrawal provenance, fee/limit immutability + ACTIVE overlap EXCLUDE, frozen quotes, volume
-periods, append-only payout reconciliations, attempt intent immutability). Migrations
-`0001`–`0016` remain immutable after acceptance. Real signer/KMS/TON broadcast remain out of
-scope until later Owner-approved phases.
+withdrawal provenance, fee/limit ACTIVE EXCLUDE, volume periods, append-only reconciliations,
+attempt intent immutability). Phase 7.1 adds `0018_membership_plan_entitlement_rule_binding.sql`
+for entitlement↔rule binding. Migrations `0001`–`0017` remain immutable after acceptance.
+Real signer/KMS/TON broadcast remain out of scope until later Owner-approved phases.
 
 ## Migration inventory
 
@@ -39,8 +39,9 @@ scope until later Owner-approved phases.
 | `0015_budget_period_utc_window_integrity.sql`        | Phase 5 narrow: canonical HOUR / UTC_DAY / UTC_MONTH window CHECKs on reward + membership bonus budget periods                                                                                               |
 | `0016_wallet_proof_nonce_lifecycle.sql`              | Phase 6: nonce `invalidated_at` / `invalidation_reason`; open-index excludes consumed and invalidated rows                                                                                                   |
 | `0017_withdrawal_engine_integrity.sql`               | Phase 7: quote/withdrawal provenance; fee/limit ACTIVE overlap EXCLUDE + financial immutability; frozen quotes; volume periods/reservations; append-only payout reconciliations; attempt intent immutability |
+| `0018_membership_plan_entitlement_rule_binding.sql`  | Phase 7.1: trigger binding `membership_plan_entitlements` to matching benefit-rule entitlement/plan                                                                                                          |
 
-Migrations `0001`–`0016` are **unchanged** by Phase 7. Only forward migration `0017` was added.
+Migrations `0001`–`0017` are **unchanged** by the Phase 7.1 correction. Only forward migration `0018` was added.
 
 ## Schema ownership
 

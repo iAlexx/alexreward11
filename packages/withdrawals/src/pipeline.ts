@@ -415,40 +415,10 @@ export async function advanceFakeReconciliation(
     }
     const advanced = fakeChain.advance(a.id);
 
-    if (advanced.phase === 'CONFIRMED') {
-      const result = await reconcileWithdrawalAttemptInTxn(client, config, {
-        withdrawalId: input.withdrawalId,
-        attemptId: a.id,
-        observation: advanced,
-      });
-      return {
-        withdrawalId: input.withdrawalId,
-        state: result.state,
-        attemptId: a.id,
-        scenario,
-      };
-    }
-
-    if (advanced.phase === 'DEFINITIVE_NONPAYMENT') {
-      const result = await reconcileWithdrawalAttemptInTxn(client, config, {
-        withdrawalId: input.withdrawalId,
-        attemptId: a.id,
-        observation: advanced,
-        forceResolution: 'DEFINITIVE_NONPAYMENT',
-      });
-      return {
-        withdrawalId: input.withdrawalId,
-        state: result.state,
-        attemptId: a.id,
-        scenario,
-      };
-    }
-
     const result = await reconcileWithdrawalAttemptInTxn(client, config, {
       withdrawalId: input.withdrawalId,
       attemptId: a.id,
       observation: advanced,
-      forceResolution: 'AMBIGUOUS',
     });
     return {
       withdrawalId: input.withdrawalId,

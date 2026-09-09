@@ -11,21 +11,16 @@ import type { WithdrawalState } from './state-machine.js';
 export type ReconcileResolution =
   'UNRESOLVED' | 'INTENDED_PAYOUT_PROVEN' | 'DEFINITIVE_NONPAYMENT' | 'AMBIGUOUS';
 
+/**
+ * Runtime reconciliation input — observation must come from the authoritative
+ * FakePayoutChain (or later real chain adapter). Callers cannot inject resolution.
+ */
 export interface ReconcileWithdrawalAttemptInput {
   readonly withdrawalId: string;
   readonly attemptId: string;
-  /** Legacy/explicit resolution path (skips observation match when set without observation). */
-  readonly resolution?: ReconcileResolution;
+  /** Authoritative chain-adapter observation. Required for runtime reconcile. */
+  readonly observation: FakePayoutObservation;
   readonly evidenceSummary?: Readonly<Record<string, unknown>>;
-  readonly observedRecipient?: string | null;
-  readonly observedAmountAtomic?: string | null;
-  readonly observedAssetSymbol?: string | null;
-  readonly observedQueryId?: string | null;
-  readonly correlationReference?: string | null;
-  /** Preferred: match observation against expected intent fields. */
-  readonly observation?: FakePayoutObservation;
-  /** Force resolution after observation match (e.g. DEFINITIVE_NONPAYMENT / AMBIGUOUS). */
-  readonly forceResolution?: ReconcileResolution;
 }
 
 export interface ReconcileWithdrawalAttemptResult {
@@ -40,7 +35,7 @@ function addressesEqual(a: string, b: string): boolean {
 
 /**
  * Match observation vs expected recipient (wallet address), net amount,
- * asset symbol USDT, query_id. Wrong any field → not INTENDED_PAYOUT_PROVEN.
+ * asset symbol, query_id. Wrong any field → not INTENDED_PAYOUT_PROVEN.
  */
 export function matchIntendedPayout(input: {
   readonly expectedRecipient: string;
@@ -75,19 +70,42 @@ export function matchIntendedPayout(input: {
   return true;
 }
 
+function deriveResolution(input: {
+  readonly observation: FakePayoutObservation;
+  readonly expectedRecipient: string;
+  readonly expectedNetAtomic: string;
+  readonly expectedAssetSymbol: string;
+  readonly expectedQueryId: string;
+}): ReconcileResolution {
+  const obs = input.observation;
+  if (obs.phase === 'CONFIRMED') {
+    const matched = matchIntendedPayout({
+      expectedRecipient: input.expectedRecipient,
+      expectedNetAtomic: input.expectedNetAtomic,
+      expectedAssetSymbol: input.expectedAssetSymbol,
+      expectedQueryId: input.expectedQueryId,
+      observedRecipient: obs.recipientAddress,
+      observedAmountAtomic: obs.amountAtomic,
+      observedAssetSymbol: obs.assetSymbol,
+      observedQueryId: obs.queryId.toString(10),
+    });
+    return matched ? 'INTENDED_PAYOUT_PROVEN' : 'AMBIGUOUS';
+  }
+  if (obs.phase === 'DEFINITIVE_NONPAYMENT') {
+    return 'DEFINITIVE_NONPAYMENT';
+  }
+  return 'AMBIGUOUS';
+}
+
 /**
- * Append-only reconciliation evidence. Resolves RECONCILE_REQUIRED toward
- * CONFIRMED / QUEUED / HELD (held_from_reconcile) / remain RECONCILE_REQUIRED.
+ * Append-only reconciliation evidence. Resolution is derived ONLY from the
+ * authoritative observation — never from caller-supplied resolution flags.
  */
 export async function reconcileWithdrawalAttempt(
   db: WithdrawalDb,
-  configOrInput: WithdrawalEngineConfig | ReconcileWithdrawalAttemptInput,
-  maybeInput?: ReconcileWithdrawalAttemptInput,
+  config: WithdrawalEngineConfig,
+  input: ReconcileWithdrawalAttemptInput,
 ): Promise<ReconcileWithdrawalAttemptResult> {
-  const input =
-    maybeInput !== undefined ? maybeInput : (configOrInput as ReconcileWithdrawalAttemptInput);
-  const config = maybeInput !== undefined ? (configOrInput as WithdrawalEngineConfig) : undefined;
-
   return withWithdrawalTransaction(db, async (client) =>
     reconcileWithdrawalAttemptInTxn(client, config, input),
   );
@@ -95,17 +113,14 @@ export async function reconcileWithdrawalAttempt(
 
 export async function reconcileWithdrawalAttemptInTxn(
   client: PoolClient,
-  configOrInput: WithdrawalEngineConfig | ReconcileWithdrawalAttemptInput | undefined,
-  maybeInput?: ReconcileWithdrawalAttemptInput,
+  config: WithdrawalEngineConfig | undefined,
+  input: ReconcileWithdrawalAttemptInput,
 ): Promise<ReconcileWithdrawalAttemptResult> {
-  // Support: (client, input) and (client, config, input)
-  let config: WithdrawalEngineConfig | undefined;
-  let input: ReconcileWithdrawalAttemptInput;
-  if (maybeInput !== undefined) {
-    config = configOrInput as WithdrawalEngineConfig | undefined;
-    input = maybeInput;
-  } else {
-    input = configOrInput as ReconcileWithdrawalAttemptInput;
+  if (input.observation === undefined || input.observation === null) {
+    throw new WithdrawalDomainError(
+      'VALIDATION',
+      'Authoritative chain observation is required for reconciliation',
+    );
   }
 
   const locked = await client.query<{
@@ -145,62 +160,19 @@ export async function reconcileWithdrawalAttemptInTxn(
   const expectedRecipient = wallet.rows[0]?.friendly_address ?? wallet.rows[0]?.raw_address ?? '';
   const expectedAssetSymbol = config?.usdtSymbol ?? 'USDT';
 
-  const observedRecipient = input.observation?.recipientAddress ?? input.observedRecipient ?? null;
-  const observedAmountAtomic =
-    input.observation?.amountAtomic ?? input.observedAmountAtomic ?? null;
-  const observedAssetSymbol = input.observation?.assetSymbol ?? input.observedAssetSymbol ?? null;
-  const observedQueryId =
-    input.observation !== undefined
-      ? input.observation.queryId.toString(10)
-      : (input.observedQueryId ?? null);
-  const correlationReference =
-    input.observation?.correlationReference ?? input.correlationReference ?? null;
+  const resolution = deriveResolution({
+    observation: input.observation,
+    expectedRecipient,
+    expectedNetAtomic: w.net_amount_atomic,
+    expectedAssetSymbol,
+    expectedQueryId: attempt.rows[0].query_id,
+  });
 
-  let resolution: ReconcileResolution;
-  if (input.forceResolution !== undefined) {
-    resolution = input.forceResolution;
-  } else if (input.resolution !== undefined && input.observation === undefined) {
-    resolution = input.resolution;
-  } else if (
-    input.observation?.phase === 'CONFIRMED' ||
-    input.resolution === 'INTENDED_PAYOUT_PROVEN'
-  ) {
-    const matched = matchIntendedPayout({
-      expectedRecipient,
-      expectedNetAtomic: w.net_amount_atomic,
-      expectedAssetSymbol,
-      expectedQueryId: attempt.rows[0].query_id,
-      observedRecipient,
-      observedAmountAtomic,
-      observedAssetSymbol,
-      observedQueryId,
-    });
-    resolution = matched ? 'INTENDED_PAYOUT_PROVEN' : 'AMBIGUOUS';
-  } else if (input.observation?.phase === 'DEFINITIVE_NONPAYMENT') {
-    resolution = 'DEFINITIVE_NONPAYMENT';
-  } else if (input.resolution !== undefined) {
-    resolution = input.resolution;
-  } else {
-    resolution = 'AMBIGUOUS';
-  }
-
-  // If caller claimed INTENDED_PAYOUT_PROVEN explicitly, still enforce field match.
-  if (resolution === 'INTENDED_PAYOUT_PROVEN') {
-    const matched = matchIntendedPayout({
-      expectedRecipient,
-      expectedNetAtomic: w.net_amount_atomic,
-      expectedAssetSymbol,
-      expectedQueryId: attempt.rows[0].query_id,
-      observedRecipient,
-      observedAmountAtomic,
-      observedAssetSymbol,
-      observedQueryId,
-    });
-    if (!matched) {
-      resolution = 'AMBIGUOUS';
-    }
-  }
-
+  const observedRecipient = input.observation.recipientAddress;
+  const observedAmountAtomic = input.observation.amountAtomic;
+  const observedAssetSymbol = input.observation.assetSymbol;
+  const observedQueryId = input.observation.queryId.toString(10);
+  const correlationReference = input.observation.correlationReference;
   const resolvedAt = resolution === 'UNRESOLVED' ? null : new Date().toISOString();
 
   const inserted = await client.query<{ id: string }>(
@@ -219,7 +191,8 @@ export async function reconcileWithdrawalAttemptInTxn(
       resolution,
       JSON.stringify({
         ...(input.evidenceSummary ?? {}),
-        phase: input.observation?.phase,
+        phase: input.observation.phase,
+        derivedOnly: true,
       }),
       observedRecipient,
       observedAmountAtomic,
@@ -245,7 +218,6 @@ export async function reconcileWithdrawalAttemptInTxn(
     await settleWithdrawalReservation(client, { withdrawalId: w.id });
     state = 'CONFIRMED';
   } else if (resolution === 'DEFINITIVE_NONPAYMENT' && w.state === 'RECONCILE_REQUIRED') {
-    // Owner may choose QUEUED (retry) or HELD with evidence; V1 holds for Owner reject.
     await transitionWithdrawal(client, {
       id: w.id,
       from: 'RECONCILE_REQUIRED',
@@ -254,10 +226,8 @@ export async function reconcileWithdrawalAttemptInTxn(
     });
     state = 'HELD';
   } else if (resolution === 'AMBIGUOUS' && w.state === 'RECONCILE_REQUIRED') {
-    // Remain RECONCILE_REQUIRED — durable evidence only. Optionally escalate to HELD.
     state = 'RECONCILE_REQUIRED';
   } else if (resolution === 'DEFINITIVE_NONPAYMENT' && w.state === 'HELD') {
-    // Evidence recorded; reject still requires explicit decideWithdrawal with proof.
     state = 'HELD';
   }
 

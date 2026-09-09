@@ -5,8 +5,8 @@ chain**. Money movement uses the Phase 4 ledger only. There is **no** real TON b
 signer, KMS, mnemonic, or Jetton transfer in this phase.
 
 Package: `@alex-rewards/withdrawals`. HTTP surface: authenticated Nest routes under `/v1`.
-Schema integrity: forward migration `0017_withdrawal_engine_integrity.sql` (do not edit
-`0001`–`0016`).
+Schema integrity: forward migrations `0017_withdrawal_engine_integrity.sql` and
+`0018_membership_plan_entitlement_rule_binding.sql` (do not edit `0001`–`0017` in place).
 
 ## Quote lifecycle
 
@@ -48,6 +48,15 @@ Entitlement code `WITHDRAWAL_PLATFORM_FEE_DISCOUNT` (FINANCIAL / BPS) resolves t
 
 `user_memberships` → plan → `membership_plan_entitlements` → `membership_benefit_rule_versions`.
 
+Binding integrity (fail closed):
+
+- `mbr.id = mpe.rule_version_id`
+- `mbr.entitlement_id = mpe.entitlement_id`
+- `mbr.membership_plan_id IS NULL` (global) **or** `mbr.membership_plan_id = mp.id`
+
+Migration `0018` enforces the same binding with a BEFORE INSERT/UPDATE trigger on
+`membership_plan_entitlements`. Cross-bound fee→reward-bonus or cross-plan rules are rejected.
+
 Arithmetic (FLOOR):
 
 ```text
@@ -63,8 +72,9 @@ final_fee = base − discount
 
 ## Priority entitlement
 
-`PRIORITY_WITHDRAWAL_REVIEW` sets `priority_review` / queue ordering only. It does **not**
-bypass risk, manual review, security gates, or auto-approve.
+`PRIORITY_WITHDRAWAL_REVIEW` (INTERNAL / BOOLEAN catalogue) sets `priority_review` / queue
+ordering only. Same binding integrity as fee discount. It does **not** bypass risk, manual
+review, security gates, or auto-approve.
 
 ## Limits and volume concurrency
 
@@ -106,18 +116,45 @@ Blocked/suspended accounts → reject + release. Priority cannot skip this path.
 
 `decideWithdrawal` is the authoritative Owner/admin command (`APPROVE` | `HOLD` | `REJECT`).
 Approve writes transactional Outbox `withdrawal.approved` with payload workflow id
-`withdrawal/{withdrawalId}` — **no synchronous Temporal call** in Phase 7.
+`withdrawal/{withdrawalId}` — **no synchronous Temporal call** inside the approval DB
+transaction. The worker Outbox relay starts Temporal asynchronously.
 
 Reject (definitive pre-broadcast) posts `WITHDRAWAL_RELEASE` for the **full gross once**
 (Reserved → Available). Reconcile-origin `HELD` (`held_from_reconcile`) forbids REJECT until
 append-only `DEFINITIVE_NONPAYMENT` evidence exists.
 
-## Fake Temporal substitute + workflow ID
+## Configuration
 
-LOCAL/TEST uses in-process `FakePayoutChain` + `runFakePayoutPipeline` as an Outbox-driven
-pipeline substitute. Workflow ID contract remains `withdrawal/{withdrawalId}` so a real Temporal
-worker can later wrap the same activities without changing identity. Staging/production must
-keep `fakeChainEnabled = false` (config validation fails closed).
+Typed keys in `@alex-rewards/config` (API + worker schemas):
+
+| Key                              | Purpose                             |
+| -------------------------------- | ----------------------------------- |
+| `WITHDRAWAL_QUOTE_TTL_SECONDS`   | Quote TTL                           |
+| `WITHDRAWAL_RISK_POLICY_VERSION` | Risk policy version                 |
+| `WITHDRAWAL_NETWORK_CODE`        | Accepted network code               |
+| `WITHDRAWAL_ASSET_SYMBOL`        | Withdrawal asset symbol (e.g. USDT) |
+| `WITHDRAWAL_FAKE_CHAIN_ENABLED`  | Fake payout chain (LOCAL/TEST only) |
+
+Local/test may receive documented fixture defaults via loader merge. Staging/production
+**fail closed** if keys are missing, if `TON_TESTNET` is inherited, or if fake chain is enabled.
+
+Asset resolution requires `assets.network_id` = resolved network, matching symbol, `ACTIVE`,
+and for USDT `is_native = false`. Zero or multiple matches → fail closed (no `rows[0]`).
+
+## Outbox → Temporal workflow
+
+1. Approval TX: state + Outbox `withdrawal.approved` + commit (no Temporal).
+2. Worker relay claims PENDING rows and starts `withdrawalPayoutWorkflow` with
+   `workflowId = withdrawal/{withdrawalId}`.
+3. Duplicate start (`WorkflowExecutionAlreadyStarted`) recovers the original workflow.
+4. Temporal unavailable → Outbox stays retryable; Reserved untouched.
+5. Activities run the Phase 7 fake payout pipeline (LOCAL/TEST only). Workflow code stays
+   deterministic (no DB/network secrets in history).
+
+## Fake payout adapter
+
+LOCAL/TEST uses `FakePayoutChain` inside Temporal activities (and in-process harness helpers).
+Staging/production keep `fakeChainEnabled = false`.
 
 ## Attempts + dispatch fencing
 
@@ -132,9 +169,19 @@ origin `HELD`). **Reserved is never released** on ambiguity. No blind resend.
 
 ## Reconciliation
 
-`withdrawal_payout_reconciliations` is **append-only** (UPDATE/DELETE rejected). Resolutions:
-`UNRESOLVED` | `INTENDED_PAYOUT_PROVEN` | `DEFINITIVE_NONPAYMENT` | `AMBIGUOUS`. Evidence is
-required before reject-from-reconcile; ledger history is never silently rewritten.
+`withdrawal_payout_reconciliations` is **append-only** (UPDATE/DELETE rejected). Runtime
+reconcile derives resolution **only** from an authoritative chain-adapter observation
+(Phase 7: `FakePayoutChain`). Callers cannot inject `resolution` / `forceResolution` /
+self-declared observed fields as financial authority.
+
+Derived resolutions:
+
+- `INTENDED_PAYOUT_PROVEN` — trusted CONFIRMED observation matching recipient, net atomic,
+  asset, query/correlation, attempt association
+- `DEFINITIVE_NONPAYMENT` — trusted definitive-nonpayment observation
+- `AMBIGUOUS` — incomplete/conflicting/untrusted evidence (Reserved preserved)
+
+Evidence is required before reject-from-reconcile; ledger history is never silently rewritten.
 
 ## Settlement (CONFIRMED)
 
@@ -162,7 +209,6 @@ Phase 7.
 
 - Real signer / KMS / mnemonic / seed storage
 - Real TON / Jetton broadcast or Testnet payout
-- Production Temporal worker wiring (contract reserved)
 - Phase 8 Control Center / Telegram admin review UI
 
 ## HTTP APIs (authenticated session)
@@ -183,6 +229,9 @@ admin channels). Fake pipeline helpers are LOCAL/TEST harness only.
 `0017_withdrawal_engine_integrity.sql` — quote/withdrawal provenance; fee/limit ACTIVE
 overlap EXCLUDE; financial immutability triggers; frozen quotes; attempt intent immutability;
 `withdrawal_volume_periods` / reservations; append-only `withdrawal_payout_reconciliations`.
+
+`0018_membership_plan_entitlement_rule_binding.sql` — fail-closed trigger so plan entitlement
+mappings cannot point at a benefit rule for a different entitlement or another plan.
 
 See `docs/LEDGER.md` (Phase 7 accounting), `docs/DATABASE.md`, and
 `docs/PHASE_07_ACCEPTANCE_REPORT.md`.

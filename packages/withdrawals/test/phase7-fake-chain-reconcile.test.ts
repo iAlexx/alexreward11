@@ -360,14 +360,22 @@ describe.skipIf(phase7DatabaseUrl === '')('Phase 7 fake chain reconcile', () => 
       'BROADCAST_RESULT_UNKNOWN',
     );
 
+    const attempt = await pool.query<{ query_id: string }>(
+      `SELECT query_id::text FROM withdrawal_attempts WHERE id = $1::uuid`,
+      [unknown.attemptId],
+    );
     const result = await reconcileWithdrawalAttempt(pool, engineConfig, {
       withdrawalId,
       attemptId: unknown.attemptId!,
-      observedRecipient: 'EQ_WRONG_RECIPIENT',
-      observedAmountAtomic: '190000',
-      observedAssetSymbol: 'USDT',
-      observedQueryId: '1',
-      resolution: 'INTENDED_PAYOUT_PROVEN',
+      observation: {
+        phase: 'CONFIRMED',
+        queryId: BigInt(attempt.rows[0]?.query_id ?? '1'),
+        recipientAddress: 'EQ_WRONG_RECIPIENT',
+        amountAtomic: '190000',
+        assetSymbol: 'USDT',
+        correlationReference: 'fake-mismatch',
+        mayHaveBroadcast: true,
+      },
     });
     expect(result.resolution).toBe('AMBIGUOUS');
     expect(result.state).toBe('RECONCILE_REQUIRED');

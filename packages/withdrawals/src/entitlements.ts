@@ -16,6 +16,7 @@ export interface PriorityEntitlement {
 
 /**
  * Resolve WITHDRAWAL_PLATFORM_FEE_DISCOUNT via membership → plan → entitlement → benefit rule.
+ * Binding integrity: mbr.entitlement_id = mpe.entitlement_id and plan-compatible rule.
  * Founder status alone yields zero discount without an active approved entitlement rule.
  * Ambiguous FINANCIAL candidates → FAIL CLOSED.
  */
@@ -35,7 +36,10 @@ export async function resolvePlatformFeeDiscount(
      JOIN membership_plans mp ON mp.id = um.membership_plan_id
      JOIN membership_plan_entitlements mpe ON mpe.membership_plan_id = mp.id
      JOIN entitlements e ON e.id = mpe.entitlement_id
-     JOIN membership_benefit_rule_versions mbr ON mbr.id = mpe.rule_version_id
+     JOIN membership_benefit_rule_versions mbr
+       ON mbr.id = mpe.rule_version_id
+      AND mbr.entitlement_id = mpe.entitlement_id
+      AND (mbr.membership_plan_id IS NULL OR mbr.membership_plan_id = mp.id)
      WHERE um.user_id = $1::uuid
        AND um.status = 'ACTIVE'
        AND (um.expires_at IS NULL OR um.expires_at > $2::timestamptz)
@@ -71,6 +75,10 @@ export async function resolvePlatformFeeDiscount(
   };
 }
 
+/**
+ * Resolve PRIORITY_WITHDRAWAL_REVIEW (INTERNAL BOOLEAN catalogue).
+ * Same binding integrity as fee discount. Queue order only — never a security bypass.
+ */
 export async function resolvePriorityReview(
   client: PoolClient,
   input: { readonly userId: string; readonly asOf: Date },
@@ -87,7 +95,10 @@ export async function resolvePriorityReview(
      JOIN membership_plans mp ON mp.id = um.membership_plan_id
      JOIN membership_plan_entitlements mpe ON mpe.membership_plan_id = mp.id
      JOIN entitlements e ON e.id = mpe.entitlement_id
-     JOIN membership_benefit_rule_versions mbr ON mbr.id = mpe.rule_version_id
+     JOIN membership_benefit_rule_versions mbr
+       ON mbr.id = mpe.rule_version_id
+      AND mbr.entitlement_id = mpe.entitlement_id
+      AND (mbr.membership_plan_id IS NULL OR mbr.membership_plan_id = mp.id)
      WHERE um.user_id = $1::uuid
        AND um.status = 'ACTIVE'
        AND (um.expires_at IS NULL OR um.expires_at > $2::timestamptz)
@@ -97,6 +108,7 @@ export async function resolvePriorityReview(
        AND mpe.valid_from <= $2::timestamptz
        AND (mpe.valid_to IS NULL OR mpe.valid_to > $2::timestamptz)
        AND e.code = 'PRIORITY_WITHDRAWAL_REVIEW'
+       AND e.security_classification = 'INTERNAL'
        AND e.value_type = 'BOOLEAN'
        AND mbr.status = 'ACTIVE'
        AND mbr.effective_from <= $2::timestamptz

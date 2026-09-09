@@ -5,8 +5,13 @@ export {
   LOCKED_INITIAL_WITHDRAWAL,
   assertWithdrawalEngineConfig,
   localWithdrawalEngineFixtureConfig,
+  withdrawalEngineConfigFromValidatedApi,
 } from './config.js';
-export type { DeploymentEnvironment, WithdrawalEngineConfig } from './config.js';
+export type {
+  DeploymentEnvironment,
+  ValidatedWithdrawalApiConfig,
+  WithdrawalEngineConfig,
+} from './config.js';
 
 export {
   applyPlatformFeeDiscount,
@@ -26,6 +31,30 @@ export {
   withdrawalApprovedDedupeKey,
   withdrawalWorkflowId,
 } from './outbox.js';
+
+export {
+  WITHDRAWAL_PAYOUT_WORKFLOW_TYPE,
+  claimPendingWithdrawalApprovedEvents,
+  markOutboxDispatched,
+  markOutboxRetry,
+  startWithdrawalWorkflowFromOutbox,
+  processWithdrawalApprovedOutboxBatch,
+  redactOutboxError,
+  outboxRetryBackoffSeconds,
+} from './outbox-relay.js';
+export type {
+  WithdrawalApprovedOutboxEvent,
+  StartWithdrawalWorkflowResult,
+  ProcessWithdrawalApprovedOutboxBatchOptions,
+  ProcessWithdrawalApprovedOutboxBatchResult,
+  TemporalWorkflowStarter,
+} from './outbox-relay.js';
+
+export {
+  registerFakePayoutScenario,
+  takeFakePayoutScenario,
+  clearFakePayoutScenarios,
+} from './scenario-registry.js';
 
 export {
   resolveActiveFeeRule,
