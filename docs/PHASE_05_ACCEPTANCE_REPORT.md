@@ -2,19 +2,22 @@
 
 Status: **PASS (narrow correction)** — Base reward budget scope authority + canonical UTC
 window integrity corrected after review of `82d73cf…`. Prior Phase 5 financial corrections remain
-in force. GitHub Actions `quality` + `docker-smoke` must be green on the new accepted commit.
+in force. GitHub Actions `quality` + `docker-smoke` are green on the new accepted commit.
 
 Date: 2026-09-09
 
 Source of truth: ALEx Rewards Master Product, Financial, Security & Engineering Specification **v1.2**.
 
-| Item                                       | Value                                         |
-| ------------------------------------------ | --------------------------------------------- |
-| New accepted Phase 5 commit                | _(filled after CI-green push)_                |
-| Prior corrected Phase 5 archive (retained) | `82d73cfcefd8368493f24219d89ba1b680dcc48a`    |
-| Historical first Phase 5 archive           | `a7da07d623c63819344dc72ebb2266d7ad0bcc06`    |
-| New migration                              | `0015_budget_period_utc_window_integrity.sql` |
-| Migrations `0001`–`0014`                   | **unchanged**                                 |
+| Item                                       | Value                                                           |
+| ------------------------------------------ | --------------------------------------------------------------- |
+| New accepted Phase 5 commit                | `a25026d5aa8ccd7844a416beb95ab32c99d20daf`                      |
+| Prior corrected Phase 5 archive (retained) | `82d73cfcefd8368493f24219d89ba1b680dcc48a`                      |
+| Historical first Phase 5 archive           | `a7da07d623c63819344dc72ebb2266d7ad0bcc06`                      |
+| GitHub Actions run                         | https://github.com/iAlexx/alexreward11/actions/runs/34293423687 |
+| `quality`                                  | PASS — job `102284736190`                                       |
+| `docker-smoke`                             | PASS — job `102285504148`                                       |
+| New migration                              | `0015_budget_period_utc_window_integrity.sql`                   |
+| Migrations `0001`–`0014`                   | **unchanged**                                                   |
 
 Phase 6 has **not** started.
 
@@ -29,7 +32,7 @@ Phase 6 has **not** started.
 6. REWARD_RULE requires `scope_reference_id == rewardRuleId`; stored `rule_version` must match when present.
 7. Canonical UTC HOUR / UTC_DAY / UTC_MONTH windows enforced in app + DB (`0015`).
 
-## Tests (local gate)
+## Tests
 
 | Suite                     | Count  |
 | ------------------------- | ------ |
