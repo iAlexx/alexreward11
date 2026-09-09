@@ -10,7 +10,9 @@ Phase 5 adds `0013_reward_engine_integrity.sql` for Reward Engine financial inte
 `0014_phase5_financial_corrections.sql` for simulated source registry, frozen quote protection,
 multi-period bonus reservations, and atomic exposure period counters, and
 `0015_budget_period_utc_window_integrity.sql` for canonical UTC budget window CHECKs.
-Migrations `0001`–`0014` remain immutable after acceptance. Withdrawals, payouts, provider adapters,
+Phase 6 adds `0016_wallet_proof_nonce_lifecycle.sql` so open `ton_proof` challenges can be
+security-invalidated (distinct from successful consumption) when the primary wallet changes.
+Migrations `0001`–`0015` remain immutable after acceptance. Withdrawals, payouts, provider adapters,
 and KMS signing remain out of scope until later Owner-approved phases.
 
 ## Migration inventory
@@ -32,6 +34,7 @@ and KMS signing remain out of scope until later Owner-approved phases.
 | `0013_reward_engine_integrity.sql`                   | Phase 5: ACTIVE reward-rule family overlap EXCLUDE; financial-rule immutability; quote reconstruction / started-source fields                        |
 | `0014_phase5_financial_corrections.sql`              | Phase 5 correction: `simulated_reward_sources`; frozen `reward_quotes` trigger; multi-period bonus reservations; economic exposure period counters   |
 | `0015_budget_period_utc_window_integrity.sql`        | Phase 5 narrow: canonical HOUR / UTC_DAY / UTC_MONTH window CHECKs on reward + membership bonus budget periods                                       |
+| `0016_wallet_proof_nonce_lifecycle.sql`              | Phase 6: nonce `invalidated_at` / `invalidation_reason`; open-index excludes consumed and invalidated rows                                           |
 
 ## Schema ownership
 

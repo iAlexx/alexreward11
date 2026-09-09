@@ -159,3 +159,19 @@ requires forward migration `0014_phase5_financial_corrections.sql` (do not edit 
 
 `MIN_EXPECTED_MARGIN_BPS` when ACTIVE fails closed (`MARGIN_POLICY_UNDEFINED`) until an
 Owner-approved expected-margin formula exists. Do not treat `10000 - user_share_bps` as margin.
+
+## ADR-016 — Wallet proof nonce invalidation lifecycle (migration 0016)
+
+V1.2 §29 requires pending old-wallet challenges to be invalidated when the primary wallet changes.
+`user_wallet_proof_nonces.consumed_at` alone cannot distinguish successful **CONSUMED** from
+**SECURITY_INVALIDATED** without corrupting audit semantics.
+
+Phase 6 therefore adds forward migration `0016_wallet_proof_nonce_lifecycle.sql` (do not edit
+`0001`–`0015`) with:
+
+- `invalidated_at` / `invalidation_reason` (e.g. `PRIMARY_WALLET_CHANGED`);
+- exclusive terminal CHECK: not both consumed and invalidated;
+- open-index predicate: `consumed_at IS NULL AND invalidated_at IS NULL`.
+
+Domain authority for `ton_proof` remains server config (`expectedTonProofDomain`), never request
+Host/Origin. Staging/production reject localhost domain inheritance.

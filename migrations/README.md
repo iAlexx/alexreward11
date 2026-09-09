@@ -28,6 +28,7 @@ provider business behaviour is implemented here.
 | `0013_reward_engine_integrity.sql`                   | Phase 5: reward-rule ACTIVE overlap EXCLUDE; financial immutability triggers; quote applied_economics / source_started_at / bonus policy                      |
 | `0014_phase5_financial_corrections.sql`              | Phase 5 correction: simulated_reward_sources; frozen quote trigger; multi-period bonus reservations; economic exposure period counters                        |
 | `0015_budget_period_utc_window_integrity.sql`        | Phase 5 narrow: canonical HOUR/UTC_DAY/UTC_MONTH window CHECKs for reward + membership bonus budget periods                                                   |
+| `0016_wallet_proof_nonce_lifecycle.sql`              | Phase 6: `invalidated_at` / `invalidation_reason` so CONSUMED vs SECURITY_INVALIDATED stay distinct for primary-wallet change                                 |
 
 ## Conventions
 

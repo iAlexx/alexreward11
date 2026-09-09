@@ -28,11 +28,10 @@ const financialShells = [
   'ads',
   'fraud',
   // ledger is implemented in Phase 4 (Ledger Core).
-  // rewards is implemented in Phase 5 (Reward Engine); other money domains remain shells.
+  // rewards is implemented in Phase 5 (Reward Engine).
+  // ton + wallets are implemented in Phase 6 (TON Connect wallet ownership).
   'referrals',
   'tasks',
-  'ton',
-  'wallets',
   'withdrawals',
 ];
 

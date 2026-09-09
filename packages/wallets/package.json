@@ -12,7 +12,23 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint src",
-    "test": "vitest run --passWithNoTests"
+    "lint": "eslint src test",
+    "test": "vitest run --passWithNoTests",
+    "test:phase6": "cross-env PHASE6_WALLET_TESTS=1 vitest run --fileParallelism=false test/phase6-ton-proof.test.ts test/phase6-wallet-lifecycle.test.ts test/phase6-concurrency.test.ts"
+  },
+  "dependencies": {
+    "@alex-rewards/auth": "workspace:*",
+    "@alex-rewards/db": "workspace:*",
+    "@alex-rewards/ton": "workspace:*",
+    "ioredis": "6.0.0",
+    "pg": "8.23.0"
+  },
+  "devDependencies": {
+    "@ton/core": "0.63.1",
+    "@ton/crypto": "3.3.0",
+    "@ton/ton": "16.3.0",
+    "@types/pg": "8.23.1",
+    "cross-env": "7.0.3",
+    "vitest": "4.1.11"
   }
 }
