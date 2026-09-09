@@ -11,6 +11,10 @@ const excludedDirectories = new Set([
   'reports',
 ]);
 const excludedFiles = new Set(['pnpm-lock.yaml']);
+/** Local env files may hold developer secrets; never commit them. Still scan `.env.example`. */
+function isExcludedEnvFile(name) {
+  return name === '.env' || (name.startsWith('.env.') && name !== '.env.example');
+}
 const patterns = [
   ['private key', /-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/],
   ['AWS access key', /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/],
@@ -27,7 +31,7 @@ async function walk(relativePath = '') {
     if (entry.isDirectory() && excludedDirectories.has(entry.name)) continue;
     const child = join(relativePath, entry.name).replaceAll('\\', '/');
     if (entry.isDirectory()) files.push(...(await walk(`${child}/`)));
-    else if (!excludedFiles.has(entry.name)) files.push(child);
+    else if (!excludedFiles.has(entry.name) && !isExcludedEnvFile(entry.name)) files.push(child);
   }
   return files;
 }

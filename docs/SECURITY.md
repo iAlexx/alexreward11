@@ -23,3 +23,19 @@ phases; Phase 1 contains no pretend authentication or financial endpoints.
 - Private keys, seeds, and mnemonics are never accepted or stored.
 
 See `docs/WALLETS.md`.
+
+## Phase 7 — payout ambiguity / fake-chain trust boundary
+
+- Possible or unknown broadcast **never** returns Reserved → Available and **never** blindly
+  retries or resends. Ambiguity → `RECONCILE_REQUIRED` (or reconcile-origin `HELD`) with
+  Reserved preserved until durable reconciliation evidence exists.
+- `withdrawal_payout_reconciliations` is append-only; reject-from-reconcile requires
+  `DEFINITIVE_NONPAYMENT` evidence (plus explicit Owner decision).
+- `FakePayoutChain` is LOCAL/TEST (and local-like DEV) only. Staging/production config that
+  enables the fake chain **fails closed**. Clients cannot choose fake payout outcomes.
+- Phase 7 introduces **no** real signer, KMS, mnemonic, or TON broadcast path. Dispatch fencing
+  tokens on hot-wallet leases prevent stale workers from broadcasting (even on the fake adapter).
+- Fee/priority membership entitlements are reconstructable from frozen quote/withdrawal
+  provenance; Founder status alone grants no financial bypass.
+
+See `docs/WITHDRAWALS.md`.

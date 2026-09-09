@@ -86,6 +86,11 @@ jobs:
           PHASE6_DATABASE_URL: postgresql://alex_rewards:local-alex-rewards-only@127.0.0.1:5432/alex_rewards_phase2
           PHASE6_WALLET_TESTS: '1'
         run: pnpm test:phase6
+      - name: Phase 7 withdrawal engine gates
+        env:
+          PHASE7_DATABASE_URL: postgresql://alex_rewards:local-alex-rewards-only@127.0.0.1:5432/alex_rewards_phase2
+          PHASE7_WITHDRAWAL_TESTS: '1'
+        run: pnpm test:phase7
       - name: Dependency vulnerability gate
         run: pnpm security:audit
 

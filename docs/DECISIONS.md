@@ -175,3 +175,15 @@ Phase 6 therefore adds forward migration `0016_wallet_proof_nonce_lifecycle.sql`
 
 Domain authority for `ton_proof` remains server config (`expectedTonProofDomain`), never request
 Host/Origin. Staging/production reject localhost domain inheritance.
+
+## ADR-017 — Phase 7 fake payout pipeline as Temporal substitute (LOCAL/TEST)
+
+Phase 7 requires Outbox-started payout work with deterministic workflow ID
+`withdrawal/{withdrawalId}`, but production Temporal worker wiring is deferred.
+
+Decision: LOCAL/TEST use an **in-process** `FakePayoutChain` + Outbox-driven
+`runFakePayoutPipeline` as a Temporal substitute that exercises the same state machine,
+attempts, fencing, ambiguity → reconcile, release, and settlement invariants. Staging/production
+must keep `fakeChainEnabled = false` (config validation fails closed). A later real Temporal
+worker may wrap the same activities without changing the workflow ID contract or ledger posting
+rules. No real signer/KMS/TON broadcast is introduced in Phase 7.

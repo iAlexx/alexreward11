@@ -12,29 +12,35 @@ multi-period bonus reservations, and atomic exposure period counters, and
 `0015_budget_period_utc_window_integrity.sql` for canonical UTC budget window CHECKs.
 Phase 6 adds `0016_wallet_proof_nonce_lifecycle.sql` so open `ton_proof` challenges can be
 security-invalidated (distinct from successful consumption) when the primary wallet changes.
-Migrations `0001`–`0015` remain immutable after acceptance. Withdrawals, payouts, provider adapters,
-and KMS signing remain out of scope until later Owner-approved phases.
+Phase 7 adds `0017_withdrawal_engine_integrity.sql` for withdrawal engine integrity (quote/
+withdrawal provenance, fee/limit immutability + ACTIVE overlap EXCLUDE, frozen quotes, volume
+periods, append-only payout reconciliations, attempt intent immutability). Migrations
+`0001`–`0016` remain immutable after acceptance. Real signer/KMS/TON broadcast remain out of
+scope until later Owner-approved phases.
 
 ## Migration inventory
 
-| File                                                 | Contents                                                                                                                                             |
-| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `0001_extensions_enums.sql`                          | `pgcrypto`, `btree_gist`, `schema_migrations`, shared helper functions, every ENUM type                                                              |
-| `0002_networks_assets_users.sql`                     | networks, assets, users, profiles, settings, sessions, payout wallets, ton_proof nonces                                                              |
-| `0003_ads_and_rewards.sql`                           | providers, manifests, units, ad sessions and evidence, daily counters, reward rules/quotes/budgets/events/maturities                                 |
-| `0004_ledger.sql`                                    | immutable double-entry ledger, balance projection, balance snapshots                                                                                 |
-| `0005_withdrawals_and_hot_wallet.sql`                | fee/limit rule versions, quotes, withdrawals, approvals, attempts, chain correlation, hot wallets, dispatch leases                                   |
-| `0006_risk_referral_tasks_missions.sql`              | risk rules/profiles/snapshots/events, fraud flags, referral graph, tasks, mission engine                                                             |
-| `0007_admin_audit_system.sql`                        | admin identity/RBAC/credentials/sessions/action tokens, audit log, Telegram and payout publications, Outbox/Inbox, idempotency keys, config versions |
-| `0008_membership_entitlements.sql`                   | membership plans, entitlements, benefit rule versions, user memberships, claim codes, grant history, bonus budgets                                   |
-| `0009_provider_v12_ops.sql`                          | provider contracts, limit rules, country rules, routing policy versions, certification, settlement, reporting imports, trust, eligibility            |
-| `0010_review_notifications_flags_reconciliation.sql` | support, review cases, notifications and campaigns, feature flags, exposure limits, reconciliation                                                   |
-| `0011_seed_local_fixtures.sql`                       | LOCAL FIXTURE ONLY reference data                                                                                                                    |
-| `0012_ledger_integrity.sql`                          | Phase 4: one-reversal-per-original unique index; ledger_accounts structural immutability                                                             |
-| `0013_reward_engine_integrity.sql`                   | Phase 5: ACTIVE reward-rule family overlap EXCLUDE; financial-rule immutability; quote reconstruction / started-source fields                        |
-| `0014_phase5_financial_corrections.sql`              | Phase 5 correction: `simulated_reward_sources`; frozen `reward_quotes` trigger; multi-period bonus reservations; economic exposure period counters   |
-| `0015_budget_period_utc_window_integrity.sql`        | Phase 5 narrow: canonical HOUR / UTC_DAY / UTC_MONTH window CHECKs on reward + membership bonus budget periods                                       |
-| `0016_wallet_proof_nonce_lifecycle.sql`              | Phase 6: nonce `invalidated_at` / `invalidation_reason`; open-index excludes consumed and invalidated rows                                           |
+| File                                                 | Contents                                                                                                                                                                                                     |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `0001_extensions_enums.sql`                          | `pgcrypto`, `btree_gist`, `schema_migrations`, shared helper functions, every ENUM type                                                                                                                      |
+| `0002_networks_assets_users.sql`                     | networks, assets, users, profiles, settings, sessions, payout wallets, ton_proof nonces                                                                                                                      |
+| `0003_ads_and_rewards.sql`                           | providers, manifests, units, ad sessions and evidence, daily counters, reward rules/quotes/budgets/events/maturities                                                                                         |
+| `0004_ledger.sql`                                    | immutable double-entry ledger, balance projection, balance snapshots                                                                                                                                         |
+| `0005_withdrawals_and_hot_wallet.sql`                | fee/limit rule versions, quotes, withdrawals, approvals, attempts, chain correlation, hot wallets, dispatch leases                                                                                           |
+| `0006_risk_referral_tasks_missions.sql`              | risk rules/profiles/snapshots/events, fraud flags, referral graph, tasks, mission engine                                                                                                                     |
+| `0007_admin_audit_system.sql`                        | admin identity/RBAC/credentials/sessions/action tokens, audit log, Telegram and payout publications, Outbox/Inbox, idempotency keys, config versions                                                         |
+| `0008_membership_entitlements.sql`                   | membership plans, entitlements, benefit rule versions, user memberships, claim codes, grant history, bonus budgets                                                                                           |
+| `0009_provider_v12_ops.sql`                          | provider contracts, limit rules, country rules, routing policy versions, certification, settlement, reporting imports, trust, eligibility                                                                    |
+| `0010_review_notifications_flags_reconciliation.sql` | support, review cases, notifications and campaigns, feature flags, exposure limits, reconciliation                                                                                                           |
+| `0011_seed_local_fixtures.sql`                       | LOCAL FIXTURE ONLY reference data                                                                                                                                                                            |
+| `0012_ledger_integrity.sql`                          | Phase 4: one-reversal-per-original unique index; ledger_accounts structural immutability                                                                                                                     |
+| `0013_reward_engine_integrity.sql`                   | Phase 5: ACTIVE reward-rule family overlap EXCLUDE; financial-rule immutability; quote reconstruction / started-source fields                                                                                |
+| `0014_phase5_financial_corrections.sql`              | Phase 5 correction: `simulated_reward_sources`; frozen `reward_quotes` trigger; multi-period bonus reservations; economic exposure period counters                                                           |
+| `0015_budget_period_utc_window_integrity.sql`        | Phase 5 narrow: canonical HOUR / UTC_DAY / UTC_MONTH window CHECKs on reward + membership bonus budget periods                                                                                               |
+| `0016_wallet_proof_nonce_lifecycle.sql`              | Phase 6: nonce `invalidated_at` / `invalidation_reason`; open-index excludes consumed and invalidated rows                                                                                                   |
+| `0017_withdrawal_engine_integrity.sql`               | Phase 7: quote/withdrawal provenance; fee/limit ACTIVE overlap EXCLUDE + financial immutability; frozen quotes; volume periods/reservations; append-only payout reconciliations; attempt intent immutability |
+
+Migrations `0001`–`0016` are **unchanged** by Phase 7. Only forward migration `0017` was added.
 
 ## Schema ownership
 
@@ -134,7 +140,7 @@ flowchart LR
   ledger_accounts --> ledger_entries
   ledger_accounts --> ledger_account_balances
 
-  withdrawals -.->|Phase 5+ posting| ledger_transactions
+  withdrawals -.->|Phase 7 posting| ledger_transactions
   withdrawals --> withdrawal_approvals
   withdrawals --> hot_wallets
 

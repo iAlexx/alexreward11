@@ -113,6 +113,25 @@ Rebuild/compare are **tie-aware**: they do not invent a total order by random UU
 as quote/reservation/outbox work. Callers must pass the outer client into
 `postLedgerTransaction` so domain + ledger + outbox commit atomically.
 
+## Phase 7 withdrawal accounting
+
+`@alex-rewards/withdrawals` posts on the same outer `PoolClient` as domain + Outbox. See
+`docs/WITHDRAWALS.md` for the full state machine.
+
+| Event                           | Ledger type              | Effect                                                                  |
+| ------------------------------- | ------------------------ | ----------------------------------------------------------------------- |
+| Withdrawal `REQUESTED`          | `WITHDRAWAL_RESERVATION` | DR Available gross / CR Reserved gross                                  |
+| Definitive pre-broadcast REJECT | `WITHDRAWAL_RELEASE`     | DR Reserved gross / CR Available gross (full gross **once**)            |
+| `CONFIRMED`                     | `WITHDRAWAL_SETTLEMENT`  | DR Reserved gross / CR Hot Wallet net / CR `WITHDRAWAL_FEE_REVENUE` fee |
+
+Invariants:
+
+- **No fee revenue at reservation** — platform fee revenue posts only at `CONFIRMED` settlement.
+- **No fake TON gas** — Phase 7 does not post `TON_NETWORK_FEE_EXPENSE` for the fake chain.
+- **Test-only hot wallet funding** — Phase 7 harness may credit `HOT_WALLET_USDT_ASSET` via
+  acknowledged `TREASURY_FUNDING_CLEARING` (`acknowledgeUnresolvedAccounting`). That path is
+  **not** production funding policy (ADR-009 still applies outside explicit test harnesses).
+
 ## Money representation
 
 - PostgreSQL `BIGINT` atomic units only

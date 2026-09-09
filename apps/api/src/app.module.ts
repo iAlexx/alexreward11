@@ -7,6 +7,7 @@ import { AccessSessionGuard } from './auth/access-session.guard.js';
 import { DependenciesService } from './dependencies.service.js';
 import { HealthController } from './health.controller.js';
 import { MembershipController } from './membership/membership.controller.js';
+import { WithdrawalsController } from './withdrawals/withdrawals.controller.js';
 import { API_CONFIG, DATABASE_POOL, REDIS_CLIENT } from './tokens.js';
 
 @Module({})
@@ -14,7 +15,7 @@ export class AppModule {
   static register(config: ApiConfig): DynamicModule {
     return {
       module: AppModule,
-      controllers: [HealthController, AuthController, MembershipController],
+      controllers: [HealthController, AuthController, MembershipController, WithdrawalsController],
       providers: [
         DependenciesService,
         AccessSessionGuard,

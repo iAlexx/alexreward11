@@ -27,7 +27,7 @@ const optedInUrl =
   process.env.PHASE2_MIGRATION_TESTS === '1' ? (process.env.DATABASE_URL ?? '') : '';
 const databaseUrl = explicitUrl !== '' ? explicitUrl : optedInUrl;
 
-const EXPECTED_MIGRATION_COUNT = 16;
+const EXPECTED_MIGRATION_COUNT = 17;
 
 const UNIQUE_VIOLATION = '23505';
 const CHECK_VIOLATION = '23514';
@@ -158,6 +158,10 @@ const REQUIRED_TABLES = [
   'simulated_reward_sources',
   'economic_exposure_periods',
   'economic_exposure_reservations',
+  // 0017 Phase 7 withdrawal engine integrity
+  'withdrawal_volume_periods',
+  'withdrawal_volume_reservations',
+  'withdrawal_payout_reconciliations',
 ] as const;
 
 /** Column-name fragments that would signal a mutable balance shortcut on `users`. */
