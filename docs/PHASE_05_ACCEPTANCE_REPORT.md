@@ -44,3 +44,19 @@ Phase 6 has **not** started.
 | Phase 4                   | 41     |
 
 **No Phase 6 work started.**
+
+## O. Archive verification
+
+| Item                                | Result                                                             |
+| ----------------------------------- | ------------------------------------------------------------------ |
+| Canonical source ZIP                | `ALEx_Rewards_PHASE_05_REWARD_ENGINE_20260909-031500_a25026d.zip`  |
+| Canonical source SHA256             | `1419f39a12673033ee1ba9531eafdc9d7b1ecc852e922f7e8535b7df8d938403` |
+| Final review-package ZIP            | `PHASE_05_REWARD_ENGINE_PACKAGE_20260909-043500_a25026d.zip`       |
+| Source extraction                   | PASS                                                               |
+| Source prohibited-path scan         | PASS                                                               |
+| Review-package extraction           | PASS                                                               |
+| Review-package prohibited-path scan | PASS                                                               |
+| Nested canonical source validation  | PASS                                                               |
+| Forward-slash ZIP entry validation  | PASS                                                               |
+
+Final review-package SHA256 is recorded externally in `PACKAGE_SHA256.txt` beside the package.
