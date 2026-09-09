@@ -20,7 +20,6 @@ import { ensureReviewCase, resolveReviewCaseAfterDomainSuccess } from './review-
 import {
   WITHDRAWAL_ACTION_TYPES,
   type ControlCenterEnvironment,
-  type WithdrawalActionType,
   type WithdrawalTelegramDecision,
 } from './types.js';
 
@@ -257,7 +256,7 @@ export async function executeWithdrawalDecisionFromToken(
     });
   }
 
-  const decision = decisionFromActionType(token.actionType as WithdrawalActionType);
+  const decision = decisionFromActionType(token.actionType);
 
   // Phase 7 owns its transaction. Idempotency key binds to action-token id so
   // retries after Telegram timeout cannot duplicate Outbox/workflow.

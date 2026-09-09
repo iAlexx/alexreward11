@@ -2,7 +2,6 @@ import type { Pool, PoolClient } from 'pg';
 
 import type { ControlCenterRuntimeConfig } from './config.js';
 import { ControlCenterError } from './errors.js';
-import type { ControlCenterPermissionCode } from './permissions.js';
 import type { AuthorizeOwnerActionInput, AuthorizedOwnerContext } from './types.js';
 
 type Db = Pool | PoolClient;
@@ -107,6 +106,6 @@ export async function authorizeOwnerAction(
   return {
     adminUserId: adminRow.id,
     telegramUserId,
-    permissionCode: input.permissionCode as ControlCenterPermissionCode,
+    permissionCode: input.permissionCode,
   };
 }

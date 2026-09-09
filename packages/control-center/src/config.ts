@@ -14,7 +14,7 @@ export interface ControlCenterRuntimeConfig {
 }
 
 export function deploymentEnvToControlCenterEnvironment(
-  value: BotConfig['DEPLOYMENT_ENV'] | string,
+  value: BotConfig['DEPLOYMENT_ENV'] | ControlCenterEnvironment,
 ): ControlCenterEnvironment {
   switch (value) {
     case 'local':

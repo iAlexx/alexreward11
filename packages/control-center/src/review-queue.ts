@@ -428,8 +428,8 @@ export async function listReviewQueue(
  * Future-domain mutations (fraud Mark Safe, provider monetary, referral abuse, etc.)
  * are intentionally unavailable in Phase 8.
  */
-export function assertFutureDomainMutationAvailable(_action: string): never {
+export function assertFutureDomainMutationAvailable(action: string): never {
   throw new ControlCenterError('ACTION_UNAVAILABLE', undefined, {
-    details: { reason: 'FUTURE_DOMAIN_MUTATION_UNAVAILABLE' },
+    details: { reason: 'FUTURE_DOMAIN_MUTATION_UNAVAILABLE', action },
   });
 }
