@@ -1,6 +1,6 @@
 # Phase 8 Acceptance Report — Control Center + Unified Review Queue
 
-**Status:** RUNTIME IMPLEMENTATION READY — CI/archive seal pending after push.
+**Status:** ACCEPTED RUNTIME — CI quality + docker-smoke PASS on tip below.
 
 **Date:** 2026-09-09
 
@@ -9,6 +9,8 @@
 **Start tip:** `c452e1d138c30c7406402b5505edb7dc90ebdf46` (Phase 7 companion only)
 
 **Phase 7 accepted runtime (do not reopen):** `3d4f57bc4b94b04911a59504e51b4ccd43655a26`
+
+**Accepted Phase 8 runtime SHA:** `a7554474b8b5ee22a3323a221d00bb1714d88ff7`
 
 ---
 
@@ -89,11 +91,11 @@ Package/typecheck for control-center, auth, bot, config: PASS (local).
 
 ## H. CI
 
-Pending push of accepted runtime commit. Fill after GitHub Actions:
-
-- Run URL:
-- quality job/result:
-- docker-smoke job/result:
+- Run URL: https://github.com/iAlexx/alexreward11/actions/runs/34388095264
+- quality job `102589368462`: **PASS**
+- docker-smoke job `102590824379`: **PASS**
+- Accepted tip: `a7554474b8b5ee22a3323a221d00bb1714d88ff7`
+  (Phase 8 runtime `876d04d` + ESLint fix `15c1516` + Phase 2 count for 0019)
 
 ## I. Known deviations
 
@@ -130,41 +132,41 @@ Pending push of accepted runtime commit. Fill after GitHub Actions:
 
 ## M. Exact accepted SHA
 
-Pending CI-green runtime commit (to be recorded here after quality + docker-smoke PASS).
+`a7554474b8b5ee22a3323a221d00bb1714d88ff7`
 
 ## N. PASS/FAIL Phase 8 gates
 
-| Gate                                           | Local          | CI      |
-| ---------------------------------------------- | -------------- | ------- |
-| 11 topics supported                            | PASS           | pending |
-| No hardcoded prod chat/topic IDs               | PASS           | pending |
-| Unauthorized Telegram cannot act               | PASS           | pending |
-| Wrong chat/topic/token/resource/state rejected | PASS           | pending |
-| One-time DB-authoritative action tokens        | PASS           | pending |
-| Duplicate approve → one Outbox/workflow        | PASS           | pending |
-| Review queue projection only                   | PASS           | pending |
-| Withdrawal → `decideWithdrawal`                | PASS           | pending |
-| Unsupported future-domain = unavailable        | PASS           | pending |
-| Founder search/grant/claim/history             | PASS           | pending |
-| Grant/claim cannot duplicate Founder           | PASS           | pending |
-| Claim secret hash-at-rest                      | PASS           | pending |
-| Reassignment mutation unavailable              | PASS           | pending |
-| Zero Founder ledger mutation                   | PASS           | pending |
-| Migrations 0001–0018 unchanged                 | PASS           | pending |
-| No Phase 9 work                                | PASS           | pending |
-| `pnpm test:phase8`                             | **38/38 PASS** | pending |
-| quality / docker-smoke                         | pending        | pending |
+| Gate                                           | Local          | CI   |
+| ---------------------------------------------- | -------------- | ---- |
+| 11 topics supported                            | PASS           | PASS |
+| No hardcoded prod chat/topic IDs               | PASS           | PASS |
+| Unauthorized Telegram cannot act               | PASS           | PASS |
+| Wrong chat/topic/token/resource/state rejected | PASS           | PASS |
+| One-time DB-authoritative action tokens        | PASS           | PASS |
+| Duplicate approve → one Outbox/workflow        | PASS           | PASS |
+| Review queue projection only                   | PASS           | PASS |
+| Withdrawal → `decideWithdrawal`                | PASS           | PASS |
+| Unsupported future-domain = unavailable        | PASS           | PASS |
+| Founder search/grant/claim/history             | PASS           | PASS |
+| Grant/claim cannot duplicate Founder           | PASS           | PASS |
+| Claim secret hash-at-rest                      | PASS           | PASS |
+| Reassignment mutation unavailable              | PASS           | PASS |
+| Zero Founder ledger mutation                   | PASS           | PASS |
+| Migrations 0001–0018 unchanged                 | PASS           | PASS |
+| No Phase 9 work                                | PASS           | PASS |
+| `pnpm test:phase8`                             | **38/38 PASS** | PASS |
+| quality / docker-smoke                         | PASS           | PASS |
 
 ## O. Archive verification
 
-Complete **after** CI-green accepted commit and dual archive packaging.
+Packaging of accepted SHA `a7554474b8b5ee22a3323a221d00bb1714d88ff7` — dual archive PASS.
 
-- Accepted Phase 8 commit:
-- Canonical source ZIP SHA256:
-- Review package filename/path:
-- PACKAGE SHA256:
-- Extraction / prohibited-path / checksum / four-member / forward-slash checks:
-- Migrations 0001–0018 unchanged confirmation:
+- Accepted Phase 8 commit: `a7554474b8b5ee22a3323a221d00bb1714d88ff7`
+- Canonical source ZIP SHA256: `86bd1fac544330fa08ec8de40ac51f577eda1c6c116d149ad6b3af9d383772fe`
+- Review package filename/path: `phase-archives/PHASE_08_CONTROL_CENTER_REVIEW_QUEUE/PHASE_08_CONTROL_CENTER_REVIEW_QUEUE_PACKAGE_20260909-182600_a755447.zip`
+- PACKAGE SHA256: see external `phase-archives/PHASE_08_CONTROL_CENTER_REVIEW_QUEUE/PACKAGE_SHA256.txt` (`9848ff41e86615a5d5f757ba04d3563cc4d5ca3e255785ba1ff68e1ab0987038`)
+- Extraction / prohibited-path / checksum / four-member / forward-slash checks: **PASS** (source extraction, source prohibited-path, package extraction, package prohibited-path, nested archive / four-member, overall PASS)
+- Migrations 0001–0018 unchanged confirmation: YES (only forward `0019` added)
 - Explicit: **No Phase 9 work started.**
 
 ---
