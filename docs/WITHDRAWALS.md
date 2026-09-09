@@ -207,7 +207,8 @@ Phase 7.
 
 - Real signer / KMS / mnemonic / seed storage
 - Real TON / Jetton broadcast or Testnet payout
-- Phase 8 Control Center / Telegram admin review UI
+- Phase 8 Control Center / Telegram admin review UI — **delivered** in `@alex-rewards/control-center`
+  (see `docs/CONTROL_CENTER.md`); Owner `decideWithdrawal` accepts `decisionSource: 'TELEGRAM'`
 
 ## HTTP APIs (authenticated session)
 
@@ -219,8 +220,9 @@ Phase 7.
 | `GET`  | `/v1/withdrawals`                  | List current user's withdrawals   |
 | `GET`  | `/v1/withdrawals/:id`              | Get one withdrawal (owner-scoped) |
 
-Owner `decideWithdrawal` is a domain command (Phase 8 Control Center will expose it over
-admin channels). Fake pipeline helpers are LOCAL/TEST harness only.
+Owner `decideWithdrawal` is exposed to the private Control Center over Telegram action tokens
+(`decisionSource: 'TELEGRAM'`, idempotency `aat:{token.id}`). Fake pipeline helpers remain
+LOCAL/TEST harness only.
 
 ## Migration
 

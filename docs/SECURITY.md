@@ -39,3 +39,16 @@ See `docs/WALLETS.md`.
   provenance; Founder status alone grants no financial bypass.
 
 See `docs/WITHDRAWALS.md`.
+
+## Phase 8 — Control Center / Owner action tokens
+
+- Telegram group membership is **not** authorization. Owner allowlist + ACTIVE admin + OWNER
+  binding + named permission + destination chat/topic + one-time action token are all required.
+- Callback `callback_data` carries only an opaque action secret (≤64 bytes). Financial fields are
+  never trusted from Telegram.
+- Action tokens store `sha256(action:{raw})` only; raw secrets are never audited or published.
+- Founder Owner grant / claim-code issue are zero-ledger; reassignment mutation is unavailable.
+- `apps/bot` and `@alex-rewards/control-center` must not import KMS or TON sign paths; control-center
+  must not import `@alex-rewards/ledger`.
+
+See `docs/CONTROL_CENTER.md` and `docs/REVIEW_QUEUE.md`.

@@ -8,6 +8,7 @@ const requiredPackages = [
   'auth',
   'config',
   'contracts',
+  'control-center',
   'db',
   'fraud',
   'i18n',
@@ -31,6 +32,7 @@ const financialShells = [
   // rewards is implemented in Phase 5 (Reward Engine).
   // ton + wallets are implemented in Phase 6 (TON Connect wallet ownership).
   // withdrawals is implemented in Phase 7 (Withdrawal Engine + fake chain).
+  // control-center is implemented in Phase 8 (Telegram Owner Control Center).
   'referrals',
   'tasks',
 ];
@@ -90,11 +92,21 @@ for (const area of [
   }
 }
 
-const sourceFiles = (await walk('apps/')).filter((path) => /\.(?:ts|tsx|js|mjs)$/.test(path));
+const sourceFiles = [...(await walk('apps/')), ...(await walk('packages/control-center/'))].filter(
+  (path) => /\.(?:ts|tsx|js|mjs)$/.test(path),
+);
 for (const path of sourceFiles) {
   const source = await readFile(new URL(path, root), 'utf8');
-  if (!path.startsWith('apps/signer/') && source.includes('@aws-sdk/client-kms')) {
+  if (!path.startsWith('apps/signer/') && /from\s+['"]@aws-sdk\/client-kms['"]/.test(source)) {
     failures.push(`${path}: only apps/signer may import the KMS client`);
+  }
+  if (
+    (path.startsWith('apps/bot/src/') || path.startsWith('packages/control-center/src/')) &&
+    (/from\s+['"]@alex-rewards\/ledger['"]/.test(source) ||
+      /from\s+['"]@alex-rewards\/ton['"]/.test(source) ||
+      /from\s+['"]@aws-sdk\/client-kms['"]/.test(source))
+  ) {
+    failures.push(`${path}: Control Center/bot src must not import ledger, TON, or KMS`);
   }
   if (/users\s*\.\s*balance|\bbalance\s+(?:bigint|numeric|integer)/i.test(source)) {
     failures.push(`${path}: mutable authoritative balance shortcut is forbidden`);
@@ -130,6 +142,28 @@ for (const name of financialShells) {
   }
   const source = await readFile(new URL(`packages/${name}/src/index.ts`, root), 'utf8');
   if (!source.includes('export {};')) failures.push(`packages/${name}: boundary shell was changed`);
+}
+
+// Phase 8: bot + control-center must not import KMS or TON sign paths;
+// control-center production src must not import ledger (tests may fund fixtures).
+const phase8BoundaryRoots = ['apps/bot/', 'packages/control-center/'];
+for (const rootPath of phase8BoundaryRoots) {
+  const files = (await walk(rootPath)).filter((path) => /\.(?:ts|tsx|js|mjs)$/.test(path));
+  for (const path of files) {
+    const source = await readFile(new URL(path, root), 'utf8');
+    if (/from\s+['"]@aws-sdk\/client-kms['"]/.test(source)) {
+      failures.push(`${path}: Control Center / bot must not import KMS client`);
+    }
+    if (/from\s+['"]@alex-rewards\/ton['"]/.test(source)) {
+      failures.push(`${path}: Control Center / bot must not import TON package`);
+    }
+    if (
+      path.startsWith('packages/control-center/src/') &&
+      /from\s+['"]@alex-rewards\/ledger['"]/.test(source)
+    ) {
+      failures.push(`${path}: control-center src must not import ledger`);
+    }
+  }
 }
 
 if (failures.length > 0) {

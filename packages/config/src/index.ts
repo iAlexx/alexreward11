@@ -130,6 +130,18 @@ const botSchema = commonSchema
     BOT_PORT: z.coerce.number().int().min(1024).max(65535).default(3003),
     BOT_TRANSPORT_MODE: z.enum(['disabled', 'polling']).default('disabled'),
     TELEGRAM_BOT_TOKEN: optionalSecret,
+    DATABASE_URL: postgresUrl.optional(),
+    REDIS_URL: redisUrl.optional(),
+    CONTROL_CENTER_OWNER_TELEGRAM_USER_IDS: z.string().default(''),
+    CONTROL_CENTER_ACTION_TOKEN_TTL_SECONDS: z.coerce.number().int().min(30).max(86_400),
+    CONTROL_CENTER_CONFIRM_TOKEN_TTL_SECONDS: z.coerce.number().int().min(30).max(3600),
+    CONTROL_CENTER_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().min(1).max(3600),
+    CONTROL_CENTER_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(10_000),
+    WITHDRAWAL_QUOTE_TTL_SECONDS: z.coerce.number().int().min(1).max(86_400),
+    WITHDRAWAL_RISK_POLICY_VERSION: z.coerce.number().int().min(1).max(10_000),
+    WITHDRAWAL_NETWORK_CODE: z.string().min(1).max(64),
+    WITHDRAWAL_ASSET_SYMBOL: z.string().min(1).max(32),
+    WITHDRAWAL_FAKE_CHAIN_ENABLED: booleanFromString,
   })
   .superRefine((value, context) => {
     if (value.BOT_TRANSPORT_MODE !== 'disabled' && value.TELEGRAM_BOT_TOKEN === undefined) {
@@ -146,7 +158,71 @@ const botSchema = commonSchema
         message: 'cannot be disabled outside local development',
       });
     }
+    const outsideLocal = value.DEPLOYMENT_ENV !== 'local' && value.DEPLOYMENT_ENV !== 'test';
+    const ownerIds = value.CONTROL_CENTER_OWNER_TELEGRAM_USER_IDS.split(',')
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
+    if (outsideLocal && ownerIds.length === 0) {
+      context.addIssue({
+        code: 'custom',
+        path: ['CONTROL_CENTER_OWNER_TELEGRAM_USER_IDS'],
+        message: 'Owner Telegram allowlist is required outside local/test',
+      });
+    }
+    for (const id of ownerIds) {
+      if (!/^\d{5,20}$/.test(id)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['CONTROL_CENTER_OWNER_TELEGRAM_USER_IDS'],
+          message: 'must be comma-separated Telegram user IDs',
+        });
+        break;
+      }
+    }
+    if (
+      (outsideLocal || value.BOT_TRANSPORT_MODE !== 'disabled') &&
+      value.DATABASE_URL === undefined
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['DATABASE_URL'],
+        message: 'is required when Control Center transport is enabled or outside local/test',
+      });
+    }
+    if (outsideLocal && value.WITHDRAWAL_FAKE_CHAIN_ENABLED) {
+      context.addIssue({
+        code: 'custom',
+        path: ['WITHDRAWAL_FAKE_CHAIN_ENABLED'],
+        message: 'fake payout chain is forbidden outside local/test',
+      });
+    }
+    if (outsideLocal && value.WITHDRAWAL_NETWORK_CODE === 'TON_TESTNET') {
+      context.addIssue({
+        code: 'custom',
+        path: ['WITHDRAWAL_NETWORK_CODE'],
+        message: 'TON_TESTNET cannot be inherited by staging/production',
+      });
+    }
+  })
+  .transform((value) => {
+    const ownerTelegramUserIds = value.CONTROL_CENTER_OWNER_TELEGRAM_USER_IDS.split(',')
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
+    return { ...value, ownerTelegramUserIds };
   });
+
+const LOCAL_BOT_CONTROL_CENTER_DEFAULTS = {
+  CONTROL_CENTER_ACTION_TOKEN_TTL_SECONDS: '900',
+  CONTROL_CENTER_CONFIRM_TOKEN_TTL_SECONDS: '300',
+  CONTROL_CENTER_RATE_LIMIT_WINDOW_SECONDS: '60',
+  CONTROL_CENTER_RATE_LIMIT_MAX: '30',
+  CONTROL_CENTER_OWNER_TELEGRAM_USER_IDS: '900001',
+  WITHDRAWAL_QUOTE_TTL_SECONDS: '300',
+  WITHDRAWAL_RISK_POLICY_VERSION: '1',
+  WITHDRAWAL_NETWORK_CODE: 'TON_TESTNET',
+  WITHDRAWAL_ASSET_SYMBOL: 'USDT',
+  WITHDRAWAL_FAKE_CHAIN_ENABLED: 'true',
+} as const;
 
 const LOCAL_WORKER_WITHDRAWAL_DEFAULTS = {
   WITHDRAWAL_QUOTE_TTL_SECONDS: '300',
@@ -271,8 +347,14 @@ export const loadApiConfig = (environment: NodeJS.ProcessEnv = process.env): Api
       : environment;
   return parseEnvironment(apiSchema, merged);
 };
-export const loadBotConfig = (environment: NodeJS.ProcessEnv = process.env): BotConfig =>
-  parseEnvironment(botSchema, environment);
+export const loadBotConfig = (environment: NodeJS.ProcessEnv = process.env): BotConfig => {
+  const deployment = environment.DEPLOYMENT_ENV ?? 'local';
+  const merged =
+    deployment === 'local' || deployment === 'test'
+      ? { ...LOCAL_BOT_CONTROL_CENTER_DEFAULTS, ...environment }
+      : environment;
+  return parseEnvironment(botSchema, merged);
+};
 export const loadWorkerConfig = (environment: NodeJS.ProcessEnv = process.env): WorkerConfig => {
   const deployment = environment.DEPLOYMENT_ENV ?? 'local';
   const merged =

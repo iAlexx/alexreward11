@@ -32,8 +32,17 @@ export {
 } from './telegram-login.js';
 export {
   claimFounderCode,
+  getFounderHistory,
   getMembershipView,
+  grantFounderMembership,
+  issueFounderClaimCode,
+  reassignFounderMembership,
+  searchFounderMember,
+  type FounderClaimCodeIssueResult,
   type FounderClaimResult,
+  type FounderGrantResult,
+  type FounderHistoryView,
+  type FounderSearchHit,
   type MembershipView,
 } from './membership.js';
 export { consumeThrottle, type ThrottlePolicy } from './throttle.js';

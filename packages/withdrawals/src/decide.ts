@@ -42,7 +42,7 @@ export async function decideWithdrawal(
     readonly trustedOwnerActorContext?: { readonly adminUserId: string };
     /** Compatibility alias used by Phase 7 tests. */
     readonly adminUserId?: string;
-    readonly decisionSource?: 'API' | 'WEB';
+    readonly decisionSource?: 'API' | 'WEB' | 'TELEGRAM';
     /**
      * Explicit acknowledgment for reconcile-origin REJECT.
      * Combined with durable DEFINITIVE_NONPAYMENT row when held_from_reconcile.

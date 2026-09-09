@@ -91,6 +91,11 @@ jobs:
           PHASE7_DATABASE_URL: postgresql://alex_rewards:local-alex-rewards-only@127.0.0.1:5432/alex_rewards_phase2
           PHASE7_WITHDRAWAL_TESTS: '1'
         run: pnpm test:phase7
+      - name: Phase 8 control center gates
+        env:
+          PHASE8_DATABASE_URL: postgresql://alex_rewards:local-alex-rewards-only@127.0.0.1:5432/alex_rewards_phase2
+          PHASE8_CONTROL_CENTER_TESTS: '1'
+        run: pnpm test:phase8
       - name: Dependency vulnerability gate
         run: pnpm security:audit
 
