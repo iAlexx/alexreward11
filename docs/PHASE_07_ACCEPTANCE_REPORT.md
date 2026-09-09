@@ -215,20 +215,20 @@ tests (FLOOR discount / net / atomic parse). Mentioned separately; official gate
 Section O is included **before** packaging. Outer review-package SHA256 is recorded only in
 external `PACKAGE_SHA256.txt` (not embedded here — self-reference is impossible).
 
-| Item                                | Result                                                                                                 |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| Canonical source ZIP                | `PENDING_CANONICAL_ZIP` (e.g. `ALEx_Rewards_PHASE_07_WITHDRAWAL_ENGINE_FAKE_CHAIN_<stamp>_<sha7>.zip`) |
-| Canonical source SHA256             | `PENDING_CANONICAL_SHA256`                                                                             |
-| Final review-package ZIP            | `PENDING_PACKAGE_ZIP` (e.g. `PHASE_07_WITHDRAWAL_ENGINE_FAKE_CHAIN_PACKAGE_<stamp>_<sha7>.zip`)        |
-| Source extraction                   | PENDING                                                                                                |
-| Source prohibited-path scan         | PENDING                                                                                                |
-| Review-package extraction           | PENDING                                                                                                |
-| Review-package prohibited-path scan | PENDING                                                                                                |
-| Nested canonical source validation  | PENDING                                                                                                |
-| Forward-slash ZIP entry validation  | PENDING                                                                                                |
-| Exact accepted commit               | `PENDING_COMMIT`                                                                                       |
-| External `PACKAGE_SHA256.txt`       | Authoritative outer hash beside the package (not embedded here)                                        |
+| Item                                | Result                                                                           |
+| ----------------------------------- | -------------------------------------------------------------------------------- |
+| Canonical source ZIP                | `ALEx_Rewards_PHASE_07_WITHDRAWAL_ENGINE_FAKE_CHAIN_20260909-075200_5efbf57.zip` |
+| Canonical source SHA256             | `a90a634320b9cecf6ea4523d274fb9cc5497eb8a9e9696f73844734aa4f897cf`               |
+| Final review-package ZIP            | `PHASE_07_WITHDRAWAL_ENGINE_FAKE_CHAIN_PACKAGE_20260909-075200_5efbf57.zip`      |
+| Source extraction                   | PASS                                                                             |
+| Source prohibited-path scan         | PASS                                                                             |
+| Review-package extraction           | PASS                                                                             |
+| Review-package prohibited-path scan | PASS                                                                             |
+| Nested canonical source validation  | PASS                                                                             |
+| Forward-slash ZIP entry validation  | PASS                                                                             |
+| Exact accepted commit               | `5efbf57a8133ea02c2ab99654e637815ce4fb282`                                       |
+| External `PACKAGE_SHA256.txt`       | Authoritative outer hash beside the package                                      |
 
-Verified with `scripts/create-phase-archive.mjs` — PENDING (stamp TBD after commit).
+Verified with `scripts/create-phase-archive.mjs` v2.1.0 (stamp `20260909-075200`).
 
 **No Phase 8 work started.**
