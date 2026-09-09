@@ -170,18 +170,16 @@ origin `HELD`). **Reserved is never released** on ambiguity. No blind resend.
 ## Reconciliation
 
 `withdrawal_payout_reconciliations` is **append-only** (UPDATE/DELETE rejected). Runtime
-reconcile derives resolution **only** from an authoritative chain-adapter observation
-(Phase 7: `FakePayoutChain`). Callers cannot inject `resolution` / `forceResolution` /
-self-declared observed fields as financial authority.
+reconcile uses `reconcileWithdrawalAttemptFromAdapter`: the trusted chain adapter
+(`FakePayoutChain` in Phase 7) supplies a branded authoritative observation for the exact
+`withdrawalId` + `attemptId`. Callers cannot inject plain `FakePayoutObservation` objects as
+financial authority (TypeScript interfaces are not a trust boundary).
 
-Derived resolutions:
+DB lookup requires `attempt.id = attemptId AND attempt.withdrawal_id = withdrawalId`.
 
-- `INTENDED_PAYOUT_PROVEN` — trusted CONFIRMED observation matching recipient, net atomic,
-  asset, query/correlation, attempt association
-- `DEFINITIVE_NONPAYMENT` — trusted definitive-nonpayment observation
-- `AMBIGUOUS` — incomplete/conflicting/untrusted evidence (Reserved preserved)
-
-Evidence is required before reject-from-reconcile; ledger history is never silently rewritten.
+Before `INTENDED_PAYOUT_PROVEN` or `DEFINITIVE_NONPAYMENT`, the observation must bind to the
+exact attempt (withdrawalId, attemptId, queryId, recipient, net atomic, asset, correlation,
+canonical message hash). Mismatch → `AMBIGUOUS` (never definitive proof).
 
 ## Settlement (CONFIRMED)
 

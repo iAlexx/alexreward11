@@ -85,12 +85,14 @@ export {
 } from './state-machine.js';
 export type { WithdrawalState } from './state-machine.js';
 
-export { FakePayoutChain } from './fake-chain.js';
+export { FakePayoutChain, isAuthoritativePayoutObservation } from './fake-chain.js';
 export type {
+  AuthoritativePayoutObservation,
   FakeBroadcastPhase,
   FakePayoutIntent,
   FakePayoutObservation,
   FakePayoutScenario,
+  PayoutChainAdapter,
 } from './fake-chain.js';
 
 export { createWithdrawalQuote, cancelWithdrawalQuote, expireWithdrawalQuote } from './quotes.js';
@@ -122,13 +124,14 @@ export { runFakePayoutPipeline, advanceFakeReconciliation } from './pipeline.js'
 export type { FakePayoutPipelineResult } from './pipeline.js';
 
 export {
-  reconcileWithdrawalAttempt,
-  reconcileWithdrawalAttemptInTxn,
+  reconcileWithdrawalAttemptFromAdapter,
+  reconcileWithdrawalAttemptFromAdapterInTxn,
   matchIntendedPayout,
+  observationMatchesExpectedAttempt,
 } from './reconcile.js';
 export type {
   ReconcileResolution,
-  ReconcileWithdrawalAttemptInput,
+  ReconcileFromAdapterInput,
   ReconcileWithdrawalAttemptResult,
 } from './reconcile.js';
 

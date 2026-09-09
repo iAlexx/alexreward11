@@ -12,10 +12,11 @@ import {
   decideWithdrawal,
   localWithdrawalEngineFixtureConfig,
   matchIntendedPayout,
-  reconcileWithdrawalAttempt,
   runFakePayoutPipeline,
   withWithdrawalTransaction,
 } from '../src/index.js';
+import { applyObservationInTxn } from '../src/reconcile.js';
+import { stampAuthoritativeObservationForTests } from '../src/fake-chain.js';
 import {
   approveWithdrawal,
   bindVerifiedPrimaryWallet,
@@ -342,7 +343,7 @@ describe.skipIf(phase7DatabaseUrl === '')('Phase 7 fake chain reconcile', () => 
     ).toBe(true);
   });
 
-  it('wrong observation fields stay AMBIGUOUS via reconcile API', async () => {
+  it('wrong observation fields stay AMBIGUOUS via adapter-stamped mismatch', async () => {
     const userId = await createTestUser(pool, '7307');
     await bindVerifiedPrimaryWallet(pool, userId, networkId);
     const withdrawalId = await createApprovedWithdrawal(pool, {
@@ -360,23 +361,36 @@ describe.skipIf(phase7DatabaseUrl === '')('Phase 7 fake chain reconcile', () => 
       'BROADCAST_RESULT_UNKNOWN',
     );
 
-    const attempt = await pool.query<{ query_id: string }>(
-      `SELECT query_id::text FROM withdrawal_attempts WHERE id = $1::uuid`,
+    const attempt = await pool.query<{
+      query_id: string;
+      attempt_number: number;
+      canonical_message_hash: string;
+    }>(
+      `SELECT query_id::text, attempt_number, canonical_message_hash
+       FROM withdrawal_attempts WHERE id = $1::uuid`,
       [unknown.attemptId],
     );
-    const result = await reconcileWithdrawalAttempt(pool, engineConfig, {
+    const row = attempt.rows[0]!;
+    // Authoritative stamp but wrong recipient → AMBIGUOUS (binding fails).
+    const forged = stampAuthoritativeObservationForTests({
       withdrawalId,
       attemptId: unknown.attemptId!,
-      observation: {
-        phase: 'CONFIRMED',
-        queryId: BigInt(attempt.rows[0]?.query_id ?? '1'),
-        recipientAddress: 'EQ_WRONG_RECIPIENT',
-        amountAtomic: '190000',
-        assetSymbol: 'USDT',
-        correlationReference: 'fake-mismatch',
-        mayHaveBroadcast: true,
-      },
+      canonicalMessageHash: row.canonical_message_hash,
+      phase: 'CONFIRMED',
+      queryId: BigInt(row.query_id),
+      recipientAddress: 'EQ_WRONG_RECIPIENT',
+      amountAtomic: '190000',
+      assetSymbol: 'USDT',
+      correlationReference: `fake:${withdrawalId}:${row.attempt_number}`,
+      mayHaveBroadcast: true,
     });
+    const result = await withWithdrawalTransaction(pool, async (client) =>
+      applyObservationInTxn(client, engineConfig, {
+        withdrawalId,
+        attemptId: unknown.attemptId!,
+        observation: forged,
+      }),
+    );
     expect(result.resolution).toBe('AMBIGUOUS');
     expect(result.state).toBe('RECONCILE_REQUIRED');
   });

@@ -12,12 +12,12 @@ import {
   createWithdrawalQuote,
   FakePayoutChain,
   localWithdrawalEngineFixtureConfig,
-  reconcileWithdrawalAttempt,
   resolvePlatformFeeDiscount,
   resolvePriorityReview,
   runFakePayoutPipeline,
   withWithdrawalTransaction,
 } from '../src/index.js';
+import { applyObservationInTxn } from '../src/reconcile.js';
 import {
   bindVerifiedPrimaryWallet,
   claimFounderForUser,
@@ -397,7 +397,7 @@ describe.skipIf(phase7DatabaseUrl === '')('Phase 7 authority corrections', () =>
   });
 
   describe('reconcile authority', () => {
-    it('runtime caller cannot self-declare payment confirmed', async () => {
+    it('plain caller DEFINITIVE_NONPAYMENT observation cannot create definitive evidence', async () => {
       const userId = await createTestUser(pool, '7620');
       await bindVerifiedPrimaryWallet(pool, userId, networkId);
       const withdrawalId = await createApprovedWithdrawal(pool, {
@@ -414,6 +414,23 @@ describe.skipIf(phase7DatabaseUrl === '')('Phase 7 authority corrections', () =>
         withdrawalId,
         'BROADCAST_RESULT_UNKNOWN',
       );
+      const attempt = await pool.query<{
+        query_id: string;
+        attempt_number: number;
+        canonical_message_hash: string;
+        net_amount_atomic: string;
+        recipient: string;
+      }>(
+        `SELECT a.query_id::text, a.attempt_number, a.canonical_message_hash,
+                wd.net_amount_atomic::text,
+                COALESCE(w.friendly_address, w.raw_address) AS recipient
+         FROM withdrawal_attempts a
+         JOIN withdrawals wd ON wd.id = a.withdrawal_id
+         JOIN user_wallets w ON w.id = wd.wallet_id
+         WHERE a.id = $1::uuid`,
+        [unknown.attemptId],
+      );
+      const row = attempt.rows[0]!;
       const reservedBefore = await userBucketBalance(
         pool,
         userId,
@@ -421,33 +438,40 @@ describe.skipIf(phase7DatabaseUrl === '')('Phase 7 authority corrections', () =>
         'USER_RESERVED_LIABILITY',
       );
 
-      const result = await reconcileWithdrawalAttempt(pool, engineConfig, {
+      // Field-perfect but unbranded plain object — not adapter provenance.
+      const plain = {
+        phase: 'DEFINITIVE_NONPAYMENT' as const,
+        queryId: BigInt(row.query_id),
+        recipientAddress: row.recipient,
+        amountAtomic: row.net_amount_atomic,
+        assetSymbol: 'USDT',
+        correlationReference: `fake:${withdrawalId}:${row.attempt_number}`,
+        mayHaveBroadcast: true,
         withdrawalId,
         attemptId: unknown.attemptId!,
-        observation: {
-          phase: 'UNKNOWN',
-          queryId: 1n,
-          recipientAddress: 'EQ_ANY',
-          amountAtomic: '190000',
-          assetSymbol: 'USDT',
-          correlationReference: 'caller-lie',
-          mayHaveBroadcast: true,
-        },
-        resolution: 'INTENDED_PAYOUT_PROVEN',
-        forceResolution: true,
-      } as Parameters<typeof reconcileWithdrawalAttempt>[2]);
+        canonicalMessageHash: row.canonical_message_hash,
+      };
+      const result = await withWithdrawalTransaction(pool, async (client) =>
+        applyObservationInTxn(client, engineConfig, {
+          withdrawalId,
+          attemptId: unknown.attemptId!,
+          observation: plain,
+        }),
+      );
       expect(result.resolution).toBe('AMBIGUOUS');
       expect(result.state).toBe('RECONCILE_REQUIRED');
-      const reservedAfter = await userBucketBalance(
-        pool,
-        userId,
-        assetId,
-        'USER_RESERVED_LIABILITY',
+      const evidence = await pool.query<{ resolution: string }>(
+        `SELECT resolution::text FROM withdrawal_payout_reconciliations
+         WHERE id = $1::uuid`,
+        [result.reconciliationId],
       );
-      expect(reservedAfter).toBe(reservedBefore);
+      expect(evidence.rows[0]?.resolution).toBe('AMBIGUOUS');
+      expect(await userBucketBalance(pool, userId, assetId, 'USER_RESERVED_LIABILITY')).toBe(
+        reservedBefore,
+      );
     });
 
-    it('runtime caller cannot self-declare definitive non-payment', async () => {
+    it('plain caller CONFIRMED observation cannot settle by matching fields', async () => {
       const userId = await createTestUser(pool, '7621');
       await bindVerifiedPrimaryWallet(pool, userId, networkId);
       const withdrawalId = await createApprovedWithdrawal(pool, {
@@ -464,38 +488,47 @@ describe.skipIf(phase7DatabaseUrl === '')('Phase 7 authority corrections', () =>
         withdrawalId,
         'BROADCAST_RESULT_UNKNOWN',
       );
-      const reservedBefore = await userBucketBalance(
-        pool,
-        userId,
-        assetId,
-        'USER_RESERVED_LIABILITY',
+      const attempt = await pool.query<{
+        query_id: string;
+        attempt_number: number;
+        canonical_message_hash: string;
+        net_amount_atomic: string;
+        recipient: string;
+      }>(
+        `SELECT a.query_id::text, a.attempt_number, a.canonical_message_hash,
+                wd.net_amount_atomic::text,
+                COALESCE(w.friendly_address, w.raw_address) AS recipient
+         FROM withdrawal_attempts a
+         JOIN withdrawals wd ON wd.id = a.withdrawal_id
+         JOIN user_wallets w ON w.id = wd.wallet_id
+         WHERE a.id = $1::uuid`,
+        [unknown.attemptId],
       );
-
-      const result = await reconcileWithdrawalAttempt(pool, engineConfig, {
+      const row = attempt.rows[0]!;
+      const plain = {
+        phase: 'CONFIRMED' as const,
+        queryId: BigInt(row.query_id),
+        recipientAddress: row.recipient,
+        amountAtomic: row.net_amount_atomic,
+        assetSymbol: 'USDT',
+        correlationReference: `fake:${withdrawalId}:${row.attempt_number}`,
+        mayHaveBroadcast: true,
         withdrawalId,
         attemptId: unknown.attemptId!,
-        observation: {
-          phase: 'UNKNOWN',
-          queryId: 2n,
-          recipientAddress: 'EQ_ANY',
-          amountAtomic: '190000',
-          assetSymbol: 'USDT',
-          correlationReference: 'caller-nonpay-lie',
-          mayHaveBroadcast: true,
-        },
-        resolution: 'DEFINITIVE_NONPAYMENT',
-        forceResolution: true,
-      } as Parameters<typeof reconcileWithdrawalAttempt>[2]);
-
+        canonicalMessageHash: row.canonical_message_hash,
+      };
+      const result = await withWithdrawalTransaction(pool, async (client) =>
+        applyObservationInTxn(client, engineConfig, {
+          withdrawalId,
+          attemptId: unknown.attemptId!,
+          observation: plain,
+        }),
+      );
       expect(result.resolution).toBe('AMBIGUOUS');
       expect(result.state).toBe('RECONCILE_REQUIRED');
-      const reservedAfter = await userBucketBalance(
-        pool,
-        userId,
-        assetId,
-        'USER_RESERVED_LIABILITY',
+      expect(await userBucketBalance(pool, userId, assetId, 'USER_RESERVED_LIABILITY')).toBe(
+        200000n,
       );
-      expect(reservedAfter).toBe(reservedBefore);
     });
 
     it('fake authoritative confirmed observation settles', async () => {
@@ -546,7 +579,7 @@ describe.skipIf(phase7DatabaseUrl === '')('Phase 7 authority corrections', () =>
       );
     });
 
-    it('mismatching observation remains ambiguous; Reserved untouched by assertion alone', async () => {
+    it('mismatching plain observation remains ambiguous; Reserved untouched', async () => {
       const userId = await createTestUser(pool, '7624');
       await bindVerifiedPrimaryWallet(pool, userId, networkId);
       const withdrawalId = await createApprovedWithdrawal(pool, {
@@ -581,19 +614,21 @@ describe.skipIf(phase7DatabaseUrl === '')('Phase 7 authority corrections', () =>
         'USER_RESERVED_LIABILITY',
       );
 
-      const result = await reconcileWithdrawalAttempt(pool, engineConfig, {
-        withdrawalId,
-        attemptId: unknown.attemptId!,
-        observation: {
-          phase: 'CONFIRMED',
-          queryId: BigInt(attempt.rows[0]!.query_id),
-          recipientAddress: 'EQ_WRONG_' + randomUUID().slice(0, 8),
-          amountAtomic: attempt.rows[0]!.net_amount_atomic,
-          assetSymbol: 'USDT',
-          correlationReference: 'mismatch',
-          mayHaveBroadcast: true,
-        },
-      });
+      const result = await withWithdrawalTransaction(pool, async (client) =>
+        applyObservationInTxn(client, engineConfig, {
+          withdrawalId,
+          attemptId: unknown.attemptId!,
+          observation: {
+            phase: 'CONFIRMED',
+            queryId: BigInt(attempt.rows[0]!.query_id),
+            recipientAddress: 'EQ_WRONG_' + randomUUID().slice(0, 8),
+            amountAtomic: attempt.rows[0]!.net_amount_atomic,
+            assetSymbol: 'USDT',
+            correlationReference: 'mismatch',
+            mayHaveBroadcast: true,
+          },
+        }),
+      );
       expect(result.resolution).toBe('AMBIGUOUS');
       expect(result.state).toBe('RECONCILE_REQUIRED');
       const reservedAfter = await userBucketBalance(

@@ -34,6 +34,11 @@ export interface FakePayoutIntent {
   readonly scenario: FakePayoutScenario;
 }
 
+/**
+ * Plain observation shape — NOT a trust boundary.
+ * Callers can forge objects matching this interface; reconciliation must not
+ * treat them as authoritative without provenance + attempt binding.
+ */
 export interface FakePayoutObservation {
   readonly phase: FakeBroadcastPhase;
   readonly queryId: bigint;
@@ -44,16 +49,71 @@ export interface FakePayoutObservation {
   readonly mayHaveBroadcast: boolean;
 }
 
+/** Module-private provenance brand — cannot be forged by plain object literals. */
+const AUTHORITATIVE_PROVENANCE = Symbol.for('alex-rewards.fake-chain.authoritative-observation');
+const AUTHORITATIVE_TOKEN = Object.freeze({ source: 'FakePayoutChain' as const });
+
+/**
+ * Observation produced only by the trusted FakePayoutChain (or test stamp helper).
+ * Carries immutable payout-intent identity for reconciliation binding.
+ */
+export interface AuthoritativePayoutObservation extends FakePayoutObservation {
+  readonly withdrawalId: string;
+  readonly attemptId: string;
+  readonly canonicalMessageHash: string;
+  readonly [AUTHORITATIVE_PROVENANCE]: typeof AUTHORITATIVE_TOKEN;
+}
+
+export function isAuthoritativePayoutObservation(
+  value: unknown,
+): value is AuthoritativePayoutObservation {
+  if (typeof value !== 'object' || value === null) return false;
+  const record = value as Record<PropertyKey, unknown>;
+  return record[AUTHORITATIVE_PROVENANCE] === AUTHORITATIVE_TOKEN;
+}
+
+export function fakeCorrelationReference(withdrawalId: string, attemptNumber: number): string {
+  return `fake:${withdrawalId}:${attemptNumber}`;
+}
+
+/**
+ * Trusted chain-adapter surface for reconciliation.
+ * Runtime reconcile asks the adapter; it never accepts caller-built observations.
+ */
+export interface PayoutChainAdapter {
+  /**
+   * Return the current observation for the exact withdrawal/attempt pair, or null.
+   * Implementations MUST fail closed / return null when the pair is unknown or mismatched.
+   */
+  observeForAttempt(input: {
+    readonly withdrawalId: string;
+    readonly attemptId: string;
+  }): AuthoritativePayoutObservation | null;
+}
+
+function stamp(
+  intent: FakePayoutIntent,
+  observation: FakePayoutObservation,
+): AuthoritativePayoutObservation {
+  return {
+    ...observation,
+    withdrawalId: intent.withdrawalId,
+    attemptId: intent.attemptId,
+    canonicalMessageHash: intent.canonicalMessageHash,
+    [AUTHORITATIVE_PROVENANCE]: AUTHORITATIVE_TOKEN,
+  };
+}
+
 /**
  * Deterministic LOCAL/TEST fake payout adapter.
  * Impossible to enable in staging/production via config validation.
  * Client cannot choose outcomes — scenario is server/test harness controlled.
  */
-export class FakePayoutChain {
+export class FakePayoutChain implements PayoutChainAdapter {
   readonly #config: WithdrawalEngineConfig;
   readonly #byAttempt = new Map<
     string,
-    { intent: FakePayoutIntent; observation: FakePayoutObservation }
+    { intent: FakePayoutIntent; observation: AuthoritativePayoutObservation }
   >();
 
   constructor(config: WithdrawalEngineConfig) {
@@ -64,35 +124,73 @@ export class FakePayoutChain {
     this.#config = config;
   }
 
-  registerIntent(intent: FakePayoutIntent): FakePayoutObservation {
+  registerIntent(intent: FakePayoutIntent): AuthoritativePayoutObservation {
     if (!this.#config.fakeChainEnabled) {
       throw new WithdrawalDomainError('CONFIG', 'Fake payout chain is disabled');
     }
-    const observation = initialObservation(intent);
+    const observation = stamp(intent, initialObservation(intent));
     this.#byAttempt.set(intent.attemptId, { intent, observation });
     return observation;
   }
 
   /** Advance according to scenario; never treats unknown as failure. */
-  advance(attemptId: string): FakePayoutObservation {
+  advance(attemptId: string): AuthoritativePayoutObservation {
     const row = this.#byAttempt.get(attemptId);
     if (row === undefined) {
       throw new WithdrawalDomainError('VALIDATION', 'Unknown fake payout attempt');
     }
-    const next = advanceScenario(row.intent.scenario, row.observation);
+    const next = stamp(row.intent, advanceScenario(row.intent.scenario, row.observation));
     const updated = { ...row, observation: next };
     this.#byAttempt.set(attemptId, updated);
     return next;
   }
 
-  observe(attemptId: string): FakePayoutObservation | null {
+  observe(attemptId: string): AuthoritativePayoutObservation | null {
     return this.#byAttempt.get(attemptId)?.observation ?? null;
   }
 
   /** Reconciliation view — returns current observation without mutating. */
-  reconcileView(attemptId: string): FakePayoutObservation | null {
+  reconcileView(attemptId: string): AuthoritativePayoutObservation | null {
     return this.observe(attemptId);
   }
+
+  observeForAttempt(input: {
+    readonly withdrawalId: string;
+    readonly attemptId: string;
+  }): AuthoritativePayoutObservation | null {
+    const row = this.#byAttempt.get(input.attemptId);
+    if (row === undefined) return null;
+    if (row.intent.withdrawalId !== input.withdrawalId) return null;
+    if (row.observation.withdrawalId !== input.withdrawalId) return null;
+    if (row.observation.attemptId !== input.attemptId) return null;
+    return row.observation;
+  }
+}
+
+/**
+ * TEST-ONLY: stamp an observation with adapter provenance.
+ * Not re-exported from the package index — import from this module in tests only.
+ */
+export function stampAuthoritativeObservationForTests(
+  input: {
+    readonly withdrawalId: string;
+    readonly attemptId: string;
+    readonly canonicalMessageHash: string;
+  } & FakePayoutObservation,
+): AuthoritativePayoutObservation {
+  return {
+    phase: input.phase,
+    queryId: input.queryId,
+    recipientAddress: input.recipientAddress,
+    amountAtomic: input.amountAtomic,
+    assetSymbol: input.assetSymbol,
+    correlationReference: input.correlationReference,
+    mayHaveBroadcast: input.mayHaveBroadcast,
+    withdrawalId: input.withdrawalId,
+    attemptId: input.attemptId,
+    canonicalMessageHash: input.canonicalMessageHash,
+    [AUTHORITATIVE_PROVENANCE]: AUTHORITATIVE_TOKEN,
+  };
 }
 
 function initialObservation(intent: FakePayoutIntent): FakePayoutObservation {
@@ -101,7 +199,7 @@ function initialObservation(intent: FakePayoutIntent): FakePayoutObservation {
     recipientAddress: intent.recipientAddress,
     amountAtomic: intent.netAmountAtomic,
     assetSymbol: intent.assetSymbol,
-    correlationReference: `fake:${intent.withdrawalId}:${intent.attemptNumber}`,
+    correlationReference: fakeCorrelationReference(intent.withdrawalId, intent.attemptNumber),
   };
   switch (intent.scenario) {
     case 'DEFINITE_PRE_BROADCAST_FAILURE':

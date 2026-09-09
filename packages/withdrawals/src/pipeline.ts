@@ -8,7 +8,7 @@ import {
   createWithdrawalAttempt,
   updateAttemptBroadcastState,
 } from './attempts.js';
-import { reconcileWithdrawalAttemptInTxn } from './reconcile.js';
+import { reconcileWithdrawalAttemptFromAdapterInTxn } from './reconcile.js';
 import { settleWithdrawalReservation } from './settlement.js';
 import type { WithdrawalState } from './state-machine.js';
 import { transitionWithdrawal } from './transitions.js';
@@ -413,12 +413,11 @@ export async function advanceFakeReconciliation(
         scenario,
       });
     }
-    const advanced = fakeChain.advance(a.id);
+    fakeChain.advance(a.id);
 
-    const result = await reconcileWithdrawalAttemptInTxn(client, config, {
+    const result = await reconcileWithdrawalAttemptFromAdapterInTxn(client, config, fakeChain, {
       withdrawalId: input.withdrawalId,
       attemptId: a.id,
-      observation: advanced,
     });
     return {
       withdrawalId: input.withdrawalId,
