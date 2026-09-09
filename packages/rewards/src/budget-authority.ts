@@ -1,6 +1,7 @@
 import type { PoolClient } from 'pg';
 
 import { RewardDomainError } from './errors.js';
+import { assertCanonicalBudgetWindow, PHASE5_BASE_BUDGET_SCOPES } from './budget-windows.js';
 
 export interface ValidatedBaseBudgetPeriod {
   readonly id: string;
@@ -27,9 +28,39 @@ export interface ApplicableBonusBudgetPeriod {
   readonly perUserCapAtomic: string | null;
 }
 
+function requireExactCountryMatch(
+  budgetCountryGroup: string | null,
+  quoteCountryGroup: string | null | undefined,
+  budgetPeriodId: string,
+  context: string,
+): void {
+  if (budgetCountryGroup === null) return;
+  if (quoteCountryGroup === undefined || quoteCountryGroup === null) {
+    throw new RewardDomainError(
+      'BUDGET_SCOPE_MISMATCH',
+      `${context} requires quote countryGroup when budget country_group is set`,
+      { details: { budgetPeriodId, budgetCountryGroup } },
+    );
+  }
+  if (quoteCountryGroup !== budgetCountryGroup) {
+    throw new RewardDomainError(
+      'BUDGET_SCOPE_MISMATCH',
+      `${context} country_group does not match quote`,
+      {
+        details: {
+          budgetPeriodId,
+          budgetCountryGroup,
+          quoteCountryGroup,
+        },
+      },
+    );
+  }
+}
+
 /**
  * Validate a caller-provided base budget period id as a locator only.
- * Authority comes from ACTIVE status, asset, window, scope, and optional provider/country/rule.
+ * Authority comes from ACTIVE status, asset, canonical UTC window, and exact scope match.
+ * Phase 5 base quotes may use only GLOBAL / PROVIDER / COUNTRY_GROUP / REWARD_RULE.
  */
 export async function validateBaseBudgetPeriod(
   client: PoolClient,
@@ -39,7 +70,8 @@ export async function validateBaseBudgetPeriod(
     readonly asOf: Date;
     readonly providerId?: string | null;
     readonly countryGroup?: string | null;
-    readonly ruleVersion?: number | null;
+    readonly rewardRuleId: string;
+    readonly ruleVersion: number;
   },
 ): Promise<ValidatedBaseBudgetPeriod> {
   const result = await client.query<{
@@ -87,6 +119,14 @@ export async function validateBaseBudgetPeriod(
       },
     );
   }
+
+  assertCanonicalBudgetWindow(
+    row.granularity,
+    row.period_start,
+    row.period_end,
+    'reward budget period',
+  );
+
   const asOfMs = input.asOf.getTime();
   if (asOfMs < row.period_start.getTime() || asOfMs >= row.period_end.getTime()) {
     throw new RewardDomainError(
@@ -102,42 +142,164 @@ export async function validateBaseBudgetPeriod(
       },
     );
   }
-  if (
-    row.scope_type === 'PROVIDER' &&
-    input.providerId !== undefined &&
-    input.providerId !== null &&
-    row.scope_reference_id !== null &&
-    row.scope_reference_id !== input.providerId
-  ) {
+
+  if (!PHASE5_BASE_BUDGET_SCOPES.has(row.scope_type)) {
     throw new RewardDomainError(
       'BUDGET_SCOPE_MISMATCH',
-      'budget period provider scope does not match quote',
-      { details: { budgetPeriodId: input.budgetPeriodId } },
+      'Phase 5 base reward quotes cannot be authorized by this budget scope_type',
+      {
+        details: {
+          budgetPeriodId: input.budgetPeriodId,
+          scopeType: row.scope_type,
+          allowed: [...PHASE5_BASE_BUDGET_SCOPES],
+        },
+      },
     );
   }
-  if (
-    row.country_group !== null &&
-    input.countryGroup !== undefined &&
-    input.countryGroup !== null &&
-    row.country_group !== input.countryGroup
-  ) {
-    throw new RewardDomainError(
-      'BUDGET_SCOPE_MISMATCH',
-      'budget period country scope does not match quote',
-      { details: { budgetPeriodId: input.budgetPeriodId } },
-    );
-  }
-  if (
-    row.rule_version !== null &&
-    input.ruleVersion !== undefined &&
-    input.ruleVersion !== null &&
-    row.rule_version !== input.ruleVersion
-  ) {
-    throw new RewardDomainError(
-      'BUDGET_SCOPE_MISMATCH',
-      'budget period rule_version does not match quote rule',
-      { details: { budgetPeriodId: input.budgetPeriodId } },
-    );
+
+  switch (row.scope_type) {
+    case 'GLOBAL': {
+      if (row.scope_reference_id !== null || row.country_group !== null) {
+        throw new RewardDomainError(
+          'BUDGET_SCOPE_MISMATCH',
+          'GLOBAL base budget must have null scope_reference_id and null country_group',
+          {
+            details: {
+              budgetPeriodId: input.budgetPeriodId,
+              scopeReferenceId: row.scope_reference_id,
+              countryGroup: row.country_group,
+            },
+          },
+        );
+      }
+      break;
+    }
+    case 'PROVIDER': {
+      if (input.providerId === undefined || input.providerId === null) {
+        throw new RewardDomainError(
+          'BUDGET_SCOPE_MISMATCH',
+          'PROVIDER base budget requires a resolved quote providerId',
+          { details: { budgetPeriodId: input.budgetPeriodId } },
+        );
+      }
+      if (row.scope_reference_id === null) {
+        throw new RewardDomainError(
+          'BUDGET_SCOPE_MISMATCH',
+          'PROVIDER base budget requires non-null scope_reference_id',
+          { details: { budgetPeriodId: input.budgetPeriodId } },
+        );
+      }
+      if (row.scope_reference_id !== input.providerId) {
+        throw new RewardDomainError(
+          'BUDGET_SCOPE_MISMATCH',
+          'PROVIDER base budget scope_reference_id does not match quote provider',
+          {
+            details: {
+              budgetPeriodId: input.budgetPeriodId,
+              scopeReferenceId: row.scope_reference_id,
+              providerId: input.providerId,
+            },
+          },
+        );
+      }
+      requireExactCountryMatch(
+        row.country_group,
+        input.countryGroup,
+        input.budgetPeriodId,
+        'PROVIDER base budget',
+      );
+      break;
+    }
+    case 'COUNTRY_GROUP': {
+      if (row.country_group === null) {
+        throw new RewardDomainError(
+          'BUDGET_SCOPE_MISMATCH',
+          'COUNTRY_GROUP base budget requires non-null country_group',
+          { details: { budgetPeriodId: input.budgetPeriodId } },
+        );
+      }
+      if (row.scope_reference_id !== null) {
+        throw new RewardDomainError(
+          'BUDGET_SCOPE_MISMATCH',
+          'COUNTRY_GROUP base budget must not use scope_reference_id as authority',
+          {
+            details: {
+              budgetPeriodId: input.budgetPeriodId,
+              scopeReferenceId: row.scope_reference_id,
+            },
+          },
+        );
+      }
+      if (input.countryGroup === undefined || input.countryGroup === null) {
+        throw new RewardDomainError(
+          'BUDGET_SCOPE_MISMATCH',
+          'COUNTRY_GROUP base budget requires quote countryGroup',
+          { details: { budgetPeriodId: input.budgetPeriodId } },
+        );
+      }
+      if (input.countryGroup !== row.country_group) {
+        throw new RewardDomainError(
+          'BUDGET_SCOPE_MISMATCH',
+          'COUNTRY_GROUP base budget country_group does not match quote',
+          {
+            details: {
+              budgetPeriodId: input.budgetPeriodId,
+              budgetCountryGroup: row.country_group,
+              quoteCountryGroup: input.countryGroup,
+            },
+          },
+        );
+      }
+      break;
+    }
+    case 'REWARD_RULE': {
+      if (row.scope_reference_id === null) {
+        throw new RewardDomainError(
+          'BUDGET_SCOPE_MISMATCH',
+          'REWARD_RULE base budget requires scope_reference_id = reward rule id',
+          { details: { budgetPeriodId: input.budgetPeriodId } },
+        );
+      }
+      if (row.scope_reference_id !== input.rewardRuleId) {
+        throw new RewardDomainError(
+          'BUDGET_SCOPE_MISMATCH',
+          'REWARD_RULE base budget does not match resolved reward rule id',
+          {
+            details: {
+              budgetPeriodId: input.budgetPeriodId,
+              scopeReferenceId: row.scope_reference_id,
+              rewardRuleId: input.rewardRuleId,
+            },
+          },
+        );
+      }
+      if (row.rule_version !== null && row.rule_version !== input.ruleVersion) {
+        throw new RewardDomainError(
+          'BUDGET_SCOPE_MISMATCH',
+          'REWARD_RULE base budget rule_version does not match resolved rule',
+          {
+            details: {
+              budgetPeriodId: input.budgetPeriodId,
+              budgetRuleVersion: row.rule_version,
+              ruleVersion: input.ruleVersion,
+            },
+          },
+        );
+      }
+      requireExactCountryMatch(
+        row.country_group,
+        input.countryGroup,
+        input.budgetPeriodId,
+        'REWARD_RULE base budget',
+      );
+      break;
+    }
+    default:
+      throw new RewardDomainError(
+        'BUDGET_SCOPE_MISMATCH',
+        'unsupported Phase 5 base budget scope_type',
+        { details: { budgetPeriodId: input.budgetPeriodId, scopeType: row.scope_type } },
+      );
   }
 
   return {
@@ -202,23 +364,30 @@ export async function resolveApplicableBonusBudgetPeriods(
     [input.assetId, input.asOf.toISOString(), input.membershipPlanId, input.userId],
   );
 
-  const applicable = result.rows.map((row) => ({
-    id: row.id,
-    membershipPlanId: row.membership_plan_id,
-    userId: row.user_id,
-    assetId: row.asset_id,
-    granularity: row.granularity,
-    budgetAtomic: row.budget_atomic,
-    reservedAtomic: row.reserved_atomic,
-    consumedAtomic: row.consumed_atomic,
-    perUserCapAtomic: row.per_user_cap_atomic,
-  }));
+  const applicable = result.rows.map((row) => {
+    assertCanonicalBudgetWindow(
+      row.granularity,
+      row.period_start,
+      row.period_end,
+      'membership bonus budget period',
+    );
+    return {
+      id: row.id,
+      membershipPlanId: row.membership_plan_id,
+      userId: row.user_id,
+      assetId: row.asset_id,
+      granularity: row.granularity,
+      budgetAtomic: row.budget_atomic,
+      reservedAtomic: row.reserved_atomic,
+      consumedAtomic: row.consumed_atomic,
+      perUserCapAtomic: row.per_user_cap_atomic,
+    };
+  });
 
   if (input.locatorPeriodIds !== undefined && input.locatorPeriodIds.length > 0) {
     const applicableIds = new Set(applicable.map((p) => p.id));
     for (const locatorId of input.locatorPeriodIds) {
       if (!applicableIds.has(locatorId)) {
-        // Validate the locator itself to surface precise mismatch reasons.
         await validateBonusBudgetPeriodLocator(client, {
           budgetPeriodId: locatorId,
           assetId: input.assetId,
@@ -294,6 +463,12 @@ export async function validateBonusBudgetPeriodLocator(
       { details: { budgetPeriodId: input.budgetPeriodId } },
     );
   }
+  assertCanonicalBudgetWindow(
+    row.granularity,
+    row.period_start,
+    row.period_end,
+    'membership bonus budget period',
+  );
   const asOfMs = input.asOf.getTime();
   if (asOfMs < row.period_start.getTime() || asOfMs >= row.period_end.getTime()) {
     throw new RewardDomainError(

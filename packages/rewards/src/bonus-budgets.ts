@@ -2,6 +2,7 @@ import type { PoolClient } from 'pg';
 
 import { amountAtomicToString } from '@alex-rewards/ledger';
 
+import { assertCanonicalBudgetWindow } from './budget-windows.js';
 import { RewardDomainError } from './errors.js';
 import type { CreateMembershipBonusBudgetPeriodCommand } from './types.js';
 
@@ -40,6 +41,12 @@ export async function createMembershipBonusBudgetPeriod(
   command: CreateMembershipBonusBudgetPeriodCommand,
 ): Promise<MembershipBonusBudgetPeriodRecord> {
   const budgetAtomic = parsePositive(command.budgetAtomic, 'budgetAtomic');
+  assertCanonicalBudgetWindow(
+    command.granularity,
+    command.periodStart,
+    command.periodEnd,
+    'membership bonus budget period',
+  );
   const perUserCap =
     command.perUserCapAtomic === undefined || command.perUserCapAtomic === null
       ? null

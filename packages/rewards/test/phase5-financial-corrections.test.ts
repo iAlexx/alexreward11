@@ -18,6 +18,8 @@ import {
   createSimulatedRewardSourceIdentity,
   ELIGIBLE_REWARD_BONUS_CODE,
   expireRewardQuote,
+  utcDayContaining,
+  utcMonthContaining,
   withLedgerTransaction,
 } from '../src/index.js';
 import {
@@ -520,7 +522,7 @@ describe.skipIf(phase5DatabaseUrl === '')('Phase 5 financial corrections', () =>
     ).rejects.toMatchObject({ code: 'BONUS_RESOLUTION_CONFLICT' });
   });
 
-  it('rejects wrong asset / window / scope budgets and enforces per-user bonus cap', async () => {
+  it('rejects wrong asset / out-of-window budgets and enforces per-user bonus cap', async () => {
     const { providerId } = await createTestOnlyPromotionRule(pool, {
       assetId,
       fixedRewardAtomic: '1000',
@@ -528,13 +530,14 @@ describe.skipIf(phase5DatabaseUrl === '')('Phase 5 financial corrections', () =>
     const ton = await pool.query<{ id: string }>(`SELECT id FROM assets WHERE symbol = 'TON'`);
     const tonId = ton.rows[0]?.id;
     if (tonId === undefined) throw new Error('TON asset missing');
+    const day = utcDayContaining(new Date());
     const wrongAssetBudget = await withLedgerTransaction(pool, async (client) => {
       const period = await createRewardBudgetPeriod(client, {
         scopeType: 'GLOBAL',
         assetId: tonId,
         granularity: 'UTC_DAY',
-        periodStart: new Date('2026-01-01T00:00:00.000Z'),
-        periodEnd: new Date('2027-01-01T00:00:00.000Z'),
+        periodStart: day.periodStart,
+        periodEnd: day.periodEnd,
         budgetAtomic: '1000000',
       });
       return period.id;
@@ -611,8 +614,8 @@ describe.skipIf(phase5DatabaseUrl === '')('Phase 5 financial corrections', () =>
         membershipPlanId: founder.planId,
         assetId,
         granularity: 'UTC_DAY',
-        periodStart: new Date('2026-01-01T00:00:00.000Z'),
-        periodEnd: new Date('2027-01-01T00:00:00.000Z'),
+        periodStart: day.periodStart,
+        periodEnd: day.periodEnd,
         budgetAtomic: '1000000',
         perUserCapAtomic: '40',
       });
@@ -631,7 +634,6 @@ describe.skipIf(phase5DatabaseUrl === '')('Phase 5 financial corrections', () =>
       bonusUnavailablePolicy: 'BASE_REWARD_ONLY',
       membershipBonusBudgetPeriodId: capped,
     });
-    // Requested bonus 50 > per-user cap 40 → base-only under BASE_REWARD_ONLY
     expect(quote.membershipBonusAmountAtomic).toBe('0');
   });
 
@@ -647,27 +649,30 @@ describe.skipIf(phase5DatabaseUrl === '')('Phase 5 financial corrections', () =>
       bonusBps: 500,
       includeBonusBudget: false,
     });
+    const asOf = new Date();
+    const day = utcDayContaining(asOf);
+    const month = utcMonthContaining(asOf);
     const periods = await withLedgerTransaction(pool, async (client) => {
       const daily = await createMembershipBonusBudgetPeriod(client, {
         assetId,
         granularity: 'UTC_DAY',
-        periodStart: new Date('2026-01-01T00:00:00.000Z'),
-        periodEnd: new Date('2027-01-01T00:00:00.000Z'),
+        periodStart: day.periodStart,
+        periodEnd: day.periodEnd,
         budgetAtomic: '1000000',
       });
       const monthly = await createMembershipBonusBudgetPeriod(client, {
         assetId,
         granularity: 'UTC_MONTH',
-        periodStart: new Date('2026-01-01T00:00:00.000Z'),
-        periodEnd: new Date('2027-01-01T00:00:00.000Z'),
+        periodStart: month.periodStart,
+        periodEnd: month.periodEnd,
         budgetAtomic: '1000000',
       });
       const plan = await createMembershipBonusBudgetPeriod(client, {
         membershipPlanId: founder.planId,
         assetId,
         granularity: 'UTC_DAY',
-        periodStart: new Date('2026-01-01T00:00:00.000Z'),
-        periodEnd: new Date('2027-01-01T00:00:00.000Z'),
+        periodStart: day.periodStart,
+        periodEnd: day.periodEnd,
         budgetAtomic: '1000000',
       });
       return [daily.id, monthly.id, plan.id];

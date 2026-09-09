@@ -18,6 +18,7 @@ import {
   ELIGIBLE_REWARD_BONUS_CODE,
   withLedgerTransaction,
 } from '../src/index.js';
+import { utcDayContaining, utcMonthContaining } from '../src/budget-windows.js';
 
 const explicitUrl = process.env.PHASE5_DATABASE_URL ?? '';
 const optedInUrl = process.env.PHASE5_REWARD_TESTS === '1' ? (process.env.DATABASE_URL ?? '') : '';
@@ -121,16 +122,53 @@ export async function createTestOnlyPromotionRule(
 
 export async function createTestOnlyBudget(
   pool: Pool,
-  input: { readonly assetId: string; readonly budgetAtomic?: string },
+  input: {
+    readonly assetId: string;
+    readonly budgetAtomic?: string;
+    readonly asOf?: Date;
+    readonly scopeType?: string;
+    readonly scopeReferenceId?: string | null;
+    readonly countryGroup?: string | null;
+    readonly ruleVersion?: number | null;
+    readonly granularity?: 'HOUR' | 'UTC_DAY' | 'UTC_MONTH';
+  },
 ): Promise<string> {
   return withLedgerTransaction(pool, async (client) => {
+    const asOf = input.asOf ?? new Date();
+    const granularity = input.granularity ?? 'UTC_DAY';
+    const window =
+      granularity === 'UTC_MONTH'
+        ? utcMonthContaining(asOf)
+        : granularity === 'HOUR'
+          ? {
+              periodStart: new Date(
+                Date.UTC(
+                  asOf.getUTCFullYear(),
+                  asOf.getUTCMonth(),
+                  asOf.getUTCDate(),
+                  asOf.getUTCHours(),
+                ),
+              ),
+              periodEnd: new Date(
+                Date.UTC(
+                  asOf.getUTCFullYear(),
+                  asOf.getUTCMonth(),
+                  asOf.getUTCDate(),
+                  asOf.getUTCHours() + 1,
+                ),
+              ),
+            }
+          : utcDayContaining(asOf);
     const period = await createRewardBudgetPeriod(client, {
-      scopeType: 'GLOBAL',
+      scopeType: input.scopeType ?? 'GLOBAL',
       assetId: input.assetId,
-      granularity: 'UTC_DAY',
-      periodStart: new Date('2026-01-01T00:00:00.000Z'),
-      periodEnd: new Date('2027-01-01T00:00:00.000Z'),
+      granularity,
+      periodStart: window.periodStart,
+      periodEnd: window.periodEnd,
       budgetAtomic: input.budgetAtomic ?? '100000000',
+      scopeReferenceId: input.scopeReferenceId ?? null,
+      countryGroup: input.countryGroup ?? null,
+      ruleVersion: input.ruleVersion ?? null,
     });
     return period.id;
   });
@@ -195,12 +233,13 @@ export async function createFounderBonusFixture(
 
     let bonusBudgetPeriodId: string | null = null;
     if (input.includeBonusBudget !== false) {
+      const day = utcDayContaining(new Date());
       const bonusBudget = await createMembershipBonusBudgetPeriod(client, {
         membershipPlanId: planId,
         assetId: input.assetId,
         granularity: 'UTC_DAY',
-        periodStart: new Date('2026-01-01T00:00:00.000Z'),
-        periodEnd: new Date('2027-01-01T00:00:00.000Z'),
+        periodStart: day.periodStart,
+        periodEnd: day.periodEnd,
         budgetAtomic: '100000000',
       });
       bonusBudgetPeriodId = bonusBudget.id;

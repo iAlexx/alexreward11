@@ -14,7 +14,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src test",
     "test": "vitest run --passWithNoTests",
-    "test:phase5": "cross-env PHASE5_REWARD_TESTS=1 vitest run --fileParallelism=false test/phase5-arithmetic.test.ts test/phase5-rules.test.ts test/phase5-quotes-budgets.test.ts test/phase5-issuance.test.ts test/phase5-bonus.test.ts test/phase5-maturity.test.ts test/phase5-guardrails.test.ts test/phase5-failure-injection.test.ts test/phase5-concurrency.test.ts test/phase5-financial-corrections.test.ts"
+    "test:phase5": "cross-env PHASE5_REWARD_TESTS=1 vitest run --fileParallelism=false test/phase5-arithmetic.test.ts test/phase5-rules.test.ts test/phase5-quotes-budgets.test.ts test/phase5-issuance.test.ts test/phase5-bonus.test.ts test/phase5-maturity.test.ts test/phase5-guardrails.test.ts test/phase5-failure-injection.test.ts test/phase5-concurrency.test.ts test/phase5-financial-corrections.test.ts test/phase5-budget-scope.test.ts"
   },
   "dependencies": {
     "@alex-rewards/db": "workspace:*",

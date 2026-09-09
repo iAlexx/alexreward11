@@ -55,7 +55,8 @@ Zero after `FLOOR` means **no bonus** (amount `0`), not an error.
 
 1. For `PROMOTION`, prove `simulated_reward_sources` eligibility (server-created, correct provider).
 2. Resolve exactly one `ACTIVE` reward rule for context (`resolveRewardRule` fails closed on 0 or >1 matches). Rule family = `reward_rules.code`.
-3. Validate base budget period as locator only (ACTIVE, asset, window, scope).
+3. Validate base budget period as locator only (ACTIVE, asset, canonical UTC window, exact Phase 5
+   scope authority: GLOBAL / PROVIDER / COUNTRY_GROUP / REWARD_RULE only; pass resolved rule id).
 4. Resolve FINANCIAL `ELIGIBLE_REWARD_BONUS` candidates across all active memberships (0 → none; 1 → use; >1 → fail closed).
 5. Under `BASE_REWARD_ONLY`, recognized bonus economic unavailability (exhausted/missing/inactive/cap/pause) yields bonus `0` with valid base; `BLOCK_QUOTE_BEFORE_START` fails closed with no surviving quote.
 6. Evaluate guardrails with **candidate base + bonus**, lock current UTC exposure periods, snapshot all evaluated limit versions (ALLOW and BLOCK). `MIN_EXPECTED_MARGIN_BPS` when ACTIVE → `MARGIN_POLICY_UNDEFINED` / OWNER_DECISION_REQUIRED (no invented margin formula).

@@ -109,6 +109,14 @@ export {
 } from './budget-authority.js';
 
 export {
+  assertCanonicalBudgetWindow,
+  utcDayContaining,
+  utcHourContaining,
+  utcMonthContaining,
+  PHASE5_BASE_BUDGET_SCOPES,
+} from './budget-windows.js';
+
+export {
   releaseExposureReservationsForQuote,
   consumeExposureReservationsForQuote,
 } from './exposure.js';

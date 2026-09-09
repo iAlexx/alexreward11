@@ -334,6 +334,7 @@ async function createRewardQuoteOnClient(
     asOf,
     providerId,
     countryGroup: command.countryGroup ?? null,
+    rewardRuleId: rule.id,
     ruleVersion: rule.ruleVersion,
   });
 

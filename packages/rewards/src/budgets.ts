@@ -2,6 +2,7 @@ import type { PoolClient } from 'pg';
 
 import { amountAtomicToString } from '@alex-rewards/ledger';
 
+import { assertCanonicalBudgetWindow } from './budget-windows.js';
 import { RewardDomainError } from './errors.js';
 import type { CreateRewardBudgetPeriodCommand } from './types.js';
 
@@ -35,6 +36,12 @@ export async function createRewardBudgetPeriod(
   command: CreateRewardBudgetPeriodCommand,
 ): Promise<RewardBudgetPeriodRecord> {
   const budgetAtomic = parsePositive(command.budgetAtomic, 'budgetAtomic');
+  assertCanonicalBudgetWindow(
+    command.granularity,
+    command.periodStart,
+    command.periodEnd,
+    'reward budget period',
+  );
   const result = await client.query<{
     id: string;
     budget_atomic: string;

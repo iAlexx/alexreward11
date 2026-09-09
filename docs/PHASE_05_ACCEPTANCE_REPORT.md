@@ -1,66 +1,43 @@
-# ALEx Rewards Phase 5 Acceptance Report (Corrected)
+# ALEx Rewards Phase 5 Acceptance Report (Corrected — budget scope)
 
-Status: **PASS (corrected)** — Phase 5 Reward Engine financial corrections complete after independent review of archive `a7da07d…`. GitHub Actions `quality` (including Phase 5 gates) and `docker-smoke` are green on the corrected archival commit.
+Status: **PASS (narrow correction)** — Base reward budget scope authority + canonical UTC
+window integrity corrected after review of `82d73cf…`. Prior Phase 5 financial corrections remain
+in force. GitHub Actions `quality` + `docker-smoke` must be green on the new accepted commit.
 
 Date: 2026-09-09
 
 Source of truth: ALEx Rewards Master Product, Financial, Security & Engineering Specification **v1.2**.
 
-| Item                                  | Value                                                           |
-| ------------------------------------- | --------------------------------------------------------------- |
-| Corrected accepted Phase 5 commit     | `82d73cfcefd8368493f24219d89ba1b680dcc48a`                      |
-| Historical Phase 5 archive (retained) | `a7da07d623c63819344dc72ebb2266d7ad0bcc06`                      |
-| GitHub Actions run                    | https://github.com/iAlexx/alexreward11/actions/runs/34290555816 |
-| `quality`                             | PASS — job `102275913607`                                       |
-| `docker-smoke`                        | PASS — job `102276707087`                                       |
-| New migration                         | `0014_phase5_financial_corrections.sql`                         |
-| Migrations `0001`–`0013`              | **unchanged**                                                   |
-| Phase 4 accepted archival source      | `34bb15455f98f9ae298289453f274d5f2f9d0ee2`                      |
+| Item                                       | Value                                         |
+| ------------------------------------------ | --------------------------------------------- |
+| New accepted Phase 5 commit                | _(filled after CI-green push)_                |
+| Prior corrected Phase 5 archive (retained) | `82d73cfcefd8368493f24219d89ba1b680dcc48a`    |
+| Historical first Phase 5 archive           | `a7da07d623c63819344dc72ebb2266d7ad0bcc06`    |
+| New migration                              | `0015_budget_period_utc_window_integrity.sql` |
+| Migrations `0001`–`0014`                   | **unchanged**                                 |
 
-Phase 6 has **not** started. Phase 5 remains Reward Engine (simulated source) only.
+Phase 6 has **not** started.
 
-## Correction scope (vs historical `a7da07d`)
+## Narrow correction scope
 
-1. `BASE_REWARD_ONLY` covers exhausted/inactive/out-of-window/cap/pause bonus unavailability (not only missing period / pause).
-2. Quote start requires `completedAt <= expires_at`; issuance proves timely `source_started_at`.
-3. `markSimulatedSourceStarted` removed from public runtime API; `completeSimulatedRewardSource` enforces binding + expiry.
-4. `simulated_reward_sources` is DB-authoritative; arbitrary client source UUIDs rejected.
-5. Membership bonus resolves FINANCIAL `ELIGIBLE_REWARD_BONUS` candidates (fail closed on conflict).
-6. Budget periods validated as locators against authoritative metadata.
-7. All applicable bonus caps reserved atomically (multi-period reservations).
-8. Exposure limits use exact UTC windows + scope; concurrency-safe period counters.
-9. Successful quotes freeze all evaluated active guardrail versions (ALLOW included).
-10. `MIN_EXPECTED_MARGIN_BPS` fail-closed (`MARGIN_POLICY_UNDEFINED`) until Owner formula.
-11. `reward_quotes` financial snapshot protected by DB trigger (0014).
-12. Docs corrected: financial immutability + approved lifecycle supersession (not full-row append-only).
+1. `validateBaseBudgetPeriod` enforces exact Phase 5 base scopes only:
+   `GLOBAL` | `PROVIDER` | `COUNTRY_GROUP` | `REWARD_RULE`.
+2. `MEMBERSHIP_PLAN` / `MISSION` / `REFERRAL` cannot authorize Phase 5 base simulated quotes.
+3. GLOBAL requires null `scope_reference_id` and null `country_group`.
+4. PROVIDER requires resolved provider match; optional country_group requires exact quote country.
+5. COUNTRY_GROUP requires exact quote country; rejects null quote country; rejects `scope_reference_id` authority abuse.
+6. REWARD_RULE requires `scope_reference_id == rewardRuleId`; stored `rule_version` must match when present.
+7. Canonical UTC HOUR / UTC_DAY / UTC_MONTH windows enforced in app + DB (`0015`).
 
-## Schema
+## Tests (local gate)
 
-| Migration                               | Change                                                                                                      |
-| --------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `0014_phase5_financial_corrections.sql` | `simulated_reward_sources`; frozen quote trigger; multi-period bonus reservations; exposure period counters |
-
-## Tests (local + CI gate)
-
-| Suite                            | Count  |
-| -------------------------------- | ------ |
-| Phase 5 arithmetic               | 6      |
-| Phase 5 rules                    | 5      |
-| Phase 5 quotes/budgets           | 4      |
-| Phase 5 issuance                 | 3      |
-| Phase 5 Founder/membership bonus | 4      |
-| Phase 5 maturity                 | 2      |
-| Phase 5 guardrails               | 3      |
-| Phase 5 failure injection        | 2      |
-| Phase 5 concurrency/composition  | 5      |
-| Phase 5 financial corrections    | 14     |
-| **Phase 5 total**                | **48** |
-| Phase 4 regression               | 41     |
-| Phase 2 migration regression     | 27     |
-| Phase 3 auth + throttle          | 21     |
-
-## Explicit non-goals
-
-AdsGram monetary flow, withdrawals/payouts, TON/signer/KMS, public money HTTP APIs, Phase 6 engines.
+| Suite                     | Count  |
+| ------------------------- | ------ |
+| Prior Phase 5 suites      | 48     |
+| Phase 5 base budget scope | 7      |
+| **Phase 5 total**         | **55** |
+| Phase 2                   | 27     |
+| Phase 3                   | 21     |
+| Phase 4                   | 41     |
 
 **No Phase 6 work started.**
