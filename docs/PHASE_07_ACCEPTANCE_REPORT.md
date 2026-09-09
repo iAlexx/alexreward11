@@ -14,10 +14,10 @@ Source of truth: ALEx Rewards Master Product, Financial, Security & Engineering 
 | Phase 7 start tip                 | `3bf245d782416ef46c3685b5f7e8ad2b48494435` (Phase 6 companion/archive evidence)              |
 | Historical Phase 7 archival tip   | `5efbf57a8133ea02c2ab99654e637815ce4fb282` (retained; Owner correction required)             |
 | Historical companion (Section O)  | `dc6c3b0778ac51087089dc588079a4ac725b17d6` (docs-only; not archival source)                  |
-| Corrected accepted Phase 7 commit | `PENDING_AFTER_CI`                                                                           |
-| GitHub Actions run                | `PENDING_AFTER_CI`                                                                           |
-| `quality`                         | `PENDING_AFTER_CI`                                                                           |
-| `docker-smoke`                    | `PENDING_AFTER_CI`                                                                           |
+| Corrected accepted Phase 7 commit | `9cb695dab9477e50d8761e32f65496a716222a6b`                                                   |
+| GitHub Actions run                | https://github.com/iAlexx/alexreward11/actions/runs/34359100172                              |
+| `quality`                         | PASS — job `102491188211`                                                                    |
+| `docker-smoke`                    | PASS — job `102492745097`                                                                    |
 | Migrations                        | `0017_withdrawal_engine_integrity.sql` + `0018_membership_plan_entitlement_rule_binding.sql` |
 | Migrations `0001`–`0017`          | **unchanged** by this correction (0018 is forward-only)                                      |
 
@@ -129,11 +129,11 @@ tests (FLOOR discount / net / atomic parse).
 
 ## H. CI
 
-| Item                   | Value              |
-| ---------------------- | ------------------ |
-| GitHub Actions run URL | `PENDING_AFTER_CI` |
-| `quality`              | `PENDING_AFTER_CI` |
-| `docker-smoke`         | `PENDING_AFTER_CI` |
+| Item                   | Value                                                           |
+| ---------------------- | --------------------------------------------------------------- |
+| GitHub Actions run URL | https://github.com/iAlexx/alexreward11/actions/runs/34359100172 |
+| `quality`              | PASS — job `102491188211`                                       |
+| `docker-smoke`         | PASS — job `102492745097`                                       |
 
 ## I. Known deviations
 
@@ -183,7 +183,7 @@ tests (FLOOR discount / net / atomic parse).
 
 ## M. Exact accepted SHA
 
-`PENDING_AFTER_CI` (historical retained: `5efbf57a8133ea02c2ab99654e637815ce4fb282`)
+`9cb695dab9477e50d8761e32f65496a716222a6b` (historical retained: `5efbf57a8133ea02c2ab99654e637815ce4fb282`)
 
 ## N. PASS/FAIL — Owner section 66 gates
 
@@ -217,8 +217,8 @@ tests (FLOOR discount / net / atomic parse).
 | Fake chain impossible in staging/production                         | PASS                              |
 | No real signing/broadcast introduced                                | PASS                              |
 | Previous phases remain green                                        | PASS (2/3/4/5/6 = 27/21/41/55/35) |
-| `quality` PASS                                                      | PENDING_AFTER_CI                  |
-| `docker-smoke` PASS                                                 | PENDING_AFTER_CI                  |
+| `quality` PASS                                                      | PASS                              |
+| `docker-smoke` PASS                                                 | PASS                              |
 | No Phase 8 work introduced                                          | PASS                              |
 
 ## O. Archive verification
@@ -226,18 +226,20 @@ tests (FLOOR discount / net / atomic parse).
 Section O is filled after packaging. Outer review-package SHA256 is recorded only in
 external `PACKAGE_SHA256.txt` (not embedded here — self-reference is impossible).
 
-| Item                                | Result                                      |
-| ----------------------------------- | ------------------------------------------- |
-| Canonical source ZIP                | `PENDING_ARCHIVE`                           |
-| Canonical source SHA256             | `PENDING_ARCHIVE`                           |
-| Final review-package ZIP            | `PENDING_ARCHIVE`                           |
-| Source extraction                   | `PENDING_ARCHIVE`                           |
-| Source prohibited-path scan         | `PENDING_ARCHIVE`                           |
-| Review-package extraction           | `PENDING_ARCHIVE`                           |
-| Review-package prohibited-path scan | `PENDING_ARCHIVE`                           |
-| Nested canonical source validation  | `PENDING_ARCHIVE`                           |
-| Forward-slash ZIP entry validation  | `PENDING_ARCHIVE`                           |
-| Exact accepted commit               | `PENDING_AFTER_CI`                          |
-| External `PACKAGE_SHA256.txt`       | Authoritative outer hash beside the package |
+| Item                                | Result                                                                           |
+| ----------------------------------- | -------------------------------------------------------------------------------- |
+| Canonical source ZIP                | `ALEx_Rewards_PHASE_07_WITHDRAWAL_ENGINE_FAKE_CHAIN_20260909-165226_9cb695d.zip` |
+| Canonical source SHA256             | `66560a1b093f02851d7d0a81086bb43147c6bf034ecc34b65322350eb71026b8`               |
+| Final review-package ZIP            | `PHASE_07_WITHDRAWAL_ENGINE_FAKE_CHAIN_PACKAGE_20260909-165226_9cb695d.zip`      |
+| Source extraction                   | PASS                                                                             |
+| Source prohibited-path scan         | PASS                                                                             |
+| Review-package extraction           | PASS                                                                             |
+| Review-package prohibited-path scan | PASS                                                                             |
+| Nested canonical source validation  | PASS                                                                             |
+| Forward-slash ZIP entry validation  | PASS                                                                             |
+| Exact accepted commit               | `9cb695dab9477e50d8761e32f65496a716222a6b`                                       |
+| External `PACKAGE_SHA256.txt`       | Authoritative outer hash beside the package                                      |
+
+Verified with `scripts/create-phase-archive.mjs` v2.1.0 (stamp `20260909-165226`).
 
 **No Phase 8 work started.**
