@@ -14,7 +14,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src test",
     "test": "vitest run --passWithNoTests",
-    "test:phase9": "cross-env PHASE9_SIGNER_TESTS=1 vitest run --fileParallelism=false test/phase9-migration.test.ts test/phase9-wallet-v5r1.test.ts test/phase9-canonical-message.test.ts test/phase9-policy.test.ts test/phase9-sign-flow.test.ts test/phase9-db-readonly.test.ts test/phase9-boundary.test.ts test/phase9-kms-local.test.ts test/phase9-encrypted-custody.test.ts"
+    "test:phase9": "cross-env PHASE9_SIGNER_TESTS=1 vitest run --fileParallelism=false test/phase9-migration.test.ts test/phase9-wallet-v5r1.test.ts test/phase9-canonical-message.test.ts test/phase9-policy.test.ts test/phase9-sign-flow.test.ts test/phase9-db-readonly.test.ts test/phase9-boundary.test.ts test/phase9-kms-local.test.ts test/phase9-encrypted-custody.test.ts",
+    "test:phase10": "vitest run test/phase10-external-message.test.ts"
   },
   "dependencies": {
     "@alex-rewards/config": "workspace:*",

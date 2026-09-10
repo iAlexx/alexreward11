@@ -4,13 +4,19 @@ export interface SignerClientSignResult {
   readonly withdrawalAttemptId: string;
   readonly withdrawalId: string;
   readonly canonicalMessageHash: string;
+  readonly canonicalSigningHash: string;
+  /** @deprecated alias of normalizedExternalMessageHash */
   readonly signedMessageHash: string;
   readonly publicKeyFingerprint: string;
   readonly walletAddressRaw: string;
   readonly signatureBase64: string;
   readonly keySpec: string;
   readonly signingAlgorithm: string;
+  readonly signedWalletRequestBocBase64: string;
   readonly externalMessageBocBase64: string;
+  readonly externalMessageCellHash: string;
+  readonly normalizedExternalMessageHash: string;
+  readonly signatureFingerprintHash?: string;
 }
 
 export interface SignerSigningIdentity {
@@ -111,13 +117,29 @@ export class SignerHttpClient {
       withdrawalAttemptId: asNonEmptyString(body.withdrawalAttemptId, withdrawalAttemptId),
       withdrawalId: asNonEmptyString(body.withdrawalId),
       canonicalMessageHash: asNonEmptyString(body.canonicalMessageHash),
-      signedMessageHash: asNonEmptyString(body.signedMessageHash),
+      canonicalSigningHash: asNonEmptyString(
+        body.canonicalSigningHash,
+        asNonEmptyString(body.canonicalMessageHash),
+      ),
+      signedMessageHash: asNonEmptyString(
+        body.signedMessageHash,
+        asNonEmptyString(body.normalizedExternalMessageHash),
+      ),
       publicKeyFingerprint: asNonEmptyString(body.publicKeyFingerprint),
       walletAddressRaw: asNonEmptyString(body.walletAddressRaw),
       signatureBase64: asNonEmptyString(body.signatureBase64),
       keySpec: asNonEmptyString(body.keySpec, asNonEmptyString(body.kmsKeySpec)),
       signingAlgorithm: asNonEmptyString(body.signingAlgorithm),
+      signedWalletRequestBocBase64: asNonEmptyString(body.signedWalletRequestBocBase64),
       externalMessageBocBase64: boc,
+      externalMessageCellHash: asNonEmptyString(body.externalMessageCellHash),
+      normalizedExternalMessageHash: asNonEmptyString(
+        body.normalizedExternalMessageHash,
+        asNonEmptyString(body.signedMessageHash),
+      ),
+      ...(typeof body.signatureFingerprintHash === 'string'
+        ? { signatureFingerprintHash: body.signatureFingerprintHash }
+        : {}),
     };
   }
 }

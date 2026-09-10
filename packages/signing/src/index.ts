@@ -16,6 +16,16 @@ export {
 } from './canonical-message.js';
 export { localSigningFixtureConfig, type SignerRuntimeConfig } from './config.js';
 export { SignerError, type SignerErrorCode } from './errors.js';
+export {
+  assertExternalInMessageBody,
+  assertExternalInMessageDestination,
+  assertExternalInMessageInitPresence,
+  buildExternalInMessage,
+  normalizeExternalInMessageHash,
+  parseExternalInMessageFromBoc,
+  walletStateInitForSeqno,
+  type BuildExternalInMessageInput,
+} from './external-message.js';
 export type {
   KmsKeyDescription,
   LockableSignPort,

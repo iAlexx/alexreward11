@@ -115,7 +115,10 @@ export class FakeTonChainProvider implements TonChainProvider {
         t.hotWallet === input.hotWallet &&
         t.jettonMaster === input.jettonMaster &&
         t.queryId === input.queryId &&
-        (input.recipient === undefined || t.recipient === input.recipient),
+        (input.recipient === undefined || t.recipient === input.recipient) &&
+        (input.amountAtomic === undefined || t.amountAtomic === input.amountAtomic) &&
+        (input.senderJettonWallet === undefined ||
+          t.senderJettonWallet === input.senderJettonWallet),
     );
   }
 
@@ -123,7 +126,7 @@ export class FakeTonChainProvider implements TonChainProvider {
     input: FindTransactionsByQueryIdInput,
   ): Promise<JettonTransferEvidence | null> {
     const matches = await this.findTransactionsByQueryId(input);
-    return matches[0] ?? null;
+    return matches.find((evidence) => evidence.proofStage === 'COMPLETE') ?? matches[0] ?? null;
   }
 
   async health(): Promise<TonProviderHealth> {

@@ -20,44 +20,153 @@
       "verification": "none"
     }
   },
-  "events": {
-    "next_from": 0,
-    "events": [
-      {
-        "event_id": "tonapi-testnet-event-id",
-        "timestamp": 1750000000,
-        "actions": [
-          {
-            "type": "JettonTransfer",
-            "status": "ok",
-            "JettonTransfer": {
-              "query_id": "42",
-              "amount": "190000",
-              "sender": {
-                "address": "0:1111111111111111111111111111111111111111111111111111111111111111",
-                "is_scam": false,
-                "is_wallet": true
-              },
-              "recipient": {
-                "address": "0:2222222222222222222222222222222222222222222222222222222222222222",
-                "is_scam": false,
-                "is_wallet": true
-              },
-              "senders_wallet": "0:3333333333333333333333333333333333333333333333333333333333333333",
-              "recipients_wallet": "0:5555555555555555555555555555555555555555555555555555555555555555",
-              "jetton": {
-                "address": "0:4444444444444444444444444444444444444444444444444444444444444444",
-                "name": "Testnet Reward",
-                "symbol": "TST",
-                "decimals": 9,
-                "verification": "none"
-              }
-            }
-          }
-        ],
+  "recipientJettonBalance": {
+    "balance": "190000",
+    "wallet_address": {
+      "address": "0:5555555555555555555555555555555555555555555555555555555555555555",
+      "is_scam": false,
+      "is_wallet": false
+    },
+    "jetton": {
+      "address": "0:4444444444444444444444444444444444444444444444444444444444444444",
+      "name": "Testnet Reward",
+      "symbol": "TST",
+      "decimals": 9,
+      "verification": "none"
+    }
+  },
+  "transactionByMessageHash": {
+    "hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "lt": 50000000001,
+    "account": {
+      "address": "0:1111111111111111111111111111111111111111111111111111111111111111",
+      "is_scam": false,
+      "is_wallet": true
+    },
+    "success": true,
+    "aborted": false,
+    "compute_phase": { "skipped": false, "success": true, "exit_code": 0 },
+    "action_phase": { "success": true, "result_code": 0 },
+    "in_msg": {
+      "msg_type": "ext_in_msg",
+      "destination": {
+        "address": "0:1111111111111111111111111111111111111111111111111111111111111111",
         "is_scam": false,
-        "lt": "50000000001",
-        "in_progress": false
+        "is_wallet": true
+      },
+      "bounced": false,
+      "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "out_msgs": [
+      {
+        "msg_type": "int_msg",
+        "source": {
+          "address": "0:1111111111111111111111111111111111111111111111111111111111111111",
+          "is_scam": false,
+          "is_wallet": true
+        },
+        "destination": {
+          "address": "0:3333333333333333333333333333333333333333333333333333333333333333",
+          "is_scam": false,
+          "is_wallet": false
+        },
+        "bounced": false,
+        "hash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "raw_body": "b5ee9c724101010100560000a80f8a7ea5000000000000002a302e630800444444444444444444444444444444444444444444444444444444444444444500044444444444444444444444444444444444444444444444444444444444444442029b293b36"
+      }
+    ]
+  },
+  "trace": {
+    "transaction": {
+      "hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "lt": 50000000001,
+      "account": {
+        "address": "0:1111111111111111111111111111111111111111111111111111111111111111",
+        "is_scam": false,
+        "is_wallet": true
+      },
+      "success": true,
+      "aborted": false,
+      "compute_phase": { "skipped": false, "success": true, "exit_code": 0 },
+      "out_msgs": []
+    },
+    "interfaces": ["wallet"],
+    "children": [
+      {
+        "transaction": {
+          "hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "lt": 50000000002,
+          "account": {
+            "address": "0:3333333333333333333333333333333333333333333333333333333333333333",
+            "is_scam": false,
+            "is_wallet": false
+          },
+          "success": true,
+          "aborted": false,
+          "compute_phase": { "skipped": false, "success": true, "exit_code": 0 },
+          "in_msg": {
+            "msg_type": "int_msg",
+            "source": {
+              "address": "0:1111111111111111111111111111111111111111111111111111111111111111",
+              "is_scam": false,
+              "is_wallet": true
+            },
+            "destination": {
+              "address": "0:3333333333333333333333333333333333333333333333333333333333333333",
+              "is_scam": false,
+              "is_wallet": false
+            },
+            "bounced": false,
+            "raw_body": "b5ee9c724101010100560000a80f8a7ea5000000000000002a302e630800444444444444444444444444444444444444444444444444444444444444444500044444444444444444444444444444444444444444444444444444444444444442029b293b36"
+          },
+          "out_msgs": []
+        },
+        "interfaces": ["jetton_wallet"],
+        "children": [
+          {
+            "transaction": {
+              "hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+              "lt": 50000000003,
+              "account": {
+                "address": "0:5555555555555555555555555555555555555555555555555555555555555555",
+                "is_scam": false,
+                "is_wallet": false
+              },
+              "success": true,
+              "aborted": false,
+              "compute_phase": { "skipped": false, "success": true, "exit_code": 0 },
+              "in_msg": {
+                "msg_type": "int_msg",
+                "source": {
+                  "address": "0:3333333333333333333333333333333333333333333333333333333333333333",
+                  "is_scam": false,
+                  "is_wallet": false
+                },
+                "destination": {
+                  "address": "0:5555555555555555555555555555555555555555555555555555555555555555",
+                  "is_scam": false,
+                  "is_wallet": false
+                },
+                "bounced": false,
+                "raw_body": "b5ee9c724101010100560000a7178d4519000000000000002a302e63080022222222222222222222222222222222222222222222222222222222222222230004444444444444444444444444444444444444444444444444444444444444444405d4832c57"
+              },
+              "out_msgs": [
+                {
+                  "msg_type": "int_msg",
+                  "destination": {
+                    "address": "0:2222222222222222222222222222222222222222222222222222222222222222",
+                    "is_scam": false,
+                    "is_wallet": true
+                  },
+                  "bounced": false,
+                  "raw_body": "b5ee9c724101010100330000627362d09c000000000000002a302e630800222222222222222222222222222222222222222222222222222222222222222239527627"
+                }
+              ]
+            },
+            "interfaces": ["jetton_wallet"],
+            "children": []
+          }
+        ]
       }
     ]
   },

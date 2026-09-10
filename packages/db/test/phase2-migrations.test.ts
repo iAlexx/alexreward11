@@ -27,7 +27,7 @@ const optedInUrl =
   process.env.PHASE2_MIGRATION_TESTS === '1' ? (process.env.DATABASE_URL ?? '') : '';
 const databaseUrl = explicitUrl !== '' ? explicitUrl : optedInUrl;
 
-const EXPECTED_MIGRATION_COUNT = 21;
+const EXPECTED_MIGRATION_COUNT = 22;
 
 const UNIQUE_VIOLATION = '23505';
 const CHECK_VIOLATION = '23514';

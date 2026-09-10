@@ -31,7 +31,48 @@
     "result": {
       "@type": "smc.runResult",
       "gas_used": 1581,
-      "stack": [["num", "0x2e630"]],
+      "stack": [
+        ["num", "0x2e630"],
+        [
+          "cell",
+          { "bytes": "te6cckEBAQEAJAAAQ4ACIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIjBaejMR" }
+        ],
+        [
+          "cell",
+          { "bytes": "te6cckEBAQEAJAAAQ4AIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiJDoWZyk" }
+        ]
+      ],
+      "exit_code": 0
+    }
+  },
+  "recipientWalletAddress": {
+    "ok": true,
+    "result": {
+      "@type": "smc.runResult",
+      "stack": [
+        [
+          "cell",
+          { "bytes": "te6cckEBAQEAJAAAQ4AKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqrD4zy0o" }
+        ]
+      ],
+      "exit_code": 0
+    }
+  },
+  "recipientWalletData": {
+    "ok": true,
+    "result": {
+      "@type": "smc.runResult",
+      "stack": [
+        ["num", "0x2e630"],
+        [
+          "cell",
+          { "bytes": "te6cckEBAQEAJAAAQ4AERERERERERERERERERERERERERERERERERERERERERFCbtg2B" }
+        ],
+        [
+          "cell",
+          { "bytes": "te6cckEBAQEAJAAAQ4AIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiJDoWZyk" }
+        ]
+      ],
       "exit_code": 0
     }
   },
@@ -57,6 +98,11 @@
         "fee": "105000",
         "storage_fee": "0",
         "other_fee": "105000",
+        "aborted": false,
+        "description": {
+          "compute_ph": { "success": true, "exit_code": 0 },
+          "action": { "success": true, "result_code": 0 }
+        },
         "in_msg": {
           "@type": "raw.message",
           "source": "",
@@ -65,7 +111,7 @@
           "fwd_fee": "0",
           "ihr_fee": "0",
           "created_lt": "0",
-          "body_hash": "",
+          "body_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "msg_data": { "@type": "msg.dataRaw", "body": "", "init_state": "" }
         },
         "out_msgs": [
@@ -77,11 +123,94 @@
             "fwd_fee": "0",
             "ihr_fee": "0",
             "created_lt": "50000000002",
-            "body_hash": "",
+            "body_hash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
             "bounced": false,
             "msg_data": {
               "@type": "msg.dataRaw",
               "body": "te6cckEBAQEAVgAAqA+KfqUAAAAAAAAAKjAuYwgAREREREREREREREREREREREREREREREREREREREREREUABERERERERERERERERERERERERERERERERERERERERERCApspOzY=",
+              "init_state": ""
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "senderTransactions": {
+    "ok": true,
+    "result": [
+      {
+        "@type": "raw.transaction",
+        "utime": 1750000001,
+        "transaction_id": {
+          "lt": "50000000002",
+          "hash": "c2VuZGVyLWpldHRvbi13YWxsZXQtdHg="
+        },
+        "aborted": false,
+        "description": {
+          "compute_ph": { "success": true, "exit_code": 0 },
+          "action": { "success": true, "result_code": 0 }
+        },
+        "in_msg": {
+          "source": "0:1111111111111111111111111111111111111111111111111111111111111111",
+          "destination": "0:3333333333333333333333333333333333333333333333333333333333333333",
+          "bounced": false,
+          "body_hash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+          "msg_data": {
+            "@type": "msg.dataRaw",
+            "body": "te6cckEBAQEAVgAAqA+KfqUAAAAAAAAAKjAuYwgAREREREREREREREREREREREREREREREREREREREREREUABERERERERERERERERERERERERERERERERERERERERERCApspOzY=",
+            "init_state": ""
+          }
+        },
+        "out_msgs": [
+          {
+            "source": "0:3333333333333333333333333333333333333333333333333333333333333333",
+            "destination": "0:5555555555555555555555555555555555555555555555555555555555555555",
+            "bounced": false,
+            "body_hash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "msg_data": {
+              "@type": "msg.dataRaw",
+              "body": "te6cckEBAQEAVgAApxeNRRkAAAAAAAAAKjAuYwgAIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiMABEREREREREREREREREREREREREREREREREREREREREREBdSDLFc=",
+              "init_state": ""
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "recipientTransactions": {
+    "ok": true,
+    "result": [
+      {
+        "@type": "raw.transaction",
+        "utime": 1750000002,
+        "transaction_id": {
+          "lt": "50000000003",
+          "hash": "cmVjaXBpZW50LWpldHRvbi13YWxsZXQtdHg="
+        },
+        "aborted": false,
+        "description": {
+          "compute_ph": { "success": true, "exit_code": 0 },
+          "action": { "success": true, "result_code": 0 }
+        },
+        "in_msg": {
+          "source": "0:3333333333333333333333333333333333333333333333333333333333333333",
+          "destination": "0:5555555555555555555555555555555555555555555555555555555555555555",
+          "bounced": false,
+          "body_hash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          "msg_data": {
+            "@type": "msg.dataRaw",
+            "body": "te6cckEBAQEAVgAApxeNRRkAAAAAAAAAKjAuYwgAIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiMABEREREREREREREREREREREREREREREREREREREREREREBdSDLFc=",
+            "init_state": ""
+          }
+        },
+        "out_msgs": [
+          {
+            "source": "0:5555555555555555555555555555555555555555555555555555555555555555",
+            "destination": "0:2222222222222222222222222222222222222222222222222222222222222222",
+            "bounced": false,
+            "msg_data": {
+              "@type": "msg.dataRaw",
+              "body": "te6cckEBAQEAMwAAYnNi0JwAAAAAAAAAKjAuYwgAIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiIiI5UnYn",
               "init_state": ""
             }
           }

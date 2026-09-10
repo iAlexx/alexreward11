@@ -1,6 +1,13 @@
+import { Cell } from '@ton/core';
 import { beforeAll, describe, expect, it } from 'vitest';
 
-import { SignerError, reconstructCanonicalHash, signWithdrawalAttempt } from '../src/index.js';
+import {
+  SignerError,
+  assertExternalInMessageBody,
+  parseExternalInMessageFromBoc,
+  reconstructCanonicalHash,
+  signWithdrawalAttempt,
+} from '../src/index.js';
 import {
   createPool,
   createProductionShapedSignableAttempt,
@@ -36,6 +43,14 @@ describePhase9('Phase 9 production-shaped sign flow', () => {
     expect(result.walletAddressRaw).toBe(fixture.walletAddressRaw);
     expect(result.signatureBase64.length).toBeGreaterThan(40);
     expect(result.externalMessageBocBase64.length).toBeGreaterThan(40);
+    expect(result.signedMessageHash).toBe(result.normalizedExternalMessageHash);
+    expect(result.canonicalSigningHash).toBe(result.canonicalMessageHash);
+    const message = parseExternalInMessageFromBoc(result.externalMessageBocBase64);
+    const signedRequest = Cell.fromBoc(
+      Buffer.from(result.signedWalletRequestBocBase64, 'base64'),
+    )[0]!;
+    assertExternalInMessageBody(message, signedRequest);
+    expect(message.init).toBeUndefined();
     expect(result.kmsKeySpec).toBe('LOCAL_EPHEMERAL_ED25519');
   });
 

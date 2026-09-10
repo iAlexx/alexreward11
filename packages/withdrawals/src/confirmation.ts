@@ -58,6 +58,18 @@ export function matchIntendedJettonPayout(
     }
   }
 
+  // Production adapters may only confirm after the complete low-level message chain.
+  // Fakes and other domain-port implementations remain usable in deterministic tests.
+  if (
+    (evidence.providerKind === 'tonapi' || evidence.providerKind === 'toncenter') &&
+    (evidence.proofStage !== 'COMPLETE' ||
+      evidence.hotWalletTxHash === undefined ||
+      evidence.jettonWalletTxHash === undefined ||
+      evidence.recipientEvidence === undefined)
+  ) {
+    return false;
+  }
+
   return true;
 }
 

@@ -181,9 +181,10 @@ export {
 } from './confirmation.js';
 export type { ExpectedJettonPayout } from './confirmation.js';
 
-export { runRealTestnetPayoutPipeline } from './real-payout-pipeline.js';
+export { PipelineCrashError, runRealTestnetPayoutPipeline } from './real-payout-pipeline.js';
 export type {
   BuildCanonicalMessageHash,
+  RealPipelineCrashPoint,
   RealPayoutCanonicalIntent,
   RealPayoutSignerPort,
   RealTestnetPayoutPipelineResult,

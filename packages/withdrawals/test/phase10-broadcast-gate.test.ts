@@ -81,18 +81,28 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 broadcast gate (db)', () => {
       await persistPreBroadcastEvidence(client, {
         attemptId: attempt.id,
         signedExternalMessageBoc: 'dGVzdC1ib2M=',
-        signedMessageHash: 'a'.repeat(64),
+        signedWalletRequestBoc: 'dGVzdC13YWxsZXQtcmVxdWVzdA==',
+        externalMessageCellHash: 'a'.repeat(64),
+        normalizedExternalMessageHash: 'b'.repeat(64),
       });
 
       const stored = await client.query<{
         signed_external_message_boc: string | null;
+        signed_wallet_request_boc: string | null;
+        external_message_cell_hash: string | null;
+        normalized_external_message_hash: string | null;
         broadcast_submitted_at: Date | null;
       }>(
-        `SELECT signed_external_message_boc, broadcast_submitted_at
+        `SELECT signed_external_message_boc, signed_wallet_request_boc,
+                external_message_cell_hash, normalized_external_message_hash,
+                broadcast_submitted_at
          FROM withdrawal_attempts WHERE id = $1::uuid`,
         [attempt.id],
       );
       expect(stored.rows[0]?.signed_external_message_boc).toBe('dGVzdC1ib2M=');
+      expect(stored.rows[0]?.signed_wallet_request_boc).toBe('dGVzdC13YWxsZXQtcmVxdWVzdA==');
+      expect(stored.rows[0]?.external_message_cell_hash).toBe('a'.repeat(64));
+      expect(stored.rows[0]?.normalized_external_message_hash).toBe('b'.repeat(64));
       expect(stored.rows[0]?.broadcast_submitted_at).toBeNull();
 
       await markBroadcastSubmitted(client, {
@@ -109,7 +119,9 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 broadcast gate (db)', () => {
         persistPreBroadcastEvidence(client, {
           attemptId: attempt.id,
           signedExternalMessageBoc: 'cmVzZW5k',
-          signedMessageHash: 'b'.repeat(64),
+          signedWalletRequestBoc: 'cmVzZW5kLXJlcXVlc3Q=',
+          externalMessageCellHash: 'c'.repeat(64),
+          normalizedExternalMessageHash: 'd'.repeat(64),
         }),
       ).rejects.toMatchObject({ code: 'RECONCILE_REQUIRED' });
     });

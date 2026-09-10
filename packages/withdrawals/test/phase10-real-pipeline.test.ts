@@ -140,13 +140,18 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 real pipeline (db + fake prov
           withdrawalAttemptId,
           withdrawalId: attempt.withdrawal_id,
           canonicalMessageHash: attempt.canonical_message_hash,
+          canonicalSigningHash: attempt.canonical_message_hash,
           signedMessageHash: '33'.repeat(32),
           publicKeyFingerprint: 'fp-test',
           walletAddressRaw: HOT_WALLET_RAW,
           signatureBase64: 'dGVzdC1zaWc=',
           keySpec: 'TEST_ONLY',
           signingAlgorithm: 'ED25519_SHA_512',
+          signedWalletRequestBocBase64: 'dGVzdC13YWxsZXQtcmVxdWVzdA==',
           externalMessageBocBase64: 'dGVzdC1ib2MtYmFzZTY0',
+          externalMessageCellHash: '44'.repeat(32),
+          normalizedExternalMessageHash: '33'.repeat(32),
+          signatureFingerprintHash: '55'.repeat(32),
         };
       },
     };

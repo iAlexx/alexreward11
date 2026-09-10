@@ -25,6 +25,12 @@ export interface JettonTransferEvidence {
   readonly networkGlobalId?: number;
   readonly senderJettonWallet?: string;
   readonly providerKind?: string;
+  /** Furthest independently verified stage in the TEP-74 message chain. */
+  readonly proofStage?: 'HOT_WALLET' | 'JETTON_WALLET' | 'RECIPIENT' | 'COMPLETE';
+  readonly hotWalletTxHash?: string;
+  readonly jettonWalletTxHash?: string;
+  readonly recipientEvidence?: string;
+  readonly traceId?: string;
 }
 
 export interface TonAccountBalance {
@@ -57,6 +63,12 @@ export interface FindTransactionsByQueryIdInput {
   readonly jettonMaster: string;
   readonly queryId: string;
   readonly recipient?: string;
+  /** Hash of the final normalized External-In message cell. */
+  readonly normalizedExternalMessageHash?: string;
+  /** Expected sender-side Jetton wallet owned by hotWallet. */
+  readonly senderJettonWallet?: string;
+  /** Exact expected atomic Jetton amount. */
+  readonly amountAtomic?: string;
 }
 
 /**

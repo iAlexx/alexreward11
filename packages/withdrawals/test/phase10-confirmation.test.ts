@@ -103,4 +103,33 @@ describe('phase10 confirmation matchIntendedJettonPayout', () => {
       ),
     ).toBe(true);
   });
+
+  it('requires complete low-level proof fields from production adapters', () => {
+    expect(
+      matchIntendedJettonPayout(
+        {
+          ...expected,
+          success: true,
+          bounced: false,
+          providerKind: 'tonapi',
+        },
+        expected,
+      ),
+    ).toBe(false);
+    expect(
+      matchIntendedJettonPayout(
+        {
+          ...expected,
+          success: true,
+          bounced: false,
+          providerKind: 'tonapi',
+          proofStage: 'COMPLETE',
+          hotWalletTxHash: 'hot-tx',
+          jettonWalletTxHash: 'sender-jetton-wallet-tx',
+          recipientEvidence: 'recipient-jetton-wallet-tx',
+        },
+        expected,
+      ),
+    ).toBe(true);
+  });
 });

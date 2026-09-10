@@ -17,11 +17,13 @@ export type BroadcastSubmitClassification =
 export interface PersistPreBroadcastEvidenceInput {
   readonly attemptId: string;
   readonly signedExternalMessageBoc: string;
-  readonly signedMessageHash: string;
+  readonly signedWalletRequestBoc: string;
+  readonly externalMessageCellHash: string;
+  readonly normalizedExternalMessageHash: string;
 }
 
 /**
- * Persist signed BOC + signed hash BEFORE calling sendBoc.
+ * Persist signed request, final BOC, and both message hashes BEFORE calling sendBoc.
  * Never call sendBoc until this returns successfully.
  */
 export async function persistPreBroadcastEvidence(
@@ -31,8 +33,14 @@ export async function persistPreBroadcastEvidence(
   if (input.signedExternalMessageBoc.trim() === '') {
     throw new WithdrawalDomainError('VALIDATION', 'signedExternalMessageBoc is required');
   }
-  if (input.signedMessageHash.trim() === '') {
-    throw new WithdrawalDomainError('VALIDATION', 'signedMessageHash is required');
+  if (input.signedWalletRequestBoc.trim() === '') {
+    throw new WithdrawalDomainError('VALIDATION', 'signedWalletRequestBoc is required');
+  }
+  if (input.externalMessageCellHash.trim() === '') {
+    throw new WithdrawalDomainError('VALIDATION', 'externalMessageCellHash is required');
+  }
+  if (input.normalizedExternalMessageHash.trim() === '') {
+    throw new WithdrawalDomainError('VALIDATION', 'normalizedExternalMessageHash is required');
   }
 
   const existing = await client.query<{
@@ -68,10 +76,19 @@ export async function persistPreBroadcastEvidence(
   const result = await client.query(
     `UPDATE withdrawal_attempts SET
        signed_external_message_boc = $2,
-       signed_message_hash = $3,
+       signed_wallet_request_boc = $3,
+       external_message_cell_hash = $4,
+       normalized_external_message_hash = $5,
+       signed_message_hash = $5,
        updated_at = now()
      WHERE id = $1::uuid`,
-    [input.attemptId, input.signedExternalMessageBoc, input.signedMessageHash],
+    [
+      input.attemptId,
+      input.signedExternalMessageBoc,
+      input.signedWalletRequestBoc,
+      input.externalMessageCellHash,
+      input.normalizedExternalMessageHash,
+    ],
   );
   if ((result.rowCount ?? 0) === 0) {
     throw new WithdrawalDomainError('VALIDATION', 'Attempt not found');

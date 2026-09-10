@@ -27,7 +27,7 @@
     "test:phase7": "pnpm --filter @alex-rewards/withdrawals run test:phase7",
     "test:phase8": "pnpm --filter @alex-rewards/control-center run test:phase8",
     "test:phase9": "pnpm --filter @alex-rewards/signing run test:phase9",
-    "test:phase10": "pnpm --filter @alex-rewards/withdrawals run test:phase10 && pnpm --filter @alex-rewards/ton run test:phase10",
+    "test:phase10": "pnpm --filter @alex-rewards/signing run test:phase10 && pnpm --filter @alex-rewards/withdrawals run test:phase10 && pnpm --filter @alex-rewards/ton run test:phase10",
     "seal:phase9": "node scripts/seal-phase9.mjs",
     "security:secrets": "node scripts/scan-secrets.mjs",
     "security:audit": "pnpm audit --audit-level=high",

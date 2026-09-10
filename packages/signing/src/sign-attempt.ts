@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 
-import { Address, beginCell, internal, type Cell } from '@ton/core';
-import { sign as tonSign, signVerify } from '@ton/crypto';
+import { Address, internal, type Cell } from '@ton/core';
+import { signVerify } from '@ton/crypto';
 import { WalletContractV5R1 } from '@ton/ton';
 import type { Pool } from 'pg';
 
@@ -14,6 +14,12 @@ import {
 } from './canonical-message.js';
 import type { SignerRuntimeConfig } from './config.js';
 import { SignerError } from './errors.js';
+import {
+  buildExternalInMessage,
+  normalizeExternalInMessageHash,
+  parseExternalInMessageFromBoc,
+  walletStateInitForSeqno,
+} from './external-message.js';
 import type { SignPort, LockableSignPort } from './signing-key-provider.js';
 import { publicKeyFingerprint } from './local-ephemeral-kms.js';
 import { assertSigningPolicy } from './policy.js';
@@ -24,6 +30,12 @@ export interface SignWithdrawalAttemptResult {
   readonly withdrawalAttemptId: string;
   readonly withdrawalId: string;
   readonly canonicalMessageHash: string;
+  /** Alias of canonicalMessageHash: hash signed by the Ed25519 key. */
+  readonly canonicalSigningHash: string;
+  /**
+   * @deprecated Chain lookup identity alias. Equals normalizedExternalMessageHash,
+   * never SHA256(signature).
+   */
   readonly signedMessageHash: string;
   readonly publicKeyFingerprint: string;
   readonly walletAddressRaw: string;
@@ -32,11 +44,19 @@ export interface SignWithdrawalAttemptResult {
   /** @deprecated alias of keySpec — historical Phase 9 field name */
   readonly kmsKeySpec: string;
   readonly signingAlgorithm: string;
+  /** Base64 BOC of the signed Wallet V5 R1 request body (not broadcastable alone). */
+  readonly signedWalletRequestBocBase64: string;
   /**
-   * Base64 BOC of the signed Wallet V5 R1 external message.
-   * Phase 10: returned for broadcast outside apps/signer (signer never broadcasts).
+   * Base64 BOC of the final External-In message.
+   * Returned for broadcast outside apps/signer (signer never broadcasts).
    */
   readonly externalMessageBocBase64: string;
+  /** Hash of the serialized final External-In message cell. */
+  readonly externalMessageCellHash: string;
+  /** Tonkeeper-normalized External-In message hash used for chain lookup. */
+  readonly normalizedExternalMessageHash: string;
+  /** SHA256(signature), retained only as a diagnostic fingerprint. */
+  readonly signatureFingerprintHash?: string;
 }
 
 export interface SignWithdrawalAttemptInput {
@@ -123,7 +143,7 @@ export async function signWithdrawalAttempt(
     walletId: { networkGlobalId: intent.networkGlobalId },
   });
 
-  const signedBody: Cell = await wallet.createTransfer({
+  const signedWalletRequestBody: Cell = await wallet.createTransfer({
     seqno: intent.seqno,
     timeout: intent.validUntil,
     sendMode: SPIKE_SEND_MODE,
@@ -157,24 +177,38 @@ export async function signWithdrawalAttempt(
     throw new SignerError('SIGNATURE_VERIFY_FAILED', 'Local Ed25519 verification failed');
   }
 
-  void beginCell;
-  void tonSign;
-
-  const signedMessageHash = createHash('sha256').update(signature).digest('hex');
-  const externalMessageBocBase64 = signedBody.toBoc().toString('base64');
+  const stateInit = walletStateInitForSeqno(intent.seqno, wallet.init);
+  const externalMessageCell = buildExternalInMessage({
+    walletAddress: wallet.address,
+    signedWalletRequestBody,
+    ...(stateInit === undefined ? {} : { stateInit }),
+  });
+  const signedWalletRequestBocBase64 = signedWalletRequestBody.toBoc().toString('base64');
+  const externalMessageBocBase64 = externalMessageCell.toBoc().toString('base64');
+  const parsedExternalMessage = parseExternalInMessageFromBoc(externalMessageBocBase64);
+  const externalMessageCellHash = externalMessageCell.hash().toString('hex');
+  const normalizedExternalMessageHash =
+    normalizeExternalInMessageHash(parsedExternalMessage).toString('hex');
+  const signatureFingerprintHash = createHash('sha256').update(signature).digest('hex');
 
   return {
     withdrawalAttemptId: row.withdrawal_attempt_id,
     withdrawalId: row.withdrawal_id,
     canonicalMessageHash: canonical.canonicalMessageHashHex,
-    signedMessageHash,
+    canonicalSigningHash: canonical.canonicalMessageHashHex,
+    // Deprecated persistence alias; chain identity is the normalized External-In hash.
+    signedMessageHash: normalizedExternalMessageHash,
     publicKeyFingerprint: publicKeyFingerprint(publicKey),
     walletAddressRaw: derived.addressRaw,
     signatureBase64: signature.toString('base64'),
     keySpec: description.keySpec,
     kmsKeySpec: description.keySpec,
     signingAlgorithm: description.signingAlgorithm,
+    signedWalletRequestBocBase64,
     externalMessageBocBase64,
+    externalMessageCellHash,
+    normalizedExternalMessageHash,
+    signatureFingerprintHash,
   };
 }
 

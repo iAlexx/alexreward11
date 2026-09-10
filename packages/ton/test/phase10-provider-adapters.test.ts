@@ -20,7 +20,9 @@ const tonapi = JSON.parse(
 
 const OWNER = '0:1111111111111111111111111111111111111111111111111111111111111111';
 const RECIPIENT = '0:2222222222222222222222222222222222222222222222222222222222222222';
+const SENDER_WALLET = '0:3333333333333333333333333333333333333333333333333333333333333333';
 const MASTER = '0:4444444444444444444444444444444444444444444444444444444444444444';
+const EXTERNAL_HASH = 'aa'.repeat(32);
 
 function response(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -40,18 +42,40 @@ function requestBody(init: RequestInit | undefined): string {
 }
 
 function tonCenterFetch(calls: Array<{ url: string; init?: RequestInit }> = []): typeof fetch {
+  let walletDataCalls = 0;
+  let transactionCalls = 0;
   return async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     const url = requestUrl(input);
     calls.push({ url, ...(init === undefined ? {} : { init }) });
     if (url.includes('/getAddressBalance')) return response(toncenter.accountBalance);
     if (url.includes('/sendBocReturnHash')) return response(toncenter.sendBoc);
-    if (url.includes('/getTransactions')) return response(toncenter.transactions);
+    if (url.includes('/getTransactions')) {
+      transactionCalls += 1;
+      return response(
+        transactionCalls === 1
+          ? toncenter.transactions
+          : transactionCalls === 2
+            ? toncenter.senderTransactions
+            : toncenter.recipientTransactions,
+      );
+    }
     if (url.includes('/getMasterchainInfo')) return response(toncenter.health);
     if (url.includes('/runGetMethod')) {
       const payload = JSON.parse(requestBody(init)) as { method: string };
       if (payload.method === 'seqno') return response(toncenter.seqno);
-      if (payload.method === 'get_wallet_address') return response(toncenter.walletAddress);
-      if (payload.method === 'get_wallet_data') return response(toncenter.walletData);
+      if (payload.method === 'get_wallet_address') {
+        return response(
+          requestBody(init).includes(
+            'te6cckEBAQEAJAAAQ4AERERERERERERERERERERERERERERERERERERERERERFCbtg2B',
+          )
+            ? toncenter.recipientWalletAddress
+            : toncenter.walletAddress,
+        );
+      }
+      if (payload.method === 'get_wallet_data') {
+        walletDataCalls += 1;
+        return response(walletDataCalls > 1 ? toncenter.recipientWalletData : toncenter.walletData);
+      }
     }
     throw new Error(`Unexpected TonCenter fixture request: ${url}`);
   };
@@ -59,14 +83,20 @@ function tonCenterFetch(calls: Array<{ url: string; init?: RequestInit }> = []):
 
 function tonApiFetch(
   calls: Array<{ url: string; init?: RequestInit }> = [],
-  events: unknown = tonapi.events,
+  trace: unknown = tonapi.trace,
 ): typeof fetch {
   return async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     const url = requestUrl(input);
     calls.push({ url, ...(init === undefined ? {} : { init }) });
     if (url.includes('/wallet/') && url.endsWith('/seqno')) return response(tonapi.seqno);
-    if (url.includes('/jettons/')) return response(tonapi.jettonBalance);
-    if (url.includes('/events?')) return response(events);
+    if (url.includes('/jettons/'))
+      return response(
+        url.includes(encodeURIComponent(RECIPIENT))
+          ? tonapi.recipientJettonBalance
+          : tonapi.jettonBalance,
+      );
+    if (url.includes('/v2/blockchain/messages/')) return response(tonapi.transactionByMessageHash);
+    if (url.includes('/v2/traces/')) return response(trace);
     if (url.endsWith('/v2/status')) return response(tonapi.status);
     if (url.endsWith('/v2/blockchain/message')) return new Response(null, { status: 200 });
     if (url.includes('/v2/accounts/')) return response(tonapi.account);
@@ -122,7 +152,7 @@ describe('TonCenter Testnet adapter', () => {
     });
   });
 
-  it('extracts Jetton transfer evidence from documented raw out-message BOC', async () => {
+  it('proves the complete TEP-74 chain through both Jetton wallets', async () => {
     const provider = new TonCenterTestnetProvider({
       baseUrl: 'https://testnet.toncenter.com/api/v2',
       fetchImpl: tonCenterFetch(),
@@ -132,6 +162,9 @@ describe('TonCenter Testnet adapter', () => {
       jettonMaster: MASTER,
       queryId: '42',
       recipient: RECIPIENT,
+      amountAtomic: '190000',
+      senderJettonWallet: SENDER_WALLET,
+      normalizedExternalMessageHash: EXTERNAL_HASH,
     });
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({
@@ -141,6 +174,8 @@ describe('TonCenter Testnet adapter', () => {
       queryId: '42',
       success: true,
       bounced: false,
+      proofStage: 'COMPLETE',
+      senderJettonWallet: SENDER_WALLET,
       providerKind: 'toncenter',
       networkGlobalId: TON_TESTNET_NETWORK_GLOBAL_ID,
     });
@@ -184,16 +219,20 @@ describe('TonAPI Testnet adapter', () => {
     expect(JSON.parse(requestBody(calls[0]!.init))).toEqual({ boc: 'fixture-boc' });
   });
 
-  it('requires concrete fields when normalizing JettonTransfer actions', async () => {
+  it('looks up normalized hash and proves low-level trace messages without events', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
     const provider = new TonApiTestnetProvider({
       baseUrl: 'https://testnet.tonapi.io',
-      fetchImpl: tonApiFetch(),
+      fetchImpl: tonApiFetch(calls),
     });
     const result = await provider.findTransactionsByQueryId({
       hotWallet: OWNER,
       jettonMaster: MASTER,
       queryId: '42',
       recipient: RECIPIENT,
+      amountAtomic: '190000',
+      senderJettonWallet: SENDER_WALLET,
+      normalizedExternalMessageHash: EXTERNAL_HASH,
     });
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({
@@ -203,7 +242,35 @@ describe('TonAPI Testnet adapter', () => {
       senderJettonWallet: '0:3333333333333333333333333333333333333333333333333333333333333333',
       providerKind: 'tonapi',
       success: true,
+      proofStage: 'COMPLETE',
     });
+    expect(calls.some((call) => call.url.includes(`/messages/${EXTERNAL_HASH}/transaction`))).toBe(
+      true,
+    );
+    expect(calls.some((call) => call.url.includes('/v2/traces/'))).toBe(true);
+    expect(calls.every((call) => !call.url.includes('/events'))).toBe(true);
+  });
+
+  it('does not confirm a bounced or failed Jetton-wallet trace', async () => {
+    const failingTrace = structuredClone(tonapi.trace) as {
+      children: Array<{ transaction: { aborted: boolean } }>;
+    };
+    failingTrace.children[0]!.transaction.aborted = true;
+    const provider = new TonApiTestnetProvider({
+      baseUrl: 'https://testnet.tonapi.io',
+      fetchImpl: tonApiFetch([], failingTrace),
+    });
+    await expect(
+      provider.observeJettonTransfer({
+        hotWallet: OWNER,
+        jettonMaster: MASTER,
+        queryId: '42',
+        recipient: RECIPIENT,
+        amountAtomic: '190000',
+        senderJettonWallet: SENDER_WALLET,
+        normalizedExternalMessageHash: EXTERNAL_HASH,
+      }),
+    ).resolves.toBeNull();
   });
 
   it('uses TonAPI status health and pins networkGlobalId to Testnet', async () => {
@@ -277,25 +344,33 @@ describe('provider failure handling and selection', () => {
     );
   });
 
-  it('makes primary/secondary evidence disagreement detectable', async () => {
-    const disagreeingEvents = structuredClone(tonapi.events) as {
-      events: Array<{ actions: Array<{ JettonTransfer: { amount: string } }> }>;
+  it('makes primary/secondary low-level evidence disagreement detectable', async () => {
+    const failingTrace = structuredClone(tonapi.trace) as {
+      children: Array<{ transaction: { success: boolean } }>;
     };
-    disagreeingEvents.events[0]!.actions[0]!.JettonTransfer.amount = '190001';
+    failingTrace.children[0]!.transaction.success = false;
     const primary = new TonCenterTestnetProvider({
       baseUrl: 'https://testnet.toncenter.com/api/v2',
       fetchImpl: tonCenterFetch(),
     });
     const secondary = new TonApiTestnetProvider({
       baseUrl: 'https://testnet.tonapi.io',
-      fetchImpl: tonApiFetch([], disagreeingEvents),
+      fetchImpl: tonApiFetch([], failingTrace),
     });
-    const query = { hotWallet: OWNER, jettonMaster: MASTER, queryId: '42' };
+    const query = {
+      hotWallet: OWNER,
+      jettonMaster: MASTER,
+      queryId: '42',
+      recipient: RECIPIENT,
+      amountAtomic: '190000',
+      senderJettonWallet: SENDER_WALLET,
+      normalizedExternalMessageHash: EXTERNAL_HASH,
+    };
     const [left, right] = await Promise.all([
-      primary.findTransactionsByQueryId(query),
-      secondary.findTransactionsByQueryId(query),
+      primary.observeJettonTransfer(query),
+      secondary.observeJettonTransfer(query),
     ]);
-    expect(left[0]!.queryId).toBe(right[0]!.queryId);
-    expect(left[0]!.amountAtomic).not.toBe(right[0]!.amountAtomic);
+    expect(left?.proofStage).toBe('COMPLETE');
+    expect(right).toBeNull();
   });
 });
