@@ -32,6 +32,11 @@ export interface SignWithdrawalAttemptResult {
   /** @deprecated alias of keySpec — historical Phase 9 field name */
   readonly kmsKeySpec: string;
   readonly signingAlgorithm: string;
+  /**
+   * Base64 BOC of the signed Wallet V5 R1 external message.
+   * Phase 10: returned for broadcast outside apps/signer (signer never broadcasts).
+   */
+  readonly externalMessageBocBase64: string;
 }
 
 export interface SignWithdrawalAttemptInput {
@@ -152,11 +157,11 @@ export async function signWithdrawalAttempt(
     throw new SignerError('SIGNATURE_VERIFY_FAILED', 'Local Ed25519 verification failed');
   }
 
-  void signedBody;
   void beginCell;
   void tonSign;
 
   const signedMessageHash = createHash('sha256').update(signature).digest('hex');
+  const externalMessageBocBase64 = signedBody.toBoc().toString('base64');
 
   return {
     withdrawalAttemptId: row.withdrawal_attempt_id,
@@ -169,6 +174,7 @@ export async function signWithdrawalAttempt(
     keySpec: description.keySpec,
     kmsKeySpec: description.keySpec,
     signingAlgorithm: description.signingAlgorithm,
+    externalMessageBocBase64,
   };
 }
 

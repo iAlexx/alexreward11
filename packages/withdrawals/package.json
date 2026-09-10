@@ -14,12 +14,14 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src test",
     "test": "vitest run --passWithNoTests",
-    "test:phase7": "cross-env PHASE7_WITHDRAWAL_TESTS=1 vitest run --fileParallelism=false test/phase7-fee-limit-quote.test.ts test/phase7-reservation-concurrency.test.ts test/phase7-risk-manual.test.ts test/phase7-fake-chain-reconcile.test.ts test/phase7-failure-injection.test.ts test/phase7-state-machine.test.ts test/phase7-temporal-outbox.test.ts test/phase7-authority-corrections.test.ts test/phase7-reconcile-provenance.test.ts"
+    "test:phase7": "cross-env PHASE7_WITHDRAWAL_TESTS=1 vitest run --fileParallelism=false test/phase7-fee-limit-quote.test.ts test/phase7-reservation-concurrency.test.ts test/phase7-risk-manual.test.ts test/phase7-fake-chain-reconcile.test.ts test/phase7-failure-injection.test.ts test/phase7-state-machine.test.ts test/phase7-temporal-outbox.test.ts test/phase7-authority-corrections.test.ts test/phase7-reconcile-provenance.test.ts",
+    "test:phase10": "cross-env PHASE7_WITHDRAWAL_TESTS=1 vitest run --fileParallelism=false test/phase10-confirmation.test.ts test/phase10-broadcast-gate.test.ts test/phase10-lease-fencing.test.ts test/phase10-config-gate.test.ts test/phase10-crash-matrix.test.ts"
   },
   "dependencies": {
     "@alex-rewards/auth": "workspace:*",
     "@alex-rewards/db": "workspace:*",
     "@alex-rewards/ledger": "workspace:*",
+    "@alex-rewards/ton": "workspace:*",
     "@temporalio/client": "1.23.0",
     "pg": "8.23.0"
   },

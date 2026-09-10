@@ -230,7 +230,18 @@ const LOCAL_WORKER_WITHDRAWAL_DEFAULTS = {
   WITHDRAWAL_NETWORK_CODE: 'TON_TESTNET',
   WITHDRAWAL_ASSET_SYMBOL: 'USDT',
   WITHDRAWAL_FAKE_CHAIN_ENABLED: 'true',
+  WITHDRAWAL_REAL_CHAIN_ENABLED: 'false',
+  SIGNER_BASE_URL: 'http://127.0.0.1:3005',
+  TON_TESTNET_JETTON_MASTER: '',
+  TON_PRIMARY_PROVIDER_URL: '',
+  TON_SECONDARY_PROVIDER_URL: '',
+  TON_PROVIDER_API_KEY: '',
 } as const;
+
+const optionalEmptyString = z.preprocess(
+  (value) => (value === undefined || value === null ? '' : value),
+  z.string().max(512),
+);
 
 const workerSchema = serviceSchema
   .extend({
@@ -241,6 +252,16 @@ const workerSchema = serviceSchema
     WITHDRAWAL_NETWORK_CODE: z.string().min(1).max(64),
     WITHDRAWAL_ASSET_SYMBOL: z.string().min(1).max(32),
     WITHDRAWAL_FAKE_CHAIN_ENABLED: booleanFromString,
+    WITHDRAWAL_REAL_CHAIN_ENABLED: booleanFromString,
+    SIGNER_BASE_URL: z.string().min(1).max(512),
+    TON_TESTNET_JETTON_MASTER: optionalEmptyString,
+    TON_PRIMARY_PROVIDER_URL: optionalEmptyString,
+    TON_SECONDARY_PROVIDER_URL: optionalEmptyString,
+    TON_PROVIDER_API_KEY: optionalEmptyString,
+    SIGNER_SERVICE_TOKEN: z.preprocess(
+      (value) => (value === undefined || value === null || value === '' ? undefined : value),
+      z.string().min(32).optional(),
+    ),
   })
   .superRefine((value, context) => {
     const outsideLocal = value.DEPLOYMENT_ENV !== 'local' && value.DEPLOYMENT_ENV !== 'test';
@@ -256,6 +277,28 @@ const workerSchema = serviceSchema
         code: 'custom',
         path: ['WITHDRAWAL_NETWORK_CODE'],
         message: 'TON_TESTNET cannot be inherited by staging/production',
+      });
+    }
+    if (value.WITHDRAWAL_NETWORK_CODE.toUpperCase().includes('MAINNET')) {
+      context.addIssue({
+        code: 'custom',
+        path: ['WITHDRAWAL_NETWORK_CODE'],
+        message: 'MAINNET network codes are forbidden',
+      });
+    }
+    if (value.WITHDRAWAL_REAL_CHAIN_ENABLED && value.WITHDRAWAL_FAKE_CHAIN_ENABLED) {
+      context.addIssue({
+        code: 'custom',
+        path: ['WITHDRAWAL_REAL_CHAIN_ENABLED'],
+        message: 'real chain and fake chain cannot both be enabled',
+      });
+    }
+    if (value.WITHDRAWAL_REAL_CHAIN_ENABLED && value.TON_TESTNET_JETTON_MASTER.trim() === '') {
+      context.addIssue({
+        code: 'custom',
+        path: ['TON_TESTNET_JETTON_MASTER'],
+        message:
+          'TON_TESTNET_JETTON_MASTER is required when WITHDRAWAL_REAL_CHAIN_ENABLED=true (Owner-approved; fail closed)',
       });
     }
   });

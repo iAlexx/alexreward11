@@ -28,7 +28,7 @@ export type TemporalWorkflowStarter = {
       options: {
         taskQueue: string;
         workflowId: string;
-        args: [{ withdrawalId: string }];
+        args: [{ withdrawalId: string; realChainEnabled?: boolean }];
         workflowIdReusePolicy?: 'REJECT_DUPLICATE';
         workflowIdConflictPolicy?: 'FAIL';
       },
@@ -150,6 +150,7 @@ export async function startWithdrawalWorkflowFromOutbox(
   temporalClient: TemporalWorkflowStarter,
   event: WithdrawalApprovedOutboxEvent,
   taskQueue: string,
+  options?: { readonly realChainEnabled?: boolean },
 ): Promise<StartWithdrawalWorkflowResult> {
   const withdrawalId = resolveWithdrawalId(event);
   const workflowId = resolveWorkflowId(event, withdrawalId);
@@ -157,7 +158,12 @@ export async function startWithdrawalWorkflowFromOutbox(
     await temporalClient.workflow.start(WITHDRAWAL_PAYOUT_WORKFLOW_TYPE, {
       taskQueue,
       workflowId,
-      args: [{ withdrawalId }],
+      args: [
+        {
+          withdrawalId,
+          ...(options?.realChainEnabled === true ? { realChainEnabled: true } : {}),
+        },
+      ],
       // Never mint a second logical payout for the same withdrawal/{id}.
       workflowIdReusePolicy: 'REJECT_DUPLICATE',
       workflowIdConflictPolicy: 'FAIL',
@@ -179,6 +185,11 @@ export interface ProcessWithdrawalApprovedOutboxBatchOptions {
    * when the fake chain is disabled. Kept for callers / future production gating.
    */
   readonly fakeChainEnabled: boolean;
+  /**
+   * Phase 10: when true (and fake chain off), workflow selects Testnet activity.
+   * Default false preserves Phase 7 fake Temporal tests.
+   */
+  readonly realChainEnabled?: boolean;
   readonly limit?: number;
 }
 
@@ -198,6 +209,8 @@ export async function processWithdrawalApprovedOutboxBatch(
   options: ProcessWithdrawalApprovedOutboxBatchOptions,
 ): Promise<ProcessWithdrawalApprovedOutboxBatchResult> {
   void options.fakeChainEnabled;
+  const realChainEnabled =
+    options.realChainEnabled === true && options.fakeChainEnabled === false;
   const limit = options.limit ?? 20;
   const client = await pool.connect();
   let dispatched = 0;
@@ -213,6 +226,7 @@ export async function processWithdrawalApprovedOutboxBatch(
           options.client,
           event,
           options.taskQueue,
+          { realChainEnabled },
         );
         void started;
         await markOutboxDispatched(client, event.id);

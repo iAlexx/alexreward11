@@ -10,6 +10,7 @@ import { HEALTH_CONTRACT_VERSION, type HealthResponse } from '@alex-rewards/cont
 import { createShutdownCoordinator, initializeObservability } from '@alex-rewards/observability';
 import {
   processWithdrawalApprovedOutboxBatch,
+  buildPhase10PayoutConfig,
   withdrawalEngineConfigFromValidatedApi,
   type WithdrawalEngineConfig,
 } from '@alex-rewards/withdrawals';
@@ -31,6 +32,15 @@ function withdrawalEngineConfigFromWorker(config: WorkerConfig): WithdrawalEngin
 
 const config = loadWorkerConfig();
 const withdrawalConfig = withdrawalEngineConfigFromWorker(config);
+const phase10Config = buildPhase10PayoutConfig({
+  realChainEnabled: config.WITHDRAWAL_REAL_CHAIN_ENABLED,
+  signerBaseUrl: config.SIGNER_BASE_URL,
+  signerServiceToken: config.SIGNER_SERVICE_TOKEN ?? '',
+  jettonMasterIdentity: config.TON_TESTNET_JETTON_MASTER,
+  primaryProviderUrl: config.TON_PRIMARY_PROVIDER_URL,
+  secondaryProviderUrl: config.TON_SECONDARY_PROVIDER_URL,
+  providerApiKey: config.TON_PROVIDER_API_KEY,
+});
 Runtime.install({ shutdownSignals: [] });
 const observability = await initializeObservability({
   serviceName: 'worker',
@@ -81,6 +91,7 @@ try {
   const activities = createWithdrawalActivities({
     pool: dbPool,
     config: withdrawalConfig,
+    phase10: phase10Config,
   });
   worker = await Worker.create({
     connection: nativeConnection,
@@ -105,6 +116,7 @@ try {
       client: temporalClient,
       taskQueue: config.TEMPORAL_TASK_QUEUE,
       fakeChainEnabled: withdrawalConfig.fakeChainEnabled,
+      realChainEnabled: phase10Config.realChainEnabled,
     })
       .catch((error: unknown) => {
         observability.logger.warn({ err: error }, 'withdrawal outbox relay batch failed');
@@ -119,6 +131,7 @@ try {
       port: config.WORKER_PORT,
       taskQueue: config.TEMPORAL_TASK_QUEUE,
       fakeChainEnabled: withdrawalConfig.fakeChainEnabled,
+      realChainEnabled: phase10Config.realChainEnabled,
     },
     'worker listening',
   );

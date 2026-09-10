@@ -27,3 +27,18 @@ export {
   type VerifiedTonProof,
   type VerifyTonProofInput,
 } from './verify-proof.js';
+export {
+  assertTestnetOnly,
+  TON_MAINNET_NETWORK_GLOBAL_ID,
+  TON_TESTNET_NETWORK_GLOBAL_ID,
+  type FindTransactionsByQueryIdInput,
+  type JettonTransferEvidence,
+  type TonAccountBalance,
+  type TonChainProvider,
+  type TonJettonBalance,
+  type TonNetworkGlobalId,
+  type TonProviderHealth,
+  type TonSendBocResult,
+} from './chain-provider.js';
+export { FakeTonChainProvider, type FakeTonChainProviderOptions } from './fake-chain-provider.js';
+export { HttpTonProvider, type HttpTonProviderConfig } from './http-ton-provider.js';

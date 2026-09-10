@@ -35,6 +35,7 @@ describePhase9('Phase 9 production-shaped sign flow', () => {
     expect(result.canonicalMessageHash).toBe(fixture.canonicalMessageHash);
     expect(result.walletAddressRaw).toBe(fixture.walletAddressRaw);
     expect(result.signatureBase64.length).toBeGreaterThan(40);
+    expect(result.externalMessageBocBase64.length).toBeGreaterThan(40);
     expect(result.kmsKeySpec).toBe('LOCAL_EPHEMERAL_ED25519');
   });
 

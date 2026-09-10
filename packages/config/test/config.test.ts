@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { loadApiConfig, loadBotConfig, loadSignerConfig, loadWebConfig } from '../src/index.js';
+import { loadApiConfig, loadBotConfig, loadSignerConfig, loadWebConfig, loadWorkerConfig } from '../src/index.js';
 
 const common = {
   DEPLOYMENT_ENV: 'local',
@@ -320,5 +320,47 @@ describe('environment validation', () => {
       NEXT_PUBLIC_API_BASE_URL: 'https://api.example.com',
     });
     expect(Object.keys(config).sort()).toEqual(['NEXT_PUBLIC_API_BASE_URL', 'NODE_ENV']);
+  });
+
+  it('worker local defaults keep real chain off', () => {
+    const config = loadWorkerConfig({
+      ...common,
+      DATABASE_URL: 'postgresql://alex_rewards:local-alex-rewards-only@localhost:5432/alex_rewards',
+      REDIS_URL: 'redis://localhost:6379/0',
+      TEMPORAL_ADDRESS: 'localhost:7233',
+      TEMPORAL_TASK_QUEUE: 'alex-rewards-foundation',
+    });
+    expect(config.WITHDRAWAL_REAL_CHAIN_ENABLED).toBe(false);
+    expect(config.WITHDRAWAL_FAKE_CHAIN_ENABLED).toBe(true);
+    expect(config.SIGNER_BASE_URL).toBe('http://127.0.0.1:3005');
+    expect(config.TON_TESTNET_JETTON_MASTER).toBe('');
+  });
+
+  it('worker rejects real chain without Owner Jetton master', () => {
+    expect(() =>
+      loadWorkerConfig({
+        ...common,
+        DATABASE_URL: 'postgresql://alex_rewards:local-alex-rewards-only@localhost:5432/alex_rewards',
+        REDIS_URL: 'redis://localhost:6379/0',
+        TEMPORAL_ADDRESS: 'localhost:7233',
+        TEMPORAL_TASK_QUEUE: 'alex-rewards-foundation',
+        WITHDRAWAL_FAKE_CHAIN_ENABLED: 'false',
+        WITHDRAWAL_REAL_CHAIN_ENABLED: 'true',
+        TON_TESTNET_JETTON_MASTER: '',
+      }),
+    ).toThrow(/TON_TESTNET_JETTON_MASTER/);
+  });
+
+  it('worker rejects MAINNET withdrawal network code', () => {
+    expect(() =>
+      loadWorkerConfig({
+        ...common,
+        DATABASE_URL: 'postgresql://alex_rewards:local-alex-rewards-only@localhost:5432/alex_rewards',
+        REDIS_URL: 'redis://localhost:6379/0',
+        TEMPORAL_ADDRESS: 'localhost:7233',
+        TEMPORAL_TASK_QUEUE: 'alex-rewards-foundation',
+        WITHDRAWAL_NETWORK_CODE: 'TON_MAINNET',
+      }),
+    ).toThrow(/MAINNET/);
   });
 });

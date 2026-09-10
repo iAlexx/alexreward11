@@ -44,6 +44,7 @@ Real signer/KMS/TON broadcast remain out of scope until later Owner-approved pha
 | `0018_membership_plan_entitlement_rule_binding.sql`  | Phase 7.1: trigger binding `membership_plan_entitlements` to matching benefit-rule entitlement/plan                                                                                                          |
 | `0019_control_center_security_integrity.sql`         | Phase 8: `CONTROL_CENTER_AUDIT` / `CONTROL_CENTER_SYSTEM`; action-token expected_state / destination / chat / topic / nonce / confirmation parent; OWNER permission catalog                                  |
 | `0020_signer_read_boundary.sql`                      | Phase 9: `hot_wallets.payout_jetton_wallet_address`; `signer_withdrawal_attempt_signing_v`; `alex_rewards_signer_ro` SELECT-only role                                                                        |
+| `0021_phase10_broadcast_evidence.sql`                | Phase 10: additive `signed_external_message_boc` / `broadcast_submitted_at` / `broadcast_ambiguity_class` on `withdrawal_attempts`                                                                         |
 
 Migrations `0001`–`0019` are **unchanged** by Phase 9. Only forward migration `0020` was added.
 

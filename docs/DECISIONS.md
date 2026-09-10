@@ -196,3 +196,20 @@ Decision:
 
 In-process `runFakePayoutPipeline` remains available for unit/integration tests that do not need a
 full Temporal env; official Phase 7 Temporal gates use `@temporalio/testing`.
+
+## ADR-018 — Phase 10 Testnet payout foundation (broadcast outside signer)
+
+Phase 10 started as a **foundation** only. Status remains
+**IN PROGRESS / BLOCKED — EXTERNAL TESTNET RESOURCE REQUIRED** until Owner supplies resources.
+
+Decisions:
+
+1. **Jetton master is Owner-required.** Never invent a Testnet Jetton master address. When
+   `WITHDRAWAL_REAL_CHAIN_ENABLED=true` and `TON_TESTNET_JETTON_MASTER` is empty, config fails closed.
+2. **Broadcast is outside `apps/signer`.** Signer may return signed external-message BOC; worker
+   persists pre-broadcast evidence then submits via `@alex-rewards/ton` providers. Signer never
+   calls TON RPC.
+3. **No blind resend** after `broadcast_submitted_at` or ambiguity classification.
+4. **No Mainnet / no AWS KMS / no plaintext keys.** Fake chain remains for Phase 7 local tests.
+5. Migration `0021` is additive only; `0001`–`0020` immutable. Phase 9 signer custody not weakened.
+6. Do not claim real Testnet 100+ payout PASS; do not start Phase 11; do not seal a Phase 10 PASS archive yet.

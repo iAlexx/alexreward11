@@ -136,3 +136,43 @@ export type {
 } from './reconcile.js';
 
 export { getWithdrawal, listWithdrawalsForUser } from './read.js';
+
+export {
+  PHASE10_MAINNET_GLOBAL_ID,
+  PHASE10_NETWORK_CODE,
+  PHASE10_NETWORK_GLOBAL_ID,
+  assertPhase10Ready,
+  buildPhase10PayoutConfig,
+  listPhase10MissingResources,
+  phase10ReadyCheck,
+} from './phase10-config.js';
+export type {
+  Phase10ConfigInput,
+  Phase10PayoutConfig,
+  Phase10ReadyCheck,
+} from './phase10-config.js';
+
+export { SignerHttpClient } from './signer-client.js';
+export type { SignerClientDeps, SignerClientSignResult } from './signer-client.js';
+
+export {
+  assertBlindResendForbidden,
+  broadcastGate,
+  classifySubmitError,
+  markBroadcastSubmitted,
+  persistPreBroadcastEvidence,
+} from './broadcast-gate.js';
+export type {
+  BroadcastAmbiguityClass,
+  BroadcastSubmitClassification,
+  PersistPreBroadcastEvidenceInput,
+} from './broadcast-gate.js';
+
+export { confirmation, matchIntendedJettonPayout } from './confirmation.js';
+export type { ExpectedJettonPayout } from './confirmation.js';
+
+export { runRealTestnetPayoutPipeline } from './real-payout-pipeline.js';
+export type {
+  RealTestnetPayoutPipelineResult,
+  RunRealTestnetPayoutPipelineInput,
+} from './real-payout-pipeline.js';

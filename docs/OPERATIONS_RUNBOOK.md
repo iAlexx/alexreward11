@@ -49,4 +49,14 @@ Pause dispatch → relock / revoke host+backup access → rotate Hot Wallet / bu
 Owner approval before resume. Future HSM/Vault may plug in via `SignPort` / `LockableSignPort`
 without giving signing rights to API/bot/worker.
 
+## Phase 10 Testnet payout foundation (broadcast outside signer)
+
+- `apps/signer` signs only and may return `externalMessageBocBase64`; it must not call TON RPC.
+- Worker / withdrawals persist signed BOC evidence **before** `sendBoc`, classify ambiguous RPC
+  outcomes, and never blind-resend after `broadcast_submitted_at` or ambiguity.
+- Keep `WITHDRAWAL_REAL_CHAIN_ENABLED=false` until Owner sets `TON_TESTNET_JETTON_MASTER` and
+  Testnet provider URLs. Fake chain remains for Phase 7 local tests.
+- Forbidden: Mainnet, AWS KMS, plaintext Hot Wallet keys in env.
+- Status: `docs/PHASE_10_ACCEPTANCE_REPORT.md` — **IN PROGRESS / BLOCKED**.
+
 See `docs/TON_SIGNER.md` and `docs/DISASTER_RECOVERY.md`.

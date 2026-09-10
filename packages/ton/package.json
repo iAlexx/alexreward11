@@ -13,7 +13,8 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src test",
-    "test": "vitest run test/ton-proof-crypto.test.ts"
+    "test": "vitest run test/ton-proof-crypto.test.ts",
+    "test:phase10": "vitest run test/phase10-chain-provider.test.ts"
   },
   "dependencies": {
     "@ton/core": "0.63.1",

@@ -134,9 +134,16 @@ Typed keys in `@alex-rewards/config` (API + worker schemas):
 | `WITHDRAWAL_NETWORK_CODE`        | Accepted network code               |
 | `WITHDRAWAL_ASSET_SYMBOL`        | Withdrawal asset symbol (e.g. USDT) |
 | `WITHDRAWAL_FAKE_CHAIN_ENABLED`  | Fake payout chain (LOCAL/TEST only) |
+| `WITHDRAWAL_REAL_CHAIN_ENABLED`  | Phase 10 real Testnet path (default off) |
+| `SIGNER_BASE_URL`                | Worker → signer HTTP base (sign only) |
+| `TON_TESTNET_JETTON_MASTER`      | Owner-approved Testnet Jetton master (required if real chain on) |
+| `TON_PRIMARY_PROVIDER_URL`       | Testnet HTTP provider (worker broadcast/observe) |
+| `TON_SECONDARY_PROVIDER_URL`     | Optional secondary provider |
+| `TON_PROVIDER_API_KEY`           | Optional provider key (never commit) |
 
 Local/test may receive documented fixture defaults via loader merge. Staging/production
 **fail closed** if keys are missing, if `TON_TESTNET` is inherited, or if fake chain is enabled.
+Real chain + empty Jetton master fails closed (Owner must supply the address — never invent).
 
 Asset resolution requires `assets.network_id` = resolved network, matching symbol, `ACTIVE`,
 and for USDT `is_native = false`. Zero or multiple matches → fail closed (no `rows[0]`).
@@ -148,13 +155,24 @@ and for USDT `is_native = false`. Zero or multiple matches → fail closed (no `
    `workflowId = withdrawal/{withdrawalId}`.
 3. Duplicate start (`WorkflowExecutionAlreadyStarted`) recovers the original workflow.
 4. Temporal unavailable → Outbox stays retryable; Reserved untouched.
-5. Activities run the Phase 7 fake payout pipeline (LOCAL/TEST only). Workflow code stays
-   deterministic (no DB/network secrets in history).
+5. Activities run the Phase 7 fake payout pipeline (LOCAL/TEST only) by default. When
+   `realChainEnabled` is set and fake chain is off, the workflow calls
+   `executeWithdrawalTestnetPayout` (Phase 10 foundation; fail-closed until Owner resources exist).
+   Workflow code stays deterministic (no DB/network secrets in history).
 
 ## Fake payout adapter
 
 LOCAL/TEST uses `FakePayoutChain` inside Temporal activities (and in-process harness helpers).
 Staging/production keep `fakeChainEnabled = false`.
+
+## Phase 10 Testnet broadcast (outside signer)
+
+Broadcast and TON RPC live in the worker / `@alex-rewards/withdrawals` + `@alex-rewards/ton`
+path — **never** in `apps/signer`. Pre-broadcast evidence (`signed_external_message_boc`,
+signed hash) is persisted before `sendBoc`. Ambiguous submit outcomes set
+`broadcast_submitted_at` / `broadcast_ambiguity_class` and forbid blind resend. Confirmation
+requires hot wallet + Jetton master + recipient + exact amount + queryId + success + not bounced.
+See `docs/PHASE_10_ACCEPTANCE_REPORT.md` for Owner blockers.
 
 ## Attempts + dispatch fencing
 

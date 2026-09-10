@@ -21,6 +21,7 @@ export type WithdrawalErrorCode =
   | 'TRANSITION_FORBIDDEN'
   | 'RECONCILE_REQUIRED'
   | 'CONFIG'
+  | 'EXTERNAL_RESOURCE_REQUIRED'
   | 'INTERNAL';
 
 export class WithdrawalDomainError extends Error {

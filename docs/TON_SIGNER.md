@@ -12,7 +12,8 @@ Authority: `docs/ALEx_Rewards_Master_Product_Financial_Security_Engineering_Spec
 
 **No signer-custody migration required.** `FALLBACK_ENCRYPTED` already exists in the Hot Wallet signer-type enum; migration `0020_signer_read_boundary.sql` is preserved.
 
-Do **not** start Phase 10 from this document.
+Do **not** start Phase 11 from this document. Phase 10 broadcast foundation is documented in
+`docs/PHASE_10_ACCEPTANCE_REPORT.md` (status: blocked on Owner Testnet resources).
 
 ## Boundary
 
@@ -22,6 +23,8 @@ Do **not** start Phase 10 from this document.
 - Caller may send **only** `withdrawalAttemptId`.
 - Signer independently loads `signer_withdrawal_attempt_signing_v` and reconstructs canonical Wallet V5 R1 / TEP-74 intent.
 - Signer has **no** financial DB writes, **no** public ingress, **no** TON RPC/broadcast.
+- Phase 10 additive: sign result may include `externalMessageBocBase64` for worker-side broadcast;
+  the signer process still must never submit that BOC to the network.
 
 ## Signing message bytes
 
@@ -109,4 +112,6 @@ AWS `ECC_NIST_EDWARDS25519` compatibility was proven in Phase 9 engineering evid
 - **§34.2:** historical AWS checklist — evidence only.
 - **§34.3 / production gate:** formally reviewed, Testnet-validated self-hosted encrypted signer (`FALLBACK_ENCRYPTED`).
 
-**Deferred to Phase 10:** broadcast, chain watcher, crash-after-broadcast, Jetton confirmation runs, provider reconciliation.
+**Deferred beyond Phase 9 signer:** chain watcher maturity, 100+ Testnet payout campaign,
+provider reconciliation against live TON (see Phase 10 acceptance — currently blocked on Owner
+Jetton master / providers). Broadcast foundation lives **outside** the signer (worker).
