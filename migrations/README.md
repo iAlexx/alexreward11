@@ -33,7 +33,7 @@ provider business behaviour is implemented here.
 | `0018_membership_plan_entitlement_rule_binding.sql`  | Phase 7.1: `membership_plan_entitlements` trigger binding rule entitlement/plan to mapping (no new tables)                                                                                                                                                   |
 | `0019_control_center_security_integrity.sql`         | Phase 8: `CONTROL_CENTER_AUDIT` / `CONTROL_CENTER_SYSTEM` purposes; action-token expected_state, destination/chat/topic, nonce, confirmation parent; OWNER permission catalog                                                                                |
 | `0020_signer_read_boundary.sql`                      | Phase 9: Hot Wallet payout Jetton wallet snapshot column; narrow `signer_withdrawal_attempt_signing_v`; `alex_rewards_signer_ro` read-only role                                                                                                              |
-| `0021_phase10_broadcast_evidence.sql`                | Phase 10: additive nullable `signed_external_message_boc` / `broadcast_submitted_at` / `broadcast_ambiguity_class` on `withdrawal_attempts` (intent immutability from 0017 unchanged)                                                                          |
+| `0021_phase10_broadcast_evidence.sql`                | Phase 10: additive nullable `signed_external_message_boc` / `broadcast_submitted_at` / `broadcast_ambiguity_class` on `withdrawal_attempts` (intent immutability from 0017 unchanged)                                                                        |
 
 Migrations `0001`–`0020` are **unchanged** by Phase 10. Only forward migration `0021` was added.
 

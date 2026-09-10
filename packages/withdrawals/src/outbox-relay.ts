@@ -209,8 +209,7 @@ export async function processWithdrawalApprovedOutboxBatch(
   options: ProcessWithdrawalApprovedOutboxBatchOptions,
 ): Promise<ProcessWithdrawalApprovedOutboxBatchResult> {
   void options.fakeChainEnabled;
-  const realChainEnabled =
-    options.realChainEnabled === true && options.fakeChainEnabled === false;
+  const realChainEnabled = options.realChainEnabled === true && options.fakeChainEnabled === false;
   const limit = options.limit ?? 20;
   const client = await pool.connect();
   let dispatched = 0;

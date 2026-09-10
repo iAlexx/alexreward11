@@ -127,19 +127,19 @@ append-only `DEFINITIVE_NONPAYMENT` evidence exists.
 
 Typed keys in `@alex-rewards/config` (API + worker schemas):
 
-| Key                              | Purpose                             |
-| -------------------------------- | ----------------------------------- |
-| `WITHDRAWAL_QUOTE_TTL_SECONDS`   | Quote TTL                           |
-| `WITHDRAWAL_RISK_POLICY_VERSION` | Risk policy version                 |
-| `WITHDRAWAL_NETWORK_CODE`        | Accepted network code               |
-| `WITHDRAWAL_ASSET_SYMBOL`        | Withdrawal asset symbol (e.g. USDT) |
-| `WITHDRAWAL_FAKE_CHAIN_ENABLED`  | Fake payout chain (LOCAL/TEST only) |
-| `WITHDRAWAL_REAL_CHAIN_ENABLED`  | Phase 10 real Testnet path (default off) |
-| `SIGNER_BASE_URL`                | Worker → signer HTTP base (sign only) |
+| Key                              | Purpose                                                          |
+| -------------------------------- | ---------------------------------------------------------------- |
+| `WITHDRAWAL_QUOTE_TTL_SECONDS`   | Quote TTL                                                        |
+| `WITHDRAWAL_RISK_POLICY_VERSION` | Risk policy version                                              |
+| `WITHDRAWAL_NETWORK_CODE`        | Accepted network code                                            |
+| `WITHDRAWAL_ASSET_SYMBOL`        | Withdrawal asset symbol (e.g. USDT)                              |
+| `WITHDRAWAL_FAKE_CHAIN_ENABLED`  | Fake payout chain (LOCAL/TEST only)                              |
+| `WITHDRAWAL_REAL_CHAIN_ENABLED`  | Phase 10 real Testnet path (default off)                         |
+| `SIGNER_BASE_URL`                | Worker → signer HTTP base (sign only)                            |
 | `TON_TESTNET_JETTON_MASTER`      | Owner-approved Testnet Jetton master (required if real chain on) |
-| `TON_PRIMARY_PROVIDER_URL`       | Testnet HTTP provider (worker broadcast/observe) |
-| `TON_SECONDARY_PROVIDER_URL`     | Optional secondary provider |
-| `TON_PROVIDER_API_KEY`           | Optional provider key (never commit) |
+| `TON_PRIMARY_PROVIDER_URL`       | Testnet HTTP provider (worker broadcast/observe)                 |
+| `TON_SECONDARY_PROVIDER_URL`     | Optional secondary provider                                      |
+| `TON_PROVIDER_API_KEY`           | Optional provider key (never commit)                             |
 
 Local/test may receive documented fixture defaults via loader merge. Staging/production
 **fail closed** if keys are missing, if `TON_TESTNET` is inherited, or if fake chain is enabled.

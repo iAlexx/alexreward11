@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { loadApiConfig, loadBotConfig, loadSignerConfig, loadWebConfig, loadWorkerConfig } from '../src/index.js';
+import {
+  loadApiConfig,
+  loadBotConfig,
+  loadSignerConfig,
+  loadWebConfig,
+  loadWorkerConfig,
+} from '../src/index.js';
 
 const common = {
   DEPLOYMENT_ENV: 'local',
@@ -340,7 +346,8 @@ describe('environment validation', () => {
     expect(() =>
       loadWorkerConfig({
         ...common,
-        DATABASE_URL: 'postgresql://alex_rewards:local-alex-rewards-only@localhost:5432/alex_rewards',
+        DATABASE_URL:
+          'postgresql://alex_rewards:local-alex-rewards-only@localhost:5432/alex_rewards',
         REDIS_URL: 'redis://localhost:6379/0',
         TEMPORAL_ADDRESS: 'localhost:7233',
         TEMPORAL_TASK_QUEUE: 'alex-rewards-foundation',
@@ -355,7 +362,8 @@ describe('environment validation', () => {
     expect(() =>
       loadWorkerConfig({
         ...common,
-        DATABASE_URL: 'postgresql://alex_rewards:local-alex-rewards-only@localhost:5432/alex_rewards',
+        DATABASE_URL:
+          'postgresql://alex_rewards:local-alex-rewards-only@localhost:5432/alex_rewards',
         REDIS_URL: 'redis://localhost:6379/0',
         TEMPORAL_ADDRESS: 'localhost:7233',
         TEMPORAL_TASK_QUEUE: 'alex-rewards-foundation',
