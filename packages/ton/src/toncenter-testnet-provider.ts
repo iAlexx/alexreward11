@@ -119,6 +119,34 @@ function messages(transaction: Record<string, unknown>): Record<string, unknown>
   return transaction.out_msgs.map((value) => asRecord(value, 'TonCenter out_msg'));
 }
 
+/** External-In messages have an empty source and a concrete destination account. */
+function isExternalInMessage(message: Record<string, unknown>, hotWallet: string): boolean {
+  const source = typeof message.source === 'string' ? message.source.trim() : '';
+  if (source !== '') return false;
+  return typeof message.destination === 'string' && addressEquals(message.destination, hotWallet);
+}
+
+/**
+ * Match the persisted Tonkeeper-normalized External-In identity against TonCenter
+ * message hash fields returned by getTransactions / index APIs.
+ */
+function externalInHashMatches(
+  message: Record<string, unknown>,
+  normalizedExternalMessageHash: string,
+): boolean {
+  for (const key of ['hash', 'hash_norm', 'message_hash', 'msg_hash'] as const) {
+    const value = message[key];
+    if (
+      typeof value === 'string' &&
+      value !== '' &&
+      hashEquals(value, normalizedExternalMessageHash)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export class TonCenterTestnetProvider implements TonChainProvider {
   readonly networkGlobalId = TON_TESTNET_NETWORK_GLOBAL_ID;
   private readonly baseUrl: string;
@@ -262,6 +290,8 @@ export class TonCenterTestnetProvider implements TonChainProvider {
     input: FindTransactionsByQueryIdInput,
   ): Promise<readonly JettonTransferEvidence[]> {
     if (
+      input.normalizedExternalMessageHash === undefined ||
+      input.normalizedExternalMessageHash.trim() === '' ||
       input.senderJettonWallet === undefined ||
       input.amountAtomic === undefined ||
       input.recipient === undefined
@@ -282,6 +312,19 @@ export class TonCenterTestnetProvider implements TonChainProvider {
     for (const value of hotResult) {
       const transaction = asRecord(value, 'TonCenter transaction');
       if (!transactionSucceeded(transaction)) continue;
+      const externalIn =
+        transaction.in_msg === undefined || transaction.in_msg === null
+          ? null
+          : asRecord(transaction.in_msg, 'TonCenter hot wallet external-in');
+      // Chain identity: External-In accepted by the Hot Wallet must match the
+      // persisted normalized message hash (no query_id-only confirmation).
+      if (
+        externalIn === null ||
+        !isExternalInMessage(externalIn, input.hotWallet) ||
+        !externalInHashMatches(externalIn, input.normalizedExternalMessageHash)
+      ) {
+        continue;
+      }
       for (const message of messages(transaction)) {
         const body = messageBody(message);
         const transfer = body === null ? null : parseJettonMessageBase64(body);

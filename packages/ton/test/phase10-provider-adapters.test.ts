@@ -181,6 +181,34 @@ describe('TonCenter Testnet adapter', () => {
     });
   });
 
+  it('refuses TonCenter confirmation without the persisted normalized External-In hash', async () => {
+    const provider = new TonCenterTestnetProvider({
+      baseUrl: 'https://testnet.toncenter.com/api/v2',
+      fetchImpl: tonCenterFetch(),
+    });
+    await expect(
+      provider.observeJettonTransfer({
+        hotWallet: OWNER,
+        jettonMaster: MASTER,
+        queryId: '42',
+        recipient: RECIPIENT,
+        amountAtomic: '190000',
+        senderJettonWallet: SENDER_WALLET,
+      }),
+    ).resolves.toBeNull();
+    await expect(
+      provider.observeJettonTransfer({
+        hotWallet: OWNER,
+        jettonMaster: MASTER,
+        queryId: '42',
+        recipient: RECIPIENT,
+        amountAtomic: '190000',
+        senderJettonWallet: SENDER_WALLET,
+        normalizedExternalMessageHash: 'ff'.repeat(32),
+      }),
+    ).resolves.toBeNull();
+  });
+
   it('uses getMasterchainInfo for health', async () => {
     const provider = new TonCenterTestnetProvider({
       baseUrl: 'https://testnet.toncenter.com/api/v2',
