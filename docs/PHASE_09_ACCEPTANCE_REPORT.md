@@ -149,14 +149,22 @@ Do not treat companion docs tips as the accepted runtime.
 
 ## N. Owner action required (unblock seal)
 
-AWS console login works for account `661390315990`, but **KMS is not subscribed**
-(`SubscriptionRequiredException`). Activate billing/KMS for that account, then:
+Account `661390315990` (`iAlexx1`) remains **`AccountState=PENDING_ACTIVATION`**.
+`aws freetier upgrade-account-plan FREE` fails with **`PI vet failure`** (payment instrument
+not accepted). Until that clears, KMS returns `SubscriptionRequiredException`.
 
-1. `aws login` (if session expired) + export creds for Node:
-   `aws configure export-credentials --format env-no-export` → set into the shell
-2. `SIGNER_AWS_REGION=eu-central-1 pnpm provision:kms-spike-key`
-3. `pnpm spike:kms` against candidate tip `7d8cb06e18f319271750d9378dc7cb5a5a9f8178`
-4. Or mirror the same values into GitHub Actions secrets and dispatch **Phase 9 KMS Spike**
+Do this in the AWS root console (email/password or `aws login` browser flow):
+
+1. Billing → Payment methods / Payment preferences: add a card that can take international USD auth; complete bank 3DS if prompted.
+2. Complete any phone verification AWS requests.
+3. Optional: Account and billing support case if PI vet stays failed after a valid card.
+4. Confirm: `aws account get-account-information` is no longer `PENDING_ACTIVATION`, then `aws kms list-keys` works.
+5. Seal path (automated once active): `pnpm seal:phase9:kms`  
+   Or: `pnpm provision:kms-spike-key` → `pnpm spike:kms` → dual archive.
+6. Candidate tip for ordinary CI evidence: `7d8cb06e18f319271750d9378dc7cb5a5a9f8178`  
+   (runtime tip may advance after KMS evidence commit; do not start Phase 10).
+
+GitHub Actions secrets remain empty (`total_count=0`); local `aws login` is the active path.
 
 ## O. STOP packet
 
