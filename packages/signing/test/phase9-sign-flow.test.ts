@@ -50,7 +50,7 @@ describePhase9('Phase 9 production-shaped sign flow', () => {
       Buffer.from(result.signedWalletRequestBocBase64, 'base64'),
     )[0]!;
     assertExternalInMessageBody(message, signedRequest);
-    expect(message.init).toBeUndefined();
+    expect(message.init == null).toBe(true);
     expect(result.kmsKeySpec).toBe('LOCAL_EPHEMERAL_ED25519');
   });
 
