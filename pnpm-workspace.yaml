@@ -2,6 +2,10 @@ packages:
   - apps/*
   - packages/*
 
+# Pin transitive AWS SDK XML parser past GHSA-8gc5-j5rx-235r / related advisories.
+overrides:
+  fast-xml-parser: 5.11.1
+
 catalogMode: strict
 
 linkWorkspacePackages: true
