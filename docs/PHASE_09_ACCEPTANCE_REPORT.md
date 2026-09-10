@@ -162,13 +162,13 @@ AWS console login works for account `661390315990`, but **KMS is not subscribed*
 
 ```text
 PHASE 9 BLOCKED — REAL KMS SPIKE ENVIRONMENT UNAVAILABLE
-Reason: AWS account AccountState=PENDING_ACTIVATION; KMS returns SubscriptionRequiredException
+Reason: AWS AccountState=PENDING_ACTIVATION; freetier plan upgrade fails PI vet; KMS SubscriptionRequiredException
 AWS account: 661390315990 (iAlexx1) / eu-central-1
 Candidate tip (ordinary CI PASS): 7d8cb06e18f319271750d9378dc7cb5a5a9f8178
 Ordinary CI: https://github.com/iAlexx/alexreward11/actions/runs/34422715453
 Phase 8 accepted runtime remains closed: a7554474b8b5ee22a3323a221d00bb1714d88ff7
 No Phase 10 / Mainnet work started.
-Awaiting Owner AWS account activation, then ECC_NIST_EDWARDS25519 spike.
+Awaiting Owner AWS payment-method (PI) verification + account activation, then ECC_NIST_EDWARDS25519 spike.
 ```
 
 **No Phase 10 work started.**
