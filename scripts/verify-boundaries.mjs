@@ -89,6 +89,11 @@ for (const area of [
       if (name.startsWith('@alex-rewards/') && apps.includes(name.replace('@alex-rewards/', ''))) {
         failures.push(`${area}: applications may not depend on application ${name}`);
       }
+      if (name === '@aws-sdk/client-kms') {
+        failures.push(
+          `${area}: @aws-sdk/client-kms is forbidden in product apps/packages (AWS production custody OWNER REJECTED; use self-hosted FALLBACK_ENCRYPTED)`,
+        );
+      }
     }
   }
 }
@@ -98,9 +103,6 @@ const sourceFiles = [...(await walk('apps/')), ...(await walk('packages/control-
 );
 for (const path of sourceFiles) {
   const source = await readFile(new URL(path, root), 'utf8');
-  if (!path.startsWith('apps/signer/') && /from\s+['"]@aws-sdk\/client-kms['"]/.test(source)) {
-    failures.push(`${path}: only apps/signer may import the KMS client`);
-  }
   if (
     (path.startsWith('apps/bot/src/') || path.startsWith('packages/control-center/src/')) &&
     (/from\s+['"]@alex-rewards\/ledger['"]/.test(source) ||
@@ -130,6 +132,27 @@ for (const path of sourceFiles) {
   }
 }
 
+// Forbid @aws-sdk/client-kms anywhere in product apps/packages (including signer).
+const productTreeFiles = [...(await walk('apps/')), ...(await walk('packages/'))].filter((path) => {
+  const normalized = path.replaceAll('\\', '/');
+  return (
+    /\.(?:ts|tsx|js|mjs)$/.test(normalized) &&
+    !normalized.includes('/dist/') &&
+    !normalized.includes('/node_modules/')
+  );
+});
+for (const path of productTreeFiles) {
+  const source = await readFile(new URL(path, root), 'utf8');
+  if (
+    /from\s+['"]@aws-sdk\/client-kms['"]/.test(source) ||
+    /require\(['"]@aws-sdk\/client-kms['"]\)/.test(source)
+  ) {
+    failures.push(
+      `${path}: @aws-sdk/client-kms import is forbidden in product apps/packages (self-hosted encrypted custody only)`,
+    );
+  }
+}
+
 const signerManifest = await readJson('apps/signer/package.json');
 for (const name of Object.keys(signerManifest.dependencies ?? {})) {
   if (name.includes('toncenter') || name.includes('tonapi')) {
@@ -154,24 +177,6 @@ for (const path of [...(await walk('apps/signer/')), ...(await walk('packages/si
   }
   if (/\bTonClient\b/.test(source) || /\.sendBoc\s*\(/.test(source)) {
     failures.push(`${path}: signer/signing must not use TonClient or chain broadcast helpers`);
-  }
-  if (path.startsWith('packages/signing/') && /from\s+['"]@aws-sdk\/client-kms['"]/.test(source)) {
-    failures.push(`${path}: packages/signing must not import KMS client`);
-  }
-}
-
-for (const bannedRoot of [
-  'apps/api/',
-  'apps/bot/',
-  'apps/admin/',
-  'apps/worker/',
-  'packages/withdrawals/',
-]) {
-  for (const path of (await walk(bannedRoot)).filter((p) => /\.(?:ts|tsx|js|mjs)$/.test(p))) {
-    const source = await readFile(new URL(path, root), 'utf8');
-    if (/from\s+['"]@aws-sdk\/client-kms['"]/.test(source)) {
-      failures.push(`${path}: only apps/signer may import the KMS client`);
-    }
   }
 }
 
@@ -203,6 +208,24 @@ for (const rootPath of phase8BoundaryRoots) {
     ) {
       failures.push(`${path}: control-center src must not import ledger`);
     }
+  }
+}
+
+// Committed .env.example must not assign real plaintext signer secrets.
+const envExample = await readFile(new URL('.env.example', root), 'utf8');
+const forbiddenPlaintextEnvKeys = [
+  'SIGNER_PRIVATE_KEY',
+  'SIGNER_SEED',
+  'SIGNER_MNEMONIC',
+  'SIGNER_KEY_PASSPHRASE',
+];
+for (const key of forbiddenPlaintextEnvKeys) {
+  // Allow comment lines that mention the key as forbidden; reject assignments.
+  const assignment = new RegExp(`^\\s*${key}\\s*=`, 'm');
+  if (assignment.test(envExample)) {
+    failures.push(
+      `.env.example: ${key}= is forbidden (plaintext signer secrets must never be committed; comments that mark them FORBIDDEN are OK)`,
+    );
   }
 }
 

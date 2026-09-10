@@ -1,41 +1,27 @@
 # Terraform
 
-Production Terraform remains reserved for later phases. Phase 9 does **not** auto-apply cloud
-resources from this repository.
+Production Terraform remains reserved for later phases. This repository does **not** auto-apply
+cloud resources for signer custody.
 
-## Phase 9 — Testnet signer spike IAM shape (documentation only)
+## Signer custody (v1.3) — self-hosted encrypted
 
-When the Owner provisions a TEST/SPIKE AWS environment for the formal KMS gate:
+Owner decision: AWS as production Hot Wallet signing custody is **OWNER REJECTED**. Production
+target is `apps/signer` + self-hosted encrypted Ed25519 (`FALLBACK_ENCRYPTED`). Historical AWS
+KMS Ed25519 compatibility evidence remains non-authoritative only.
 
-1. Create a non-exportable KMS key:
-   - KeySpec: `ECC_NIST_EDWARDS25519`
-   - KeyUsage: `SIGN_VERIFY`
-   - No Mainnet payout key; spike/test only
-2. Attach an IAM task role used **only** by `apps/signer` with least privilege:
-   - `kms:Sign`
-   - `kms:GetPublicKey`
-   - `kms:DescribeKey`
-   - Resource: the exact spike key ARN
-3. Deny / omit `kms:Sign` on API, Bot, Admin, Worker, Mini App, and payout-dispatcher roles.
-4. Signer service networking:
-   - private service (no public load-balancer route to `/v1/sign-withdrawal-attempt`)
-   - workload auth (mTLS / equivalent) in staging+; bearer token only for local/test compatibility
-5. Database:
-   - dedicated read-only login inheriting `alex_rewards_signer_ro`
-   - no INSERT/UPDATE/DELETE on financial tables
-6. Egress:
-   - PostgreSQL read endpoint
-   - AWS KMS endpoint
-   - approved observability
-   - **no** TON RPC / broadcast egress
+**No signer-custody migration required** for infrastructure that already models
+`FALLBACK_ENCRYPTED`.
 
-Do not commit real AWS account IDs or production ARNs into this repo. Pass spike values via
-environment / secret store at execution time:
+When provisioning a signer host (documentation only — no committed cloud ARNs):
 
-```bash
-SIGNER_AWS_REGION=...
-# optional: create TEST/SPIKE key
-pnpm provision:kms-spike-key
-SIGNER_KMS_KEY_ARN=arn:aws:kms:region:account:key/uuid
-pnpm spike:kms
-```
+1. Dedicated signer compute with no public ingress to `/v1/sign-withdrawal-attempt`.
+2. Workload auth (mTLS / equivalent) in staging+; bearer token only for local/test compatibility.
+3. Encrypted key bundle file on a restricted path (`SIGNER_KEY_BUNDLE_PATH`); dual offline
+   encrypted backups outside the live host.
+4. Database: dedicated read-only login inheriting `alex_rewards_signer_ro` (no financial writes).
+5. Egress: PostgreSQL read endpoint + approved observability; **no** TON RPC / broadcast egress;
+   **no** AWS KMS requirement on the production path.
+6. Future HSM/Vault: implement behind `SignPort` / `LockableSignPort` without widening trust to
+   API/bot/worker.
+
+Do not commit real account IDs, passphrase material, or plaintext seeds into this repo.

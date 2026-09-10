@@ -2,11 +2,11 @@ import { createHash, randomBytes } from 'node:crypto';
 
 import { keyPairFromSeed, sign } from '@ton/crypto';
 
-import type { KmsKeyDescription, SignPort } from './kms-port.js';
+import type { SigningKeyDescription, SignPort } from './signing-key-provider.js';
 
 /**
  * TEST/SPIKE ONLY — ephemeral in-process Ed25519 key.
- * Does NOT satisfy the formal AWS KMS ECC_NIST_EDWARDS25519 compatibility gate.
+ * Does NOT satisfy production self-hosted encrypted custody requirements.
  */
 export class LocalEphemeralSignPort implements SignPort {
   readonly kind = 'local_ephemeral' as const;
@@ -28,12 +28,13 @@ export class LocalEphemeralSignPort implements SignPort {
     return Buffer.from(sign(message, this.keyPair.secretKey));
   }
 
-  async describe(): Promise<KmsKeyDescription> {
+  async describe(): Promise<SigningKeyDescription> {
     return {
       keySpec: 'LOCAL_EPHEMERAL_ED25519',
       keyUsage: 'SIGN_VERIFY',
       signingAlgorithm: 'ED25519_SHA_512',
       messageType: 'RAW',
+      provider: 'LocalEphemeralSignPort',
     };
   }
 

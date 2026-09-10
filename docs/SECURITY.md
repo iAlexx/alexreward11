@@ -4,7 +4,7 @@
 - Production-like environments reject loopback service endpoints and known local-only tokens.
 - Secrets are never returned by health endpoints or passed to frontend applications.
 - Logs redact common credential, token, cookie, authorization, and key fields.
-- The Signer package boundary is checked automatically; KMS dependencies outside it fail CI.
+- The Signer package boundary is checked automatically; `@aws-sdk/client-kms` anywhere in product apps/packages fails CI.
 - Repository secret-pattern scanning and high-severity dependency auditing run in CI.
 - Docker image and GitHub Action versions are immutable or exact.
 
@@ -53,13 +53,16 @@ See `docs/WITHDRAWALS.md`.
 
 See `docs/CONTROL_CENTER.md` and `docs/REVIEW_QUEUE.md`.
 
-## Phase 9 — TON Testnet signer spike
+## Phase 9 — TON Testnet signer (self-hosted encrypted)
 
-- Only `apps/signer` may import `@aws-sdk/client-kms` / invoke `kms:Sign`.
+- Production Hot Wallet custody target: `apps/signer` + **SELF-HOSTED ENCRYPTED Ed25519 (`FALLBACK_ENCRYPTED`)**.
+- AWS KMS Ed25519 compatibility is **historically PROVEN**; AWS as production custody is **OWNER REJECTED**.
+- **No signer-custody migration required** (`FALLBACK_ENCRYPTED` enum + migration `0020` preserved).
+- Product apps/packages must not depend on or import `@aws-sdk/client-kms`.
 - Caller input is only `withdrawalAttemptId`; signer reconstructs canonical Wallet V5 R1 intent.
 - Signer DB role is read-only (`alex_rewards_signer_ro`); no financial writes.
+- Key material: Argon2id + XChaCha20-Poly1305 encrypted bundle at rest; unlock only in signer memory (loopback local unlock); plaintext `SIGNER_PRIVATE_KEY` / `SEED` / `MNEMONIC` / `KEY_PASSPHRASE` env forbidden.
 - No TON RPC/broadcast from signer (Phase 10).
-- `local_ephemeral` mode is local/test only and does **not** satisfy the formal KMS gate.
-- Formal spike: `pnpm spike:kms` against `ECC_NIST_EDWARDS25519` + `ED25519_SHA_512` / `MessageType=RAW`.
+- `local_ephemeral` mode is local/test only and does **not** satisfy the production self-hosted gate.
 
 See `docs/TON_SIGNER.md`.

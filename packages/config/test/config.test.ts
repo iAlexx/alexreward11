@@ -83,12 +83,12 @@ describe('environment validation', () => {
     );
   });
 
-  it('accepts Phase 9 local_ephemeral signer config and rejects invalid KMS ARN shape', () => {
+  it('accepts Phase 9 local_ephemeral signer config and rejects AWS/plaintext signer env', () => {
     const config = loadSignerConfig({
       ...common,
       SIGNER_SERVICE_TOKEN: 'a-secure-local-token-that-is-long-enough',
     });
-    expect(config.SIGNER_KMS_MODE).toBe('local_ephemeral');
+    expect(config.SIGNER_KEY_MODE).toBe('local_ephemeral');
     expect(config.SIGNER_NETWORK_GLOBAL_ID).toBe(-3);
     expect(() =>
       loadSignerConfig({
@@ -97,6 +97,13 @@ describe('environment validation', () => {
         SIGNER_KMS_KEY_ARN: 'kms-key-must-not-exist-in-phase-one',
       }),
     ).toThrow(/SIGNER_KMS_KEY_ARN/);
+    expect(() =>
+      loadSignerConfig({
+        ...common,
+        SIGNER_SERVICE_TOKEN: 'a-secure-local-token-that-is-long-enough',
+        SIGNER_PRIVATE_KEY: 'forbidden',
+      }),
+    ).toThrow(/SIGNER_PRIVATE_KEY/);
   });
 
   it('forbids AWS_KMS_KEY_ID alias at the signer boundary', () => {
@@ -107,6 +114,23 @@ describe('environment validation', () => {
         AWS_KMS_KEY_ID: 'alias-forbidden',
       }),
     ).toThrow(/AWS_KMS_KEY_ID/);
+  });
+
+  it('requires bundle path for self_hosted_encrypted and rejects plaintext passphrase env', () => {
+    expect(() =>
+      loadSignerConfig({
+        ...common,
+        SIGNER_SERVICE_TOKEN: 'a-secure-local-token-that-is-long-enough',
+        SIGNER_KEY_MODE: 'self_hosted_encrypted',
+      }),
+    ).toThrow(/SIGNER_KEY_BUNDLE_PATH/);
+    expect(() =>
+      loadSignerConfig({
+        ...common,
+        SIGNER_SERVICE_TOKEN: 'a-secure-local-token-that-is-long-enough',
+        SIGNER_KEY_PASSPHRASE: 'never-store-passphrase-in-env',
+      }),
+    ).toThrow(/SIGNER_KEY_PASSPHRASE/);
   });
 
   it('rejects local dependency endpoints in production', () => {

@@ -14,7 +14,7 @@ import {
 } from './canonical-message.js';
 import type { SignerRuntimeConfig } from './config.js';
 import { SignerError } from './errors.js';
-import type { SignPort } from './kms-port.js';
+import type { SignPort, LockableSignPort } from './signing-key-provider.js';
 import { publicKeyFingerprint } from './local-ephemeral-kms.js';
 import { assertSigningPolicy } from './policy.js';
 import { loadSigningView } from './read-model.js';
@@ -28,6 +28,8 @@ export interface SignWithdrawalAttemptResult {
   readonly publicKeyFingerprint: string;
   readonly walletAddressRaw: string;
   readonly signatureBase64: string;
+  readonly keySpec: string;
+  /** @deprecated alias of keySpec — historical Phase 9 field name */
   readonly kmsKeySpec: string;
   readonly signingAlgorithm: string;
 }
@@ -63,6 +65,14 @@ function intentFromRow(
 export async function signWithdrawalAttempt(
   input: SignWithdrawalAttemptInput,
 ): Promise<SignWithdrawalAttemptResult> {
+  const lockable = input.signPort as LockableSignPort;
+  if (typeof lockable.isSigningReady === 'function' && !lockable.isSigningReady()) {
+    throw new SignerError(
+      'SIGNER_LOCKED',
+      'Signer is LOCKED; signing requires explicit local unlock',
+    );
+  }
+
   const row = await loadSigningView(input.pool, input.withdrawalAttemptId);
   assertSigningPolicy(row, input.config);
 
@@ -125,7 +135,7 @@ export async function signWithdrawalAttempt(
       signingHash = Buffer.from(messageCell.hash());
       signature = await input.signPort.signEd25519RawMessage(signingHash);
       if (signature.length !== 64) {
-        throw new SignerError('KMS_REJECTED', 'Ed25519 signature must be 64 bytes');
+        throw new SignerError('SIGNATURE_VERIFY_FAILED', 'Ed25519 signature must be 64 bytes');
       }
       return signature;
     },
@@ -156,6 +166,7 @@ export async function signWithdrawalAttempt(
     publicKeyFingerprint: publicKeyFingerprint(publicKey),
     walletAddressRaw: derived.addressRaw,
     signatureBase64: signature.toString('base64'),
+    keySpec: description.keySpec,
     kmsKeySpec: description.keySpec,
     signingAlgorithm: description.signingAlgorithm,
   };

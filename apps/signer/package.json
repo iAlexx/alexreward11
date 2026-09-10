@@ -9,7 +9,9 @@
     "start": "node dist/main.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src test",
-    "test": "vitest run"
+    "test": "vitest run",
+    "keygen": "tsx src/cli/generate-hot-wallet-key.ts",
+    "local-unlock": "tsx src/cli/local-unlock.ts"
   },
   "dependencies": {
     "@alex-rewards/config": "workspace:*",
@@ -17,7 +19,6 @@
     "@alex-rewards/db": "workspace:*",
     "@alex-rewards/observability": "workspace:*",
     "@alex-rewards/signing": "workspace:*",
-    "@aws-sdk/client-kms": "3.901.0",
     "fastify": "5.12.1",
     "pg": "8.23.0",
     "zod": "4.5.4"

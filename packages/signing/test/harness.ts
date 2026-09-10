@@ -181,8 +181,9 @@ export async function createProductionShapedSignableAttempt(
   const publicKey = await signPort.getPublicKey();
   const derived = deriveWalletV5R1({ publicKey, networkGlobalId: -3, workchain: 0 });
   const config = localSigningFixtureConfig({
-    kmsMode: 'local_ephemeral',
-    kmsKeyArn: null,
+    keyMode: 'local_ephemeral',
+    keyBundlePath: null,
+    expectedSignerReference: null,
   });
   const engine = localWithdrawalEngineFixtureConfig();
 
@@ -204,7 +205,7 @@ export async function createProductionShapedSignableAttempt(
        network_id, address, friendly_address, wallet_version, signer_type, signer_reference,
        status, payout_jetton_wallet_address, label
      ) VALUES (
-       $1::uuid, $2, $3, 'v5R1', 'KMS', $5,
+       $1::uuid, $2, $3, 'v5R1', 'FALLBACK_ENCRYPTED', $5,
        'ACTIVE', $4, 'phase9-spike'
      ) RETURNING id`,
     [

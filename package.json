@@ -27,10 +27,7 @@
     "test:phase7": "pnpm --filter @alex-rewards/withdrawals run test:phase7",
     "test:phase8": "pnpm --filter @alex-rewards/control-center run test:phase8",
     "test:phase9": "pnpm --filter @alex-rewards/signing run test:phase9",
-    "spike:kms": "node scripts/spike-kms-compatibility.mjs",
-    "provision:kms-spike-key": "node scripts/provision-kms-spike-key.mjs",
     "seal:phase9": "node scripts/seal-phase9.mjs",
-    "seal:phase9:kms": "node scripts/run-phase9-kms-seal.mjs",
     "security:secrets": "node scripts/scan-secrets.mjs",
     "security:audit": "pnpm audit --audit-level=high",
     "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm test:archive && pnpm build && pnpm verify:boundaries && pnpm validate:migrations && pnpm security:secrets",
@@ -41,10 +38,7 @@
     "dev:stack:down": "docker compose -f infra/docker/compose.yaml --env-file .env --profile apps down",
     "smoke": "node scripts/phase1-smoke.mjs",
     "archive:phase": "node scripts/create-phase-archive.mjs",
-    "test:archive": "node --test scripts/create-phase-archive.test.mjs",
-    "fix:aws-contact-phone": "node scripts/fix-aws-contact-phone.mjs",
-    "open:aws-incomplete-signup": "node scripts/open-aws-incomplete-signup.mjs",
-    "ingest:phase9-aws-creds": "node scripts/ingest-phase9-aws-creds.mjs"
+    "test:archive": "node --test scripts/create-phase-archive.test.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

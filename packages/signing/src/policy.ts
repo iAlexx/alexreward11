@@ -88,22 +88,29 @@ export function assertSigningPolicy(
       walletVersion: row.hot_wallet_version,
     });
   }
-  if (row.hot_wallet_signer_type !== 'KMS') {
-    throw new SignerError('POLICY_REJECTED', 'Hot Wallet signer_type must be KMS for KMS mode');
+  if (row.hot_wallet_signer_type !== 'FALLBACK_ENCRYPTED') {
+    throw new SignerError(
+      'POLICY_REJECTED',
+      'Hot Wallet signer_type must be FALLBACK_ENCRYPTED (self-hosted encrypted custody)',
+    );
   }
-  if (config.kmsMode === 'aws') {
-    if (!config.kmsKeyArn || row.hot_wallet_signer_reference !== config.kmsKeyArn) {
-      throw new SignerError(
-        'POLICY_REJECTED',
-        'Hot Wallet signer_reference must match KMS key ARN',
-      );
-    }
-    if (row.signer_key_reference !== config.kmsKeyArn) {
-      throw new SignerError(
-        'POLICY_REJECTED',
-        'Attempt signer_key_reference must match KMS key ARN',
-      );
-    }
+  if (
+    config.expectedSignerReference !== null &&
+    row.hot_wallet_signer_reference !== config.expectedSignerReference
+  ) {
+    throw new SignerError(
+      'POLICY_REJECTED',
+      'Hot Wallet signer_reference must match expected public key fingerprint',
+    );
+  }
+  if (
+    config.expectedSignerReference !== null &&
+    row.signer_key_reference !== config.expectedSignerReference
+  ) {
+    throw new SignerError(
+      'POLICY_REJECTED',
+      'Attempt signer_key_reference must match expected public key fingerprint',
+    );
   }
 
   if (!row.payout_jetton_wallet_address) {

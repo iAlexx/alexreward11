@@ -37,7 +37,7 @@ function baseRow(overrides: Partial<SigningViewRow> = {}): SigningViewRow {
     recipient_wallet_disabled_at: null,
     hot_wallet_address: '0:22',
     hot_wallet_version: 'v5R1',
-    hot_wallet_signer_type: 'KMS',
+    hot_wallet_signer_type: 'FALLBACK_ENCRYPTED',
     hot_wallet_signer_reference: 'local',
     hot_wallet_status: 'ACTIVE',
     payout_jetton_wallet_address: '0:33',
@@ -110,6 +110,12 @@ describe('Phase 9 signer policy', () => {
     expect(() =>
       assertSigningPolicy(baseRow({ approval_id: null, approval_decision: null }), config),
     ).toThrow(SignerError);
+  });
+
+  it('rejects non-FALLBACK_ENCRYPTED hot wallet signer_type', () => {
+    expect(() => assertSigningPolicy(baseRow({ hot_wallet_signer_type: 'KMS' }), config)).toThrow(
+      /FALLBACK_ENCRYPTED/,
+    );
   });
 });
 

@@ -264,8 +264,7 @@ const workerSchema = serviceSchema
 const LOCAL_SIGNER_DEFAULTS = {
   SIGNER_DATABASE_URL:
     'postgresql://alex_rewards:local-alex-rewards-only@localhost:55432/alex_rewards',
-  SIGNER_AWS_REGION: 'eu-central-1',
-  SIGNER_KMS_MODE: 'local_ephemeral',
+  SIGNER_KEY_MODE: 'local_ephemeral',
   SIGNER_SPIKE_ENABLED: 'true',
   SIGNER_NETWORK_CODE: 'TON_TESTNET',
   SIGNER_NETWORK_GLOBAL_ID: '-3',
@@ -274,21 +273,39 @@ const LOCAL_SIGNER_DEFAULTS = {
   SIGNER_EXPECTED_ASSET_SYMBOL: 'USDT',
 } as const;
 
+const forbiddenPlaintextSignerSecrets = [
+  'SIGNER_PRIVATE_KEY',
+  'SIGNER_SEED',
+  'SIGNER_MNEMONIC',
+  'SIGNER_KEY_PASSPHRASE',
+] as const;
+
 const signerSchema = commonSchema
   .extend({
     SIGNER_PORT: z.coerce.number().int().min(1024).max(65535).default(3005),
     SIGNER_SERVICE_TOKEN: z.string().min(32),
     SIGNER_DATABASE_URL: postgresUrl,
-    SIGNER_AWS_REGION: z.string().min(2).max(32),
-    SIGNER_KMS_MODE: z.enum(['aws', 'local_ephemeral']),
-    SIGNER_KMS_KEY_ARN: z.preprocess(
+    SIGNER_KEY_MODE: z.enum(['self_hosted_encrypted', 'local_ephemeral']),
+    SIGNER_KEY_BUNDLE_PATH: z.preprocess(
+      (value) => (value === '' || value === undefined ? undefined : value),
+      z.string().min(1).max(512).optional(),
+    ),
+    SIGNER_EXPECTED_SIGNER_REFERENCE: z.preprocess(
       (value) => (value === '' || value === undefined ? undefined : value),
       z
         .string()
-        .regex(/^arn:aws:kms:[a-z0-9-]+:\d+:key\/[0-9a-f-]+$/i, 'must be an exact KMS key ARN')
+        .regex(/^[0-9a-f]{64}$/i, 'must be SHA-256 public key fingerprint hex')
         .optional(),
     ),
+    // Removed production AWS path (Owner v1.3). Reject if still present.
+    SIGNER_KMS_MODE: z.never().optional(),
+    SIGNER_KMS_KEY_ARN: z.never().optional(),
+    SIGNER_AWS_REGION: z.never().optional(),
     AWS_KMS_KEY_ID: z.never().optional(),
+    SIGNER_PRIVATE_KEY: z.never().optional(),
+    SIGNER_SEED: z.never().optional(),
+    SIGNER_MNEMONIC: z.never().optional(),
+    SIGNER_KEY_PASSPHRASE: z.never().optional(),
     SIGNER_SPIKE_ENABLED: booleanFromString,
     SIGNER_NETWORK_CODE: z.string().min(1).max(64),
     SIGNER_NETWORK_GLOBAL_ID: z.coerce.number().int(),
@@ -297,6 +314,15 @@ const signerSchema = commonSchema
     SIGNER_EXPECTED_ASSET_SYMBOL: z.string().min(1).max(32).default('USDT'),
   })
   .superRefine((value, context) => {
+    for (const key of forbiddenPlaintextSignerSecrets) {
+      if (process.env[key] !== undefined && process.env[key] !== '') {
+        context.addIssue({
+          code: 'custom',
+          path: [key],
+          message: `${key} is forbidden; passphrase/private material must not be stored in env`,
+        });
+      }
+    }
     if (
       value.DEPLOYMENT_ENV !== 'local' &&
       value.SIGNER_SERVICE_TOKEN === 'replace-with-a-random-32-character-local-token'
@@ -308,18 +334,21 @@ const signerSchema = commonSchema
       });
     }
     const outsideLocal = value.DEPLOYMENT_ENV !== 'local' && value.DEPLOYMENT_ENV !== 'test';
-    if (outsideLocal && value.SIGNER_KMS_MODE !== 'aws') {
+    if (outsideLocal && value.SIGNER_KEY_MODE !== 'self_hosted_encrypted') {
       context.addIssue({
         code: 'custom',
-        path: ['SIGNER_KMS_MODE'],
-        message: 'local_ephemeral KMS mode is forbidden outside local/test',
+        path: ['SIGNER_KEY_MODE'],
+        message: 'local_ephemeral key mode is forbidden outside local/test',
       });
     }
-    if (value.SIGNER_KMS_MODE === 'aws' && value.SIGNER_KMS_KEY_ARN === undefined) {
+    if (
+      value.SIGNER_KEY_MODE === 'self_hosted_encrypted' &&
+      value.SIGNER_KEY_BUNDLE_PATH === undefined
+    ) {
       context.addIssue({
         code: 'custom',
-        path: ['SIGNER_KMS_KEY_ARN'],
-        message: 'exact KMS key ARN is required when SIGNER_KMS_MODE=aws',
+        path: ['SIGNER_KEY_BUNDLE_PATH'],
+        message: 'SIGNER_KEY_BUNDLE_PATH is required when SIGNER_KEY_MODE=self_hosted_encrypted',
       });
     }
     if (value.SIGNER_NETWORK_CODE.toUpperCase().includes('MAINNET')) {

@@ -1,6 +1,7 @@
 export {
   PHASE9_COMPLETED_FROM_SPEC_34_2,
   PHASE9_DEFERRED_TO_PHASE_10,
+  PHASE9_HISTORICAL_AWS_KMS_EVIDENCE,
   SIGNER_BOUNDARY,
 } from './boundary.js';
 export {
@@ -15,7 +16,32 @@ export {
 } from './canonical-message.js';
 export { localSigningFixtureConfig, type SignerRuntimeConfig } from './config.js';
 export { SignerError, type SignerErrorCode } from './errors.js';
-export type { KmsKeyDescription, SignPort } from './kms-port.js';
+export type {
+  KmsKeyDescription,
+  LockableSignPort,
+  SignPort,
+  SignerCustodyState,
+  SigningKeyDescription,
+} from './signing-key-provider.js';
+export {
+  DEFAULT_ARGON2ID_PARAMS,
+  KEY_BUNDLE_AEAD,
+  KEY_BUNDLE_FORMAT_VERSION,
+  KEY_BUNDLE_KDF,
+  decryptKeyBundle,
+  encryptKeyBundle,
+  generateHotWalletSeed,
+  identityFromSeed,
+  loadKeyBundleFile,
+  publicKeyFingerprintHex,
+  scrubBuffer,
+  writeKeyBundleFile,
+  type DecryptedSigningMaterial,
+  type EncryptedKeyBundleV1,
+  type GeneratedHotWalletIdentity,
+  type KeyBundleKdfParams,
+} from './encrypted-key-bundle.js';
+export { EncryptedLocalSigningProvider } from './encrypted-local-signing-provider.js';
 export { LocalEphemeralSignPort, publicKeyFingerprint } from './local-ephemeral-kms.js';
 export { assertSigningPolicy } from './policy.js';
 export { loadSigningView, type SigningViewRow } from './read-model.js';

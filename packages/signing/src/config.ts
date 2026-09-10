@@ -1,8 +1,11 @@
 export interface SignerRuntimeConfig {
   readonly deploymentEnv: 'local' | 'test' | 'staging' | 'production';
   readonly spikeEnabled: boolean;
-  readonly kmsMode: 'aws' | 'local_ephemeral';
-  readonly kmsKeyArn: string | null;
+  /** Production: self_hosted_encrypted. local/test may use local_ephemeral. */
+  readonly keyMode: 'self_hosted_encrypted' | 'local_ephemeral';
+  /** Expected Hot Wallet signer_reference = public key fingerprint (hex). */
+  readonly expectedSignerReference: string | null;
+  readonly keyBundlePath: string | null;
   readonly networkCode: string;
   readonly networkGlobalId: number;
   readonly walletVersion: 'v5R1';
@@ -16,8 +19,9 @@ export function localSigningFixtureConfig(
   return {
     deploymentEnv: 'test',
     spikeEnabled: true,
-    kmsMode: 'local_ephemeral',
-    kmsKeyArn: null,
+    keyMode: 'local_ephemeral',
+    expectedSignerReference: null,
+    keyBundlePath: null,
     networkCode: 'TON_TESTNET',
     networkGlobalId: -3,
     walletVersion: 'v5R1',
