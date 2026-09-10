@@ -66,17 +66,25 @@ describe('Phase 10 chain provider', () => {
     const provider = new HttpTonProvider({
       baseUrl: 'https://ton-testnet.example/rpc',
       apiKey: 'test-key-not-for-prod',
-      fetchImpl: (async (url, init) => {
+      fetchImpl: async (input, init) => {
+        const url =
+          typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+        const body =
+          typeof init?.body === 'string'
+            ? init.body
+            : init?.body === undefined || init.body === null
+              ? ''
+              : JSON.stringify(init.body);
         calls.push({
-          url: String(url),
+          url,
           headers: (init?.headers ?? {}) as Record<string, string>,
-          body: String(init?.body ?? ''),
+          body,
         });
         return new Response(JSON.stringify({ result: 3 }), {
           status: 200,
           headers: { 'content-type': 'application/json' },
         });
-      }) as typeof fetch,
+      },
     });
 
     expect(await provider.getSeqno('EQ_x')).toBe(3);
