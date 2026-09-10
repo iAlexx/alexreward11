@@ -57,7 +57,4 @@ export {
   TonApiTestnetProvider,
   type TonApiTestnetProviderConfig,
 } from './tonapi-testnet-provider.js';
-export {
-  createTonChainProvider,
-  type TonProviderKind,
-} from './create-chain-provider.js';
+export { createTonChainProvider, type TonProviderKind } from './create-chain-provider.js';

@@ -1,7 +1,4 @@
-import {
-  assertTestnetOnly,
-  TON_TESTNET_NETWORK_GLOBAL_ID,
-} from './chain-provider.js';
+import { assertTestnetOnly, TON_TESTNET_NETWORK_GLOBAL_ID } from './chain-provider.js';
 
 const BODY_SNIPPET_LENGTH = 500;
 
@@ -40,8 +37,10 @@ export function assertTestnetProviderUrl(baseUrl: string, provider: string): str
   }
   const hostname = parsed.hostname.toLowerCase();
   const knownMainnetHost =
-    (hostname === 'toncenter.com' || hostname === 'www.toncenter.com') ||
-    (hostname === 'tonapi.io' || hostname === 'www.tonapi.io');
+    hostname === 'toncenter.com' ||
+    hostname === 'www.toncenter.com' ||
+    hostname === 'tonapi.io' ||
+    hostname === 'www.tonapi.io';
   if (knownMainnetHost || hostname.includes('mainnet')) {
     throw new Error(
       `NETWORK_MISMATCH: ${provider} must use Testnet; mainnet URL ${parsed.origin} is forbidden`,
@@ -60,10 +59,7 @@ export function assertTestnetResponse(value: unknown, context: string): void {
   if (value === null || typeof value !== 'object') return;
   const record = value as Record<string, unknown>;
   const network = record.network ?? record.networkGlobalId ?? record.global_id;
-  if (
-    network === -239 ||
-    (typeof network === 'string' && /mainnet|-239/i.test(network))
-  ) {
+  if (network === -239 || (typeof network === 'string' && /mainnet|-239/i.test(network))) {
     throw new Error(`NETWORK_MISMATCH: ${context} returned mainnet data`);
   }
 }
@@ -149,7 +145,10 @@ export async function fetchOk(
     response = await fetchImpl(url, init);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (/timeout|timed?\s*out|abort/i.test(message) || (error instanceof Error && error.name === 'AbortError')) {
+    if (
+      /timeout|timed?\s*out|abort/i.test(message) ||
+      (error instanceof Error && error.name === 'AbortError')
+    ) {
       throw new Error(`TIMEOUT: TON provider request failed for ${context}: ${message}`, {
         cause: error,
       });

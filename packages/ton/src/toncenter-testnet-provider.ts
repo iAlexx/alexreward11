@@ -38,7 +38,8 @@ function addressEquals(left: string, right: string): boolean {
 function stackFromResult(result: unknown, context: string): StackEntry[] {
   const record = asRecord(result, context);
   const exitCode = Number(record.exit_code);
-  if (exitCode !== 0) throw new Error(`TONCENTER_GET_METHOD_FAILED: ${context} exit_code=${exitCode}`);
+  if (exitCode !== 0)
+    throw new Error(`TONCENTER_GET_METHOD_FAILED: ${context} exit_code=${exitCode}`);
   if (!Array.isArray(record.stack)) {
     throw new Error(`MALFORMED_RESPONSE: ${context} stack missing`);
   }
@@ -131,7 +132,11 @@ export class TonCenterTestnetProvider implements TonChainProvider {
     return body.result;
   }
 
-  private async runGetMethod(address: string, method: string, stack: unknown[]): Promise<StackEntry[]> {
+  private async runGetMethod(
+    address: string,
+    method: string,
+    stack: unknown[],
+  ): Promise<StackEntry[]> {
     const result = await this.post(
       'runGetMethod',
       { address, method, stack },
@@ -162,12 +167,14 @@ export class TonCenterTestnetProvider implements TonChainProvider {
   }
 
   async getJettonBalance(ownerAddress: string, jettonMaster: string): Promise<TonJettonBalance> {
-    const ownerCell = beginCell().storeAddress(Address.parse(ownerAddress)).endCell().toBoc().toString('base64');
-    const walletStack = await this.runGetMethod(
-      jettonMaster,
-      'get_wallet_address',
-      [['tvm.Slice', ownerCell]],
-    );
+    const ownerCell = beginCell()
+      .storeAddress(Address.parse(ownerAddress))
+      .endCell()
+      .toBoc()
+      .toString('base64');
+    const walletStack = await this.runGetMethod(jettonMaster, 'get_wallet_address', [
+      ['tvm.Slice', ownerCell],
+    ]);
     const walletAddress = parseAddressCell(
       stackCellBase64(walletStack[0], 'TonCenter get_wallet_address'),
       'TonCenter get_wallet_address',
@@ -218,7 +225,8 @@ export class TonCenterTestnetProvider implements TonChainProvider {
         if (typeof msgData.body !== 'string') continue;
         const transfer = parseJettonTransferBody(msgData.body);
         if (transfer === null || transfer.queryId !== input.queryId) continue;
-        if (input.recipient !== undefined && !addressEquals(transfer.recipient, input.recipient)) continue;
+        if (input.recipient !== undefined && !addressEquals(transfer.recipient, input.recipient))
+          continue;
         const bounced = message.bounced === true;
         evidence.push({
           hotWallet: input.hotWallet,
@@ -228,7 +236,9 @@ export class TonCenterTestnetProvider implements TonChainProvider {
           queryId: transfer.queryId,
           success: !bounced,
           bounced,
-          ...(typeof transactionId.hash === 'string' ? { transactionHash: transactionId.hash } : {}),
+          ...(typeof transactionId.hash === 'string'
+            ? { transactionHash: transactionId.hash }
+            : {}),
           ...(typeof transactionId.lt === 'string' ? { lt: transactionId.lt } : {}),
           networkGlobalId: this.networkGlobalId,
           ...(typeof message.destination === 'string'

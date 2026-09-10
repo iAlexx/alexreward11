@@ -85,10 +85,7 @@ export class TonApiTestnetProvider implements TonChainProvider {
   }
 
   async getAccountBalance(address: string): Promise<TonAccountBalance> {
-    const body = await this.get(
-      `/v2/accounts/${encodeURIComponent(address)}`,
-      'TonAPI account',
-    );
+    const body = await this.get(`/v2/accounts/${encodeURIComponent(address)}`, 'TonAPI account');
     return {
       address,
       balanceNanotons: decimalString(body.balance, 'TonAPI account balance'),

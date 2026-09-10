@@ -200,8 +200,7 @@ describe('TonAPI Testnet adapter', () => {
       recipient: RECIPIENT,
       amountAtomic: '190000',
       queryId: '42',
-      senderJettonWallet:
-        '0:3333333333333333333333333333333333333333333333333333333333333333',
+      senderJettonWallet: '0:3333333333333333333333333333333333333333333333333333333333333333',
       providerKind: 'tonapi',
       success: true,
     });
@@ -257,9 +256,9 @@ describe('provider failure handling and selection', () => {
   });
 
   it('rejects known mainnet provider URLs during construction', () => {
-    expect(
-      () => new TonCenterTestnetProvider({ baseUrl: 'https://toncenter.com/api/v2' }),
-    ).toThrow(/NETWORK_MISMATCH/);
+    expect(() => new TonCenterTestnetProvider({ baseUrl: 'https://toncenter.com/api/v2' })).toThrow(
+      /NETWORK_MISMATCH/,
+    );
     expect(() => new TonApiTestnetProvider({ baseUrl: 'https://tonapi.io' })).toThrow(
       /NETWORK_MISMATCH/,
     );
@@ -273,9 +272,9 @@ describe('provider failure handling and selection', () => {
         fetchImpl: tonCenterFetch(),
       }),
     ).toBeInstanceOf(TonCenterTestnetProvider);
-    expect(() =>
-      createTonChainProvider({ kind: 'fake', baseUrl: 'test-only' }),
-    ).toThrow(/test-only/);
+    expect(() => createTonChainProvider({ kind: 'fake', baseUrl: 'test-only' })).toThrow(
+      /test-only/,
+    );
   });
 
   it('makes primary/secondary evidence disagreement detectable', async () => {

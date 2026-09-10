@@ -55,8 +55,8 @@ describe('Phase 10 chain provider', () => {
   });
 
   it('deprecated HttpTonProvider directs callers to documented adapters', () => {
-    expect(
-      () => new HttpTonProvider({ baseUrl: 'https://testnet.toncenter.com/api/v2' }),
-    ).toThrow(/TonCenterTestnetProvider or TonApiTestnetProvider/);
+    expect(() => new HttpTonProvider({ baseUrl: 'https://testnet.toncenter.com/api/v2' })).toThrow(
+      /TonCenterTestnetProvider or TonApiTestnetProvider/,
+    );
   });
 });

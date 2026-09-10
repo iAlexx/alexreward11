@@ -17,7 +17,12 @@
     "result": {
       "@type": "smc.runResult",
       "gas_used": 2394,
-      "stack": [["cell", { "bytes": "te6cckEBAQEAJAAAQ4AGZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZnCLILwN" }]],
+      "stack": [
+        [
+          "cell",
+          { "bytes": "te6cckEBAQEAJAAAQ4AGZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZnCLILwN" }
+        ]
+      ],
       "exit_code": 0
     }
   },
@@ -89,8 +94,22 @@
     "result": {
       "@type": "blocks.masterchainInfo",
       "state_root_hash": "c3RhdGU=",
-      "last": { "@type": "ton.blockIdExt", "workchain": -1, "shard": "-9223372036854775808", "seqno": 1, "root_hash": "cm9vdA==", "file_hash": "ZmlsZQ==" },
-      "init": { "@type": "ton.blockIdExt", "workchain": -1, "shard": "0", "seqno": 0, "root_hash": "", "file_hash": "" }
+      "last": {
+        "@type": "ton.blockIdExt",
+        "workchain": -1,
+        "shard": "-9223372036854775808",
+        "seqno": 1,
+        "root_hash": "cm9vdA==",
+        "file_hash": "ZmlsZQ=="
+      },
+      "init": {
+        "@type": "ton.blockIdExt",
+        "workchain": -1,
+        "shard": "0",
+        "seqno": 0,
+        "root_hash": "",
+        "file_hash": ""
+      }
     }
   }
 }
