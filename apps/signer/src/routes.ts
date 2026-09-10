@@ -5,7 +5,9 @@ import { HEALTH_CONTRACT_VERSION, type HealthResponse } from '@alex-rewards/cont
 import {
   LocalEphemeralSignPort,
   SignerError,
+  deriveWalletV5R1,
   localSigningFixtureConfig,
+  publicKeyFingerprint,
   signWithdrawalAttempt,
   type LockableSignPort,
   type SignPort,
@@ -140,6 +142,54 @@ export async function registerSignerRoutes(
       return reply.code(200).send({
         custodyState: deps.lockable.custodyState,
         signingReady: false,
+      });
+    } catch (error) {
+      if (error instanceof SignerError) {
+        const status = error.code === 'UNAUTHORIZED' ? 401 : 400;
+        return reply.code(status).send({ error: error.code, message: error.message });
+      }
+      throw error;
+    }
+  });
+
+  /**
+   * Read-only signing identity for Phase 10 attempt construction.
+   * Returns public key + derived wallet address when signing is ready.
+   * Never returns private key material or passphrases.
+   */
+  server.get('/v1/signing-identity', async (request, reply) => {
+    try {
+      assertBearerAuth(
+        typeof request.headers.authorization === 'string'
+          ? request.headers.authorization
+          : undefined,
+        deps.serviceToken,
+      );
+      if (!deps.spikeEnabled) {
+        throw new SignerError('SPIKE_DISABLED', 'Signer spike disabled');
+      }
+      const signingReady = deps.lockable ? deps.lockable.isSigningReady() : true;
+      if (!signingReady) {
+        return reply.code(503).send({
+          error: 'SIGNING_LOCKED',
+          message: 'Signer custody is locked',
+          signingReady: false,
+          custodyState: deps.lockable?.custodyState ?? 'LOCKED',
+        });
+      }
+      const publicKey = await deps.signPort.getPublicKey();
+      const fingerprint = publicKeyFingerprint(publicKey);
+      const derived = deriveWalletV5R1({
+        publicKey,
+        networkGlobalId: deps.runtime.networkGlobalId,
+        workchain: deps.runtime.workchain,
+      });
+      return reply.code(200).send({
+        publicKeyHex: publicKey.toString('hex'),
+        publicKeyFingerprint: fingerprint,
+        walletAddressRaw: derived.addressRaw,
+        signingReady: true,
+        custodyState: deps.lockable?.custodyState ?? 'n/a',
       });
     } catch (error) {
       if (error instanceof SignerError) {

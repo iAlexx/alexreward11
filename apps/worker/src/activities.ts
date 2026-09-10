@@ -50,8 +50,8 @@ export function createWithdrawalActivities(deps: WithdrawalActivityDeps) {
     },
 
     /**
-     * Phase 10 Testnet payout activity. Calls assertPhase10Ready / skeleton pipeline
-     * or throws EXTERNAL_RESOURCE_REQUIRED. Does not run real 100+ Testnet broadcasts.
+     * Phase 10 Testnet payout activity. Fail-closed until Owner resources exist.
+     * Does not run real Testnet broadcasts without WITHDRAWAL_REAL_CHAIN_ENABLED + providers.
      */
     async executeWithdrawalTestnetPayout(input: {
       withdrawalId: string;

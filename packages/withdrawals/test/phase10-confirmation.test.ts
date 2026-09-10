@@ -71,4 +71,36 @@ describe('phase10 confirmation matchIntendedJettonPayout', () => {
       ),
     ).toBe(false);
   });
+
+  it('rejects network mismatch and sender Jetton wallet mismatch', () => {
+    expect(
+      matchIntendedJettonPayout(
+        { ...expected, success: true, bounced: false, networkGlobalId: -239 },
+        { ...expected, networkGlobalId: -3 },
+      ),
+    ).toBe(false);
+    expect(
+      matchIntendedJettonPayout(
+        {
+          ...expected,
+          success: true,
+          bounced: false,
+          senderJettonWallet: 'EQ_wrong_jw',
+        },
+        { ...expected, senderJettonWallet: 'EQ_expected_jw' },
+      ),
+    ).toBe(false);
+    expect(
+      matchIntendedJettonPayout(
+        {
+          ...expected,
+          success: true,
+          bounced: false,
+          networkGlobalId: -3,
+          senderJettonWallet: 'EQ_expected_jw',
+        },
+        { ...expected, networkGlobalId: -3, senderJettonWallet: 'EQ_expected_jw' },
+      ),
+    ).toBe(true);
+  });
 });

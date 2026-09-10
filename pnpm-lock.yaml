@@ -561,6 +561,9 @@ importers:
       '@alex-rewards/ledger':
         specifier: workspace:*
         version: link:../ledger
+      '@alex-rewards/signing':
+        specifier: workspace:*
+        version: link:../signing
       '@alex-rewards/ton':
         specifier: workspace:*
         version: link:../ton

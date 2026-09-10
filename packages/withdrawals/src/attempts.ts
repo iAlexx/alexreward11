@@ -120,6 +120,20 @@ export async function createWithdrawalAttempt(
     readonly signerKeyReference: string;
     /** Optional scenario hash inputs for deterministic query_id derivation. */
     readonly scenarioHashInputs?: Readonly<Record<string, string | number>>;
+    /**
+     * Phase 10 real path: authoritative chain seqno.
+     * When omitted, Phase 7 fake path uses attemptNumber as seqno.
+     */
+    readonly expectedSeqno?: bigint;
+    /** Phase 10 real path: immutable query_id. */
+    readonly queryId?: bigint;
+    /**
+     * Phase 10 real path: hex canonical message hash (not `fake-hash:`).
+     * When omitted, Phase 7 fake path uses `fake-hash:{withdrawalId}:{attemptNumber}`.
+     */
+    readonly canonicalMessageHash?: string;
+    /** Phase 10 real path: must match the unix timeout used for canonical hash. */
+    readonly validUntil?: Date;
   },
 ): Promise<WithdrawalAttemptView> {
   await assertLeaseFencing(client, input.hotWalletId, input.fencingToken);
@@ -189,18 +203,29 @@ export async function createWithdrawalAttempt(
   }
 
   const attemptNumber = (prior.rows[0]?.attempt_number ?? 0) + 1;
-  const expectedSeqno = BigInt(attemptNumber);
+  const expectedSeqno = input.expectedSeqno ?? BigInt(attemptNumber);
   // Deterministic unique query_id per hot wallet: pack attempt into high bits + hash salt.
   const salt = input.scenarioHashInputs ? Object.values(input.scenarioHashInputs).join(':') : '';
   const queryId =
+    input.queryId ??
     (BigInt(attemptNumber) << 32n) +
-    BigInt(
-      Math.abs(
-        [...`${input.withdrawalId}:${salt}`].reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 7),
-      ),
+      BigInt(
+        Math.abs(
+          [...`${input.withdrawalId}:${salt}`].reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 7),
+        ),
+      );
+  const canonicalMessageHash =
+    input.canonicalMessageHash ?? `fake-hash:${input.withdrawalId}:${attemptNumber}`;
+  if (
+    input.canonicalMessageHash !== undefined &&
+    input.canonicalMessageHash.startsWith('fake-hash:')
+  ) {
+    throw new WithdrawalDomainError(
+      'VALIDATION',
+      'Real payout attempts cannot use fake-hash canonical message hashes',
     );
-  const canonicalMessageHash = `fake-hash:${input.withdrawalId}:${attemptNumber}`;
-  const validUntil = new Date(Date.now() + 300_000);
+  }
+  const validUntil = input.validUntil ?? new Date(Date.now() + 300_000);
 
   const inserted = await client.query<{
     id: string;

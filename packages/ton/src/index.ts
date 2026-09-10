@@ -42,3 +42,22 @@ export {
 } from './chain-provider.js';
 export { FakeTonChainProvider, type FakeTonChainProviderOptions } from './fake-chain-provider.js';
 export { HttpTonProvider, type HttpTonProviderConfig } from './http-ton-provider.js';
+export {
+  TonProviderHttpError,
+  assertOkTonCenterBody,
+  assertTestnetProviderUrl,
+  assertTestnetResponse,
+  isTonProviderRateLimit,
+} from './provider-http.js';
+export {
+  TonCenterTestnetProvider,
+  type TonCenterTestnetProviderConfig,
+} from './toncenter-testnet-provider.js';
+export {
+  TonApiTestnetProvider,
+  type TonApiTestnetProviderConfig,
+} from './tonapi-testnet-provider.js';
+export {
+  createTonChainProvider,
+  type TonProviderKind,
+} from './create-chain-provider.js';

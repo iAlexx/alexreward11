@@ -1,0 +1,56 @@
+{
+  "seqno": { "seqno": 7 },
+  "account": {
+    "address": "0:1111111111111111111111111111111111111111111111111111111111111111",
+    "balance": "2500000000",
+    "status": "active"
+  },
+  "jettonBalance": {
+    "balance": "190000",
+    "wallet_address": { "address": "0:3333333333333333333333333333333333333333333333333333333333333333", "is_scam": false, "is_wallet": true },
+    "jetton": {
+      "address": "0:4444444444444444444444444444444444444444444444444444444444444444",
+      "name": "Testnet Reward",
+      "symbol": "TST",
+      "decimals": 9,
+      "verification": "none"
+    }
+  },
+  "events": {
+    "next_from": 0,
+    "events": [
+      {
+        "event_id": "tonapi-testnet-event-id",
+        "timestamp": 1750000000,
+        "actions": [
+          {
+            "type": "JettonTransfer",
+            "status": "ok",
+            "JettonTransfer": {
+              "query_id": "42",
+              "amount": "190000",
+              "sender": { "address": "0:1111111111111111111111111111111111111111111111111111111111111111", "is_scam": false, "is_wallet": true },
+              "recipient": { "address": "0:2222222222222222222222222222222222222222222222222222222222222222", "is_scam": false, "is_wallet": true },
+              "senders_wallet": "0:3333333333333333333333333333333333333333333333333333333333333333",
+              "recipients_wallet": "0:5555555555555555555555555555555555555555555555555555555555555555",
+              "jetton": {
+                "address": "0:4444444444444444444444444444444444444444444444444444444444444444",
+                "name": "Testnet Reward",
+                "symbol": "TST",
+                "decimals": 9,
+                "verification": "none"
+              }
+            }
+          }
+        ],
+        "is_scam": false,
+        "lt": "50000000001",
+        "in_progress": false
+      }
+    ]
+  },
+  "status": {
+    "rest_online": true,
+    "indexing_latency": 0
+  }
+}

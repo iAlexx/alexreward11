@@ -149,11 +149,17 @@ export {
 export type {
   Phase10ConfigInput,
   Phase10PayoutConfig,
+  Phase10ProviderEndpointConfig,
+  Phase10ProviderKind,
   Phase10ReadyCheck,
 } from './phase10-config.js';
 
 export { SignerHttpClient } from './signer-client.js';
-export type { SignerClientDeps, SignerClientSignResult } from './signer-client.js';
+export type {
+  SignerClientDeps,
+  SignerClientSignResult,
+  SignerSigningIdentity,
+} from './signer-client.js';
 
 export {
   assertBlindResendForbidden,
@@ -168,11 +174,17 @@ export type {
   PersistPreBroadcastEvidenceInput,
 } from './broadcast-gate.js';
 
-export { confirmation, matchIntendedJettonPayout } from './confirmation.js';
+export {
+  confirmation,
+  matchIntendedJettonPayout,
+  primarySecondaryEvidenceAgree,
+} from './confirmation.js';
 export type { ExpectedJettonPayout } from './confirmation.js';
 
 export { runRealTestnetPayoutPipeline } from './real-payout-pipeline.js';
 export type {
+  RealPayoutSignerPort,
   RealTestnetPayoutPipelineResult,
+  RealTestnetPayoutPipelineState,
   RunRealTestnetPayoutPipelineInput,
 } from './real-payout-pipeline.js';

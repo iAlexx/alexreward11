@@ -1,0 +1,96 @@
+{
+  "seqno": {
+    "ok": true,
+    "result": {
+      "@type": "smc.runResult",
+      "gas_used": 611,
+      "stack": [["num", "0x7"]],
+      "exit_code": 0
+    }
+  },
+  "accountBalance": {
+    "ok": true,
+    "result": "2500000000"
+  },
+  "walletAddress": {
+    "ok": true,
+    "result": {
+      "@type": "smc.runResult",
+      "gas_used": 2394,
+      "stack": [["cell", { "bytes": "te6cckEBAQEAJAAAQ4AGZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZnCLILwN" }]],
+      "exit_code": 0
+    }
+  },
+  "walletData": {
+    "ok": true,
+    "result": {
+      "@type": "smc.runResult",
+      "gas_used": 1581,
+      "stack": [["num", "0x2e630"]],
+      "exit_code": 0
+    }
+  },
+  "sendBoc": {
+    "ok": true,
+    "result": {
+      "@type": "raw.extMessageInfo",
+      "hash": "ZmFrZS10ZXN0bmV0LW1lc3NhZ2UtaGFzaA=="
+    }
+  },
+  "transactions": {
+    "ok": true,
+    "result": [
+      {
+        "@type": "raw.transaction",
+        "utime": 1750000000,
+        "data": "te6ccgEBAQEAAgAAAA==",
+        "transaction_id": {
+          "@type": "internal.transactionId",
+          "lt": "50000000001",
+          "hash": "dGVzdG5ldC10cmFuc2FjdGlvbi1oYXNo"
+        },
+        "fee": "105000",
+        "storage_fee": "0",
+        "other_fee": "105000",
+        "in_msg": {
+          "@type": "raw.message",
+          "source": "",
+          "destination": "EQAREREREREREREREREREREREREREREREREREREREREREeYT",
+          "value": "0",
+          "fwd_fee": "0",
+          "ihr_fee": "0",
+          "created_lt": "0",
+          "body_hash": "",
+          "msg_data": { "@type": "msg.dataRaw", "body": "", "init_state": "" }
+        },
+        "out_msgs": [
+          {
+            "@type": "raw.message",
+            "source": "EQAREREREREREREREREREREREREREREREREREREREREREeYT",
+            "destination": "EQAzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzM7SN",
+            "value": "1",
+            "fwd_fee": "0",
+            "ihr_fee": "0",
+            "created_lt": "50000000002",
+            "body_hash": "",
+            "bounced": false,
+            "msg_data": {
+              "@type": "msg.dataRaw",
+              "body": "te6cckEBAQEAVgAAqA+KfqUAAAAAAAAAKjAuYwgAREREREREREREREREREREREREREREREREREREREREREUABERERERERERERERERERERERERERERERERERERERERERCApspOzY=",
+              "init_state": ""
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "health": {
+    "ok": true,
+    "result": {
+      "@type": "blocks.masterchainInfo",
+      "state_root_hash": "c3RhdGU=",
+      "last": { "@type": "ton.blockIdExt", "workchain": -1, "shard": "-9223372036854775808", "seqno": 1, "root_hash": "cm9vdA==", "file_hash": "ZmlsZQ==" },
+      "init": { "@type": "ton.blockIdExt", "workchain": -1, "shard": "0", "seqno": 0, "root_hash": "", "file_hash": "" }
+    }
+  }
+}

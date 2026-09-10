@@ -22,6 +22,9 @@ export interface JettonTransferEvidence {
   readonly bounced: boolean;
   readonly transactionHash?: string;
   readonly lt?: string;
+  readonly networkGlobalId?: number;
+  readonly senderJettonWallet?: string;
+  readonly providerKind?: string;
 }
 
 export interface TonAccountBalance {

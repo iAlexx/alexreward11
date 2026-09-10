@@ -233,9 +233,12 @@ const LOCAL_WORKER_WITHDRAWAL_DEFAULTS = {
   WITHDRAWAL_REAL_CHAIN_ENABLED: 'false',
   SIGNER_BASE_URL: 'http://127.0.0.1:3005',
   TON_TESTNET_JETTON_MASTER: '',
+  TON_PRIMARY_PROVIDER_KIND: '',
   TON_PRIMARY_PROVIDER_URL: '',
+  TON_PRIMARY_PROVIDER_API_KEY: '',
+  TON_SECONDARY_PROVIDER_KIND: '',
   TON_SECONDARY_PROVIDER_URL: '',
-  TON_PROVIDER_API_KEY: '',
+  TON_SECONDARY_PROVIDER_API_KEY: '',
 } as const;
 
 const optionalEmptyString = z.preprocess(
@@ -255,9 +258,12 @@ const workerSchema = serviceSchema
     WITHDRAWAL_REAL_CHAIN_ENABLED: booleanFromString,
     SIGNER_BASE_URL: z.string().min(1).max(512),
     TON_TESTNET_JETTON_MASTER: optionalEmptyString,
+    TON_PRIMARY_PROVIDER_KIND: optionalEmptyString,
     TON_PRIMARY_PROVIDER_URL: optionalEmptyString,
+    TON_PRIMARY_PROVIDER_API_KEY: optionalEmptyString,
+    TON_SECONDARY_PROVIDER_KIND: optionalEmptyString,
     TON_SECONDARY_PROVIDER_URL: optionalEmptyString,
-    TON_PROVIDER_API_KEY: optionalEmptyString,
+    TON_SECONDARY_PROVIDER_API_KEY: optionalEmptyString,
     SIGNER_SERVICE_TOKEN: z.preprocess(
       (value) => (value === undefined || value === null || value === '' ? undefined : value),
       z.string().min(32).optional(),
@@ -299,6 +305,20 @@ const workerSchema = serviceSchema
         path: ['TON_TESTNET_JETTON_MASTER'],
         message:
           'TON_TESTNET_JETTON_MASTER is required when WITHDRAWAL_REAL_CHAIN_ENABLED=true (Owner-approved; fail closed)',
+      });
+    }
+    if (value.WITHDRAWAL_REAL_CHAIN_ENABLED && value.TON_PRIMARY_PROVIDER_KIND.trim() === '') {
+      context.addIssue({
+        code: 'custom',
+        path: ['TON_PRIMARY_PROVIDER_KIND'],
+        message: 'TON_PRIMARY_PROVIDER_KIND is required when WITHDRAWAL_REAL_CHAIN_ENABLED=true',
+      });
+    }
+    if (value.WITHDRAWAL_REAL_CHAIN_ENABLED && value.TON_PRIMARY_PROVIDER_URL.trim() === '') {
+      context.addIssue({
+        code: 'custom',
+        path: ['TON_PRIMARY_PROVIDER_URL'],
+        message: 'TON_PRIMARY_PROVIDER_URL is required when WITHDRAWAL_REAL_CHAIN_ENABLED=true',
       });
     }
   });

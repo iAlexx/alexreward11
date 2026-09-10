@@ -44,15 +44,8 @@ describe('Phase 10 chain provider', () => {
     expect(health.networkGlobalId).toBe(TON_TESTNET_NETWORK_GLOBAL_ID);
   });
 
-  it('rejects mainnet networkGlobalId at assert and HttpTonProvider construction', () => {
+  it('rejects mainnet networkGlobalId at assert and fake construction', () => {
     expect(() => assertTestnetOnly(TON_MAINNET_NETWORK_GLOBAL_ID)).toThrow(/MAINNET rejected/);
-    expect(
-      () =>
-        new HttpTonProvider({
-          baseUrl: 'https://example.testnet.tonapi.local',
-          networkGlobalId: TON_MAINNET_NETWORK_GLOBAL_ID,
-        }),
-    ).toThrow(/MAINNET rejected/);
     expect(
       () =>
         new FakeTonChainProvider({
@@ -61,39 +54,9 @@ describe('Phase 10 chain provider', () => {
     ).toThrow(/MAINNET rejected/);
   });
 
-  it('HttpTonProvider posts JSON-RPC without hardcoding secrets', async () => {
-    const calls: { url: string; headers: Record<string, string>; body: string }[] = [];
-    const provider = new HttpTonProvider({
-      baseUrl: 'https://ton-testnet.example/rpc',
-      apiKey: 'test-key-not-for-prod',
-      fetchImpl: async (input, init) => {
-        const url =
-          typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-        const body =
-          typeof init?.body === 'string'
-            ? init.body
-            : init?.body === undefined || init.body === null
-              ? ''
-              : JSON.stringify(init.body);
-        calls.push({
-          url,
-          headers: (init?.headers ?? {}) as Record<string, string>,
-          body,
-        });
-        return new Response(JSON.stringify({ result: 3 }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        });
-      },
-    });
-
-    expect(await provider.getSeqno('EQ_x')).toBe(3);
-    expect(calls).toHaveLength(1);
-    expect(calls[0]!.headers['x-api-key']).toBe('test-key-not-for-prod');
-    expect(JSON.parse(calls[0]!.body)).toMatchObject({
-      jsonrpc: '2.0',
-      method: 'getSeqno',
-      params: { address: 'EQ_x' },
-    });
+  it('deprecated HttpTonProvider directs callers to documented adapters', () => {
+    expect(
+      () => new HttpTonProvider({ baseUrl: 'https://testnet.toncenter.com/api/v2' }),
+    ).toThrow(/TonCenterTestnetProvider or TonApiTestnetProvider/);
   });
 });

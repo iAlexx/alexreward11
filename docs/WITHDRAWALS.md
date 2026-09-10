@@ -137,9 +137,12 @@ Typed keys in `@alex-rewards/config` (API + worker schemas):
 | `WITHDRAWAL_REAL_CHAIN_ENABLED`  | Phase 10 real Testnet path (default off)                         |
 | `SIGNER_BASE_URL`                | Worker → signer HTTP base (sign only)                            |
 | `TON_TESTNET_JETTON_MASTER`      | Owner-approved Testnet Jetton master (required if real chain on) |
-| `TON_PRIMARY_PROVIDER_URL`       | Testnet HTTP provider (worker broadcast/observe)                 |
-| `TON_SECONDARY_PROVIDER_URL`     | Optional secondary provider                                      |
-| `TON_PROVIDER_API_KEY`           | Optional provider key (never commit)                             |
+| `TON_PRIMARY_PROVIDER_KIND`      | `toncenter` or `tonapi`                                          |
+| `TON_PRIMARY_PROVIDER_URL`       | Primary Testnet provider base URL (worker broadcast/observe)     |
+| `TON_PRIMARY_PROVIDER_API_KEY`   | Primary provider key (never commit; never expose to frontend)    |
+| `TON_SECONDARY_PROVIDER_KIND`    | Independent secondary kind (`toncenter` or `tonapi`)             |
+| `TON_SECONDARY_PROVIDER_URL`     | Independent secondary base URL (reconciliation)                  |
+| `TON_SECONDARY_PROVIDER_API_KEY` | Secondary provider key (independent; never commit)               |
 
 Local/test may receive documented fixture defaults via loader merge. Staging/production
 **fail closed** if keys are missing, if `TON_TESTNET` is inherited, or if fake chain is enabled.

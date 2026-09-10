@@ -37,9 +37,12 @@ const phase10Config = buildPhase10PayoutConfig({
   signerBaseUrl: config.SIGNER_BASE_URL,
   signerServiceToken: config.SIGNER_SERVICE_TOKEN ?? '',
   jettonMasterIdentity: config.TON_TESTNET_JETTON_MASTER,
+  primaryProviderKind: config.TON_PRIMARY_PROVIDER_KIND,
   primaryProviderUrl: config.TON_PRIMARY_PROVIDER_URL,
+  primaryProviderApiKey: config.TON_PRIMARY_PROVIDER_API_KEY,
+  secondaryProviderKind: config.TON_SECONDARY_PROVIDER_KIND,
   secondaryProviderUrl: config.TON_SECONDARY_PROVIDER_URL,
-  providerApiKey: config.TON_PROVIDER_API_KEY,
+  secondaryProviderApiKey: config.TON_SECONDARY_PROVIDER_API_KEY,
 });
 Runtime.install({ shutdownSignals: [] });
 const observability = await initializeObservability({

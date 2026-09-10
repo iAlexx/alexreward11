@@ -101,6 +101,11 @@ jobs:
           PHASE9_DATABASE_URL: postgresql://alex_rewards:local-alex-rewards-only@127.0.0.1:5432/alex_rewards_phase2
           PHASE9_SIGNER_TESTS: '1'
         run: pnpm test:phase9
+      - name: Phase 10 Testnet payout foundation gates
+        env:
+          PHASE7_DATABASE_URL: postgresql://alex_rewards:local-alex-rewards-only@127.0.0.1:5432/alex_rewards_phase2
+          PHASE7_WITHDRAWAL_TESTS: '1'
+        run: pnpm test:phase10
       - name: Dependency vulnerability gate
         run: pnpm security:audit
 

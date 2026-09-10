@@ -22,7 +22,10 @@ describe('phase10 config gate', () => {
     const config = buildPhase10PayoutConfig({
       realChainEnabled: true,
       signerServiceToken: 'x'.repeat(32),
-      primaryProviderUrl: 'https://ton-testnet.example/rpc',
+      primaryProviderKind: 'toncenter',
+      primaryProviderUrl: 'https://testnet.toncenter.com/api/v2',
+      secondaryProviderKind: 'tonapi',
+      secondaryProviderUrl: 'https://testnet.tonapi.io',
       jettonMasterIdentity: null,
     });
     const missing = listPhase10MissingResources(config);
@@ -39,6 +42,37 @@ describe('phase10 config gate', () => {
     }
   });
 
+  it('requires independent primary and secondary provider credentials', () => {
+    const config = buildPhase10PayoutConfig({
+      realChainEnabled: true,
+      signerServiceToken: 'local-signer-service-token-32chars!!',
+      jettonMasterIdentity: 'EQ_owner_approved_testnet_jetton_master',
+      primaryProviderKind: 'toncenter',
+      primaryProviderUrl: 'https://testnet.toncenter.com/api/v2',
+      primaryProviderApiKey: 'primary-key',
+      secondaryProviderKind: 'tonapi',
+      secondaryProviderUrl: 'https://testnet.tonapi.io',
+      secondaryProviderApiKey: 'secondary-key',
+    });
+    expect(config.primaryProvider.apiKey).toBe('primary-key');
+    expect(config.secondaryProvider.apiKey).toBe('secondary-key');
+    expect(phase10ReadyCheck(config).ready).toBe(true);
+  });
+
+  it('rejects identical primary/secondary endpoints as non-independent', () => {
+    const config = buildPhase10PayoutConfig({
+      realChainEnabled: true,
+      signerServiceToken: 'local-signer-service-token-32chars!!',
+      jettonMasterIdentity: 'EQ_owner_approved_testnet_jetton_master',
+      primaryProviderKind: 'toncenter',
+      primaryProviderUrl: 'https://testnet.toncenter.com/api/v2',
+      secondaryProviderKind: 'toncenter',
+      secondaryProviderUrl: 'https://testnet.toncenter.com/api/v2',
+    });
+    const missing = listPhase10MissingResources(config);
+    expect(missing.some((m) => m.includes('operationally independent'))).toBe(true);
+  });
+
   it('phase10ReadyCheck reports incomplete Owner resources', () => {
     const config = buildPhase10PayoutConfig({ realChainEnabled: false });
     const check = phase10ReadyCheck(config);
@@ -51,7 +85,10 @@ describe('phase10 config gate', () => {
       realChainEnabled: true,
       signerServiceToken: 'local-signer-service-token-32chars!!',
       jettonMasterIdentity: 'EQ_owner_approved_testnet_jetton_master',
-      primaryProviderUrl: 'https://ton-testnet.example/rpc',
+      primaryProviderKind: 'toncenter',
+      primaryProviderUrl: 'https://testnet.toncenter.com/api/v2',
+      secondaryProviderKind: 'tonapi',
+      secondaryProviderUrl: 'https://testnet.tonapi.io',
     });
     expect(phase10ReadyCheck(config).ready).toBe(true);
     expect(() => assertPhase10Ready(config)).not.toThrow();
