@@ -91,7 +91,8 @@ export function assertExternalInMessageInitPresence(
   message: Message,
   expectedPresent: boolean,
 ): void {
-  if ((message.init !== undefined && message.init !== null) !== expectedPresent) {
+  const present = message.init !== undefined && message.init !== null;
+  if (present !== expectedPresent) {
     throw new Error(
       `External-In StateInit presence mismatch: expected ${expectedPresent ? 'present' : 'absent'}`,
     );
