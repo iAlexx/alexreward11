@@ -16,7 +16,7 @@
 
 **KMS spike dispatch (FAILED — secrets missing):** https://github.com/iAlexx/alexreward11/actions/runs/34422797023
 
-**Latest companion tip CI (docs/tooling only):** https://github.com/iAlexx/alexreward11/actions/runs/34449529886 — quality+docker-smoke **PASS** on 183cadb… (not a new accepted runtime)
+**Latest companion tip CI (docs/tooling only):** https://github.com/iAlexx/alexreward11/actions/runs/34450487081 — quality+docker-smoke **PASS** on `833ee52…` (not a new accepted runtime)
 
 ---
 
