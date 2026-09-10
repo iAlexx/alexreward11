@@ -36,7 +36,14 @@ Local verification uses `@ton/crypto` `verify(hash, signature, publicKey)`.
 
 ## Formal KMS spike
 
-Local/manual:
+If you have AWS credentials but no spike key yet:
+
+```bash
+SIGNER_AWS_REGION=... pnpm provision:kms-spike-key
+# prints SIGNER_KMS_KEY_ARN for a TEST/SPIKE ECC_NIST_EDWARDS25519 key (not Mainnet)
+```
+
+Then run the formal spike:
 
 ```bash
 SIGNER_AWS_REGION=... SIGNER_KMS_KEY_ARN=arn:aws:kms:...:key/... pnpm spike:kms
@@ -46,7 +53,8 @@ Owner/CI-manual (repository secrets + workflow dispatch):
 
 1. Configure GitHub secrets: `SIGNER_AWS_REGION`, `SIGNER_KMS_KEY_ARN`,
    `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (optional `AWS_SESSION_TOKEN`).
-2. Run workflow **Phase 9 KMS Spike** against the exact candidate SHA.
+2. Run workflow **Phase 9 KMS Spike** against the exact candidate SHA
+   (`7d8cb06e18f319271750d9378dc7cb5a5a9f8178` while that tip remains the CI-green candidate).
 3. Evidence artifact: redacted `kms-spike-report.json` (no credentials).
 
 If AWS credentials/key are unavailable:
