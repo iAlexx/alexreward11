@@ -1,6 +1,6 @@
 # Phase 9 Acceptance Report — TON Testnet Signer Spike
 
-**Status:** CANDIDATE RUNTIME — ordinary CI **PASS**; formal KMS gate **BLOCKED** (GitHub secrets empty). Not accepted until real `ECC_NIST_EDWARDS25519` spike evidence.
+**Status:** CANDIDATE RUNTIME — ordinary CI **PASS**; formal KMS gate **BLOCKED** (`AccountState=PENDING_ACTIVATION`). Not accepted until real `ECC_NIST_EDWARDS25519` spike evidence.
 
 **Date:** 2026-09-10
 
@@ -74,17 +74,18 @@ Observed at seal attempt time (local + GitHub Actions):
 
 - GitHub Actions run `34422797023` on tip `7d8cb06…`: empty repo secrets → exit 2
 - Later: AWS CLI `aws login` succeeded for account `661390315990` (root), region `eu-central-1`
+- `aws account get-account-information`: AccountName `iAlexx1`, created `2026-09-10T01:03:53Z`, **AccountState=`PENDING_ACTIVATION`**; ENABLED regions list empty
 - Node SDK + AWS CLI `kms create-key` / `kms list-keys` both fail with:
   `SubscriptionRequiredException: The AWS Access Key Id needs a subscription for the service`
-- Therefore formal `ECC_NIST_EDWARDS25519` CreateKey / Sign cannot run until the Owner completes AWS account service/billing activation for KMS
+- Therefore formal `ECC_NIST_EDWARDS25519` CreateKey / Sign cannot run until the Owner **finishes AWS account activation** (payment method + phone verification; wait until AccountState is active)
 
 `pnpm spike:kms` remains blocked until a subscribed KMS-capable account/key exists.
 
 Owner unblock path:
 
-1. Complete AWS account activation so **KMS** is subscribed (billing/payment verification in AWS Console).
+1. Finish AWS signup for account `661390315990` until `AccountState` is no longer `PENDING_ACTIVATION` (add payment method, verify phone; billing console was opened via federated login).
 2. Then either:
-   - `SIGNER_AWS_REGION=eu-central-1 pnpm provision:kms-spike-key` + `pnpm spike:kms` (export login creds into env for the Node SDK), or
+   - `SIGNER_AWS_REGION=eu-central-1 pnpm provision:kms-spike-key` + `pnpm spike:kms`, or
    - Set GitHub secrets and dispatch **Phase 9 KMS Spike** against `7d8cb06e18f319271750d9378dc7cb5a5a9f8178`
 3. Key must be AWS KMS `ECC_NIST_EDWARDS25519` (Testnet signer spike only).
 
@@ -156,13 +157,13 @@ AWS console login works for account `661390315990`, but **KMS is not subscribed*
 
 ```text
 PHASE 9 BLOCKED — REAL KMS SPIKE ENVIRONMENT UNAVAILABLE
-Reason: AWS account authenticated, but KMS returns SubscriptionRequiredException
+Reason: AWS account AccountState=PENDING_ACTIVATION; KMS returns SubscriptionRequiredException
+AWS account: 661390315990 (iAlexx1) / eu-central-1
 Candidate tip (ordinary CI PASS): 7d8cb06e18f319271750d9378dc7cb5a5a9f8178
 Ordinary CI: https://github.com/iAlexx/alexreward11/actions/runs/34422715453
-AWS account (login): 661390315990 / eu-central-1
 Phase 8 accepted runtime remains closed: a7554474b8b5ee22a3323a221d00bb1714d88ff7
 No Phase 10 / Mainnet work started.
-Awaiting Owner AWS KMS service activation, then ECC_NIST_EDWARDS25519 spike.
+Awaiting Owner AWS account activation, then ECC_NIST_EDWARDS25519 spike.
 ```
 
 **No Phase 10 work started.**
