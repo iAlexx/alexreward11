@@ -29,6 +29,7 @@
     "test:phase9": "pnpm --filter @alex-rewards/signing run test:phase9",
     "spike:kms": "node scripts/spike-kms-compatibility.mjs",
     "provision:kms-spike-key": "node scripts/provision-kms-spike-key.mjs",
+    "seal:phase9": "node scripts/seal-phase9.mjs",
     "security:secrets": "node scripts/scan-secrets.mjs",
     "security:audit": "pnpm audit --audit-level=high",
     "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm test:archive && pnpm build && pnpm verify:boundaries && pnpm validate:migrations && pnpm security:secrets",
