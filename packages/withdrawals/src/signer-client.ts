@@ -19,6 +19,10 @@ export interface SignerClientDeps {
   readonly fetchImpl?: typeof fetch;
 }
 
+function asNonEmptyString(value: unknown, fallback = ''): string {
+  return typeof value === 'string' ? value : fallback;
+}
+
 /**
  * HTTP client for apps/signer POST /v1/sign-withdrawal-attempt.
  * Sends only withdrawalAttemptId — never recipient/amount/message bytes.
@@ -63,15 +67,15 @@ export class SignerHttpClient {
     }
 
     return {
-      withdrawalAttemptId: String(body.withdrawalAttemptId ?? withdrawalAttemptId),
-      withdrawalId: String(body.withdrawalId ?? ''),
-      canonicalMessageHash: String(body.canonicalMessageHash ?? ''),
-      signedMessageHash: String(body.signedMessageHash ?? ''),
-      publicKeyFingerprint: String(body.publicKeyFingerprint ?? ''),
-      walletAddressRaw: String(body.walletAddressRaw ?? ''),
-      signatureBase64: String(body.signatureBase64 ?? ''),
-      keySpec: String(body.keySpec ?? body.kmsKeySpec ?? ''),
-      signingAlgorithm: String(body.signingAlgorithm ?? ''),
+      withdrawalAttemptId: asNonEmptyString(body.withdrawalAttemptId, withdrawalAttemptId),
+      withdrawalId: asNonEmptyString(body.withdrawalId),
+      canonicalMessageHash: asNonEmptyString(body.canonicalMessageHash),
+      signedMessageHash: asNonEmptyString(body.signedMessageHash),
+      publicKeyFingerprint: asNonEmptyString(body.publicKeyFingerprint),
+      walletAddressRaw: asNonEmptyString(body.walletAddressRaw),
+      signatureBase64: asNonEmptyString(body.signatureBase64),
+      keySpec: asNonEmptyString(body.keySpec, asNonEmptyString(body.kmsKeySpec)),
+      signingAlgorithm: asNonEmptyString(body.signingAlgorithm),
       externalMessageBocBase64: boc,
     };
   }
