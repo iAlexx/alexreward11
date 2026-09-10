@@ -11,9 +11,13 @@ export function hydrateAwsLoginEnvFromCli() {
   }
 
   const result = spawnSync(
-    'aws',
+    process.platform === 'win32' ? 'aws.cmd' : 'aws',
     ['configure', 'export-credentials', '--format', 'env-no-export'],
-    { encoding: 'utf8', shell: true },
+    {
+      encoding: 'utf8',
+      shell: false,
+      env: process.env,
+    },
   );
   if (result.status !== 0) {
     return {
