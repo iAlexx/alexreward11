@@ -19,6 +19,9 @@ const { createRequire } = await import('node:module');
 const { dirname, join } = await import('node:path');
 const { fileURLToPath } = await import('node:url');
 const { createHash } = await import('node:crypto');
+const { hydrateAwsLoginEnvFromCli, formatKmsServiceError } = await import('./aws-login-env.mjs');
+
+hydrateAwsLoginEnvFromCli();
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const requireFromSigning = createRequire(join(root, 'packages', 'signing', 'package.json'));
@@ -46,7 +49,12 @@ try {
   blocked(`AWS credentials unavailable: ${error instanceof Error ? error.message : String(error)}`);
 }
 
-const describe = await client.send(new kms.DescribeKeyCommand({ KeyId: keyArn }));
+let describe;
+try {
+  describe = await client.send(new kms.DescribeKeyCommand({ KeyId: keyArn }));
+} catch (error) {
+  blocked(formatKmsServiceError(error));
+}
 const keySpec = describe.KeyMetadata?.KeySpec;
 const keyUsage = describe.KeyMetadata?.KeyUsage;
 if (String(keySpec) !== 'ECC_NIST_EDWARDS25519') {

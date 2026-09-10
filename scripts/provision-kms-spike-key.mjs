@@ -15,6 +15,9 @@ if (!region) {
 const { createRequire } = await import('node:module');
 const { dirname, join } = await import('node:path');
 const { fileURLToPath } = await import('node:url');
+const { hydrateAwsLoginEnvFromCli, formatKmsServiceError } = await import('./aws-login-env.mjs');
+
+hydrateAwsLoginEnvFromCli();
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const requireFromSigner = createRequire(join(root, 'apps', 'signer', 'package.json'));
@@ -38,19 +41,26 @@ try {
   process.exit(2);
 }
 
-const created = await client.send(
-  new kms.CreateKeyCommand({
-    Description: 'ALEx Rewards Phase 9 TESTNET signer spike (ECC_NIST_EDWARDS25519)',
-    KeyUsage: 'SIGN_VERIFY',
-    KeySpec: 'ECC_NIST_EDWARDS25519',
-    MultiRegion: false,
-    Tags: [
-      { TagKey: 'alex-rewards-phase', TagValue: '09' },
-      { TagKey: 'alex-rewards-purpose', TagValue: 'testnet-signer-spike' },
-      { TagKey: 'alex-rewards-mainnet', TagValue: 'false' },
-    ],
-  }),
-);
+let created;
+try {
+  created = await client.send(
+    new kms.CreateKeyCommand({
+      Description: 'ALEx Rewards Phase 9 TESTNET signer spike (ECC_NIST_EDWARDS25519)',
+      KeyUsage: 'SIGN_VERIFY',
+      KeySpec: 'ECC_NIST_EDWARDS25519',
+      MultiRegion: false,
+      Tags: [
+        { TagKey: 'alex-rewards-phase', TagValue: '09' },
+        { TagKey: 'alex-rewards-purpose', TagValue: 'testnet-signer-spike' },
+        { TagKey: 'alex-rewards-mainnet', TagValue: 'false' },
+      ],
+    }),
+  );
+} catch (error) {
+  console.error('PHASE 9 BLOCKED — REAL KMS SPIKE ENVIRONMENT UNAVAILABLE');
+  console.error(formatKmsServiceError(error));
+  process.exit(2);
+}
 
 const keyId = created.KeyMetadata?.KeyId;
 const keyArn = created.KeyMetadata?.Arn;

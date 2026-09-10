@@ -72,18 +72,21 @@ Latest local run: **14/14 PASS** (includes 3 production-shaped sign-flow tests).
 
 Observed at seal attempt time (local + GitHub Actions):
 
-- Local: `AWS_ACCESS_KEY_ID` / `AWS_PROFILE` / `SIGNER_KMS_KEY_ARN` / `SIGNER_AWS_REGION` unset; no `~/.aws`; no `aws` CLI
-- GitHub Actions run `34422797023` on tip `7d8cb06…`: step **Require spike secrets** saw empty `SIGNER_AWS_REGION`, `SIGNER_KMS_KEY_ARN`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` → exit 2
+- GitHub Actions run `34422797023` on tip `7d8cb06…`: empty repo secrets → exit 2
+- Later: AWS CLI `aws login` succeeded for account `661390315990` (root), region `eu-central-1`
+- Node SDK + AWS CLI `kms create-key` / `kms list-keys` both fail with:
+  `SubscriptionRequiredException: The AWS Access Key Id needs a subscription for the service`
+- Therefore formal `ECC_NIST_EDWARDS25519` CreateKey / Sign cannot run until the Owner completes AWS account service/billing activation for KMS
 
-`pnpm spike:kms` / workflow both report:
-`PHASE 9 BLOCKED — REAL KMS SPIKE ENVIRONMENT UNAVAILABLE`
+`pnpm spike:kms` remains blocked until a subscribed KMS-capable account/key exists.
 
 Owner unblock path:
 
-1. Create repo secrets: `SIGNER_AWS_REGION`, `SIGNER_KMS_KEY_ARN`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (optional `AWS_SESSION_TOKEN`).
-2. Key must be AWS KMS `ECC_NIST_EDWARDS25519` (Testnet signer spike only).
-3. Re-dispatch `.github/workflows/phase9-kms-spike.yaml` with `commit_sha=7d8cb06e18f319271750d9378dc7cb5a5a9f8178` (or later CI-green tip).
-4. Or run locally with the same env vars.
+1. Complete AWS account activation so **KMS** is subscribed (billing/payment verification in AWS Console).
+2. Then either:
+   - `SIGNER_AWS_REGION=eu-central-1 pnpm provision:kms-spike-key` + `pnpm spike:kms` (export login creds into env for the Node SDK), or
+   - Set GitHub secrets and dispatch **Phase 9 KMS Spike** against `7d8cb06e18f319271750d9378dc7cb5a5a9f8178`
+3. Key must be AWS KMS `ECC_NIST_EDWARDS25519` (Testnet signer spike only).
 
 Local/`local_ephemeral` adapters are **not** formal evidence.
 
@@ -140,30 +143,26 @@ Do not treat companion docs tips as the accepted runtime.
 
 ## N. Owner action required (unblock seal)
 
-Provide either:
+AWS console login works for account `661390315990`, but **KMS is not subscribed**
+(`SubscriptionRequiredException`). Activate billing/KMS for that account, then:
 
-**A. GitHub Actions secrets** on `iAlexx/alexreward11`:
-
-- `SIGNER_AWS_REGION`
-- `SIGNER_KMS_KEY_ARN` (existing `ECC_NIST_EDWARDS25519` TEST/SPIKE key, or create via `pnpm provision:kms-spike-key` with AWS creds)
-- `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` (optional `AWS_SESSION_TOKEN`)
-
-Then re-dispatch workflow **Phase 9 KMS Spike** with
-`commit_sha=7d8cb06e18f319271750d9378dc7cb5a5a9f8178`.
-
-**B. Local AWS credentials** in this environment with the same env vars, then
-`pnpm spike:kms` (and optionally `pnpm provision:kms-spike-key` first).
+1. `aws login` (if session expired) + export creds for Node:
+   `aws configure export-credentials --format env-no-export` → set into the shell
+2. `SIGNER_AWS_REGION=eu-central-1 pnpm provision:kms-spike-key`
+3. `pnpm spike:kms` against candidate tip `7d8cb06e18f319271750d9378dc7cb5a5a9f8178`
+4. Or mirror the same values into GitHub Actions secrets and dispatch **Phase 9 KMS Spike**
 
 ## O. STOP packet
 
 ```text
 PHASE 9 BLOCKED — REAL KMS SPIKE ENVIRONMENT UNAVAILABLE
+Reason: AWS account authenticated, but KMS returns SubscriptionRequiredException
 Candidate tip (ordinary CI PASS): 7d8cb06e18f319271750d9378dc7cb5a5a9f8178
 Ordinary CI: https://github.com/iAlexx/alexreward11/actions/runs/34422715453
-KMS dispatch (secrets empty): https://github.com/iAlexx/alexreward11/actions/runs/34422797023
+AWS account (login): 661390315990 / eu-central-1
 Phase 8 accepted runtime remains closed: a7554474b8b5ee22a3323a221d00bb1714d88ff7
 No Phase 10 / Mainnet work started.
-Awaiting Owner AWS KMS ECC_NIST_EDWARDS25519 spike credentials.
+Awaiting Owner AWS KMS service activation, then ECC_NIST_EDWARDS25519 spike.
 ```
 
 **No Phase 10 work started.**
