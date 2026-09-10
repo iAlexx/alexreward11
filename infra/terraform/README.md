@@ -34,6 +34,8 @@ environment / secret store at execution time:
 
 ```bash
 SIGNER_AWS_REGION=...
+# optional: create TEST/SPIKE key
+pnpm provision:kms-spike-key
 SIGNER_KMS_KEY_ARN=arn:aws:kms:region:account:key/uuid
 pnpm spike:kms
 ```

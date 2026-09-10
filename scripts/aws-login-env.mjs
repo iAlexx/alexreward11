@@ -10,15 +10,24 @@ export function hydrateAwsLoginEnvFromCli() {
     return { hydrated: false, reason: 'env-already-set' };
   }
 
-  const result = spawnSync(
-    process.platform === 'win32' ? 'aws.cmd' : 'aws',
-    ['configure', 'export-credentials', '--format', 'env-no-export'],
-    {
+  const candidates =
+    process.platform === 'win32'
+      ? ['aws.exe', 'C:\\Program Files\\Amazon\\AWSCLIV2\\aws.exe', 'aws']
+      : ['aws'];
+
+  let result;
+  for (const bin of candidates) {
+    result = spawnSync(bin, ['configure', 'export-credentials', '--format', 'env-no-export'], {
       encoding: 'utf8',
       shell: false,
       env: process.env,
-    },
-  );
+    });
+    if (result.error?.code === 'ENOENT') continue;
+    break;
+  }
+  if (!result || result.error?.code === 'ENOENT') {
+    return { hydrated: false, reason: 'aws CLI not found on PATH' };
+  }
   if (result.status !== 0) {
     return {
       hydrated: false,
