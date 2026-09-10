@@ -18,11 +18,11 @@
 
 **Historical AWS-era sealed tip (SUPERSEDED package):** `973e6974a0e8ee7a5465bcf5514352b1351ece0c` — marked `SUPERSEDED — AWS signer candidate, not Owner-approved production architecture` under `phase-archives/PHASE_09_TON_TESTNET_SIGNER_SPIKE_AWS_SUPERSEDED_973e697/`.
 
-**Phase 9 accepted runtime SHA (self-hosted amendment):** _pending commit of final security corrections_
+**Phase 9 accepted runtime SHA (self-hosted amendment):** `06ed3d414f70c60abbff960d7ecfbb2e2fd8f8f4`
 
 **Prior candidate (superseded by final security corrections):** `dc20d197796623aac2ce0611139e8606eb333f9b`
 
-**CI:** _pending push of final security corrections_
+**CI:** https://github.com/iAlexx/alexreward11/actions/runs/34516299249 — quality `103002438246` **PASS**; docker-smoke `103004116509` **PASS** (no AWS secrets/jobs required)
 
 ### Final security corrections (pre-Owner approval)
 
@@ -106,17 +106,19 @@ Phase 9 suites include `phase9-encrypted-custody` (generate/encrypt/decrypt, tam
 ## I. STOP packet
 
 ```text
-PHASE 9 OWNER AMENDMENT — SELF-HOSTED ENCRYPTED CUSTODY SELECTED
+PHASE 9 FINAL SECURITY CORRECTIONS — SELF-HOSTED ENCRYPTED CUSTODY
 Master Spec: docs/ALEx_Rewards_Master_Product_Financial_Security_Engineering_Specification_v1.3.md
-Accepted runtime SHA: dc20d197796623aac2ce0611139e8606eb333f9b
-CI: https://github.com/iAlexx/alexreward11/actions/runs/34511019788
-quality 102984866064 PASS · docker-smoke 102986698243 PASS
+Accepted runtime SHA: 06ed3d414f70c60abbff960d7ecfbb2e2fd8f8f4
+CI: https://github.com/iAlexx/alexreward11/actions/runs/34516299249
+quality 103002438246 PASS · docker-smoke 103004116509 PASS
+Fail-closed unlock + bounded Argon2id v1 params applied
 AWS KMS Ed25519: TECHNICALLY PROVEN (historical, non-authoritative)
 AWS production custody: OWNER REJECTED
-Selected signer: apps/signer + FALLBACK_ENCRYPTED (encrypted-at-rest; unlock in-memory only)
+Selected signer: apps/signer + FALLBACK_ENCRYPTED
 No AWS runtime dependency; no plaintext key persisted
 No signer-custody migration required (0020 preserved)
 Historical AWS archive: SUPERSEDED under PHASE_09_TON_TESTNET_SIGNER_SPIKE_AWS_SUPERSEDED_973e697
+Migrations 0001–0020 unchanged
 No Phase 10 / Mainnet work started.
 STOP AND WAIT FOR OWNER APPROVAL.
 ```
