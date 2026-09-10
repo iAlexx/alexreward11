@@ -277,6 +277,9 @@ importers:
       '@alex-rewards/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@alex-rewards/signing':
+        specifier: workspace:*
+        version: link:../../packages/signing
       '@alex-rewards/withdrawals':
         specifier: workspace:*
         version: link:../../packages/withdrawals
@@ -561,9 +564,6 @@ importers:
       '@alex-rewards/ledger':
         specifier: workspace:*
         version: link:../ledger
-      '@alex-rewards/signing':
-        specifier: workspace:*
-        version: link:../signing
       '@alex-rewards/ton':
         specifier: workspace:*
         version: link:../ton

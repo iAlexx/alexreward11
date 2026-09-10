@@ -1,10 +1,6 @@
 import type { Pool } from 'pg';
 
 import {
-  buildCanonicalSigningMessageAsync,
-  type CanonicalPayoutIntent,
-} from '@alex-rewards/signing';
-import {
   createTonChainProvider,
   FakeTonChainProvider,
   type TonChainProvider,
@@ -41,6 +37,24 @@ import {
 import type { WithdrawalState } from './state-machine.js';
 import { transitionWithdrawal } from './transitions.js';
 
+/** Intent fields required to compute an immutable canonical payout hash (TEP-74). */
+export interface RealPayoutCanonicalIntent {
+  readonly publicKey: Buffer;
+  readonly networkGlobalId: number;
+  readonly workchain: number;
+  readonly subwalletNumber: number;
+  readonly seqno: number;
+  readonly validUntil: number;
+  readonly queryId: bigint;
+  readonly netAmountAtomic: bigint;
+  readonly recipientAddress: string;
+  readonly hotWalletAddress: string;
+  readonly payoutJettonWalletAddress: string;
+  readonly jettonMasterIdentity: string;
+}
+
+export type BuildCanonicalMessageHash = (intent: RealPayoutCanonicalIntent) => Promise<string>;
+
 export type RealTestnetPayoutPipelineState =
   | 'BLOCKED'
   | 'PAUSED'
@@ -67,6 +81,11 @@ export interface RunRealTestnetPayoutPipelineInput {
   readonly withdrawalId: string;
   readonly phase10: Phase10PayoutConfig;
   readonly engine: WithdrawalEngineConfig;
+  /**
+   * Build immutable canonical message hash (hex). Wired from `@alex-rewards/signing`
+   * by the worker; kept injectable so withdrawals does not depend on signing at build time.
+   */
+  readonly buildCanonicalMessageHash: BuildCanonicalMessageHash;
   /**
    * Inject FakeTonChainProvider (or other) in unit/integration tests.
    * Production path constructs adapters from Phase 10 provider config.
@@ -363,7 +382,7 @@ export async function runRealTestnetPayoutPipeline(
   const validUntil = new Date(Date.now() + 300_000);
   const validUntilUnix = Math.floor(validUntil.getTime() / 1000);
 
-  const intent: CanonicalPayoutIntent = {
+  const intent: RealPayoutCanonicalIntent = {
     publicKey,
     networkGlobalId: input.phase10.networkGlobalId,
     workchain: 0,
@@ -377,7 +396,7 @@ export async function runRealTestnetPayoutPipeline(
     payoutJettonWalletAddress: context.payoutJettonWallet,
     jettonMasterIdentity: context.jettonMaster,
   };
-  const canonical = await buildCanonicalSigningMessageAsync(intent);
+  const canonicalMessageHashHex = await input.buildCanonicalMessageHash(intent);
 
   const attempt = await withWithdrawalTransaction(db, async (client) => {
     return createWithdrawalAttempt(client, {
@@ -387,7 +406,7 @@ export async function runRealTestnetPayoutPipeline(
       signerKeyReference: context.signerKeyReference,
       expectedSeqno: BigInt(seqno),
       queryId,
-      canonicalMessageHash: canonical.canonicalMessageHashHex,
+      canonicalMessageHash: canonicalMessageHashHex,
       validUntil,
       scenarioHashInputs: { recipient: context.recipient, path: 'phase10-real' },
     });

@@ -1,5 +1,6 @@
 import type { Pool } from 'pg';
 
+import { buildCanonicalSigningMessageAsync } from '@alex-rewards/signing';
 import {
   FakePayoutChain,
   assertPhase10Ready,
@@ -76,6 +77,10 @@ export function createWithdrawalActivities(deps: WithdrawalActivityDeps) {
         withdrawalId: input.withdrawalId,
         phase10,
         engine: deps.config,
+        buildCanonicalMessageHash: async (intent) => {
+          const built = await buildCanonicalSigningMessageAsync(intent);
+          return built.canonicalMessageHashHex;
+        },
       });
       return {
         state: result.state,

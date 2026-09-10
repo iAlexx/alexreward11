@@ -16,6 +16,7 @@
     "@alex-rewards/contracts": "workspace:*",
     "@alex-rewards/db": "workspace:*",
     "@alex-rewards/observability": "workspace:*",
+    "@alex-rewards/signing": "workspace:*",
     "@alex-rewards/withdrawals": "workspace:*",
     "@temporalio/activity": "1.23.0",
     "@temporalio/client": "1.23.0",

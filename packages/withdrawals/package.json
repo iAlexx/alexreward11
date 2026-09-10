@@ -21,7 +21,6 @@
     "@alex-rewards/auth": "workspace:*",
     "@alex-rewards/db": "workspace:*",
     "@alex-rewards/ledger": "workspace:*",
-    "@alex-rewards/signing": "workspace:*",
     "@alex-rewards/ton": "workspace:*",
     "@temporalio/client": "1.23.0",
     "pg": "8.23.0"

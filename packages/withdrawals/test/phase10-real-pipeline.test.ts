@@ -1,13 +1,6 @@
 import { Pool } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import {
-  deriveWalletV5R1,
-  localSigningFixtureConfig,
-  LocalEphemeralSignPort,
-  publicKeyFingerprint,
-  signWithdrawalAttempt,
-} from '@alex-rewards/signing';
 import { FakeTonChainProvider } from '@alex-rewards/ton';
 
 import {
@@ -29,6 +22,9 @@ import {
 
 const PAYOUT_JETTON_WALLET = '0:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
 const RECIPIENT_RAW = '0:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+const HOT_WALLET_RAW = '0:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd';
+const TEST_PUBLIC_KEY_HEX = '11'.repeat(32);
+const TEST_CANONICAL_HASH = '22'.repeat(32);
 
 describe('phase10 real pipeline gate (no skeleton throw)', () => {
   it('lists dual-provider Owner resources and does not use single shared API key', () => {
@@ -64,8 +60,6 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 real pipeline (db + fake prov
   let networkId: string;
   let adminUserId: string;
   let hotWalletId: string;
-  let signPort: LocalEphemeralSignPort;
-  let hotWalletAddress: string;
   let jettonMaster: string;
 
   beforeAll(async () => {
@@ -90,19 +84,11 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 real pipeline (db + fake prov
       [assetId],
     );
     jettonMaster = master.rows[0]!.contract_identity;
-
-    signPort = new LocalEphemeralSignPort(Buffer.from('a'.repeat(32)));
-    const publicKey = await signPort.getPublicKey();
-    const derived = deriveWalletV5R1({ publicKey, networkGlobalId: -3, workchain: 0 });
-    hotWalletAddress = derived.addressRaw;
   });
 
   async function prepareHotWalletForRealSign(
     targetHotWalletId: string = hotWalletId,
   ): Promise<void> {
-    const publicKey = await signPort.getPublicKey();
-    const derived = deriveWalletV5R1({ publicKey, networkGlobalId: -3, workchain: 0 });
-    hotWalletAddress = derived.addressRaw;
     hotWalletId = targetHotWalletId;
     const updated = await pool.query<{ payout_jetton_wallet_address: string | null }>(
       `UPDATE hot_wallets SET
@@ -115,9 +101,9 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 real pipeline (db + fake prov
        RETURNING payout_jetton_wallet_address`,
       [
         targetHotWalletId,
-        derived.addressRaw,
-        derived.addressFriendly,
-        publicKeyFingerprint(publicKey),
+        HOT_WALLET_RAW,
+        'EQ_phase10_test_hot',
+        'phase10-test-signer-ref',
         PAYOUT_JETTON_WALLET,
       ],
     );
@@ -127,29 +113,41 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 real pipeline (db + fake prov
   }
 
   function createTestSigner(): RealPayoutSignerPort {
-    const runtime = localSigningFixtureConfig({
-      keyMode: 'local_ephemeral',
-      expectedSignerReference: null,
-    });
     return {
       async getSigningIdentity() {
-        const publicKey = await signPort.getPublicKey();
-        const derived = deriveWalletV5R1({ publicKey, networkGlobalId: -3, workchain: 0 });
         return {
-          publicKeyHex: publicKey.toString('hex'),
-          publicKeyFingerprint: publicKeyFingerprint(publicKey),
-          walletAddressRaw: derived.addressRaw,
+          publicKeyHex: TEST_PUBLIC_KEY_HEX,
+          publicKeyFingerprint: 'fp-test',
+          walletAddressRaw: HOT_WALLET_RAW,
           signingReady: true,
           custodyState: 'n/a',
         };
       },
       async signWithdrawalAttempt(withdrawalAttemptId: string) {
-        return signWithdrawalAttempt({
-          pool,
+        const row = await pool.query<{
+          withdrawal_id: string;
+          canonical_message_hash: string;
+        }>(
+          `SELECT withdrawal_id::text AS withdrawal_id, canonical_message_hash
+           FROM withdrawal_attempts WHERE id = $1::uuid`,
+          [withdrawalAttemptId],
+        );
+        const attempt = row.rows[0];
+        if (attempt === undefined) {
+          throw new Error('attempt missing for mock signer');
+        }
+        return {
           withdrawalAttemptId,
-          signPort,
-          config: runtime,
-        });
+          withdrawalId: attempt.withdrawal_id,
+          canonicalMessageHash: attempt.canonical_message_hash,
+          signedMessageHash: '33'.repeat(32),
+          publicKeyFingerprint: 'fp-test',
+          walletAddressRaw: HOT_WALLET_RAW,
+          signatureBase64: 'dGVzdC1zaWc=',
+          keySpec: 'TEST_ONLY',
+          signingAlgorithm: 'ED25519_SHA_512',
+          externalMessageBocBase64: 'dGVzdC1ib2MtYmFzZTY0',
+        };
       },
     };
   }
@@ -187,7 +185,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 real pipeline (db + fake prov
 
     const primary = new FakeTonChainProvider();
     const secondary = new FakeTonChainProvider();
-    primary.seedSeqno(hotWalletAddress, 7);
+    primary.seedSeqno(HOT_WALLET_RAW, 7);
 
     const attemptNumber = 1;
     const queryId =
@@ -201,7 +199,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 real pipeline (db + fake prov
         ),
       );
     const evidence = {
-      hotWallet: hotWalletAddress,
+      hotWallet: HOT_WALLET_RAW,
       jettonMaster,
       recipient: RECIPIENT_RAW,
       amountAtomic: netAmount,
@@ -232,6 +230,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 real pipeline (db + fake prov
       secondaryChainProvider: secondary,
       signer: createTestSigner(),
       allowTestExecutionPath: true,
+      buildCanonicalMessageHash: async () => TEST_CANONICAL_HASH,
     });
 
     expect(result.state).toBe('CONFIRMED');
@@ -264,7 +263,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 real pipeline (db + fake prov
     );
     expect(attempt.rows[0]?.signed_external_message_boc).toBeTruthy();
     expect(attempt.rows[0]?.broadcast_submitted_at).toBeTruthy();
-    expect(attempt.rows[0]?.canonical_message_hash.startsWith('fake-hash:')).toBe(false);
+    expect(attempt.rows[0]?.canonical_message_hash).toBe(TEST_CANONICAL_HASH);
     expect(attempt.rows[0]?.expected_seqno).toBe('7');
 
     const withdrawal = await pool.query<{ state: string }>(
@@ -300,7 +299,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 real pipeline (db + fake prov
     );
 
     const primary = new FakeTonChainProvider({ sendBocTimeout: true });
-    primary.seedSeqno(hotWalletAddress, 3);
+    primary.seedSeqno(HOT_WALLET_RAW, 3);
 
     const phase10 = buildPhase10PayoutConfig({
       realChainEnabled: true,
@@ -320,6 +319,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 real pipeline (db + fake prov
       secondaryChainProvider: new FakeTonChainProvider(),
       signer: createTestSigner(),
       allowTestExecutionPath: true,
+      buildCanonicalMessageHash: async () => TEST_CANONICAL_HASH,
     });
 
     expect(result.state).toBe('RECONCILE_REQUIRED');
