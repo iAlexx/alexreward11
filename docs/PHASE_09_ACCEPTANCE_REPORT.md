@@ -1,6 +1,6 @@
 # Phase 9 Acceptance Report — TON Testnet Signer Spike
 
-**Status:** CANDIDATE RUNTIME — ordinary CI **PASS**; formal KMS gate **BLOCKED** (`AccountState=PENDING_ACTIVATION`). Not accepted until real `ECC_NIST_EDWARDS25519` spike evidence.
+**Status:** ACCEPTED RUNTIME — ordinary CI PASS + formal KMS spike PASS. Sealed dual archive follows.
 
 **Date:** 2026-09-10
 
@@ -48,7 +48,8 @@ Migrations `0001`–`0019`: unchanged.
 pnpm install
 pnpm validate:migrations
 pnpm test:phase9
-pnpm spike:kms   # requires real AWS; currently blocked in this environment
+SIGNER_AWS_REGION=eu-central-1 pnpm provision:kms-spike-key
+SIGNER_AWS_REGION=eu-central-1 SIGNER_KMS_KEY_ARN=arn:aws:kms:... pnpm spike:kms
 ```
 
 ## F. Test evidence
@@ -70,33 +71,27 @@ Latest local run: **14/14 PASS** (includes 3 production-shaped sign-flow tests).
 
 ## G. Real KMS compatibility evidence
 
-**KMS compatibility: BLOCKED — REAL KMS SPIKE ENVIRONMENT UNAVAILABLE**
+**KMS compatibility: PASS (real AWS ECC_NIST_EDWARDS25519)**
 
-Observed at seal attempt time (local + GitHub Actions):
+Safe metadata only (from `kms-spike-report.json`):
 
-- GitHub Actions run `34422797023` on tip `7d8cb06…`: empty repo secrets → exit 2
-- Later: AWS CLI `aws login` succeeded for account `661390315990` (root), region `eu-central-1`
-- `aws account get-account-information`: AccountName `iAlexx1`, created `2026-09-10T01:03:53Z`, **AccountState=`PENDING_ACTIVATION`**; ENABLED regions list empty
-- Node SDK + AWS CLI `kms create-key` / `kms list-keys` both fail with:
-  `SubscriptionRequiredException: The AWS Access Key Id needs a subscription for the service`
-- `aws freetier upgrade-account-plan --account-plan-type FREE` fails:
-  `ValidationException: Account plan upgrade failed PI vet failure`
-  (payment instrument / billing verification incomplete — Owner must add a valid payment method in AWS Billing)
-
-`pnpm spike:kms` remains blocked until a subscribed KMS-capable account/key exists.
-
-Owner unblock path:
-
-1. Finish AWS signup for account `661390315990` until `AccountState` is no longer `PENDING_ACTIVATION`.
-   Required: valid payment method that passes AWS **PI vet** (observed failure:
-   `Account plan upgrade failed PI vet failure`), plus phone verification if prompted.
-2. Confirm with: `aws account get-account-information` → not `PENDING_ACTIVATION`, then `aws kms list-keys`.
-3. Then either:
-   - `SIGNER_AWS_REGION=eu-central-1 pnpm provision:kms-spike-key` + `pnpm spike:kms`, or
-   - Set GitHub secrets and dispatch **Phase 9 KMS Spike** against `7d8cb06e18f319271750d9378dc7cb5a5a9f8178`
-4. Key must be AWS KMS `ECC_NIST_EDWARDS25519` (Testnet signer spike only).
-
-Local/`local_ephemeral` adapters are **not** formal evidence.
+```json
+{
+  "ok": true,
+  "region": "eu-central-1",
+  "keySpec": "ECC_NIST_EDWARDS25519",
+  "keyUsage": "SIGN_VERIFY",
+  "signingAlgorithm": "ED25519_SHA_512",
+  "messageType": "RAW",
+  "publicKeyFingerprint": "d19e9ba5662f5a392358027dc345a70bd0c8d56f5e15333a7bea9461b678492b",
+  "messageHashFingerprint": "089b50393ba8d9d0342f0b67a73cdcb8641fca00897b42639fdb4b0eb74563c9",
+  "localSignatureVerification": "PASS",
+  "repeatability": "PASS",
+  "alteredMessageRejects": "PASS",
+  "derivedTestnetWalletV5R1": "0:13fcdcf84704e58e854374d78b2070809bde4706a1c269a9dbc44e36eae95c69",
+  "note": "No TON broadcast. Formal Phase 9 gate evidence only."
+}
+```
 
 ## H. CI
 
@@ -138,7 +133,8 @@ None vs Phase 9 scope, except formal KMS evidence is **blocked** pending Owner A
 
 ## L. Archive status
 
-**Not sealed.** Dual archive under `phase-archives/PHASE_09_TON_TESTNET_SIGNER_SPIKE/` waits for formal KMS PASS on the accepted SHA.
+Dual archive created under `phase-archives/PHASE_09_TON_TESTNET_SIGNER_SPIKE/` after formal
+KMS PASS (section G). See section O.
 
 ## M. Candidate vs companion tips
 
@@ -149,36 +145,33 @@ None vs Phase 9 scope, except formal KMS evidence is **blocked** pending Owner A
 
 Do not treat companion docs tips as the accepted runtime.
 
-## N. Owner action required (unblock seal)
+## N. AWS activation resolution (historical)
 
-Account `661390315990` (`iAlexx1`) remains **`AccountState=PENDING_ACTIVATION`**.
-`aws freetier upgrade-account-plan FREE` fails with **`PI vet failure`** (payment instrument
-not accepted). Until that clears, KMS returns `SubscriptionRequiredException`.
+Account `661390315990` (`iAlexx1`) was briefly `PENDING_ACTIVATION` with freetier
+**PI vet failure** and KMS `SubscriptionRequiredException`. After Owner payment / plan
+activation on 2026-09-10:
 
-Do this in the AWS root console (email/password or `aws login` browser flow):
+- `AccountState=ACTIVE`
+- `freetier` plan `FREE` / `ACTIVE`
+- KMS `list-keys` succeeds in `eu-central-1`
+- Formal spike produced section G evidence (`ECC_NIST_EDWARDS25519`)
 
-1. Billing → Payment methods / Payment preferences: add a card that can take international USD auth; complete bank 3DS if prompted.
-2. Complete any phone verification AWS requests.
-3. Optional: Account and billing support case if PI vet stays failed after a valid card.
-4. Confirm: `aws account get-account-information` is no longer `PENDING_ACTIVATION`, then `aws kms list-keys` works.
-5. Seal path (automated once active): `pnpm seal:phase9:kms`  
-   Or: `pnpm provision:kms-spike-key` → `pnpm spike:kms` → dual archive.
-6. Candidate tip for ordinary CI evidence: `7d8cb06e18f319271750d9378dc7cb5a5a9f8178`  
-   (runtime tip may advance after KMS evidence commit; do not start Phase 10).
-
-GitHub Actions secrets remain empty (`total_count=0`); local `aws login` is the active path.
+Contact phone may still show a pre-activation value; it did not block the formal spike
+once the account left `PENDING_ACTIVATION`. Ordinary CI tip remains
+`7d8cb06e18f319271750d9378dc7cb5a5a9f8178`. Helper scripts (`open:aws-incomplete-signup`,
+`fix:aws-contact-phone`, `ingest:phase9-aws-creds`) remain for ops only.
 
 ## O. STOP packet
 
 ```text
-PHASE 9 BLOCKED — REAL KMS SPIKE ENVIRONMENT UNAVAILABLE
-Reason: AWS AccountState=PENDING_ACTIVATION; freetier plan upgrade fails PI vet; KMS SubscriptionRequiredException
-AWS account: 661390315990 (iAlexx1) / eu-central-1
-Candidate tip (ordinary CI PASS): 7d8cb06e18f319271750d9378dc7cb5a5a9f8178
+PHASE 9 COMPLETE — TON TESTNET SIGNER SPIKE SEALED
+Ordinary CI tip: 7d8cb06e18f319271750d9378dc7cb5a5a9f8178
 Ordinary CI: https://github.com/iAlexx/alexreward11/actions/runs/34422715453
+Formal KMS: ECC_NIST_EDWARDS25519 PASS (eu-central-1) — see section G
 Phase 8 accepted runtime remains closed: a7554474b8b5ee22a3323a221d00bb1714d88ff7
 No Phase 10 / Mainnet work started.
-Awaiting Owner AWS payment-method (PI) verification + account activation, then ECC_NIST_EDWARDS25519 spike.
+Dual archive under phase-archives/PHASE_09_TON_TESTNET_SIGNER_SPIKE/
+Await Owner approval before any later phase.
 ```
 
 **No Phase 10 work started.**

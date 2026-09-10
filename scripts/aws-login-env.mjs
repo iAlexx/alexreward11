@@ -3,9 +3,37 @@
  * Node AWS SDK default provider cannot see login-session credentials.
  * Never prints secret values.
  */
+import { existsSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
+/** Optional long-term root AK written during Phase 9 unblock (TEMP only). */
+export function hydratePhase9RootAkEnv() {
+  if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
+    return { hydrated: false, reason: 'env-already-set' };
+  }
+  const path = join(tmpdir(), 'phase9-root-ak.env');
+  if (!existsSync(path)) {
+    return { hydrated: false, reason: 'phase9-root-ak.env missing' };
+  }
+  for (const line of readFileSync(path, 'utf8').split(/\r?\n/)) {
+    const match = /^(AWS_[A-Z_]+)=(.*)$/.exec(line.trim());
+    if (!match) continue;
+    process.env[match[1]] = match[2];
+  }
+  // Long-term keys must not keep a stale session token.
+  delete process.env.AWS_SESSION_TOKEN;
+  if (!process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY) {
+    return { hydrated: false, reason: 'phase9-root-ak.env incomplete' };
+  }
+  return { hydrated: true, reason: 'phase9-root-ak-env' };
+}
+
 export function hydrateAwsLoginEnvFromCli() {
+  const rootAk = hydratePhase9RootAkEnv();
+  if (rootAk.hydrated) return rootAk;
+
   if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
     return { hydrated: false, reason: 'env-already-set' };
   }
