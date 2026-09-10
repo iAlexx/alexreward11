@@ -17,6 +17,7 @@ const requiredPackages = [
   'observability',
   'referrals',
   'rewards',
+  'signing',
   'support',
   'tasks',
   'telegram',
@@ -131,8 +132,50 @@ for (const path of sourceFiles) {
 
 const signerManifest = await readJson('apps/signer/package.json');
 for (const name of Object.keys(signerManifest.dependencies ?? {})) {
-  if (name.includes('kms'))
-    failures.push(`apps/signer: Phase 1 may not depend on KMS package ${name}`);
+  if (name.includes('toncenter') || name.includes('tonapi')) {
+    failures.push(`apps/signer: must not depend on TON RPC package ${name}`);
+  }
+}
+
+for (const path of [...(await walk('apps/signer/')), ...(await walk('packages/signing/'))].filter(
+  (p) => {
+    const normalized = p.replaceAll('\\', '/');
+    return (
+      /\.(?:ts|tsx|js|mjs)$/.test(normalized) &&
+      !normalized.includes('/dist/') &&
+      !normalized.includes('/node_modules/') &&
+      !normalized.includes('/test/')
+    );
+  },
+)) {
+  const source = await readFile(new URL(path, root), 'utf8');
+  if (/from\s+['"][^'"]*(toncenter|tonapi)[^'"]*['"]/.test(source)) {
+    failures.push(`${path}: signer/signing must not import TON RPC clients`);
+  }
+  if (/\bTonClient\b/.test(source) || /\.sendBoc\s*\(/.test(source)) {
+    failures.push(`${path}: signer/signing must not use TonClient or chain broadcast helpers`);
+  }
+  if (
+    path.startsWith('packages/signing/') &&
+    /from\s+['"]@aws-sdk\/client-kms['"]/.test(source)
+  ) {
+    failures.push(`${path}: packages/signing must not import KMS client`);
+  }
+}
+
+for (const bannedRoot of [
+  'apps/api/',
+  'apps/bot/',
+  'apps/admin/',
+  'apps/worker/',
+  'packages/withdrawals/',
+]) {
+  for (const path of (await walk(bannedRoot)).filter((p) => /\.(?:ts|tsx|js|mjs)$/.test(p))) {
+    const source = await readFile(new URL(path, root), 'utf8');
+    if (/from\s+['"]@aws-sdk\/client-kms['"]/.test(source)) {
+      failures.push(`${path}: only apps/signer may import the KMS client`);
+    }
+  }
 }
 
 for (const name of financialShells) {

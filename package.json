@@ -26,6 +26,8 @@
     "test:phase6": "pnpm --filter @alex-rewards/wallets run test:phase6",
     "test:phase7": "pnpm --filter @alex-rewards/withdrawals run test:phase7",
     "test:phase8": "pnpm --filter @alex-rewards/control-center run test:phase8",
+    "test:phase9": "pnpm --filter @alex-rewards/signing run test:phase9",
+    "spike:kms": "node scripts/spike-kms-compatibility.mjs",
     "security:secrets": "node scripts/scan-secrets.mjs",
     "security:audit": "pnpm audit --audit-level=high",
     "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm test:archive && pnpm build && pnpm verify:boundaries && pnpm validate:migrations && pnpm security:secrets",

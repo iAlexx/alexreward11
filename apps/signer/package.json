@@ -14,10 +14,17 @@
   "dependencies": {
     "@alex-rewards/config": "workspace:*",
     "@alex-rewards/contracts": "workspace:*",
+    "@alex-rewards/db": "workspace:*",
     "@alex-rewards/observability": "workspace:*",
-    "fastify": "5.12.1"
+    "@alex-rewards/signing": "workspace:*",
+    "@aws-sdk/client-kms": "3.901.0",
+    "fastify": "5.12.1",
+    "pg": "8.23.0",
+    "zod": "4.5.4"
   },
   "devDependencies": {
-    "tsx": "4.23.13"
+    "@types/pg": "8.23.1",
+    "tsx": "4.23.13",
+    "vitest": "4.1.11"
   }
 }

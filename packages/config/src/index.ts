@@ -260,12 +260,40 @@ const workerSchema = serviceSchema
     }
   });
 
+/** Local/test-only signer defaults. Staging/production must set keys explicitly. */
+const LOCAL_SIGNER_DEFAULTS = {
+  SIGNER_DATABASE_URL: 'postgresql://alex_rewards:local-alex-rewards-only@localhost:55432/alex_rewards',
+  SIGNER_AWS_REGION: 'eu-central-1',
+  SIGNER_KMS_MODE: 'local_ephemeral',
+  SIGNER_SPIKE_ENABLED: 'true',
+  SIGNER_NETWORK_CODE: 'TON_TESTNET',
+  SIGNER_NETWORK_GLOBAL_ID: '-3',
+  SIGNER_WALLET_VERSION: 'v5R1',
+  SIGNER_WORKCHAIN: '0',
+  SIGNER_EXPECTED_ASSET_SYMBOL: 'USDT',
+} as const;
+
 const signerSchema = commonSchema
   .extend({
     SIGNER_PORT: z.coerce.number().int().min(1024).max(65535).default(3005),
     SIGNER_SERVICE_TOKEN: z.string().min(32),
-    SIGNER_KMS_KEY_ARN: z.never().optional(),
+    SIGNER_DATABASE_URL: postgresUrl,
+    SIGNER_AWS_REGION: z.string().min(2).max(32),
+    SIGNER_KMS_MODE: z.enum(['aws', 'local_ephemeral']),
+    SIGNER_KMS_KEY_ARN: z.preprocess(
+      (value) => (value === '' || value === undefined ? undefined : value),
+      z
+        .string()
+        .regex(/^arn:aws:kms:[a-z0-9-]+:\d+:key\/[0-9a-f-]+$/i, 'must be an exact KMS key ARN')
+        .optional(),
+    ),
     AWS_KMS_KEY_ID: z.never().optional(),
+    SIGNER_SPIKE_ENABLED: booleanFromString,
+    SIGNER_NETWORK_CODE: z.string().min(1).max(64),
+    SIGNER_NETWORK_GLOBAL_ID: z.coerce.number().int(),
+    SIGNER_WALLET_VERSION: z.literal('v5R1'),
+    SIGNER_WORKCHAIN: z.coerce.number().int().min(-1).max(0).default(0),
+    SIGNER_EXPECTED_ASSET_SYMBOL: z.string().min(1).max(32).default('USDT'),
   })
   .superRefine((value, context) => {
     if (
@@ -276,6 +304,42 @@ const signerSchema = commonSchema
         code: 'custom',
         path: ['SIGNER_SERVICE_TOKEN'],
         message: 'local example token is forbidden outside local development',
+      });
+    }
+    const outsideLocal = value.DEPLOYMENT_ENV !== 'local' && value.DEPLOYMENT_ENV !== 'test';
+    if (outsideLocal && value.SIGNER_KMS_MODE !== 'aws') {
+      context.addIssue({
+        code: 'custom',
+        path: ['SIGNER_KMS_MODE'],
+        message: 'local_ephemeral KMS mode is forbidden outside local/test',
+      });
+    }
+    if (value.SIGNER_KMS_MODE === 'aws' && value.SIGNER_KMS_KEY_ARN === undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['SIGNER_KMS_KEY_ARN'],
+        message: 'exact KMS key ARN is required when SIGNER_KMS_MODE=aws',
+      });
+    }
+    if (value.SIGNER_NETWORK_CODE.toUpperCase().includes('MAINNET')) {
+      context.addIssue({
+        code: 'custom',
+        path: ['SIGNER_NETWORK_CODE'],
+        message: 'MAINNET network codes are forbidden in Phase 9 signer config',
+      });
+    }
+    if (value.SIGNER_NETWORK_GLOBAL_ID === -239) {
+      context.addIssue({
+        code: 'custom',
+        path: ['SIGNER_NETWORK_GLOBAL_ID'],
+        message: 'MAINNET networkGlobalId (-239) is forbidden in Phase 9',
+      });
+    }
+    if (value.SIGNER_NETWORK_GLOBAL_ID !== -3) {
+      context.addIssue({
+        code: 'custom',
+        path: ['SIGNER_NETWORK_GLOBAL_ID'],
+        message: 'Phase 9 requires TESTNET networkGlobalId -3',
       });
     }
   });
@@ -363,7 +427,13 @@ export const loadWorkerConfig = (environment: NodeJS.ProcessEnv = process.env): 
       : environment;
   return parseEnvironment(workerSchema, merged);
 };
-export const loadSignerConfig = (environment: NodeJS.ProcessEnv = process.env): SignerConfig =>
-  parseEnvironment(signerSchema, environment);
+export const loadSignerConfig = (environment: NodeJS.ProcessEnv = process.env): SignerConfig => {
+  const deployment = environment.DEPLOYMENT_ENV ?? 'local';
+  const merged =
+    deployment === 'local' || deployment === 'test'
+      ? { ...LOCAL_SIGNER_DEFAULTS, ...environment }
+      : environment;
+  return parseEnvironment(signerSchema, merged);
+};
 export const loadWebConfig = (environment: NodeJS.ProcessEnv = process.env): WebConfig =>
   parseEnvironment(webSchema, environment);

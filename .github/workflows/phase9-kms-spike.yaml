@@ -1,0 +1,76 @@
+name: Phase 9 KMS Spike
+
+# Formal ECC_NIST_EDWARDS25519 compatibility evidence.
+# Ordinary CI remains mock/local-safe; this job is Owner-triggered with secrets.
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: Exact git SHA to evaluate (must be the Phase 9 candidate tip)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  kms-spike:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out exact candidate SHA
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ inputs.commit_sha }}
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          version: 11.25.0
+          run_install: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+
+      - name: Install from lockfile
+        run: pnpm install --frozen-lockfile
+
+      - name: Require spike secrets
+        env:
+          SIGNER_AWS_REGION: ${{ secrets.SIGNER_AWS_REGION }}
+          SIGNER_KMS_KEY_ARN: ${{ secrets.SIGNER_KMS_KEY_ARN }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+        run: |
+          if [ -z "$SIGNER_AWS_REGION" ] || [ -z "$SIGNER_KMS_KEY_ARN" ]; then
+            echo "PHASE 9 BLOCKED — REAL KMS SPIKE ENVIRONMENT UNAVAILABLE"
+            echo "Configure repository secrets: SIGNER_AWS_REGION, SIGNER_KMS_KEY_ARN,"
+            echo "and AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (optional AWS_SESSION_TOKEN)."
+            exit 2
+          fi
+          if [ -z "$AWS_ACCESS_KEY_ID" ] || [ -z "$AWS_SECRET_ACCESS_KEY" ]; then
+            echo "PHASE 9 BLOCKED — REAL KMS SPIKE ENVIRONMENT UNAVAILABLE"
+            echo "AWS credentials secrets are required for this workflow."
+            exit 2
+          fi
+
+      - name: Run formal KMS compatibility spike
+        env:
+          SIGNER_AWS_REGION: ${{ secrets.SIGNER_AWS_REGION }}
+          SIGNER_KMS_KEY_ARN: ${{ secrets.SIGNER_KMS_KEY_ARN }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+          AWS_REGION: ${{ secrets.SIGNER_AWS_REGION }}
+        run: |
+          pnpm spike:kms | tee kms-spike-report.log
+          if [ -f kms-spike-report.json ]; then
+            echo "## Phase 9 KMS spike report" >> "$GITHUB_STEP_SUMMARY"
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            cat kms-spike-report.json >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi

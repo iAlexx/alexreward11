@@ -83,7 +83,13 @@ describe('environment validation', () => {
     );
   });
 
-  it('forbids every Phase 1 KMS key input at the signer boundary', () => {
+  it('accepts Phase 9 local_ephemeral signer config and rejects invalid KMS ARN shape', () => {
+    const config = loadSignerConfig({
+      ...common,
+      SIGNER_SERVICE_TOKEN: 'a-secure-local-token-that-is-long-enough',
+    });
+    expect(config.SIGNER_KMS_MODE).toBe('local_ephemeral');
+    expect(config.SIGNER_NETWORK_GLOBAL_ID).toBe(-3);
     expect(() =>
       loadSignerConfig({
         ...common,
@@ -91,6 +97,16 @@ describe('environment validation', () => {
         SIGNER_KMS_KEY_ARN: 'kms-key-must-not-exist-in-phase-one',
       }),
     ).toThrow(/SIGNER_KMS_KEY_ARN/);
+  });
+
+  it('forbids AWS_KMS_KEY_ID alias at the signer boundary', () => {
+    expect(() =>
+      loadSignerConfig({
+        ...common,
+        SIGNER_SERVICE_TOKEN: 'a-secure-local-token-that-is-long-enough',
+        AWS_KMS_KEY_ID: 'alias-forbidden',
+      }),
+    ).toThrow(/AWS_KMS_KEY_ID/);
   });
 
   it('rejects local dependency endpoints in production', () => {

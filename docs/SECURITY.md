@@ -52,3 +52,14 @@ See `docs/WITHDRAWALS.md`.
   must not import `@alex-rewards/ledger`.
 
 See `docs/CONTROL_CENTER.md` and `docs/REVIEW_QUEUE.md`.
+
+## Phase 9 — TON Testnet signer spike
+
+- Only `apps/signer` may import `@aws-sdk/client-kms` / invoke `kms:Sign`.
+- Caller input is only `withdrawalAttemptId`; signer reconstructs canonical Wallet V5 R1 intent.
+- Signer DB role is read-only (`alex_rewards_signer_ro`); no financial writes.
+- No TON RPC/broadcast from signer (Phase 10).
+- `local_ephemeral` mode is local/test only and does **not** satisfy the formal KMS gate.
+- Formal spike: `pnpm spike:kms` against `ECC_NIST_EDWARDS25519` + `ED25519_SHA_512` / `MessageType=RAW`.
+
+See `docs/TON_SIGNER.md`.
