@@ -29,8 +29,7 @@ import {
 } from '../src/index.js';
 
 const explicitUrl = process.env.PHASE9_DATABASE_URL ?? '';
-const optedInUrl =
-  process.env.PHASE9_SIGNER_TESTS === '1' ? (process.env.DATABASE_URL ?? '') : '';
+const optedInUrl = process.env.PHASE9_SIGNER_TESTS === '1' ? (process.env.DATABASE_URL ?? '') : '';
 export const phase9DatabaseUrl = explicitUrl !== '' ? explicitUrl : optedInUrl;
 
 export const SPIKE_SEED = Buffer.alloc(32, 42);
@@ -195,8 +194,7 @@ export async function createProductionShapedSignableAttempt(
   });
   const adminId = await createOwnerAdmin(pool);
   const userId = await createTestUser(pool, String(900_000 + Math.floor(Math.random() * 99_000)));
-  const recipientRaw =
-    '0:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+  const recipientRaw = '0:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
   await createVerifiedPrimaryWallet(pool, userId, recipientRaw);
   await fundUserAvailable(pool, userId, '5000000');
 

@@ -1,10 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
-import {
-  SignerError,
-  reconstructCanonicalHash,
-  signWithdrawalAttempt,
-} from '../src/index.js';
+import { SignerError, reconstructCanonicalHash, signWithdrawalAttempt } from '../src/index.js';
 import {
   createPool,
   createProductionShapedSignableAttempt,
@@ -59,12 +55,14 @@ describePhase9('Phase 9 production-shaped sign flow', () => {
   });
 
   it('rejects Phase 7 fake-hash attempts fail-closed', async () => {
-    await fixture.pool.query(
-      `UPDATE withdrawal_attempts
+    await fixture.pool
+      .query(
+        `UPDATE withdrawal_attempts
        SET canonical_message_hash = $2
        WHERE id = $1::uuid`,
-      [fixture.attemptId, `fake-hash:${fixture.withdrawalId}:1`],
-    ).catch(() => undefined);
+        [fixture.attemptId, `fake-hash:${fixture.withdrawalId}:1`],
+      )
+      .catch(() => undefined);
 
     // If immutability trigger blocks UPDATE, insert a dedicated fake attempt on a clone path:
     const existing = await fixture.pool.query<{ canonical_message_hash: string }>(

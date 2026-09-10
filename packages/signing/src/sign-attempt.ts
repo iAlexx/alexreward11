@@ -74,10 +74,14 @@ export async function signWithdrawalAttempt(
   });
 
   if (!addressesEqual(derived.addressRaw, row.hot_wallet_address)) {
-    throw new SignerError('WALLET_MISMATCH', 'Derived Wallet V5 R1 address does not match Hot Wallet', {
-      derived: derived.addressRaw,
-      hotWallet: row.hot_wallet_address,
-    });
+    throw new SignerError(
+      'WALLET_MISMATCH',
+      'Derived Wallet V5 R1 address does not match Hot Wallet',
+      {
+        derived: derived.addressRaw,
+        hotWallet: row.hot_wallet_address,
+      },
+    );
   }
 
   const intent = intentFromRow(row, publicKey, input.config);
@@ -128,7 +132,10 @@ export async function signWithdrawalAttempt(
   });
 
   if (signingHash.toString('hex') !== canonical.canonicalMessageHashHex) {
-    throw new SignerError('CANONICAL_HASH_MISMATCH', 'Signing hash drifted from canonical reconstruction');
+    throw new SignerError(
+      'CANONICAL_HASH_MISMATCH',
+      'Signing hash drifted from canonical reconstruction',
+    );
   }
 
   if (!signVerify(signingHash, signature, publicKey)) {

@@ -155,10 +155,7 @@ for (const path of [...(await walk('apps/signer/')), ...(await walk('packages/si
   if (/\bTonClient\b/.test(source) || /\.sendBoc\s*\(/.test(source)) {
     failures.push(`${path}: signer/signing must not use TonClient or chain broadcast helpers`);
   }
-  if (
-    path.startsWith('packages/signing/') &&
-    /from\s+['"]@aws-sdk\/client-kms['"]/.test(source)
-  ) {
+  if (path.startsWith('packages/signing/') && /from\s+['"]@aws-sdk\/client-kms['"]/.test(source)) {
     failures.push(`${path}: packages/signing must not import KMS client`);
   }
 }

@@ -164,27 +164,27 @@ SHA256 is recorded only in external `PACKAGE_SHA256.txt` beside the package (not
 embedded here — embedding an outer archive hash inside that same archive would
 create a self-reference problem).
 
-| Item | Result |
-| --- | --- |
-| Accepted runtime SHA | `a7554474b8b5ee22a3323a221d00bb1714d88ff7` |
-| CI run | https://github.com/iAlexx/alexreward11/actions/runs/34388095264 |
-| quality job | `102589368462` — PASS |
-| docker-smoke job | `102590824379` — PASS |
-| Phase 8 dedicated gate | 38 / 38 PASS |
-| Canonical source ZIP | `ALEx_Rewards_PHASE_08_CONTROL_CENTER_REVIEW_QUEUE_20260909-182600_a755447.zip` |
-| Canonical source SHA256 | `86bd1fac544330fa08ec8de40ac51f577eda1c6c116d149ad6b3af9d383772fe` |
-| Final review-package ZIP | `PHASE_08_CONTROL_CENTER_REVIEW_QUEUE_PACKAGE_20260909-232806_a755447.zip` |
-| Final review-package path | `phase-archives/PHASE_08_CONTROL_CENTER_REVIEW_QUEUE/PHASE_08_CONTROL_CENTER_REVIEW_QUEUE_PACKAGE_20260909-232806_a755447.zip` |
-| Canonical source extraction | PASS |
-| Canonical source prohibited-path scan | PASS |
-| Review-package extraction | PASS |
-| Review-package prohibited-path scan | PASS |
-| Nested canonical source identity | PASS |
-| SHA256SUMS verification | PASS |
-| ZIP entry separator / forward-slash validation | PASS |
-| Exactly four outer members | PASS |
-| External `PACKAGE_SHA256.txt` | Authoritative outer hash beside the package (not embedded in this report) |
-| Migrations 0001–0018 unchanged | YES (only forward `0019_control_center_security_integrity.sql`) |
+| Item                                           | Result                                                                                                                         |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Accepted runtime SHA                           | `a7554474b8b5ee22a3323a221d00bb1714d88ff7`                                                                                     |
+| CI run                                         | https://github.com/iAlexx/alexreward11/actions/runs/34388095264                                                                |
+| quality job                                    | `102589368462` — PASS                                                                                                          |
+| docker-smoke job                               | `102590824379` — PASS                                                                                                          |
+| Phase 8 dedicated gate                         | 38 / 38 PASS                                                                                                                   |
+| Canonical source ZIP                           | `ALEx_Rewards_PHASE_08_CONTROL_CENTER_REVIEW_QUEUE_20260909-182600_a755447.zip`                                                |
+| Canonical source SHA256                        | `86bd1fac544330fa08ec8de40ac51f577eda1c6c116d149ad6b3af9d383772fe`                                                             |
+| Final review-package ZIP                       | `PHASE_08_CONTROL_CENTER_REVIEW_QUEUE_PACKAGE_20260909-232806_a755447.zip`                                                     |
+| Final review-package path                      | `phase-archives/PHASE_08_CONTROL_CENTER_REVIEW_QUEUE/PHASE_08_CONTROL_CENTER_REVIEW_QUEUE_PACKAGE_20260909-232806_a755447.zip` |
+| Canonical source extraction                    | PASS                                                                                                                           |
+| Canonical source prohibited-path scan          | PASS                                                                                                                           |
+| Review-package extraction                      | PASS                                                                                                                           |
+| Review-package prohibited-path scan            | PASS                                                                                                                           |
+| Nested canonical source identity               | PASS                                                                                                                           |
+| SHA256SUMS verification                        | PASS                                                                                                                           |
+| ZIP entry separator / forward-slash validation | PASS                                                                                                                           |
+| Exactly four outer members                     | PASS                                                                                                                           |
+| External `PACKAGE_SHA256.txt`                  | Authoritative outer hash beside the package (not embedded in this report)                                                      |
+| Migrations 0001–0018 unchanged                 | YES (only forward `0019_control_center_security_integrity.sql`)                                                                |
 
 Verified with `scripts/create-phase-archive.mjs` v2.1.0 (corrected outer stamp `20260909-232806`; canonical source stamp `20260909-182600` unchanged).
 

@@ -34,7 +34,9 @@ try {
   tonTon = requireFromSigning('@ton/ton');
   tonCore = requireFromSigning('@ton/core');
 } catch (error) {
-  blocked(`Unable to load spike dependencies: ${error instanceof Error ? error.message : String(error)}`);
+  blocked(
+    `Unable to load spike dependencies: ${error instanceof Error ? error.message : String(error)}`,
+  );
 }
 
 const client = new kms.KMSClient({ region });

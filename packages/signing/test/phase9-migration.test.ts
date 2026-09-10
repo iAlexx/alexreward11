@@ -23,7 +23,9 @@ describePhase9('Phase 9 migration 0020', () => {
       expect(col.rowCount).toBe(1);
       const view = await pool.query(`SELECT 1 FROM signer_withdrawal_attempt_signing_v LIMIT 0`);
       expect(view.rows).toEqual([]);
-      const role = await pool.query(`SELECT 1 FROM pg_roles WHERE rolname = 'alex_rewards_signer_ro'`);
+      const role = await pool.query(
+        `SELECT 1 FROM pg_roles WHERE rolname = 'alex_rewards_signer_ro'`,
+      );
       expect(role.rowCount).toBe(1);
     } finally {
       await pool.end();

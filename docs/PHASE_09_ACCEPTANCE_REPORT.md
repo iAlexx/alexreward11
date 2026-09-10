@@ -1,6 +1,6 @@
 # Phase 9 Acceptance Report — TON Testnet Signer Spike
 
-**Status:** IMPLEMENTATION IN PROGRESS / FORMAL KMS GATE **BLOCKED** until real AWS ECC_NIST_EDWARDS25519 spike evidence exists on the accepted SHA.
+**Status:** CANDIDATE RUNTIME pushed — ordinary CI pending; formal KMS gate **BLOCKED** until real AWS ECC_NIST_EDWARDS25519 spike evidence exists on the accepted SHA.
 
 **Date:** 2026-09-10
 
@@ -9,6 +9,8 @@
 **Start tip:** `a6ff87dd6511a568508401bdd890b640301120a0`
 
 **Phase 8 accepted runtime (closed):** `a7554474b8b5ee22a3323a221d00bb1714d88ff7`
+
+**Phase 9 candidate tip (not accepted until KMS evidence):** `61db6ac9904b4f6b24e8cafcb5f559b020ce02a7`
 
 ---
 
@@ -47,16 +49,16 @@ pnpm spike:kms   # requires real AWS; currently blocked in this environment
 
 Ordinary Phase 9 suites against local Postgres (`PHASE9_DATABASE_URL`):
 
-| Suite | Focus |
-| --- | --- |
-| `phase9-migration` | 0020 / view / RO role |
-| `phase9-wallet-v5r1` | TESTNET derive; MAINNET reject |
-| `phase9-canonical-message` | 100× identical hash; field mutation |
-| `phase9-policy` | fake-hash / MAINNET / HELD / native reject |
-| `phase9-sign-flow` | production-shaped attempt + local sign + 100× reconstruct |
-| `phase9-db-readonly` | SELECT view PASS; INSERT/UPDATE DENIED |
-| `phase9-boundary` | no KMS/broadcast in `@alex-rewards/signing` |
-| `phase9-kms-local` | ephemeral crypto only (not formal evidence) |
+| Suite                      | Focus                                                     |
+| -------------------------- | --------------------------------------------------------- |
+| `phase9-migration`         | 0020 / view / RO role                                     |
+| `phase9-wallet-v5r1`       | TESTNET derive; MAINNET reject                            |
+| `phase9-canonical-message` | 100× identical hash; field mutation                       |
+| `phase9-policy`            | fake-hash / MAINNET / HELD / native reject                |
+| `phase9-sign-flow`         | production-shaped attempt + local sign + 100× reconstruct |
+| `phase9-db-readonly`       | SELECT view PASS; INSERT/UPDATE DENIED                    |
+| `phase9-boundary`          | no KMS/broadcast in `@alex-rewards/signing`               |
+| `phase9-kms-local`         | ephemeral crypto only (not formal evidence)               |
 
 Latest local run: **14/14 PASS** (includes 3 production-shaped sign-flow tests).
 
@@ -65,6 +67,7 @@ Latest local run: **14/14 PASS** (includes 3 production-shaped sign-flow tests).
 **KMS compatibility: BLOCKED — REAL KMS SPIKE ENVIRONMENT UNAVAILABLE**
 
 Observed at seal attempt time:
+
 - `AWS_ACCESS_KEY_ID` unset
 - `AWS_PROFILE` unset
 - `SIGNER_KMS_KEY_ARN` unset
@@ -76,6 +79,7 @@ Observed at seal attempt time:
 `PHASE 9 BLOCKED — REAL KMS SPIKE ENVIRONMENT UNAVAILABLE`
 
 Owner unblock path:
+
 1. Configure GitHub Actions secrets (`SIGNER_AWS_REGION`, `SIGNER_KMS_KEY_ARN`, AWS keys).
 2. Dispatch workflow `.github/workflows/phase9-kms-spike.yaml` against the Phase 9 candidate SHA.
 3. Or run locally with the same env vars.

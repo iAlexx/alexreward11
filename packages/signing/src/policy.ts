@@ -93,10 +93,16 @@ export function assertSigningPolicy(
   }
   if (config.kmsMode === 'aws') {
     if (!config.kmsKeyArn || row.hot_wallet_signer_reference !== config.kmsKeyArn) {
-      throw new SignerError('POLICY_REJECTED', 'Hot Wallet signer_reference must match KMS key ARN');
+      throw new SignerError(
+        'POLICY_REJECTED',
+        'Hot Wallet signer_reference must match KMS key ARN',
+      );
     }
     if (row.signer_key_reference !== config.kmsKeyArn) {
-      throw new SignerError('POLICY_REJECTED', 'Attempt signer_key_reference must match KMS key ARN');
+      throw new SignerError(
+        'POLICY_REJECTED',
+        'Attempt signer_key_reference must match KMS key ARN',
+      );
     }
   }
 

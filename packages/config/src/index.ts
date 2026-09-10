@@ -262,7 +262,8 @@ const workerSchema = serviceSchema
 
 /** Local/test-only signer defaults. Staging/production must set keys explicitly. */
 const LOCAL_SIGNER_DEFAULTS = {
-  SIGNER_DATABASE_URL: 'postgresql://alex_rewards:local-alex-rewards-only@localhost:55432/alex_rewards',
+  SIGNER_DATABASE_URL:
+    'postgresql://alex_rewards:local-alex-rewards-only@localhost:55432/alex_rewards',
   SIGNER_AWS_REGION: 'eu-central-1',
   SIGNER_KMS_MODE: 'local_ephemeral',
   SIGNER_SPIKE_ENABLED: 'true',

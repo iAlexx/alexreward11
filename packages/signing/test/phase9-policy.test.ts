@@ -71,9 +71,9 @@ describe('Phase 9 signer policy', () => {
     expect(() =>
       assertSigningPolicy(baseRow({ canonical_message_hash: 'fake-hash:w:1' }), config),
     ).toThrow(/FAKE_PHASE7_HASH|fake-hash/);
-    expect(() =>
-      assertSigningPolicy(baseRow({ network_environment: 'MAINNET' }), config),
-    ).toThrow(SignerError);
+    expect(() => assertSigningPolicy(baseRow({ network_environment: 'MAINNET' }), config)).toThrow(
+      SignerError,
+    );
   });
 
   it('rejects HELD/REJECTED/CONFIRMED and native asset', () => {
@@ -95,9 +95,9 @@ describe('Phase 9 signer policy', () => {
     expect(() =>
       assertSigningPolicy(baseRow({ valid_until: new Date(Date.now() - 1_000) }), config),
     ).toThrow(SignerError);
-    expect(() =>
-      assertSigningPolicy(baseRow({ payout_dispatch_paused: true }), config),
-    ).toThrow(SignerError);
+    expect(() => assertSigningPolicy(baseRow({ payout_dispatch_paused: true }), config)).toThrow(
+      SignerError,
+    );
     expect(() =>
       assertSigningPolicy(baseRow({ payout_jetton_wallet_address: null }), config),
     ).toThrow(SignerError);

@@ -51,7 +51,9 @@ export async function registerSignerRoutes(
   server.post('/v1/sign-withdrawal-attempt', async (request, reply) => {
     try {
       assertBearerAuth(
-        typeof request.headers.authorization === 'string' ? request.headers.authorization : undefined,
+        typeof request.headers.authorization === 'string'
+          ? request.headers.authorization
+          : undefined,
         deps.serviceToken,
       );
       if (!deps.spikeEnabled) {

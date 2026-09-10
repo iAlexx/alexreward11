@@ -1,11 +1,4 @@
-import {
-  Address,
-  beginCell,
-  internal,
-  SendMode,
-  type Cell,
-  type MessageRelaxed,
-} from '@ton/core';
+import { Address, beginCell, internal, SendMode, type Cell, type MessageRelaxed } from '@ton/core';
 import { WalletContractV5R1 } from '@ton/ton';
 
 import { SignerError } from './errors.js';
