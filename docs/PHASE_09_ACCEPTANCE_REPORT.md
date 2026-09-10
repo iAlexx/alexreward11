@@ -18,9 +18,16 @@
 
 **Historical AWS-era sealed tip (SUPERSEDED package):** `973e6974a0e8ee7a5465bcf5514352b1351ece0c` — marked `SUPERSEDED — AWS signer candidate, not Owner-approved production architecture` under `phase-archives/PHASE_09_TON_TESTNET_SIGNER_SPIKE_AWS_SUPERSEDED_973e697/`.
 
-**Phase 9 accepted runtime SHA (self-hosted amendment):** `dc20d197796623aac2ce0611139e8606eb333f9b`
+**Phase 9 accepted runtime SHA (self-hosted amendment):** _pending commit of final security corrections_
 
-**CI:** https://github.com/iAlexx/alexreward11/actions/runs/34511019788 — quality `102984866064` **PASS**; docker-smoke `102986698243` **PASS** (no AWS secrets/jobs required)
+**Prior candidate (superseded by final security corrections):** `dc20d197796623aac2ce0611139e8606eb333f9b`
+
+**CI:** _pending push of final security corrections_
+
+### Final security corrections (pre-Owner approval)
+
+1. **Fail-closed unlock:** any failed `EncryptedLocalSigningProvider.unlock()` leaves `custodyState=LOCKED`, `signingReady=false`, and destroys any previously unlocked key material (including after a prior successful unlock).
+2. **Bounded Argon2id v1 params:** `assertArgon2idParamsV1` validates finite integers and approved bounds for `memory` / `passes` / `parallelism` / `dkLen` **before** Argon2id; `dkLen` must equal XChaCha20-Poly1305 key length (32). Tampered KDF metadata cannot request unreasonable CPU/RAM.
 
 ---
 

@@ -16,12 +16,33 @@ export const KEY_BUNDLE_FORMAT_VERSION = 1 as const;
 export const KEY_BUNDLE_KDF = 'argon2id' as const;
 export const KEY_BUNDLE_AEAD = 'xchacha20poly1305' as const;
 
-/** Memory-hard defaults suitable for interactive unlock (tunable via versioned params). */
+/**
+ * XChaCha20-Poly1305 key length (bytes). Bundle format v1 MUST use this dkLen.
+ * Validated before Argon2id so tampered metadata cannot request arbitrary sizes.
+ */
+export const KEY_BUNDLE_V1_AEAD_KEY_BYTES = 32 as const;
+
+/**
+ * Explicit safe/versioned Argon2id bounds for encrypted key bundle format v1.
+ * Validated BEFORE invoking Argon2id — reject unreasonable CPU/RAM requests.
+ * memory is KiB (Argon2 convention).
+ */
+export const ARGON2ID_V1_BOUNDS = {
+  memoryMinKiB: 8,
+  memoryMaxKiB: 1_048_576, // 1 GiB upper bound for interactive unlock
+  passesMin: 1,
+  passesMax: 10,
+  parallelismMin: 1,
+  parallelismMax: 4,
+  dkLenExact: KEY_BUNDLE_V1_AEAD_KEY_BYTES,
+} as const;
+
+/** Memory-hard defaults suitable for interactive unlock (within ARGON2ID_V1_BOUNDS). */
 export const DEFAULT_ARGON2ID_PARAMS = {
   memory: 65_536, // KiB (~64 MiB)
   passes: 3,
   parallelism: 1,
-  dkLen: 32,
+  dkLen: KEY_BUNDLE_V1_AEAD_KEY_BYTES,
 } as const;
 
 export interface KeyBundleKdfParams {
@@ -29,6 +50,84 @@ export interface KeyBundleKdfParams {
   readonly passes: number;
   readonly parallelism: number;
   readonly dkLen: number;
+}
+
+function isSafeIntegerInRange(value: unknown, min: number, max: number): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isFinite(value) &&
+    Number.isInteger(value) &&
+    value >= min &&
+    value <= max
+  );
+}
+
+/**
+ * Validate format-v1 KDF parameters BEFORE Argon2id.
+ * Rejects zero/negative/NaN/Infinity and values outside approved bounds.
+ */
+export function assertArgon2idParamsV1(raw: unknown): KeyBundleKdfParams {
+  if (raw === null || typeof raw !== 'object') {
+    throw new SignerError('KEY_BUNDLE_INVALID', 'Key bundle missing KDF params');
+  }
+  const kp = raw as Record<string, unknown>;
+  const { memory, passes, parallelism, dkLen } = kp;
+
+  if (
+    !isSafeIntegerInRange(memory, ARGON2ID_V1_BOUNDS.memoryMinKiB, ARGON2ID_V1_BOUNDS.memoryMaxKiB)
+  ) {
+    throw new SignerError(
+      'KEY_BUNDLE_INVALID',
+      'Argon2id memory parameter out of approved v1 bounds',
+      {
+        memory,
+        min: ARGON2ID_V1_BOUNDS.memoryMinKiB,
+        max: ARGON2ID_V1_BOUNDS.memoryMaxKiB,
+      },
+    );
+  }
+  if (!isSafeIntegerInRange(passes, ARGON2ID_V1_BOUNDS.passesMin, ARGON2ID_V1_BOUNDS.passesMax)) {
+    throw new SignerError(
+      'KEY_BUNDLE_INVALID',
+      'Argon2id passes parameter out of approved v1 bounds',
+      {
+        passes,
+        min: ARGON2ID_V1_BOUNDS.passesMin,
+        max: ARGON2ID_V1_BOUNDS.passesMax,
+      },
+    );
+  }
+  if (
+    !isSafeIntegerInRange(
+      parallelism,
+      ARGON2ID_V1_BOUNDS.parallelismMin,
+      ARGON2ID_V1_BOUNDS.parallelismMax,
+    )
+  ) {
+    throw new SignerError(
+      'KEY_BUNDLE_INVALID',
+      'Argon2id parallelism parameter out of approved v1 bounds',
+      {
+        parallelism,
+        min: ARGON2ID_V1_BOUNDS.parallelismMin,
+        max: ARGON2ID_V1_BOUNDS.parallelismMax,
+      },
+    );
+  }
+  if (
+    typeof dkLen !== 'number' ||
+    !Number.isFinite(dkLen) ||
+    !Number.isInteger(dkLen) ||
+    dkLen !== ARGON2ID_V1_BOUNDS.dkLenExact
+  ) {
+    throw new SignerError(
+      'KEY_BUNDLE_INVALID',
+      'Argon2id dkLen must equal XChaCha20-Poly1305 key length for bundle v1',
+      { dkLen, required: ARGON2ID_V1_BOUNDS.dkLenExact },
+    );
+  }
+
+  return { memory, passes, parallelism, dkLen };
 }
 
 export interface EncryptedKeyBundleV1 {
@@ -73,12 +172,14 @@ function deriveWrappingKey(
   salt: Uint8Array,
   params: KeyBundleKdfParams,
 ): Uint8Array {
+  // Bounds check immediately before Argon2id (defense in depth vs parse-time check).
+  const safe = assertArgon2idParamsV1(params);
   const pass = Buffer.from(passphrase, 'utf8');
   return argon2id(pass, salt, {
-    t: params.passes,
-    m: params.memory,
-    p: params.parallelism,
-    dkLen: params.dkLen,
+    t: safe.passes,
+    m: safe.memory,
+    p: safe.parallelism,
+    dkLen: safe.dkLen,
   });
 }
 
@@ -131,7 +232,7 @@ export function encryptKeyBundle(input: {
   const networkGlobalId = input.networkGlobalId ?? -3;
   const workchain = input.workchain ?? 0;
   const identity = identityFromSeed(input.seed, { networkGlobalId, workchain });
-  const kdfParams = input.kdfParams ?? { ...DEFAULT_ARGON2ID_PARAMS };
+  const kdfParams = assertArgon2idParamsV1(input.kdfParams ?? { ...DEFAULT_ARGON2ID_PARAMS });
   const salt = randomBytes(16);
   const nonce = randomBytes(24);
   const key = deriveWrappingKey(input.passphrase, salt, kdfParams);
@@ -183,28 +284,12 @@ function parseBundle(raw: unknown): EncryptedKeyBundleV1 {
   ) {
     throw new SignerError('KEY_BUNDLE_INVALID', 'Key bundle wallet/network metadata invalid');
   }
-  const kdfParams = o.kdfParams;
-  if (kdfParams === null || typeof kdfParams !== 'object') {
-    throw new SignerError('KEY_BUNDLE_INVALID', 'Key bundle missing KDF params');
-  }
-  const kp = kdfParams as Record<string, unknown>;
-  if (
-    typeof kp.memory !== 'number' ||
-    typeof kp.passes !== 'number' ||
-    typeof kp.parallelism !== 'number' ||
-    typeof kp.dkLen !== 'number'
-  ) {
-    throw new SignerError('KEY_BUNDLE_INVALID', 'Key bundle KDF params invalid');
-  }
+  // Validate KDF bounds BEFORE any Argon2id invocation (decrypt path).
+  const kdfParams = assertArgon2idParamsV1(o.kdfParams);
   return {
     formatVersion: KEY_BUNDLE_FORMAT_VERSION,
     kdf: KEY_BUNDLE_KDF,
-    kdfParams: {
-      memory: kp.memory,
-      passes: kp.passes,
-      parallelism: kp.parallelism,
-      dkLen: kp.dkLen,
-    },
+    kdfParams,
     saltB64: o.saltB64,
     aead: KEY_BUNDLE_AEAD,
     nonceB64: o.nonceB64,

@@ -24,10 +24,13 @@ export type {
   SigningKeyDescription,
 } from './signing-key-provider.js';
 export {
+  ARGON2ID_V1_BOUNDS,
   DEFAULT_ARGON2ID_PARAMS,
   KEY_BUNDLE_AEAD,
   KEY_BUNDLE_FORMAT_VERSION,
   KEY_BUNDLE_KDF,
+  KEY_BUNDLE_V1_AEAD_KEY_BYTES,
+  assertArgon2idParamsV1,
   decryptKeyBundle,
   encryptKeyBundle,
   generateHotWalletSeed,
