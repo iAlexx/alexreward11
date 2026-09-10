@@ -14,3 +14,5 @@ node_modules/
 reports/
 docs.zip
 phase-archives/
+kms-spike-report.json
+kms-spike-report.log
