@@ -77,17 +77,22 @@ Observed at seal attempt time (local + GitHub Actions):
 - `aws account get-account-information`: AccountName `iAlexx1`, created `2026-09-10T01:03:53Z`, **AccountState=`PENDING_ACTIVATION`**; ENABLED regions list empty
 - Node SDK + AWS CLI `kms create-key` / `kms list-keys` both fail with:
   `SubscriptionRequiredException: The AWS Access Key Id needs a subscription for the service`
-- Therefore formal `ECC_NIST_EDWARDS25519` CreateKey / Sign cannot run until the Owner **finishes AWS account activation** (payment method + phone verification; wait until AccountState is active)
+- `aws freetier upgrade-account-plan --account-plan-type FREE` fails:
+  `ValidationException: Account plan upgrade failed PI vet failure`
+  (payment instrument / billing verification incomplete — Owner must add a valid payment method in AWS Billing)
 
 `pnpm spike:kms` remains blocked until a subscribed KMS-capable account/key exists.
 
 Owner unblock path:
 
-1. Finish AWS signup for account `661390315990` until `AccountState` is no longer `PENDING_ACTIVATION` (add payment method, verify phone; billing console was opened via federated login).
-2. Then either:
+1. Finish AWS signup for account `661390315990` until `AccountState` is no longer `PENDING_ACTIVATION`.
+   Required: valid payment method that passes AWS **PI vet** (observed failure:
+   `Account plan upgrade failed PI vet failure`), plus phone verification if prompted.
+2. Confirm with: `aws account get-account-information` → not `PENDING_ACTIVATION`, then `aws kms list-keys`.
+3. Then either:
    - `SIGNER_AWS_REGION=eu-central-1 pnpm provision:kms-spike-key` + `pnpm spike:kms`, or
    - Set GitHub secrets and dispatch **Phase 9 KMS Spike** against `7d8cb06e18f319271750d9378dc7cb5a5a9f8178`
-3. Key must be AWS KMS `ECC_NIST_EDWARDS25519` (Testnet signer spike only).
+4. Key must be AWS KMS `ECC_NIST_EDWARDS25519` (Testnet signer spike only).
 
 Local/`local_ephemeral` adapters are **not** formal evidence.
 
