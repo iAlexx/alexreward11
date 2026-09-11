@@ -242,6 +242,9 @@ services:
       TEMPORAL_ADDRESS: temporal:7233
       TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-default}
       TEMPORAL_TASK_QUEUE: ${TEMPORAL_TASK_QUEUE:-alex-rewards-foundation}
+      # Pass through explicitly so local defaults cannot silently enable fake chain.
+      WITHDRAWAL_FAKE_CHAIN_ENABLED: ${WITHDRAWAL_FAKE_CHAIN_ENABLED:?WITHDRAWAL_FAKE_CHAIN_ENABLED is required}
+      WITHDRAWAL_REAL_CHAIN_ENABLED: ${WITHDRAWAL_REAL_CHAIN_ENABLED:?WITHDRAWAL_REAL_CHAIN_ENABLED is required}
     ports:
       - 127.0.0.1:3004:3004
     healthcheck:
