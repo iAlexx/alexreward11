@@ -428,6 +428,49 @@ export async function markAdminActionTokenConsumed(
   });
 }
 
+/**
+ * Make open withdrawal.decide.* tokens non-actionable without recording a decision.
+ * Uses expires_at only (no schema migration; not a successful Owner decision).
+ */
+export async function expireOpenWithdrawalDecisionTokens(
+  db: Db,
+  input: {
+    readonly withdrawalId: string;
+    readonly expectedState: string;
+    readonly adminUserId: string;
+    readonly destinationId: string;
+    /** When set, leave this token alone (already consumed / executing). */
+    readonly excludeTokenId?: string;
+  },
+): Promise<{ readonly expiredCount: number }> {
+  const result = await db.query<{ id: string }>(
+    `UPDATE admin_action_tokens
+     SET expires_at = LEAST(expires_at, now())
+     WHERE resource_type = 'withdrawal'
+       AND resource_id = $1::uuid
+       AND expected_state = $2
+       AND admin_user_id = $3::uuid
+       AND destination_id = $4::uuid
+       AND action_type IN (
+         'withdrawal.decide.APPROVE',
+         'withdrawal.decide.HOLD',
+         'withdrawal.decide.REJECT'
+       )
+       AND consumed_at IS NULL
+       AND expires_at > now()
+       AND ($5::uuid IS NULL OR id <> $5::uuid)
+     RETURNING id`,
+    [
+      input.withdrawalId,
+      input.expectedState,
+      input.adminUserId,
+      input.destinationId,
+      input.excludeTokenId ?? null,
+    ],
+  );
+  return { expiredCount: result.rowCount ?? 0 };
+}
+
 /** Lookup open token by hash without consuming (tests / diagnostics). Never log raw. */
 export async function findAdminActionTokenByRaw(
   db: Db,

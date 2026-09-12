@@ -1,8 +1,12 @@
 import type { PoolClient } from 'pg';
 
-import { insertWithdrawalAuditLog } from './audit.js';
+import { insertWithdrawalAuditLog, insertWithdrawalOutboxEvent } from './audit.js';
 import type { WithdrawalEngineConfig } from './config.js';
 import { WithdrawalDomainError } from './errors.js';
+import {
+  WITHDRAWAL_OWNER_REVIEW_REQUIRED_OUTBOX_EVENT,
+  withdrawalOwnerReviewRequiredDedupeKey,
+} from './outbox.js';
 import { releaseWithdrawalReservation } from './release.js';
 import { transitionWithdrawal } from './transitions.js';
 import type { WithdrawalState } from './state-machine.js';
@@ -126,6 +130,7 @@ export async function applyV1RiskPolicy(
       actorType: 'SYSTEM',
       afterSnapshot: { decision, state: 'HELD' },
     });
+    // Owner-review Telegram delivery is MANUAL_REVIEW-only in this change.
     return { decision, state: 'HELD' };
   }
 
@@ -144,6 +149,17 @@ export async function applyV1RiskPolicy(
     resourceId: input.withdrawalId,
     actorType: 'SYSTEM',
     afterSnapshot: { decision: 'MANUAL_REVIEW', state: 'MANUAL_REVIEW' },
+  });
+  // Transactional Outbox only — no Telegram/control-center dependency here.
+  await insertWithdrawalOutboxEvent(client, {
+    aggregateType: 'withdrawal',
+    aggregateId: input.withdrawalId,
+    eventType: WITHDRAWAL_OWNER_REVIEW_REQUIRED_OUTBOX_EVENT,
+    dedupeKey: withdrawalOwnerReviewRequiredDedupeKey(input.withdrawalId, 'MANUAL_REVIEW'),
+    payload: {
+      withdrawalId: input.withdrawalId,
+      expectedState: 'MANUAL_REVIEW',
+    },
   });
   return { decision: 'MANUAL_REVIEW', state: 'MANUAL_REVIEW' };
 }

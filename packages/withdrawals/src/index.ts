@@ -28,13 +28,16 @@ export { insertWithdrawalAuditLog, insertWithdrawalOutboxEvent } from './audit.j
 
 export {
   WITHDRAWAL_APPROVED_OUTBOX_EVENT,
+  WITHDRAWAL_OWNER_REVIEW_REQUIRED_OUTBOX_EVENT,
   withdrawalApprovedDedupeKey,
+  withdrawalOwnerReviewRequiredDedupeKey,
   withdrawalWorkflowId,
 } from './outbox.js';
 
 export {
   WITHDRAWAL_PAYOUT_WORKFLOW_TYPE,
   claimPendingWithdrawalApprovedEvents,
+  claimPendingOwnerReviewRequiredEvents,
   markOutboxDispatched,
   markOutboxRetry,
   startWithdrawalWorkflowFromOutbox,

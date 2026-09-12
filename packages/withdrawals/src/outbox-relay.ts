@@ -1,7 +1,7 @@
 import { WorkflowExecutionAlreadyStartedError } from '@temporalio/client';
 import type { Pool, PoolClient } from 'pg';
 
-import { WITHDRAWAL_APPROVED_OUTBOX_EVENT, withdrawalWorkflowId } from './outbox.js';
+import { WITHDRAWAL_APPROVED_OUTBOX_EVENT, WITHDRAWAL_OWNER_REVIEW_REQUIRED_OUTBOX_EVENT, withdrawalWorkflowId } from './outbox.js';
 
 export const WITHDRAWAL_PAYOUT_WORKFLOW_TYPE = 'withdrawalPayoutWorkflow' as const;
 
@@ -83,6 +83,40 @@ export async function claimPendingWithdrawalApprovedEvents(
   client: PoolClient,
   limit: number,
 ): Promise<WithdrawalApprovedOutboxEvent[]> {
+  return claimPendingOutboxEventsByType(client, WITHDRAWAL_APPROVED_OUTBOX_EVENT, limit);
+}
+
+/**
+ * Claim PENDING withdrawal.owner_review_required outbox rows and lease them
+ * (bump available_at) so concurrent pollers skip until success/retry.
+ */
+export async function claimPendingOwnerReviewRequiredEvents(
+  client: PoolClient,
+  limit: number,
+  leaseSeconds = 120,
+): Promise<WithdrawalApprovedOutboxEvent[]> {
+  const events = await claimPendingOutboxEventsByType(
+    client,
+    WITHDRAWAL_OWNER_REVIEW_REQUIRED_OUTBOX_EVENT,
+    limit,
+  );
+  const lease = Math.max(30, Math.min(600, Math.floor(leaseSeconds)));
+  for (const event of events) {
+    await client.query(
+      `UPDATE outbox_events
+       SET available_at = now() + make_interval(secs => $2::int)
+       WHERE id = $1::uuid AND status = 'PENDING'`,
+      [event.id, lease],
+    );
+  }
+  return events;
+}
+
+async function claimPendingOutboxEventsByType(
+  client: PoolClient,
+  eventType: string,
+  limit: number,
+): Promise<WithdrawalApprovedOutboxEvent[]> {
   const safeLimit = Math.max(1, Math.min(100, Math.floor(limit)));
   const result = await client.query<{
     id: string;
@@ -100,7 +134,7 @@ export async function claimPendingWithdrawalApprovedEvents(
      ORDER BY available_at ASC, created_at ASC
      LIMIT $2
      FOR UPDATE SKIP LOCKED`,
-    [WITHDRAWAL_APPROVED_OUTBOX_EVENT, safeLimit],
+    [eventType, safeLimit],
   );
   return result.rows.map((row) => ({
     id: row.id,

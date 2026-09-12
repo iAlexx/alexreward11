@@ -39,6 +39,7 @@ export {
   consumeAdminActionToken,
   validateAdminActionToken,
   markAdminActionTokenConsumed,
+  expireOpenWithdrawalDecisionTokens,
   hashActionToken,
   findAdminActionTokenByRaw,
   type IssueAdminActionTokenInput,
@@ -79,6 +80,14 @@ export {
   issueWithdrawalDecisionTokens,
   executeWithdrawalDecisionFromToken,
 } from './withdrawal-actions.js';
+export {
+  processOwnerReviewRequiredOutboxBatch,
+  type ApprovalsTelegramSender,
+  type ApprovalsTelegramSendInput,
+  type ProcessOwnerReviewRequiredBatchResult,
+  type OwnerReviewSerializationHooks,
+  type OwnerReviewOutboxEventInput,
+} from './owner-review-delivery.js';
 export {
   ownerSearchFounderMember,
   ownerGetFounderHistory,

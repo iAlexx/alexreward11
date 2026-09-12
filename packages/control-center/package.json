@@ -14,7 +14,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src test",
     "test": "vitest run --passWithNoTests",
-    "test:phase8": "cross-env PHASE8_CONTROL_CENTER_TESTS=1 vitest run --fileParallelism=false test/phase8-migration.test.ts test/phase8-action-tokens.test.ts test/phase8-withdrawal-telegram.test.ts test/phase8-review-queue.test.ts test/phase8-founder-admin.test.ts test/phase8-topics-publications.test.ts test/phase8-config.test.ts test/phase8-boundary.test.ts"
+    "test:phase8": "cross-env PHASE8_CONTROL_CENTER_TESTS=1 vitest run --fileParallelism=false test/phase8-migration.test.ts test/phase8-action-tokens.test.ts test/phase8-withdrawal-telegram.test.ts test/phase8-review-queue.test.ts test/phase8-founder-admin.test.ts test/phase8-topics-publications.test.ts test/phase8-config.test.ts test/phase8-boundary.test.ts test/phase8-owner-review-delivery.test.ts"
   },
   "dependencies": {
     "@alex-rewards/auth": "workspace:*",

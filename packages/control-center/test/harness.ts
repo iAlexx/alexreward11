@@ -27,6 +27,8 @@ import {
   type ControlCenterRuntimeConfig,
 } from '../src/index.js';
 
+export { upsertTestDestination };
+
 const explicitUrl = process.env.PHASE8_DATABASE_URL ?? '';
 const optedInUrl =
   process.env.PHASE8_CONTROL_CENTER_TESTS === '1' ? (process.env.DATABASE_URL ?? '') : '';

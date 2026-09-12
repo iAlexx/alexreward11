@@ -6,10 +6,15 @@ import { loadBotConfig } from '@alex-rewards/config';
 import {
   controlCenterConfigFromBot,
   handleControlCenterCallback,
+  processOwnerReviewRequiredOutboxBatch,
 } from '@alex-rewards/control-center';
 import { HEALTH_CONTRACT_VERSION, type HealthResponse } from '@alex-rewards/contracts';
 import { createShutdownCoordinator, initializeObservability } from '@alex-rewards/observability';
 import { withdrawalEngineConfigFromValidatedApi } from '@alex-rewards/withdrawals';
+
+import { createGrammyApprovalsSender } from './approvals-telegram-sender.js';
+
+const OWNER_REVIEW_POLL_INTERVAL_MS = 2_000;
 
 const config = loadBotConfig();
 const observability = await initializeObservability({
@@ -29,6 +34,8 @@ const server = Fastify({
 let bot: Bot | undefined;
 let pool: Pool | undefined;
 let ready = config.BOT_TRANSPORT_MODE === 'disabled';
+let ownerReviewPollTimer: ReturnType<typeof setInterval> | undefined;
+let ownerReviewPollInFlight = false;
 
 const controlCenterConfig = controlCenterConfigFromBot(config);
 const withdrawalEngineConfig = withdrawalEngineConfigFromValidatedApi({
@@ -63,6 +70,7 @@ try {
     }
     pool = new Pool({ connectionString: config.DATABASE_URL });
     bot = new Bot(config.TELEGRAM_BOT_TOKEN);
+    const approvalsSender = createGrammyApprovalsSender(bot.api);
     bot.on('callback_query:data', async (ctx) => {
       const data = ctx.callbackQuery.data;
       const fromId = ctx.from?.id;
@@ -108,6 +116,23 @@ try {
         ready = false;
         observability.logger.error({ err: error }, 'telegram polling stopped unexpectedly');
       });
+
+    ownerReviewPollTimer = setInterval(() => {
+      if (ownerReviewPollInFlight || pool === undefined) return;
+      ownerReviewPollInFlight = true;
+      void processOwnerReviewRequiredOutboxBatch(
+        pool,
+        controlCenterConfig,
+        withdrawalEngineConfig,
+        approvalsSender,
+      )
+        .catch((error: unknown) => {
+          observability.logger.warn({ err: error }, 'owner review outbox delivery batch failed');
+        })
+        .finally(() => {
+          ownerReviewPollInFlight = false;
+        });
+    }, OWNER_REVIEW_POLL_INTERVAL_MS);
   }
   observability.logger.info(
     { port: config.BOT_PORT, transport: config.BOT_TRANSPORT_MODE },
@@ -122,6 +147,9 @@ try {
 const shutdown = createShutdownCoordinator(observability.logger, 'bot', [
   () => {
     ready = false;
+  },
+  () => {
+    if (ownerReviewPollTimer !== undefined) clearInterval(ownerReviewPollTimer);
   },
   async () => {
     if (bot?.isRunning()) await bot.stop();

@@ -1,4 +1,4 @@
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import {
   decideWithdrawal,
   type WithdrawalDecision,
@@ -9,6 +9,7 @@ import {
   issueAdminActionToken,
   markAdminActionTokenConsumed,
   validateAdminActionToken,
+  expireOpenWithdrawalDecisionTokens,
 } from './action-tokens.js';
 import { authorizeOwnerAction } from './authorize.js';
 import type { ControlCenterRuntimeConfig } from './config.js';
@@ -23,7 +24,7 @@ import {
   type WithdrawalTelegramDecision,
 } from './types.js';
 
-type Db = Pool;
+type Db = Pool | PoolClient;
 
 function truncateWallet(address: string | null | undefined): string | null {
   if (address === undefined || address === null || address.length < 10) return address ?? null;
@@ -131,24 +132,45 @@ export async function buildWithdrawalApprovalsCard(
 }
 
 export async function issueWithdrawalDecisionTokens(
-  pool: Pool,
+  db: Db,
   config: ControlCenterRuntimeConfig,
   input: {
     readonly adminUserId: string;
     readonly withdrawalId: string;
     readonly expectedState: string;
     readonly environment: ControlCenterEnvironment;
+    /**
+     * When provided, skip destination resolve (caller already authorized against it).
+     */
+    readonly destination?: {
+      readonly id: string;
+      readonly chatId: string;
+      readonly topicThreadId: string | null;
+    };
+    /**
+     * When false, caller already ensured the Approvals publication under lock.
+     * Default true preserves prior enqueue behavior for direct callers/tests.
+     */
+    readonly ensurePublication?: boolean;
   },
-): Promise<ReadonlyArray<{ decision: WithdrawalTelegramDecision; rawToken: string }>> {
-  const destination = await resolveDestination(pool, {
-    environment: input.environment,
-    purpose: 'CONTROL_CENTER_APPROVALS',
-  });
+): Promise<
+  ReadonlyArray<{ decision: WithdrawalTelegramDecision; rawToken: string; tokenId: string }>
+> {
+  const destination =
+    input.destination ??
+    (await resolveDestination(db, {
+      environment: input.environment,
+      purpose: 'CONTROL_CENTER_APPROVALS',
+    }));
   const decisions: WithdrawalTelegramDecision[] = ['APPROVE', 'HOLD', 'REJECT'];
-  const issued: Array<{ decision: WithdrawalTelegramDecision; rawToken: string }> = [];
+  const issued: Array<{
+    decision: WithdrawalTelegramDecision;
+    rawToken: string;
+    tokenId: string;
+  }> = [];
   for (const decision of decisions) {
     const actionType = WITHDRAWAL_ACTION_TYPES[decision];
-    const { rawToken } = await issueAdminActionToken(pool, config, {
+    const { rawToken, token } = await issueAdminActionToken(db, config, {
       adminUserId: input.adminUserId,
       actionType,
       resourceType: 'withdrawal',
@@ -159,10 +181,10 @@ export async function issueWithdrawalDecisionTokens(
       boundTopicThreadId: destination.topicThreadId,
       requiresSecondConfirmation: false,
     });
-    issued.push({ decision, rawToken });
+    issued.push({ decision, rawToken, tokenId: token.id });
   }
 
-  await ensureReviewCase(pool, {
+  await ensureReviewCase(db, {
     caseType: 'WITHDRAWAL_REVIEW',
     resourceType: 'withdrawal',
     resourceId: input.withdrawalId,
@@ -170,12 +192,14 @@ export async function issueWithdrawalDecisionTokens(
     adminUserId: input.adminUserId,
   });
 
-  await enqueueTelegramPublication(pool, {
-    destinationId: destination.id,
-    subjectType: 'withdrawal',
-    subjectId: input.withdrawalId,
-    messageKind: 'approvals_card',
-  });
+  if (input.ensurePublication !== false) {
+    await enqueueTelegramPublication(db, {
+      destinationId: destination.id,
+      subjectType: 'withdrawal',
+      subjectId: input.withdrawalId,
+      messageKind: 'approvals_card',
+    });
+  }
 
   return issued;
 }
@@ -273,6 +297,15 @@ export async function executeWithdrawalDecisionFromToken(
   await markAdminActionTokenConsumed(pool, {
     tokenId: token.id,
     adminUserId: owner.adminUserId,
+  });
+
+  // Sibling Approve/Hold/Reject buttons must no longer be actionable.
+  await expireOpenWithdrawalDecisionTokens(pool, {
+    withdrawalId: token.resourceId,
+    expectedState: token.expectedState,
+    adminUserId: owner.adminUserId,
+    destinationId: token.destinationId,
+    excludeTokenId: token.id,
   });
 
   const review = await ensureReviewCase(pool, {
