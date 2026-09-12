@@ -38,14 +38,10 @@ export interface SignerRouteDeps {
   readonly runtime: SignerRuntimeConfig;
 }
 
-function isLoopback(address: string | undefined): boolean {
-  if (address === undefined) return false;
-  return (
-    address === '127.0.0.1' ||
-    address === '::1' ||
-    address === '::ffff:127.0.0.1' ||
-    address.endsWith('127.0.0.1')
-  );
+/** Strict loopback allowlist for /v1/local-unlock and /v1/local-relock peer checks. */
+export function isLoopback(address: string | undefined): boolean {
+  if (address === undefined || address === '') return false;
+  return address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1';
 }
 
 export async function registerSignerRoutes(

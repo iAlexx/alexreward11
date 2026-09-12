@@ -269,6 +269,9 @@ services:
       <<: *runtime-env
       SIGNER_PORT: 3005
       SIGNER_SERVICE_TOKEN: ${SIGNER_SERVICE_TOKEN:?SIGNER_SERVICE_TOKEN is required}
+      # Required inside Docker: published ports cannot reach a process bound only to 127.0.0.1.
+      # Unlock remains restricted to loopback clients in apps/signer.
+      SIGNER_LISTEN_HOST: 0.0.0.0
       # Pass through Phase 9 self-hosted encrypted custody config (no local_ephemeral fallback).
       SIGNER_KEY_MODE: ${SIGNER_KEY_MODE:?SIGNER_KEY_MODE is required}
       SIGNER_EXPECTED_SIGNER_REFERENCE: ${SIGNER_EXPECTED_SIGNER_REFERENCE:?SIGNER_EXPECTED_SIGNER_REFERENCE is required}
@@ -290,12 +293,13 @@ services:
     ports:
       - 127.0.0.1:3005:3005
     healthcheck:
+      # Use /health/live: /health/ready intentionally returns 503 while custody is LOCKED.
       test:
         [
           CMD,
           node,
           -e,
-          "fetch('http://localhost:3005/health/ready').then(r=>{if(!r.ok)process.exit(1)})",
+          "fetch('http://localhost:3005/health/live').then(r=>{if(!r.ok)process.exit(1)})",
         ]
       interval: 5s
       timeout: 3s

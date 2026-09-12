@@ -56,8 +56,11 @@ try {
     lockable,
     runtime,
   });
-  // Bind loopback-only for local unlock safety when self-hosted; compose may still map host ports.
-  const host = config.SIGNER_KEY_MODE === 'self_hosted_encrypted' ? '127.0.0.1' : '0.0.0.0';
+  // self_hosted_encrypted defaults to loopback. Docker Compose sets SIGNER_LISTEN_HOST=0.0.0.0
+  // so host port publishing works; /v1/local-unlock remains loopback-client gated.
+  const host =
+    config.SIGNER_LISTEN_HOST ??
+    (config.SIGNER_KEY_MODE === 'self_hosted_encrypted' ? '127.0.0.1' : '0.0.0.0');
   await server.listen({ port: config.SIGNER_PORT, host });
   observability.logger.info(
     {

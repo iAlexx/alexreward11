@@ -375,6 +375,15 @@ const signerSchema = commonSchema
     SIGNER_WALLET_VERSION: z.literal('v5R1'),
     SIGNER_WORKCHAIN: z.coerce.number().int().min(-1).max(0).default(0),
     SIGNER_EXPECTED_ASSET_SYMBOL: z.string().min(1).max(32).default('USDT'),
+    /**
+     * Optional listen bind. self_hosted_encrypted defaults to 127.0.0.1 for bare-metal
+     * unlock safety. Docker Compose must set 0.0.0.0 so published ports work; unlock
+     * remains loopback-client gated in apps/signer.
+     */
+    SIGNER_LISTEN_HOST: z.preprocess(
+      (value) => (value === '' || value === undefined || value === null ? undefined : value),
+      z.enum(['127.0.0.1', '0.0.0.0']).optional(),
+    ),
   })
   .superRefine((value, context) => {
     for (const key of forbiddenPlaintextSignerSecrets) {

@@ -139,6 +139,24 @@ describe('environment validation', () => {
     ).toThrow(/SIGNER_KEY_PASSPHRASE/);
   });
 
+  it('accepts optional SIGNER_LISTEN_HOST for Docker-published signer ports', () => {
+    const config = loadSignerConfig({
+      ...common,
+      SIGNER_SERVICE_TOKEN: 'a-secure-local-token-that-is-long-enough',
+      SIGNER_KEY_MODE: 'self_hosted_encrypted',
+      SIGNER_KEY_BUNDLE_PATH: '/run/alex-rewards/signer/hot-wallet.enc',
+      SIGNER_LISTEN_HOST: '0.0.0.0',
+    });
+    expect(config.SIGNER_LISTEN_HOST).toBe('0.0.0.0');
+    expect(() =>
+      loadSignerConfig({
+        ...common,
+        SIGNER_SERVICE_TOKEN: 'a-secure-local-token-that-is-long-enough',
+        SIGNER_LISTEN_HOST: '1.2.3.4',
+      }),
+    ).toThrow(/SIGNER_LISTEN_HOST/);
+  });
+
   it('rejects local dependency endpoints in production', () => {
     expect(() =>
       loadApiConfig({

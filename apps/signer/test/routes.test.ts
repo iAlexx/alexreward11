@@ -4,7 +4,33 @@ import { describe, expect, it } from 'vitest';
 import { LocalEphemeralSignPort, localSigningFixtureConfig } from '@alex-rewards/signing';
 import { Pool } from 'pg';
 
-import { registerSignerRoutes } from '../src/routes.js';
+import { isLoopback, registerSignerRoutes } from '../src/routes.js';
+
+describe('isLoopback local-unlock peer allowlist', () => {
+  it('accepts only the exact loopback address forms required by the runtime', () => {
+    expect(isLoopback('127.0.0.1')).toBe(true);
+    expect(isLoopback('::1')).toBe(true);
+    expect(isLoopback('::ffff:127.0.0.1')).toBe(true);
+  });
+
+  it('rejects ordinary Docker-network peers and suffix lookalikes', () => {
+    expect(isLoopback('172.18.0.5')).toBe(false);
+    expect(isLoopback('10.0.0.12')).toBe(false);
+    expect(isLoopback('192.168.1.10')).toBe(false);
+    expect(isLoopback('attacker.example/127.0.0.1')).toBe(false);
+    expect(isLoopback('not-loopback-127.0.0.1')).toBe(false);
+    expect(isLoopback('127.0.0.1.extra')).toBe(false);
+    expect(isLoopback(' 127.0.0.1')).toBe(false);
+  });
+
+  it('rejects undefined, empty, and non-IP values', () => {
+    expect(isLoopback(undefined)).toBe(false);
+    expect(isLoopback('')).toBe(false);
+    expect(isLoopback('localhost')).toBe(false);
+    expect(isLoopback('loopback')).toBe(false);
+    expect(isLoopback('0.0.0.0')).toBe(false);
+  });
+});
 
 describe('Phase 9 signer HTTP boundary', () => {
   it('exposes health and rejects unauthenticated / generic sign routes', async () => {
