@@ -35,7 +35,7 @@ export const phase9DatabaseUrl = explicitUrl !== '' ? explicitUrl : optedInUrl;
 export const SPIKE_SEED = Buffer.alloc(32, 42);
 export const SPIKE_JETTON_WALLET =
   '0:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
-/** Must match resolveSingleTestHotWallet TEST_ONLY_FAKE% filter for quote path. */
+/** Must match resolveSinglePayoutHotWallet fake-mode TEST_ONLY_FAKE% filter for quote path. */
 export const SPIKE_SIGNER_REFERENCE = 'TEST_ONLY_FAKE_PHASE9_SPIKE';
 
 export function createPool(url: string): Pool {

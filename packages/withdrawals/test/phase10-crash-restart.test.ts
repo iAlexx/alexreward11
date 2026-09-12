@@ -15,6 +15,7 @@ import {
   createApprovedWithdrawal,
   createTestUser,
   createVerifiedPrimaryWallet,
+  ensureEncryptedPayoutHotWallet,
   phase7DatabaseUrl,
   resetAndMigrate,
   seedPhase7Base,
@@ -24,9 +25,11 @@ import {
 const PAYOUT_JETTON_WALLET = '0:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
 const RECIPIENT_RAW = '0:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 const HOT_WALLET_RAW = '0:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd';
+const ENCRYPTED_SIGNER_REF = 'phase10-crash-restart-encrypted-ref';
 const TEST_PUBLIC_KEY_HEX = '11'.repeat(32);
 const TEST_CANONICAL_HASH = '22'.repeat(32);
 const NORMALIZED_HASH = '33'.repeat(32);
+const nonFakeEngine = localWithdrawalEngineFixtureConfig({ fakeChainEnabled: false });
 
 type Scenario = {
   readonly name: string;
@@ -128,7 +131,13 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 DB crash/restart recovery', (
     assetId = base.assetId;
     networkId = base.networkId;
     adminUserId = base.adminUserId;
-    baseHotWalletId = base.hotWalletId;
+    baseHotWalletId = await ensureEncryptedPayoutHotWallet(pool, {
+      networkId,
+      address: HOT_WALLET_RAW,
+      friendlyAddress: 'EQ_phase10_crash_restart',
+      signerReference: ENCRYPTED_SIGNER_REF,
+      payoutJettonWalletAddress: PAYOUT_JETTON_WALLET,
+    });
     const asset = await pool.query<{ contract_identity: string }>(
       `SELECT contract_identity FROM assets WHERE id = $1::uuid`,
       [assetId],
@@ -193,6 +202,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 DB crash/restart recovery', (
       adminUserId,
       hotWalletId: baseHotWalletId,
       amountAtomic: '200000',
+      engineConfig: nonFakeEngine,
     });
     const withdrawal = await pool.query<{
       hot_wallet_id: string;
@@ -203,20 +213,8 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 DB crash/restart recovery', (
       [withdrawalId],
     );
     const hotWalletId = withdrawal.rows[0]!.hot_wallet_id;
+    expect(hotWalletId).toBe(baseHotWalletId);
     const netAmount = withdrawal.rows[0]!.net_amount_atomic;
-    await pool.query(
-      `UPDATE hot_wallets SET address = $2, friendly_address = $3,
-              signer_reference = $4, payout_jetton_wallet_address = $5,
-              signer_type = 'FALLBACK_ENCRYPTED'
-       WHERE id = $1::uuid`,
-      [
-        hotWalletId,
-        HOT_WALLET_RAW,
-        'EQ_phase10_crash_restart',
-        'phase10-crash-restart-signer',
-        PAYOUT_JETTON_WALLET,
-      ],
-    );
     await pool.query(
       `UPDATE withdrawals SET state = 'QUEUED', queued_at = now()
        WHERE id = $1::uuid`,
@@ -263,7 +261,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 DB crash/restart recovery', (
     const baseInput = {
       withdrawalId,
       phase10,
-      engine: localWithdrawalEngineFixtureConfig({ fakeChainEnabled: false }),
+      engine: nonFakeEngine,
       chainProvider: primary,
       secondaryChainProvider: secondary,
       signer: testSigner,

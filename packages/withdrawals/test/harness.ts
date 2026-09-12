@@ -20,6 +20,7 @@ import {
   decideWithdrawal,
   localWithdrawalEngineFixtureConfig,
   seedLockedInitialWithdrawalRules,
+  type WithdrawalEngineConfig,
 } from '../src/index.js';
 
 const explicitUrl = process.env.PHASE7_DATABASE_URL ?? '';
@@ -349,6 +350,89 @@ export async function ensureTestHotWallet(pool: Pool, networkIdArg?: string): Pr
   return id;
 }
 
+/**
+ * Ensure exactly one ACTIVE FALLBACK_ENCRYPTED payout Hot Wallet for non-fake create.
+ * Retires ACTIVE TEST_ONLY_FAKE* rows on the network so fake-mode rows cannot confuse
+ * volume assignment; does not invent TEST_ONLY_FAKE signer references.
+ */
+export async function ensureEncryptedPayoutHotWallet(
+  pool: Pool,
+  input: {
+    readonly networkId?: string;
+    readonly address: string;
+    readonly friendlyAddress: string;
+    readonly signerReference: string;
+    readonly payoutJettonWalletAddress: string;
+    readonly label?: string;
+  },
+): Promise<string> {
+  if (input.signerReference.startsWith('TEST_ONLY_FAKE')) {
+    throw new Error('encrypted payout Hot Wallet must not use TEST_ONLY_FAKE signer_reference');
+  }
+  const netId = input.networkId ?? (await tonTestnetNetworkId(pool));
+  await pool.query(
+    `UPDATE hot_wallets
+     SET status = 'RETIRED', retired_at = COALESCE(retired_at, now()), updated_at = now()
+     WHERE network_id = $1::uuid
+       AND status = 'ACTIVE'
+       AND signer_reference LIKE 'TEST_ONLY_FAKE%'`,
+    [netId],
+  );
+
+  const existing = await pool.query<{ id: string }>(
+    `SELECT id FROM hot_wallets
+     WHERE network_id = $1::uuid
+       AND status = 'ACTIVE'
+       AND signer_type = 'FALLBACK_ENCRYPTED'`,
+    [netId],
+  );
+  if (existing.rowCount !== null && existing.rowCount > 1) {
+    throw new Error('multiple ACTIVE FALLBACK_ENCRYPTED hot wallets');
+  }
+  if (existing.rows[0] !== undefined) {
+    await pool.query(
+      `UPDATE hot_wallets SET
+         address = $2,
+         friendly_address = $3,
+         signer_reference = $4,
+         payout_jetton_wallet_address = $5,
+         signer_type = 'FALLBACK_ENCRYPTED',
+         updated_at = now()
+       WHERE id = $1::uuid`,
+      [
+        existing.rows[0].id,
+        input.address,
+        input.friendlyAddress,
+        input.signerReference,
+        input.payoutJettonWalletAddress,
+      ],
+    );
+    return existing.rows[0].id;
+  }
+
+  const result = await pool.query<{ id: string }>(
+    `INSERT INTO hot_wallets (
+       network_id, address, friendly_address, wallet_version,
+       signer_type, signer_reference, status, payout_jetton_wallet_address, label
+     ) VALUES (
+       $1::uuid, $2, $3, 'v5R1',
+       'FALLBACK_ENCRYPTED', $4, 'ACTIVE', $5, $6
+     )
+     RETURNING id`,
+    [
+      netId,
+      input.address,
+      input.friendlyAddress,
+      input.signerReference,
+      input.payoutJettonWalletAddress,
+      input.label ?? 'phase10-encrypted-hot',
+    ],
+  );
+  const id = result.rows[0]?.id;
+  if (id === undefined) throw new Error('encrypted hot wallet insert failed');
+  return id;
+}
+
 /** @deprecated Prefer ensureTestHotWallet */
 export async function createTestOnlyFakeHotWallet(
   pool: Pool,
@@ -495,12 +579,13 @@ export async function quoteAndCreate(
   userId: string,
   amountAtomic: string,
   idempotencyKey: string,
+  config: WithdrawalEngineConfig = engineConfig,
 ): Promise<{ quoteId: string; withdrawalId: string; state: string }> {
-  const quote = await createWithdrawalQuote(pool, engineConfig, {
+  const quote = await createWithdrawalQuote(pool, config, {
     authenticatedUserId: userId,
     amountAtomic,
   });
-  const withdrawal = await createWithdrawalFromQuote(pool, engineConfig, {
+  const withdrawal = await createWithdrawalFromQuote(pool, config, {
     authenticatedUserId: userId,
     quoteId: quote.id,
     idempotencyKey,
@@ -517,8 +602,9 @@ export async function approveWithdrawal(
   adminId: string,
   withdrawalId: string,
   idempotencyKey?: string,
+  config: WithdrawalEngineConfig = engineConfig,
 ): Promise<void> {
-  await decideWithdrawal(pool, engineConfig, {
+  await decideWithdrawal(pool, config, {
     withdrawalId,
     expectedState: 'MANUAL_REVIEW',
     decision: 'APPROVE',
@@ -538,8 +624,11 @@ export async function createApprovedWithdrawal(
     adminUserId: string;
     hotWalletId: string;
     amountAtomic: string;
+    /** Defaults to fake-chain fixture config (Phase 7). Pass fakeChainEnabled:false for Phase 10. */
+    engineConfig?: WithdrawalEngineConfig;
   },
 ): Promise<string> {
+  const config = input.engineConfig ?? engineConfig;
   await fundUserAvailable({
     pool,
     userId: input.userId,
@@ -553,8 +642,9 @@ export async function createApprovedWithdrawal(
     input.userId,
     input.amountAtomic,
     randomUUID(),
+    config,
   );
-  await approveWithdrawal(pool, input.adminUserId, withdrawalId);
+  await approveWithdrawal(pool, input.adminUserId, withdrawalId, undefined, config);
   return withdrawalId;
 }
 

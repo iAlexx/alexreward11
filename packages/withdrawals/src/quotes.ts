@@ -12,7 +12,7 @@ import { resolvePlatformFeeDiscount, resolvePriorityReview } from './entitlement
 import { WithdrawalDomainError } from './errors.js';
 import { assertWithdrawalRequestsAllowed } from './flags.js';
 import { resolveActiveFeeRule, resolveActiveLimitRule } from './rules.js';
-import { assertWithdrawalVolumeHeadroom, resolveSingleTestHotWallet } from './volume.js';
+import { assertWithdrawalVolumeHeadroom, resolveSinglePayoutHotWallet } from './volume.js';
 import { requireEligiblePrimaryWallet } from './wallet-gate.js';
 
 export interface WithdrawalQuoteView {
@@ -112,7 +112,9 @@ export async function createWithdrawalQuote(
       );
     }
 
-    const hotWallet = await resolveSingleTestHotWallet(client, networkId);
+    const hotWallet = await resolveSinglePayoutHotWallet(client, networkId, {
+      fakeChainEnabled: config.fakeChainEnabled,
+    });
     await assertWithdrawalVolumeHeadroom(client, {
       userId: input.authenticatedUserId,
       hotWalletId: hotWallet.id,

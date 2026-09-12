@@ -74,6 +74,7 @@ export type { EligiblePrimaryWallet } from './wallet-gate.js';
 export {
   assertWithdrawalVolumeHeadroom,
   reserveWithdrawalVolume,
+  resolveSinglePayoutHotWallet,
   resolveSingleTestHotWallet,
 } from './volume.js';
 export type { VolumeScope } from './volume.js';

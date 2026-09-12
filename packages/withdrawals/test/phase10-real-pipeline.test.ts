@@ -14,6 +14,7 @@ import {
   createApprovedWithdrawal,
   createTestUser,
   createVerifiedPrimaryWallet,
+  ensureEncryptedPayoutHotWallet,
   phase7DatabaseUrl,
   resetAndMigrate,
   seedPhase7Base,
@@ -23,8 +24,10 @@ import {
 const PAYOUT_JETTON_WALLET = '0:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
 const RECIPIENT_RAW = '0:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 const HOT_WALLET_RAW = '0:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd';
+const ENCRYPTED_SIGNER_REF = 'phase10-pipeline-encrypted-ref';
 const TEST_PUBLIC_KEY_HEX = '11'.repeat(32);
 const TEST_CANONICAL_HASH = '22'.repeat(32);
+const nonFakeEngine = localWithdrawalEngineFixtureConfig({ fakeChainEnabled: false });
 
 describe('phase10 real pipeline gate (no skeleton throw)', () => {
   it('lists dual-provider Owner resources and does not use single shared API key', () => {
@@ -77,7 +80,14 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 real pipeline (db + fake prov
     assetId = base.assetId;
     networkId = base.networkId;
     adminUserId = base.adminUserId;
-    hotWalletId = base.hotWalletId;
+    // Seed encrypted payout Hot Wallet BEFORE quote/create (non-fake path).
+    hotWalletId = await ensureEncryptedPayoutHotWallet(pool, {
+      networkId,
+      address: HOT_WALLET_RAW,
+      friendlyAddress: 'EQ_phase10_test_hot',
+      signerReference: ENCRYPTED_SIGNER_REF,
+      payoutJettonWalletAddress: PAYOUT_JETTON_WALLET,
+    });
 
     const master = await pool.query<{ contract_identity: string }>(
       `SELECT contract_identity FROM assets WHERE id = $1::uuid`,
@@ -85,32 +95,6 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 real pipeline (db + fake prov
     );
     jettonMaster = master.rows[0]!.contract_identity;
   });
-
-  async function prepareHotWalletForRealSign(
-    targetHotWalletId: string = hotWalletId,
-  ): Promise<void> {
-    hotWalletId = targetHotWalletId;
-    const updated = await pool.query<{ payout_jetton_wallet_address: string | null }>(
-      `UPDATE hot_wallets SET
-         address = $2,
-         friendly_address = $3,
-         signer_reference = $4,
-         payout_jetton_wallet_address = $5,
-         signer_type = 'FALLBACK_ENCRYPTED'
-       WHERE id = $1::uuid
-       RETURNING payout_jetton_wallet_address`,
-      [
-        targetHotWalletId,
-        HOT_WALLET_RAW,
-        'EQ_phase10_test_hot',
-        'phase10-test-signer-ref',
-        PAYOUT_JETTON_WALLET,
-      ],
-    );
-    if (updated.rows[0]?.payout_jetton_wallet_address !== PAYOUT_JETTON_WALLET) {
-      throw new Error('failed to set payout_jetton_wallet_address for Phase 10 pipeline test');
-    }
-  }
 
   function createTestSigner(): RealPayoutSignerPort {
     return {
@@ -171,12 +155,13 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 real pipeline (db + fake prov
       adminUserId,
       hotWalletId,
       amountAtomic: '200000',
+      engineConfig: nonFakeEngine,
     });
     const assignedHot = await pool.query<{ hot_wallet_id: string }>(
       `SELECT hot_wallet_id::text AS hot_wallet_id FROM withdrawals WHERE id = $1::uuid`,
       [withdrawalId],
     );
-    await prepareHotWalletForRealSign(assignedHot.rows[0]!.hot_wallet_id);
+    expect(assignedHot.rows[0]!.hot_wallet_id).toBe(hotWalletId);
     await pool.query(
       `UPDATE withdrawals SET state = 'QUEUED', queued_at = now() WHERE id = $1::uuid`,
       [withdrawalId],
@@ -230,7 +215,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 real pipeline (db + fake prov
     const result = await runRealTestnetPayoutPipeline(pool, {
       withdrawalId,
       phase10,
-      engine: localWithdrawalEngineFixtureConfig({ fakeChainEnabled: false }),
+      engine: nonFakeEngine,
       chainProvider: primary,
       secondaryChainProvider: secondary,
       signer: createTestSigner(),
@@ -292,12 +277,13 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 real pipeline (db + fake prov
       adminUserId,
       hotWalletId,
       amountAtomic: '200000',
+      engineConfig: nonFakeEngine,
     });
     const assignedHot = await pool.query<{ hot_wallet_id: string }>(
       `SELECT hot_wallet_id::text AS hot_wallet_id FROM withdrawals WHERE id = $1::uuid`,
       [withdrawalId],
     );
-    await prepareHotWalletForRealSign(assignedHot.rows[0]!.hot_wallet_id);
+    expect(assignedHot.rows[0]!.hot_wallet_id).toBe(hotWalletId);
     await pool.query(
       `UPDATE withdrawals SET state = 'QUEUED', queued_at = now() WHERE id = $1::uuid`,
       [withdrawalId],
@@ -319,7 +305,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 real pipeline (db + fake prov
     const result = await runRealTestnetPayoutPipeline(pool, {
       withdrawalId,
       phase10,
-      engine: localWithdrawalEngineFixtureConfig({ fakeChainEnabled: false }),
+      engine: nonFakeEngine,
       chainProvider: primary,
       secondaryChainProvider: new FakeTonChainProvider(),
       signer: createTestSigner(),

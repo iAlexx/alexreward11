@@ -272,24 +272,59 @@ export async function reserveWithdrawalVolume(
   }
 }
 
-/** Deterministic single eligible TEST-ONLY hot wallet for the network. */
-export async function resolveSingleTestHotWallet(
+/**
+ * Resolve the single eligible payout Hot Wallet for the withdrawal network.
+ *
+ * Mode-specific and fail-closed (0 or >1 matching ACTIVE rows → CONFIG):
+ * - fakeChainEnabled=true: exactly one ACTIVE with signer_reference LIKE 'TEST_ONLY_FAKE%'
+ *   (Phase 7 fake-chain scaffolding).
+ * - fakeChainEnabled=false: exactly one ACTIVE with signer_type = 'FALLBACK_ENCRYPTED'
+ *   (Phase 9/10 self-hosted encrypted custody). Does not require TEST_ONLY_FAKE.
+ */
+export async function resolveSinglePayoutHotWallet(
   client: PoolClient,
   networkId: string,
+  options: { readonly fakeChainEnabled: boolean },
 ): Promise<{ id: string; address: string }> {
+  if (options.fakeChainEnabled) {
+    const result = await client.query<{ id: string; address: string }>(
+      `SELECT id, address FROM hot_wallets
+       WHERE network_id = $1::uuid
+         AND status = 'ACTIVE'
+         AND signer_reference LIKE 'TEST_ONLY_FAKE%'
+       FOR SHARE`,
+      [networkId],
+    );
+    if (result.rowCount === 0) {
+      throw new WithdrawalDomainError('CONFIG', 'No eligible test Hot Wallet');
+    }
+    if ((result.rowCount ?? 0) > 1) {
+      throw new WithdrawalDomainError('CONFIG', 'Ambiguous eligible test Hot Wallets');
+    }
+    return result.rows[0]!;
+  }
+
   const result = await client.query<{ id: string; address: string }>(
     `SELECT id, address FROM hot_wallets
      WHERE network_id = $1::uuid
        AND status = 'ACTIVE'
-       AND signer_reference LIKE 'TEST_ONLY_FAKE%'
+       AND signer_type = 'FALLBACK_ENCRYPTED'
      FOR SHARE`,
     [networkId],
   );
   if (result.rowCount === 0) {
-    throw new WithdrawalDomainError('CONFIG', 'No eligible test Hot Wallet');
+    throw new WithdrawalDomainError('CONFIG', 'No eligible encrypted payout Hot Wallet');
   }
   if ((result.rowCount ?? 0) > 1) {
-    throw new WithdrawalDomainError('CONFIG', 'Ambiguous eligible test Hot Wallets');
+    throw new WithdrawalDomainError('CONFIG', 'Ambiguous eligible encrypted payout Hot Wallets');
   }
   return result.rows[0]!;
+}
+
+/** @deprecated Prefer resolveSinglePayoutHotWallet({ fakeChainEnabled: true }). */
+export async function resolveSingleTestHotWallet(
+  client: PoolClient,
+  networkId: string,
+): Promise<{ id: string; address: string }> {
+  return resolveSinglePayoutHotWallet(client, networkId, { fakeChainEnabled: true });
 }

@@ -15,7 +15,7 @@ import { applyV1RiskPolicy } from './risk.js';
 import type { LimitRuleRow } from './rules.js';
 import type { WithdrawalState } from './state-machine.js';
 import { requireEligiblePrimaryWallet } from './wallet-gate.js';
-import { reserveWithdrawalVolume, resolveSingleTestHotWallet } from './volume.js';
+import { reserveWithdrawalVolume, resolveSinglePayoutHotWallet } from './volume.js';
 
 export interface WithdrawalView {
   readonly id: string;
@@ -281,7 +281,9 @@ export async function createWithdrawalFromQuote(
       );
     }
 
-    const hotWallet = await resolveSingleTestHotWallet(client, q.network_id);
+    const hotWallet = await resolveSinglePayoutHotWallet(client, q.network_id, {
+      fakeChainEnabled: config.fakeChainEnabled,
+    });
     const asOf = new Date();
 
     let w: {
