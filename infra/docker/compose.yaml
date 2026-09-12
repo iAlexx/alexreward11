@@ -263,11 +263,30 @@ services:
     <<: *app
     command: [node, apps/signer/dist/main.js]
     depends_on:
+      postgres: { condition: service_healthy }
       otel-collector: { condition: service_started }
     environment:
       <<: *runtime-env
       SIGNER_PORT: 3005
       SIGNER_SERVICE_TOKEN: ${SIGNER_SERVICE_TOKEN:?SIGNER_SERVICE_TOKEN is required}
+      # Pass through Phase 9 self-hosted encrypted custody config (no local_ephemeral fallback).
+      SIGNER_KEY_MODE: ${SIGNER_KEY_MODE:?SIGNER_KEY_MODE is required}
+      SIGNER_EXPECTED_SIGNER_REFERENCE: ${SIGNER_EXPECTED_SIGNER_REFERENCE:?SIGNER_EXPECTED_SIGNER_REFERENCE is required}
+      SIGNER_SPIKE_ENABLED: ${SIGNER_SPIKE_ENABLED:?SIGNER_SPIKE_ENABLED is required}
+      SIGNER_NETWORK_CODE: ${SIGNER_NETWORK_CODE:?SIGNER_NETWORK_CODE is required}
+      SIGNER_NETWORK_GLOBAL_ID: ${SIGNER_NETWORK_GLOBAL_ID:?SIGNER_NETWORK_GLOBAL_ID is required}
+      SIGNER_WALLET_VERSION: ${SIGNER_WALLET_VERSION:?SIGNER_WALLET_VERSION is required}
+      SIGNER_WORKCHAIN: ${SIGNER_WORKCHAIN:?SIGNER_WORKCHAIN is required}
+      SIGNER_EXPECTED_ASSET_SYMBOL: ${SIGNER_EXPECTED_ASSET_SYMBOL:?SIGNER_EXPECTED_ASSET_SYMBOL is required}
+      # Docker-network Postgres (same construction pattern as api/worker DATABASE_URL).
+      SIGNER_DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      # Host .env SIGNER_KEY_BUNDLE_PATH is the bind-mount source only; process sees the container path.
+      SIGNER_KEY_BUNDLE_PATH: /run/alex-rewards/signer/hot-wallet.enc
+    volumes:
+      - type: bind
+        source: ${SIGNER_KEY_BUNDLE_PATH:?SIGNER_KEY_BUNDLE_PATH is required}
+        target: /run/alex-rewards/signer/hot-wallet.enc
+        read_only: true
     ports:
       - 127.0.0.1:3005:3005
     healthcheck:
