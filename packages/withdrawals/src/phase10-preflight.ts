@@ -1,5 +1,6 @@
 import type { Pool, PoolClient } from 'pg';
 
+import type { Phase10LiveExternalProbeEvidence } from './phase10-live-probes.js';
 import {
   runPhase10Readiness,
   type Phase10ReadinessConfig,
@@ -7,17 +8,17 @@ import {
 } from './phase10-readiness.js';
 import {
   runPhase10RestoreReconcileScan,
+  type Phase10HistoricalBaselineInput,
   type Phase10RestoreReconcileScanReport,
 } from './phase10-restore-reconcile.js';
 
-export type Phase10PreflightVerdict =
-  | 'READY_FOR_CONTROLLED_LIVE_TESTNET'
-  | 'BLOCKED';
+export type Phase10PreflightVerdict = 'READY_FOR_CONTROLLED_LIVE_TESTNET' | 'BLOCKED';
 
 export interface Phase10PreflightReport {
   readonly verdict: Phase10PreflightVerdict;
   readonly readiness: Phase10ReadinessReport;
   readonly restore: Phase10RestoreReconcileScanReport;
+  readonly externalProbes: Phase10LiveExternalProbeEvidence | null;
   readonly intentionallySafeOff: boolean;
   readonly misconfigured: boolean;
   readonly blockers: readonly string[];
@@ -28,11 +29,21 @@ export interface Phase10PreflightInput {
   readonly readinessConfig: Phase10ReadinessConfig;
   /** When true, skip restore scan (tests / offline). Default false. */
   readonly skipRestoreScan?: boolean;
+  /**
+   * Authoritative live external probe evidence. When real chain is enabled,
+   * absence of a successful probe blocks READY (caller-injected signerLocked alone is insufficient).
+   */
+  readonly externalProbes?: Phase10LiveExternalProbeEvidence | null;
+  readonly historicalBaseline?: Phase10HistoricalBaselineInput | null;
+  readonly baselineIsolatedHistoricalAttemptIds?: readonly string[];
+  readonly liveAuthorizationWindowStartedAt?: string | Date | null;
+  readonly campaignCreatedAt?: string | Date | null;
 }
 
 /**
- * Aggregate readiness + restore scan into a controlled live Testnet preflight verdict.
- * Distinguishes intentionally-safe-off vs misconfigured. Never mutates.
+ * Aggregate readiness + restore scan + external probes into a controlled live
+ * Testnet preflight verdict. Distinguishes intentionally-safe-off vs misconfigured.
+ * Never mutates.
  */
 export async function runPhase10Preflight(
   db: Pool | PoolClient,
@@ -45,6 +56,7 @@ export async function runPhase10Preflight(
           scannedAt: new Date().toISOString(),
           dangerousCount: 0,
           warnCount: 0,
+          historicalIsolatedBaselineCount: 0,
           findings: [],
           byCategory: {
             approved_without_workflow: 0,
@@ -55,12 +67,31 @@ export async function runPhase10Preflight(
             pending_outbox_recovery: 0,
             competing_attempt_lineage: 0,
             synthetic_unknown_isolated: 0,
+            historical_isolated_baseline: 0,
           },
           autoResend: false as const,
           autoUnpause: false as const,
         }
-      : await runPhase10RestoreReconcileScan(db);
+      : await runPhase10RestoreReconcileScan(db, {
+          ...(input.historicalBaseline !== undefined
+            ? { historicalBaseline: input.historicalBaseline }
+            : {}),
+          ...(input.baselineIsolatedHistoricalAttemptIds !== undefined
+            ? {
+                baselineIsolatedHistoricalAttemptIds: input.baselineIsolatedHistoricalAttemptIds,
+              }
+            : {}),
+          ...(input.liveAuthorizationWindowStartedAt !== undefined
+            ? {
+                liveAuthorizationWindowStartedAt: input.liveAuthorizationWindowStartedAt,
+              }
+            : {}),
+          ...(input.campaignCreatedAt !== undefined
+            ? { campaignCreatedAt: input.campaignCreatedAt }
+            : {}),
+        });
 
+  const probes = input.externalProbes ?? null;
   const intentionallySafeOff = readiness.items.some(
     (i) => i.classification === 'intentionally_safe_off',
   );
@@ -82,11 +113,15 @@ export async function runPhase10Preflight(
   for (const finding of restore.findings) {
     if (finding.severity === 'WARN') {
       warnings.push(`restore:${finding.category}: ${finding.message}`);
+    } else if (finding.severity === 'INFO') {
+      warnings.push(`restore:${finding.category}: ${finding.message}`);
     }
   }
 
   if (!input.readinessConfig.realChainEnabled) {
-    blockers.push('WITHDRAWAL_REAL_CHAIN_ENABLED is false (intentionally disabled for live Testnet)');
+    blockers.push(
+      'WITHDRAWAL_REAL_CHAIN_ENABLED is false (intentionally disabled for live Testnet)',
+    );
   }
   if (input.readinessConfig.fakeChainEnabled) {
     blockers.push('WITHDRAWAL_FAKE_CHAIN_ENABLED must be false for controlled live Testnet');
@@ -99,13 +134,39 @@ export async function runPhase10Preflight(
     if (controlled === null) {
       blockers.push('CONTROLLED_USER: controlled user id not provided');
     }
-    if (input.readinessConfig.signerLocked !== false) {
+
+    // Authoritative probes required — caller-injected signerLocked alone is insufficient.
+    if (probes === null) {
       blockers.push(
-        input.readinessConfig.signerLocked === true
-          ? 'SIGNER_LOCKED: signer reported LOCKED'
-          : 'SIGNER_LOCKED: signer lock state unknown / not probed',
+        'EXTERNAL_PROBES_REQUIRED: live preflight requires authoritative provider+signer probes',
       );
+    } else {
+      if (probes.overallBlocked || probes.blockers.length > 0) {
+        for (const b of probes.blockers) blockers.push(`probe:${b}`);
+      }
+      if (!probes.signer.probePerformed) {
+        blockers.push('SIGNER_PROBE_REQUIRED: signer must be probed (not inferred from env)');
+      } else if (!probes.signer.signingReady) {
+        blockers.push(`SIGNER_NOT_READY: custodyState=${probes.signer.custodyState ?? 'unknown'}`);
+      }
+      if (!probes.primary.healthy) {
+        blockers.push('PRIMARY_PROVIDER_UNHEALTHY');
+      }
+      if (!probes.secondary.healthy) {
+        blockers.push('SECONDARY_PROVIDER_UNHEALTHY');
+      }
+      if (!probes.providerIndependence.proven) {
+        blockers.push(
+          `PROVIDER_INDEPENDENCE_UNPROVEN: ${probes.providerIndependence.reason ?? 'unproven'}`,
+        );
+      }
     }
+
+    // Still refuse if readiness reported locked even when probes somehow omitted.
+    if (input.readinessConfig.signerLocked === true) {
+      blockers.push('SIGNER_LOCKED: signer reported LOCKED');
+    }
+
     for (const item of readiness.items) {
       if (
         item.status === 'WARN' &&
@@ -125,12 +186,20 @@ export async function runPhase10Preflight(
     readiness.overall !== 'BLOCKED' &&
     restore.dangerousCount === 0 &&
     input.readinessConfig.realChainEnabled === true &&
-    input.readinessConfig.fakeChainEnabled === false;
+    input.readinessConfig.fakeChainEnabled === false &&
+    (probes === null
+      ? input.readinessConfig.realChainEnabled !== true
+      : probes.signer.probePerformed &&
+        probes.signer.signingReady &&
+        probes.primary.healthy &&
+        probes.secondary.healthy &&
+        probes.providerIndependence.proven);
 
   return {
     verdict: ready ? 'READY_FOR_CONTROLLED_LIVE_TESTNET' : 'BLOCKED',
     readiness,
     restore,
+    externalProbes: probes,
     intentionallySafeOff,
     misconfigured,
     blockers,

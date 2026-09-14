@@ -25,8 +25,7 @@ export const PHASE10_PROVISION_AUDIT_ACTION = 'OWNER_TESTNET_AVAILABLE_PROVISION
 export const PHASE10_REVERSE_AUDIT_ACTION = 'OWNER_TESTNET_AVAILABLE_PROVISION_REVERSE';
 export const PHASE10_PROVISION_TOOL_VERSION = '1.0.0-phase10';
 
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export interface Phase10TestnetProvisionRuntimeConfig {
   readonly enabled: boolean;
@@ -112,16 +111,12 @@ function assertFeatureAndEnv(config: Phase10TestnetProvisionRuntimeConfig): void
     );
   }
   if (config.withdrawalNetworkCode !== 'TON_TESTNET') {
-    throw new LedgerDomainError(
-      'VALIDATION',
-      'withdrawal network must be exactly TON_TESTNET',
-      {
-        details: {
-          reason: 'NETWORK_CODE_MISMATCH',
-          configured: config.withdrawalNetworkCode,
-        },
+    throw new LedgerDomainError('VALIDATION', 'withdrawal network must be exactly TON_TESTNET', {
+      details: {
+        reason: 'NETWORK_CODE_MISMATCH',
+        configured: config.withdrawalNetworkCode,
       },
-    );
+    });
   }
   if (config.withdrawalAssetSymbol !== 'USDT') {
     throw new LedgerDomainError('VALIDATION', 'withdrawal asset must be exactly USDT', {
@@ -212,7 +207,11 @@ async function resolveTestnetUsdt(
     });
   }
   const gci = (net.global_chain_identifier ?? '').trim();
-  if (gci === '-239' || gci.toLowerCase().includes('mainnet') || net.code.toUpperCase().includes('MAINNET')) {
+  if (
+    gci === '-239' ||
+    gci.toLowerCase().includes('mainnet') ||
+    net.code.toUpperCase().includes('MAINNET')
+  ) {
     throw new LedgerDomainError('VALIDATION', 'Mainnet network identity is forbidden', {
       details: { reason: 'MAINNET_FORBIDDEN', globalChainIdentifier: gci, code: net.code },
     });
@@ -325,9 +324,7 @@ async function assertTargetUserForReverse(
   return user.rows[0].id;
 }
 
-function readProvisionIntent(
-  metadata: unknown,
-): Phase10ProvisionIntent | null {
+function readProvisionIntent(metadata: unknown): Phase10ProvisionIntent | null {
   if (metadata === null || typeof metadata !== 'object') return null;
   const root = metadata as Record<string, unknown>;
   const intent = root.phase10ProvisionIntent;
@@ -353,7 +350,10 @@ function readProvisionIntent(
   };
 }
 
-function assertIntentMatch(expected: Phase10ProvisionIntent, stored: Phase10ProvisionIntent | null): void {
+function assertIntentMatch(
+  expected: Phase10ProvisionIntent,
+  stored: Phase10ProvisionIntent | null,
+): void {
   if (stored === null) {
     throw new LedgerDomainError(
       'IDEMPOTENCY_CONFLICT',
@@ -567,9 +567,13 @@ export async function reversePhase10TestnetAvailableProvision(
     );
     const orig = original.rows[0];
     if (orig === undefined) {
-      throw new LedgerDomainError('TRANSACTION_NOT_FOUND', 'Original provision transaction not found', {
-        details: { originalLedgerTransactionId: originalId },
-      });
+      throw new LedgerDomainError(
+        'TRANSACTION_NOT_FOUND',
+        'Original provision transaction not found',
+        {
+          details: { originalLedgerTransactionId: originalId },
+        },
+      );
     }
     if (orig.transaction_type !== 'SUPPORT_ADJUSTMENT') {
       throw new LedgerDomainError('VALIDATION', 'original is not SUPPORT_ADJUSTMENT', {

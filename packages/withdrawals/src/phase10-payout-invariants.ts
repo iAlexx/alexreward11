@@ -28,7 +28,10 @@ const STATES_REQUIRING_CHAIN_PROOF = new Set([
   'RECONCILE_REQUIRED',
 ]);
 
-async function withClient<T>(db: Pool | PoolClient, fn: (client: PoolClient) => Promise<T>): Promise<T> {
+async function withClient<T>(
+  db: Pool | PoolClient,
+  fn: (client: PoolClient) => Promise<T>,
+): Promise<T> {
   if (!isPool(db)) return fn(db);
   const client = await db.connect();
   try {
@@ -111,18 +114,8 @@ export function isCompleteIntendedPayoutProof(
   const withdrawalId = readString(record, 'withdrawalId', 'withdrawal_id');
   const attemptId = readString(record, 'attemptId', 'attempt_id');
   const queryId = readString(record, 'queryId', 'query_id');
-  const recipient = readString(
-    record,
-    'recipient',
-    'expectedRecipient',
-    'observed_recipient',
-  );
-  const amount = readString(
-    record,
-    'amountAtomic',
-    'expectedAmountAtomic',
-    'amount_atomic',
-  );
+  const recipient = readString(record, 'recipient', 'expectedRecipient', 'observed_recipient');
+  const amount = readString(record, 'amountAtomic', 'expectedAmountAtomic', 'amount_atomic');
   const jettonMaster = readString(record, 'jettonMaster', 'jetton_master');
   const hotWallet = readString(record, 'hotWallet', 'hot_wallet');
   const senderJetton = readString(record, 'senderJettonWallet', 'sender_jetton_wallet');
@@ -473,7 +466,9 @@ export async function checkPhase10PayoutInvariants(
 
     const submitted = attempts.rows.filter((a) => a.broadcast_submitted_at !== null);
     const unresolvedSubmitted = submitted.filter((a) =>
-      ['UNKNOWN', 'RECONCILE_REQUIRED', 'BROADCASTED', 'PENDING'].includes(a.broadcast_result_state),
+      ['UNKNOWN', 'RECONCILE_REQUIRED', 'BROADCASTED', 'PENDING'].includes(
+        a.broadcast_result_state,
+      ),
     );
     let blindResend = false;
     if (submitted.length > 1) {
@@ -534,10 +529,9 @@ export async function checkPhase10PayoutInvariants(
     const hotRow = await client.query<{
       address: string;
       payout_jetton_wallet_address: string | null;
-    }>(
-      `SELECT address, payout_jetton_wallet_address FROM hot_wallets WHERE id = $1::uuid`,
-      [row.hot_wallet_id],
-    );
+    }>(`SELECT address, payout_jetton_wallet_address FROM hot_wallets WHERE id = $1::uuid`, [
+      row.hot_wallet_id,
+    ]);
     const assetRow = await client.query<{ contract_identity: string | null }>(
       `SELECT contract_identity FROM assets WHERE id = $1::uuid`,
       [row.asset_id],
@@ -642,8 +636,7 @@ export async function checkPhase10PayoutInvariants(
         findings.push({
           code: 'CHAIN_PROOF',
           severity: 'PASS',
-          message:
-            'complete INTENDED_PAYOUT_PROVEN TEP-74 evidence present with field binding',
+          message: 'complete INTENDED_PAYOUT_PROVEN TEP-74 evidence present with field binding',
           details: {
             proofIds: completeProofs.map((p) => p.id),
             blockchainTransactionsCount: blockchainTxCount,

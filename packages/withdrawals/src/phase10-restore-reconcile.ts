@@ -11,7 +11,8 @@ export type Phase10RestoreFindingCategory =
   | 'settlement_state_mismatch'
   | 'pending_outbox_recovery'
   | 'competing_attempt_lineage'
-  | 'synthetic_unknown_isolated';
+  | 'synthetic_unknown_isolated'
+  | 'historical_isolated_baseline';
 
 export interface Phase10RestoreFinding {
   readonly category: Phase10RestoreFindingCategory;
@@ -23,10 +24,35 @@ export interface Phase10RestoreFinding {
   readonly details?: Readonly<Record<string, unknown>>;
 }
 
+export interface Phase10HistoricalBaselineAttemptState {
+  readonly broadcastResultState: string;
+}
+
+/**
+ * Authoritative baseline of historical ambiguous attempts captured BEFORE the
+ * controlled campaign / live authorization window. Never uses hardcoded public IDs.
+ */
+export interface Phase10HistoricalBaselineInput {
+  readonly attemptIds: readonly string[];
+  /** ISO timestamp — attempts must predate this window. */
+  readonly capturedAt: string;
+  /** Optional per-attempt state snapshot; when present, current state must match. */
+  readonly attemptStates?: Readonly<Record<string, Phase10HistoricalBaselineAttemptState>>;
+}
+
+export interface Phase10RestoreReconcileScanOptions {
+  readonly baselineIsolatedHistoricalAttemptIds?: readonly string[];
+  readonly historicalBaseline?: Phase10HistoricalBaselineInput | null;
+  /** Campaign / live window start — attempts must predate this when baseline-tolerated. */
+  readonly liveAuthorizationWindowStartedAt?: string | Date | null;
+  readonly campaignCreatedAt?: string | Date | null;
+}
+
 export interface Phase10RestoreReconcileScanReport {
   readonly scannedAt: string;
   readonly dangerousCount: number;
   readonly warnCount: number;
+  readonly historicalIsolatedBaselineCount: number;
   readonly findings: readonly Phase10RestoreFinding[];
   readonly byCategory: Readonly<Record<Phase10RestoreFindingCategory, number>>;
   /** Always false — this scanner never auto-resends or unpauses. */
@@ -44,10 +70,50 @@ function emptyCounts(): Record<Phase10RestoreFindingCategory, number> {
     pending_outbox_recovery: 0,
     competing_attempt_lineage: 0,
     synthetic_unknown_isolated: 0,
+    historical_isolated_baseline: 0,
   };
 }
 
-async function withClient<T>(db: Pool | PoolClient, fn: (client: PoolClient) => Promise<T>): Promise<T> {
+function parseIsoMs(value: string | Date | null | undefined): number | null {
+  if (value === null || value === undefined) return null;
+  if (value instanceof Date) {
+    const ms = value.getTime();
+    return Number.isFinite(ms) ? ms : null;
+  }
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function resolveBaseline(options: Phase10RestoreReconcileScanOptions | undefined): {
+  readonly ids: ReadonlySet<string>;
+  readonly capturedAtMs: number | null;
+  readonly windowStartMs: number | null;
+  readonly attemptStates: Readonly<Record<string, Phase10HistoricalBaselineAttemptState>>;
+} {
+  const baseline = options?.historicalBaseline ?? null;
+  const ids = new Set<string>(
+    [
+      ...(baseline?.attemptIds ?? []),
+      ...(options?.baselineIsolatedHistoricalAttemptIds ?? []),
+    ].filter((id) => typeof id === 'string' && id.trim() !== ''),
+  );
+  const capturedAtMs = parseIsoMs(baseline?.capturedAt ?? null);
+  const windowStartMs =
+    parseIsoMs(options?.liveAuthorizationWindowStartedAt) ??
+    parseIsoMs(options?.campaignCreatedAt) ??
+    capturedAtMs;
+  return {
+    ids,
+    capturedAtMs,
+    windowStartMs,
+    attemptStates: baseline?.attemptStates ?? {},
+  };
+}
+
+async function withClient<T>(
+  db: Pool | PoolClient,
+  fn: (client: PoolClient) => Promise<T>,
+): Promise<T> {
   if (!isPool(db)) return fn(db);
   const client = await db.connect();
   try {
@@ -63,10 +129,12 @@ async function withClient<T>(db: Pool | PoolClient, fn: (client: PoolClient) => 
  */
 export async function runPhase10RestoreReconcileScan(
   db: Pool | PoolClient,
+  options: Phase10RestoreReconcileScanOptions = {},
 ): Promise<Phase10RestoreReconcileScanReport> {
   return withClient(db, async (client) => {
     const findings: Phase10RestoreFinding[] = [];
     const byCategory = emptyCounts();
+    const baseline = resolveBaseline(options);
 
     const push = (finding: Phase10RestoreFinding): void => {
       findings.push(finding);
@@ -176,17 +244,79 @@ export async function runPhase10RestoreReconcileScan(
       broadcast_result_state: string;
       broadcast_submitted_at: Date | null;
       broadcast_ambiguity_class: string | null;
+      attempt_created_at: Date;
+      has_pending_outbox: boolean;
+      newer_attempt_count: number;
     }>(
       `SELECT a.id, a.withdrawal_id, w.public_id,
               a.broadcast_result_state::text AS broadcast_result_state,
-              a.broadcast_submitted_at, a.broadcast_ambiguity_class
+              a.broadcast_submitted_at, a.broadcast_ambiguity_class,
+              a.created_at AS attempt_created_at,
+              EXISTS (
+                SELECT 1 FROM outbox_events o
+                WHERE o.event_type = $1
+                  AND o.status = 'PENDING'
+                  AND (o.aggregate_id = a.withdrawal_id
+                       OR (o.payload->>'withdrawalId') = a.withdrawal_id::text)
+              ) AS has_pending_outbox,
+              (
+                SELECT count(*)::int FROM withdrawal_attempts a2
+                WHERE a2.withdrawal_id = a.withdrawal_id
+                  AND a2.id <> a.id
+                  AND a2.created_at > a.created_at
+              ) AS newer_attempt_count
        FROM withdrawal_attempts a
        JOIN withdrawals w ON w.id = a.withdrawal_id
        WHERE a.broadcast_submitted_at IS NOT NULL
          AND a.broadcast_result_state IN ('UNKNOWN', 'RECONCILE_REQUIRED', 'BROADCASTED', 'PENDING')
          AND w.state NOT IN ('CONFIRMED', 'REJECTED', 'FAILED_PRE_BROADCAST')`,
+      [WITHDRAWAL_APPROVED_OUTBOX_EVENT],
     );
     for (const row of submittedUnknown.rows) {
+      const inBaseline = baseline.ids.has(row.id);
+      const attemptMs = (row.broadcast_submitted_at ?? row.attempt_created_at).getTime();
+      const predatesWindow =
+        baseline.windowStartMs !== null && Number.isFinite(attemptMs)
+          ? attemptMs < baseline.windowStartMs
+          : false;
+      const expectedState = baseline.attemptStates[row.id];
+      const stateUnchanged =
+        expectedState === undefined ||
+        expectedState.broadcastResultState === row.broadcast_result_state;
+      const noResendPath = !row.has_pending_outbox;
+      const noNewerLineage = row.newer_attempt_count === 0;
+
+      if (inBaseline && predatesWindow && noResendPath && noNewerLineage && stateUnchanged) {
+        push({
+          category: 'historical_isolated_baseline',
+          severity: 'WARN',
+          withdrawalId: row.withdrawal_id,
+          publicId: row.public_id,
+          attemptId: row.id,
+          message:
+            'HISTORICAL_ISOLATED_BASELINE: ambiguous attempt authoritatively isolated from new campaign danger',
+          details: {
+            historicalIsolatedBaseline: true,
+            classification: 'HISTORICAL_ISOLATED_BASELINE',
+            broadcastResultState: row.broadcast_result_state,
+            ambiguityClass: row.broadcast_ambiguity_class,
+            predatesWindow: true,
+            pendingApprovedOutbox: false,
+            newerAttemptCount: 0,
+          },
+        });
+        continue;
+      }
+
+      // Baseline claimed but isolation invariants failed → remain DANGER.
+      const baselineFailureReasons: string[] = [];
+      if (inBaseline) {
+        if (!predatesWindow) baselineFailureReasons.push('does_not_predate_window');
+        if (!noResendPath) baselineFailureReasons.push('pending_approved_outbox');
+        if (!noNewerLineage) baselineFailureReasons.push('newer_attempt_lineage');
+        if (!stateUnchanged) baselineFailureReasons.push('state_changed_from_baseline');
+      }
+
       push({
         category: 'submitted_unknown_need_chain',
         severity: 'DANGER',
@@ -197,6 +327,10 @@ export async function runPhase10RestoreReconcileScan(
         details: {
           broadcastResultState: row.broadcast_result_state,
           ambiguityClass: row.broadcast_ambiguity_class,
+          inBaseline,
+          baselineFailureReasons,
+          hasPendingOutbox: row.has_pending_outbox,
+          newerAttemptCount: row.newer_attempt_count,
         },
       });
     }
@@ -265,7 +399,8 @@ export async function runPhase10RestoreReconcileScan(
         withdrawalId,
         publicId: null,
         attemptId: null,
-        message: 'PENDING withdrawal.approved outbox requires Owner-gated recovery (never auto-resend)',
+        message:
+          'PENDING withdrawal.approved outbox requires Owner-gated recovery (never auto-resend)',
         details: { outboxId: row.id, attempts: row.attempts },
       });
     }
@@ -332,6 +467,9 @@ export async function runPhase10RestoreReconcileScan(
       scannedAt: new Date().toISOString(),
       dangerousCount: findings.filter((f) => f.severity === 'DANGER').length,
       warnCount: findings.filter((f) => f.severity === 'WARN').length,
+      historicalIsolatedBaselineCount: findings.filter(
+        (f) => f.category === 'historical_isolated_baseline',
+      ).length,
       findings,
       byCategory,
       autoResend: false,

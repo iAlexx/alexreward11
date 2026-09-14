@@ -34,9 +34,7 @@ export type HotWalletDispatchLeaseAcquireResult =
     };
 
 export type HotWalletDispatchReleaseReason =
-  | 'FAILED_PRE_BROADCAST'
-  | 'DEFINITIVE_NONPAYMENT'
-  | 'CONFIRMED_SETTLED';
+  'FAILED_PRE_BROADCAST' | 'DEFINITIVE_NONPAYMENT' | 'CONFIRMED_SETTLED';
 
 const DEFAULT_LEASE_MS = 120_000;
 

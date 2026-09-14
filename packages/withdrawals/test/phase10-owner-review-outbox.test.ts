@@ -51,12 +51,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 owner-review Outbox on MANUAL
       amountAtomic: '5000000',
       key: randomUUID(),
     });
-    const { withdrawalId, state } = await quoteAndCreate(
-      pool,
-      userId,
-      '200000',
-      randomUUID(),
-    );
+    const { withdrawalId, state } = await quoteAndCreate(pool, userId, '200000', randomUUID());
     expect(state).toBe('MANUAL_REVIEW');
 
     const rows = await pool.query<{
@@ -111,10 +106,9 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 owner-review Outbox on MANUAL
 
   it('RESTRICTED → HELD does not emit owner_review_required', async () => {
     const userId = await createTestUser(pool, '9503');
-    await pool.query(
-      `UPDATE users SET withdrawal_status = 'RESTRICTED' WHERE id = $1::uuid`,
-      [userId],
-    );
+    await pool.query(`UPDATE users SET withdrawal_status = 'RESTRICTED' WHERE id = $1::uuid`, [
+      userId,
+    ]);
     await createVerifiedPrimaryWallet(pool, { userId, networkId });
     await fundUserAvailable({
       pool,
@@ -123,12 +117,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 owner-review Outbox on MANUAL
       amountAtomic: '5000000',
       key: randomUUID(),
     });
-    const { withdrawalId, state } = await quoteAndCreate(
-      pool,
-      userId,
-      '200000',
-      randomUUID(),
-    );
+    const { withdrawalId, state } = await quoteAndCreate(pool, userId, '200000', randomUUID());
     expect(state).toBe('HELD');
     const count = await pool.query<{ c: number }>(
       `SELECT count(*)::int AS c FROM outbox_events

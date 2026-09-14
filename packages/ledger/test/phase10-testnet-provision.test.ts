@@ -55,7 +55,10 @@ async function seedOwnerAdmin(pool: Pool): Promise<string> {
     `INSERT INTO admin_users (email, display_name, status, telegram_user_id)
      VALUES ($1, 'Phase10 Owner', 'ACTIVE', $2::bigint)
      RETURNING id`,
-    [`phase10-owner-${randomUUID()}@example.local`, String(910000 + Math.floor(Math.random() * 10000))],
+    [
+      `phase10-owner-${randomUUID()}@example.local`,
+      String(910000 + Math.floor(Math.random() * 10000)),
+    ],
   );
   const adminUserId = result.rows[0]?.id;
   if (adminUserId === undefined) throw new Error('admin insert failed');

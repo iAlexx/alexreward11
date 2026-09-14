@@ -42,16 +42,16 @@ passes `evaluatePhase10AcceptanceFromEvidence` and Owner review.
 
 Read-only / dry-run helpers landed in `@alex-rewards/withdrawals` (not a Phase 10 close):
 
-| Tool | Purpose |
-| --- | --- |
-| `runPhase10Readiness` / `phase10:readiness` | PASS/WARN/BLOCKED inspector + summary |
-| `runPhase10Preflight` / `phase10:preflight` | Aggregates readiness + restore → READY vs BLOCKED |
-| `runPhase10RestoreReconcileScan` / `phase10:restore-reconcile` | Post-restore scan; never auto-resend / never unpause |
-| `buildPhase10HotWalletMonitorReport` / `phase10:hot-wallet-monitor` | Hot wallet identity + injected balance observations |
-| `planPhase10Campaign` / `phase10:campaign-plan` | Dry-run scenario matrix only |
-| `checkPhase10PayoutInvariants` | Per-withdrawal reservation / settlement / TEP-74 proof checks |
-| `evaluatePhase10AcceptanceGate` / `evaluatePhase10AcceptanceFromEvidence` | Path-only refuses; authoritative gate verifies campaign JSON + DB invariants |
-| Approved outbox claim | `FOR UPDATE SKIP LOCKED` + Temporal workflow id (no `available_at` bump fencing) |
+| Tool                                                                      | Purpose                                                                          |
+| ------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `runPhase10Readiness` / `phase10:readiness`                               | PASS/WARN/BLOCKED inspector + summary                                            |
+| `runPhase10Preflight` / `phase10:preflight`                               | Aggregates readiness + restore → READY vs BLOCKED                                |
+| `runPhase10RestoreReconcileScan` / `phase10:restore-reconcile`            | Post-restore scan; never auto-resend / never unpause                             |
+| `buildPhase10HotWalletMonitorReport` / `phase10:hot-wallet-monitor`       | Hot wallet identity + injected balance observations                              |
+| `planPhase10Campaign` / `phase10:campaign-plan`                           | Dry-run scenario matrix only                                                     |
+| `checkPhase10PayoutInvariants`                                            | Per-withdrawal reservation / settlement / TEP-74 proof checks                    |
+| `evaluatePhase10AcceptanceGate` / `evaluatePhase10AcceptanceFromEvidence` | Path-only refuses; authoritative gate verifies campaign JSON + DB invariants     |
+| Approved outbox claim                                                     | `FOR UPDATE SKIP LOCKED` + Temporal workflow id (no `available_at` bump fencing) |
 
 **Still blocked for live execution** on Owner external resources (Jetton master, providers, funded Hot Wallet,
 signer unlock window) before any controlled live Testnet. Phase 10 remains **not closed**.

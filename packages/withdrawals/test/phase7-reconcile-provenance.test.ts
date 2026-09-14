@@ -21,7 +21,10 @@ import {
   type AuthoritativePayoutObservation,
   type PayoutChainAdapter,
 } from '../src/fake-chain.js';
-import { applyObservationInTxn, reconcileWithdrawalAttemptFromAdapterInTxn } from '../src/reconcile.js';
+import {
+  applyObservationInTxn,
+  reconcileWithdrawalAttemptFromAdapterInTxn,
+} from '../src/reconcile.js';
 import {
   bindVerifiedPrimaryWallet,
   createApprovedWithdrawal,

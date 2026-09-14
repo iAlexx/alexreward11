@@ -1,6 +1,6 @@
 import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 import { FakeTonChainProvider } from '@alex-rewards/ton';
@@ -10,6 +10,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   WITHDRAWAL_APPROVED_OUTBOX_EVENT,
   acquireHotWalletDispatchLease,
+  buildPhase10ChainHistoryEvidence,
   buildPhase10HotWalletMonitorReport,
   checkPhase10PayoutInvariants,
   claimPendingWithdrawalApprovedEvents,
@@ -198,7 +199,9 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 ops tooling', () => {
     expect(report.verdict).toBe('BLOCKED');
     expect(report.intentionallySafeOff || report.blockers.length > 0).toBe(true);
     expect(
-      report.blockers.some((b) => b.includes('WITHDRAWAL_REAL_CHAIN_ENABLED') || b.includes('fake')),
+      report.blockers.some(
+        (b) => b.includes('WITHDRAWAL_REAL_CHAIN_ENABLED') || b.includes('fake'),
+      ),
     ).toBe(true);
   });
 
@@ -1200,7 +1203,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 pre-commit blocker DB regress
     failurePath: string,
     readinessPath: string,
     controlledUserId: string,
-  ): Promise<void> {
+  ): Promise<string> {
     await writeFile(
       failurePath,
       JSON.stringify({
@@ -1232,6 +1235,27 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 pre-commit blocker DB regress
       }),
       'utf8',
     );
+    const chainHistoryPath = join(dirname(readinessPath), 'chain-history.json');
+    const artifact = buildPhase10ChainHistoryEvidence({
+      hotWalletAddress: '0:hot',
+      hotWalletJettonWallet: '0:jetton',
+      jettonMaster: '0:master',
+      observationWindow: {
+        start: new Date(Date.now() - 3600_000).toISOString(),
+        end: new Date().toISOString(),
+      },
+      providerIdentity: {
+        primaryKind: 'toncenter',
+        primaryEndpointFingerprint: 'https://toncenter.test:443',
+        secondaryKind: 'tonapi',
+        secondaryEndpointFingerprint: 'https://tonapi.test:443',
+        independenceProven: true,
+      },
+      enumeratedOutgoingTransfers: [],
+      expectedCampaignPayoutIdentities: [],
+    });
+    await writeFile(chainHistoryPath, JSON.stringify(artifact), 'utf8');
+    return chainHistoryPath;
   }
 
   it('readiness controlled user A vs campaign user B → REFUSED_CAMPAIGN_BINDING', async () => {
@@ -1267,12 +1291,13 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 pre-commit blocker DB regress
       }),
       'utf8',
     );
-    await writeValidFailureAndReadiness(failurePath, readinessPath, userA);
+    const chainHistoryPath = await writeValidFailureAndReadiness(failurePath, readinessPath, userA);
     const result = await evaluatePhase10AcceptanceFromEvidence({
       db: pool,
       campaignEvidencePath: campaignPath,
       failureInjectionEvidencePath: failurePath,
       readinessEvidencePath: readinessPath,
+      chainHistoryEvidencePath: chainHistoryPath,
     });
     expect(result.verdict).toBe('REFUSED_CAMPAIGN_BINDING');
     expect(result.reasons.some((r) => r.includes('controlledUserId'))).toBe(true);
@@ -1313,12 +1338,17 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 pre-commit blocker DB regress
       }),
       'utf8',
     );
-    await writeValidFailureAndReadiness(failurePath, readinessPath, userId);
+    const chainHistoryPath = await writeValidFailureAndReadiness(
+      failurePath,
+      readinessPath,
+      userId,
+    );
     const result = await evaluatePhase10AcceptanceFromEvidence({
       db: pool,
       campaignEvidencePath: campaignPath,
       failureInjectionEvidencePath: failurePath,
       readinessEvidencePath: readinessPath,
+      chainHistoryEvidencePath: chainHistoryPath,
     });
     expect(result.verdict).toBe('REFUSED_CAMPAIGN_BINDING');
     expect(result.confirmedCount).toBe(0);
@@ -1357,12 +1387,17 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 pre-commit blocker DB regress
       }),
       'utf8',
     );
-    await writeValidFailureAndReadiness(failurePath, readinessPath, userId);
+    const chainHistoryPath = await writeValidFailureAndReadiness(
+      failurePath,
+      readinessPath,
+      userId,
+    );
     const result = await evaluatePhase10AcceptanceFromEvidence({
       db: pool,
       campaignEvidencePath: campaignPath,
       failureInjectionEvidencePath: failurePath,
       readinessEvidencePath: readinessPath,
+      chainHistoryEvidencePath: chainHistoryPath,
     });
     expect(result.verdict).toBe('REFUSED_CAMPAIGN_BINDING');
     expect(result.reasons.some((r) => r.includes('missing evidence record'))).toBe(true);
@@ -1400,12 +1435,17 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 pre-commit blocker DB regress
       }),
       'utf8',
     );
-    await writeValidFailureAndReadiness(failurePath, readinessPath, userId);
+    const chainHistoryPath = await writeValidFailureAndReadiness(
+      failurePath,
+      readinessPath,
+      userId,
+    );
     const result = await evaluatePhase10AcceptanceFromEvidence({
       db: pool,
       campaignEvidencePath: campaignPath,
       failureInjectionEvidencePath: failurePath,
       readinessEvidencePath: readinessPath,
+      chainHistoryEvidencePath: chainHistoryPath,
     });
     expect(result.verdict).toBe('REFUSED_CAMPAIGN_BINDING');
     expect(result.reasons.some((r) => r.includes('missing campaignId'))).toBe(true);
@@ -1454,12 +1494,17 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 pre-commit blocker DB regress
       }),
       'utf8',
     );
-    await writeValidFailureAndReadiness(failurePath, readinessPath, userId);
+    const chainHistoryPath = await writeValidFailureAndReadiness(
+      failurePath,
+      readinessPath,
+      userId,
+    );
     const result = await evaluatePhase10AcceptanceFromEvidence({
       db: pool,
       campaignEvidencePath: campaignPath,
       failureInjectionEvidencePath: failurePath,
       readinessEvidencePath: readinessPath,
+      chainHistoryEvidencePath: chainHistoryPath,
     });
     expect(result.verdict).toBe('REFUSED_CAMPAIGN_BINDING');
     expect(result.reasons.some((r) => r.includes('duplicate evidence ordinal'))).toBe(true);
@@ -1497,12 +1542,17 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 pre-commit blocker DB regress
       }),
       'utf8',
     );
-    await writeValidFailureAndReadiness(failurePath, readinessPath, userId);
+    const chainHistoryPath = await writeValidFailureAndReadiness(
+      failurePath,
+      readinessPath,
+      userId,
+    );
     const result = await evaluatePhase10AcceptanceFromEvidence({
       db: pool,
       campaignEvidencePath: campaignPath,
       failureInjectionEvidencePath: failurePath,
       readinessEvidencePath: readinessPath,
+      chainHistoryEvidencePath: chainHistoryPath,
     });
     expect(result.verdict).toBe('REFUSED_CAMPAIGN_BINDING');
     expect(result.reasons.some((r) => r.includes('campaignId mismatch'))).toBe(true);
@@ -1561,12 +1611,17 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 pre-commit blocker DB regress
     expect(generated.withdrawalIds).toContain(wd);
     expect(Array.isArray((generated as { withdrawals?: unknown }).withdrawals)).toBe(false);
 
-    await writeValidFailureAndReadiness(failurePath, readinessPath, userId);
+    const chainHistoryPath = await writeValidFailureAndReadiness(
+      failurePath,
+      readinessPath,
+      userId,
+    );
     const result = await evaluatePhase10AcceptanceFromEvidence({
       db: pool,
       campaignEvidencePath: manifestPath,
       failureInjectionEvidencePath: failurePath,
       readinessEvidencePath: readinessPath,
+      chainHistoryEvidencePath: chainHistoryPath,
     });
     // Structurally accepted: must not refuse for missing canonical withdrawalIds / withdrawals array.
     expect(result.reasons.every((r) => !r.includes('missing non-empty withdrawalIds'))).toBe(true);
@@ -1697,16 +1752,23 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 pre-commit blocker DB regress
     await attachWithdrawal(manifestPath, wd);
     const generated = await generateFinalCampaignEvidence(manifestPath, pool);
     expect(generated.withdrawalIds).toEqual([wd]);
-    expect(generated.evidence.some((e) => e.withdrawalId === wd && e.campaignId === generated.campaignId)).toBe(
-      true,
-    );
+    expect(
+      generated.evidence.some(
+        (e) => e.withdrawalId === wd && e.campaignId === generated.campaignId,
+      ),
+    ).toBe(true);
 
-    await writeValidFailureAndReadiness(failurePath, readinessPath, userId);
+    const chainHistoryPath = await writeValidFailureAndReadiness(
+      failurePath,
+      readinessPath,
+      userId,
+    );
     const result = await evaluatePhase10AcceptanceFromEvidence({
       db: pool,
       campaignEvidencePath: manifestPath,
       failureInjectionEvidencePath: failurePath,
       readinessEvidencePath: readinessPath,
+      chainHistoryEvidencePath: chainHistoryPath,
     });
     expect(result.reasons.every((r) => !r.includes('missing non-empty withdrawalIds'))).toBe(true);
     expect(result.reasons.every((r) => !r.includes('missing non-empty withdrawals'))).toBe(true);

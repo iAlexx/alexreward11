@@ -373,10 +373,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 real pipeline (db + fake prov
     expect(result.state).toBe('RECONCILE_REQUIRED');
     expect(result.reason).toBe('sendBoc_accepted_false');
     expect(result.stagesCompleted).toEqual(
-      expect.arrayContaining([
-        'persist_signed_boc_before_send',
-        'provider_sendBoc_accepted_false',
-      ]),
+      expect.arrayContaining(['persist_signed_boc_before_send', 'provider_sendBoc_accepted_false']),
     );
     expect(primary.getSendBocCallCount()).toBe(1);
 

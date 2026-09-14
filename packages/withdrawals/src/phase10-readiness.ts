@@ -9,15 +9,13 @@ import {
   type Phase10ConfigInput,
   type Phase10PayoutConfig,
 } from './phase10-config.js';
+import { fingerprintProviderEndpoint } from './phase10-live-probes.js';
 import { WITHDRAWAL_APPROVED_OUTBOX_EVENT } from './outbox.js';
 
 export type Phase10ReadinessStatus = 'PASS' | 'WARN' | 'BLOCKED';
 
 export type Phase10ReadinessClassification =
-  | 'ok'
-  | 'intentionally_safe_off'
-  | 'misconfigured'
-  | 'operator_attention';
+  'ok' | 'intentionally_safe_off' | 'misconfigured' | 'operator_attention';
 
 export interface Phase10ReadinessItem {
   readonly code: string;
@@ -136,7 +134,10 @@ function rollup(items: readonly Phase10ReadinessItem[]): Phase10ReadinessStatus 
   return 'PASS';
 }
 
-async function withClient<T>(db: Pool | PoolClient, fn: (client: PoolClient) => Promise<T>): Promise<T> {
+async function withClient<T>(
+  db: Pool | PoolClient,
+  fn: (client: PoolClient) => Promise<T>,
+): Promise<T> {
   if (!isPool(db)) return fn(db);
   const client = await db.connect();
   try {
@@ -532,10 +533,7 @@ export async function runPhase10Readiness(
           primaryWallet.verified &&
           primaryWallet.verificationMethod === 'TON_PROOF';
         const userOk =
-          u.status === 'ACTIVE' &&
-          u.withdrawal_status === 'ALLOWED' &&
-          walletOk &&
-          !cooldownActive;
+          u.status === 'ACTIVE' && u.withdrawal_status === 'ALLOWED' && walletOk && !cooldownActive;
         items.push({
           code: 'CONTROLLED_USER',
           status: userOk ? 'PASS' : config.realChainEnabled ? 'BLOCKED' : 'WARN',
@@ -647,15 +645,16 @@ export async function runPhase10Readiness(
 
     const primaryUrl = phase10.primaryProvider.url;
     const secondaryUrl = phase10.secondaryProvider.url;
+    // Config-shape independence: different effective origin/host (not merely kind XOR).
+    // Authoritative live independence is enforced by phase10-live-probes.
+    const primaryFp = fingerprintProviderEndpoint(primaryUrl);
+    const secondaryFp = fingerprintProviderEndpoint(secondaryUrl);
     const primarySecondaryIndependent =
       phase10.primaryProvider.kind !== null &&
       phase10.secondaryProvider.kind !== null &&
-      primaryUrl !== null &&
-      secondaryUrl !== null &&
-      !(
-        phase10.primaryProvider.kind === phase10.secondaryProvider.kind &&
-        primaryUrl === secondaryUrl
-      );
+      primaryFp !== null &&
+      secondaryFp !== null &&
+      primaryFp !== secondaryFp;
 
     const providerConfig = {
       jettonMasterConfigured: phase10.jettonMasterIdentity !== null,

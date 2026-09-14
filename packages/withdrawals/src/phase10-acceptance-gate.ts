@@ -6,18 +6,20 @@
 import { readFile } from 'node:fs/promises';
 import type { Pool } from 'pg';
 
+import { PHASE10_FAILURE_SCENARIO_CATALOGUE } from './phase10-campaign.js';
 import {
-  PHASE10_FAILURE_SCENARIO_CATALOGUE,
-} from './phase10-campaign.js';
+  evaluateChainHistoryForAcceptance,
+  readPhase10ChainHistoryEvidence,
+} from './phase10-chain-history-evidence.js';
 import { checkPhase10PayoutInvariants } from './phase10-payout-invariants.js';
 
 const MIN_CONTROLLED_CONFIRMED = 100;
 const MIN_PLANNED_COUNT = 100;
 
 export const PHASE10_REQUIRED_REAL_FAILURE_SCENARIO_IDS: readonly string[] =
-  PHASE10_FAILURE_SCENARIO_CATALOGUE.filter((s) => s.classification === 'REQUIRES_REAL_TESTNET').map(
-    (s) => s.id,
-  );
+  PHASE10_FAILURE_SCENARIO_CATALOGUE.filter(
+    (s) => s.classification === 'REQUIRES_REAL_TESTNET',
+  ).map((s) => s.id);
 
 /**
  * Legacy path/count presence bag — kept for backward compatibility.
@@ -58,6 +60,11 @@ export interface Phase10AcceptanceFromEvidenceInput {
   readonly campaignEvidencePath: string;
   readonly failureInjectionEvidencePath: string;
   readonly readinessEvidencePath: string;
+  /**
+   * Authoritative Hot Wallet outgoing-history evidence path.
+   * Required for final acceptance — caller boolean alone is refused.
+   */
+  readonly chainHistoryEvidencePath?: string | null;
   /** Optional precomputed invariant dump path; still re-verified against DB. */
   readonly invariantResultsPath?: string | null;
 }
@@ -234,8 +241,7 @@ function extractWithdrawalIds(file: CampaignEvidenceFile): string[] {
       const id =
         (typeof row.withdrawalId === 'string' && row.withdrawalId.trim() !== ''
           ? row.withdrawalId
-          : null) ??
-        (typeof row.id === 'string' && row.id.trim() !== '' ? row.id : null);
+          : null) ?? (typeof row.id === 'string' && row.id.trim() !== '' ? row.id : null);
       if (id !== null) ids.push(id);
     }
   }
@@ -355,7 +361,9 @@ function validateCampaignEvidenceRecords(
     const ordinal =
       typeof ordinalRaw === 'number'
         ? ordinalRaw
-        : typeof ordinalRaw === 'string' && ordinalRaw.trim() !== '' && Number.isFinite(Number(ordinalRaw))
+        : typeof ordinalRaw === 'string' &&
+            ordinalRaw.trim() !== '' &&
+            Number.isFinite(Number(ordinalRaw))
           ? Number(ordinalRaw)
           : null;
     if (ordinal === null || !Number.isInteger(ordinal) || ordinal < 1) {
@@ -595,11 +603,7 @@ export function validateFailureInjectionEvidence(raw: unknown): readonly string[
   if (scenarios === null && (root.present === true || root.ok === true)) {
     errors.push('present:true / ok:true alone cannot satisfy failure-injection acceptance');
   }
-  if (
-    scenarios !== null &&
-    scenarios.length === 0 &&
-    (root.present === true || root.ok === true)
-  ) {
+  if (scenarios !== null && scenarios.length === 0 && (root.present === true || root.ok === true)) {
     errors.push('present:true / ok:true alone cannot satisfy failure-injection acceptance');
   }
 
@@ -721,6 +725,30 @@ export async function evaluatePhase10AcceptanceFromEvidence(
     reasons.push(...readinessParsed.errors);
   }
 
+  // Authoritative Hot Wallet outgoing-history evidence (never caller boolean).
+  let chainHistoryUnexpected = 0;
+  let chainHistoryFail = false;
+  const chainHistoryPath = input.chainHistoryEvidencePath?.trim() || null;
+  if (chainHistoryPath === null) {
+    chainHistoryFail = true;
+    reasons.push(
+      'chain-history evidence path missing (authoritative Hot Wallet outgoing proof required)',
+    );
+  } else {
+    const chainHistory = await readPhase10ChainHistoryEvidence(chainHistoryPath);
+    if (chainHistory.parsed === null) {
+      chainHistoryFail = true;
+      reasons.push(...chainHistory.errors);
+    } else {
+      const evaluated = evaluateChainHistoryForAcceptance(chainHistory.parsed);
+      if (!evaluated.ok) {
+        chainHistoryFail = true;
+        chainHistoryUnexpected = evaluated.unexpectedOutgoingCount;
+        reasons.push(...evaluated.reasons);
+      }
+    }
+  }
+
   const controlledUserId = readNonEmptyString(campaign.controlledUserId)!;
   const campaignId = readNonEmptyString(campaign.campaignId)!;
   const campaignCreatedAt = parseCampaignCreatedAt(campaign.createdAt)!;
@@ -774,11 +802,7 @@ export async function evaluatePhase10AcceptanceFromEvidence(
   // Distinct IDs for defensive internal iteration (duplicates already refused above).
   const distinctIds = [...new Set(listedIds)];
 
-  const evidenceBindingErrors = validateCampaignEvidenceRecords(
-    campaign,
-    campaignId,
-    distinctIds,
-  );
+  const evidenceBindingErrors = validateCampaignEvidenceRecords(campaign, campaignId, distinctIds);
   if (evidenceBindingErrors.length > 0) {
     return refuse('REFUSED_CAMPAIGN_BINDING', [...reasons, ...evidenceBindingErrors]);
   }
@@ -898,13 +922,19 @@ export async function evaluatePhase10AcceptanceFromEvidence(
       duplicateSettlements: duplicateSettlement,
     });
   }
-  if (duplicateEconomic > 0) {
+  if (duplicateEconomic > 0 || chainHistoryUnexpected > 0) {
     return refuse(
       'REFUSED_DUPLICATE_ECONOMIC_PAYOUT',
-      [...reasons, `duplicateEconomicPayouts=${duplicateEconomic}`],
+      [
+        ...reasons,
+        ...(duplicateEconomic > 0 ? [`duplicateEconomicPayouts=${duplicateEconomic}`] : []),
+        ...(chainHistoryUnexpected > 0
+          ? [`unexpectedExternalOutgoing=${chainHistoryUnexpected}`]
+          : []),
+      ],
       {
         confirmedCount,
-        duplicateEconomicPayouts: duplicateEconomic,
+        duplicateEconomicPayouts: duplicateEconomic + chainHistoryUnexpected,
         duplicateSettlements: duplicateSettlement,
       },
     );
@@ -934,7 +964,7 @@ export async function evaluatePhase10AcceptanceFromEvidence(
       duplicateSettlements: duplicateSettlement,
     });
   }
-  if (invariantFail || reasons.length > 0) {
+  if (invariantFail || chainHistoryFail || reasons.length > 0) {
     return refuse(
       invariantFail ? 'REFUSED_INVARIANT_FAILURE' : 'REFUSED_MISSING_LIVE_EVIDENCE',
       reasons,

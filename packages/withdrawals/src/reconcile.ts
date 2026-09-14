@@ -13,10 +13,7 @@ import {
 import { settleWithdrawalReservation } from './settlement.js';
 import { transitionWithdrawal } from './transitions.js';
 import type { WithdrawalState } from './state-machine.js';
-import {
-  hotWalletDispatchOwnerIdentity,
-  releaseHotWalletDispatchLease,
-} from './attempts.js';
+import { hotWalletDispatchOwnerIdentity, releaseHotWalletDispatchLease } from './attempts.js';
 
 export type ReconcileResolution =
   'UNRESOLVED' | 'INTENDED_PAYOUT_PROVEN' | 'DEFINITIVE_NONPAYMENT' | 'AMBIGUOUS';

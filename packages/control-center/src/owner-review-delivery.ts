@@ -71,7 +71,10 @@ export interface OwnerReviewOutboxEventInput {
   readonly payload: Readonly<Record<string, unknown>>;
 }
 
-function resolveWithdrawalId(payload: Readonly<Record<string, unknown>>, aggregateId: string | null): string {
+function resolveWithdrawalId(
+  payload: Readonly<Record<string, unknown>>,
+  aggregateId: string | null,
+): string {
   const fromPayload = payload.withdrawalId;
   if (typeof fromPayload === 'string' && fromPayload.trim() !== '') {
     return fromPayload;
@@ -118,7 +121,8 @@ async function resolveAuthorizedOwnerForApprovals(
       return { adminUserId: owner.adminUserId, telegramUserId };
     } catch (error) {
       if (error instanceof ControlCenterError) {
-        errors.push(String(error.details?.reason ?? error.code));
+        const reason = error.details?.reason;
+        errors.push(typeof reason === 'string' ? reason : error.code);
         continue;
       }
       throw error;
@@ -325,10 +329,9 @@ async function replaceDecisionTokensUnderPublicationLock(
     });
 
     // 2) Row-level mutex across bot processes/replicas.
-    await client.query(
-      `SELECT id FROM telegram_publications WHERE id = $1::uuid FOR UPDATE`,
-      [enqueued.publication.id],
-    );
+    await client.query(`SELECT id FROM telegram_publications WHERE id = $1::uuid FOR UPDATE`, [
+      enqueued.publication.id,
+    ]);
 
     // 3) Re-check authoritative withdrawal state under the lock.
     const live = await client.query<{ state: string }>(
@@ -423,10 +426,9 @@ async function finalizeOwnerReviewDeliveryAfterSend(
   },
 ): Promise<FinalizeAfterSendResult> {
   return withWithdrawalTransaction(pool, async (client) => {
-    await client.query(
-      `SELECT id FROM telegram_publications WHERE id = $1::uuid FOR UPDATE`,
-      [input.publicationId],
-    );
+    await client.query(`SELECT id FROM telegram_publications WHERE id = $1::uuid FOR UPDATE`, [
+      input.publicationId,
+    ]);
 
     const pub = await client.query<{ status: string }>(
       `SELECT status::text AS status FROM telegram_publications WHERE id = $1::uuid`,

@@ -5,7 +5,8 @@ import type { Pool, PoolClient } from 'pg';
 
 import { isPool } from './db.js';
 
-export const PHASE10_HOT_WALLET_CHAIN_HISTORY_PROOF_REQUIRED = 'CHAIN_HISTORY_PROOF_REQUIRED' as const;
+export const PHASE10_HOT_WALLET_CHAIN_HISTORY_PROOF_REQUIRED =
+  'CHAIN_HISTORY_PROOF_REQUIRED' as const;
 
 export interface Phase10HotWalletBalanceObservations {
   readonly tonNanotons?: string | null;
@@ -39,10 +40,19 @@ export interface Phase10HotWalletMonitorInput {
   /** Optional baseline balances for delta/drift reporting. */
   readonly balanceBaseline?: Phase10HotWalletBalanceBaseline | null;
   /**
-   * When true, caller asserts unexpected-outgoing history was proven elsewhere.
-   * Default false → emit CHAIN_HISTORY_PROOF_REQUIRED (never silent PASS).
+   * @deprecated Caller boolean alone is never authoritative. Ignored for proof status.
+   * Prefer `chainHistoryEvidence` artifact.
    */
   readonly unexpectedOutgoingHistoryProven?: boolean;
+  /**
+   * Authoritative chain-history evidence artifact (parsed). When absent/PROOF_REQUIRED,
+   * monitor reports CHAIN_HISTORY_PROOF_REQUIRED.
+   */
+  readonly chainHistoryEvidence?: {
+    readonly reconciliationResult: string;
+    readonly unexpectedOutgoingCount: number;
+    readonly evidenceDigest: string;
+  } | null;
 }
 
 export interface Phase10HotWalletMonitorReport {
@@ -85,13 +95,18 @@ export interface Phase10HotWalletMonitorReport {
     readonly observedAt: string | null;
   };
   readonly chainHistoryProof: {
-    readonly status: 'PROOF_REQUIRED' | 'PROVEN_BY_OPERATOR';
+    readonly status: 'PROOF_REQUIRED' | 'ZERO_UNEXPECTED' | 'UNEXPECTED_OUTGOING';
     readonly code: 'CHAIN_HISTORY_PROOF_REQUIRED' | null;
+    /** Present only when an authoritative chain-history artifact was supplied. */
+    readonly evidenceDigest: string | null;
   };
   readonly notes: readonly string[];
 }
 
-async function withClient<T>(db: Pool | PoolClient, fn: (client: PoolClient) => Promise<T>): Promise<T> {
+async function withClient<T>(
+  db: Pool | PoolClient,
+  fn: (client: PoolClient) => Promise<T>,
+): Promise<T> {
   if (!isPool(db)) return fn(db);
   const client = await db.connect();
   try {
@@ -169,12 +184,12 @@ export async function buildPhase10HotWalletMonitorReport(
     const fakeChainEnabled = input.fakeChainEnabled === true;
     const jettonMasterIdentity = input.jettonMasterIdentity?.trim() || null;
     const liveProvider =
-      input.provider != null && (input.observeProvider === true || input.balanceObservations == null);
+      input.provider != null &&
+      (input.observeProvider === true || input.balanceObservations == null);
 
-    const network = await client.query<{ id: string }>(
-      `SELECT id FROM networks WHERE code = $1`,
-      [networkCode],
-    );
+    const network = await client.query<{ id: string }>(`SELECT id FROM networks WHERE code = $1`, [
+      networkCode,
+    ]);
     const networkId = network.rows[0]?.id;
     if (networkId === undefined) {
       notes.push(`network ${networkCode} not found`);
@@ -208,6 +223,7 @@ export async function buildPhase10HotWalletMonitorReport(
         chainHistoryProof: {
           status: 'PROOF_REQUIRED',
           code: 'CHAIN_HISTORY_PROOF_REQUIRED',
+          evidenceDigest: null,
         },
         notes,
       };
@@ -387,11 +403,38 @@ export async function buildPhase10HotWalletMonitorReport(
       );
     }
 
-    const historyProven = input.unexpectedOutgoingHistoryProven === true;
-    if (!historyProven) {
+    // Caller boolean alone is NEVER sufficient (unexpectedOutgoingHistoryProven ignored).
+    const hist = input.chainHistoryEvidence ?? null;
+    let chainHistoryProof: Phase10HotWalletMonitorReport['chainHistoryProof'] = {
+      status: 'PROOF_REQUIRED',
+      code: 'CHAIN_HISTORY_PROOF_REQUIRED',
+      evidenceDigest: null,
+    };
+    if (hist !== null && hist.reconciliationResult === 'ZERO_UNEXPECTED') {
+      chainHistoryProof = {
+        status: 'ZERO_UNEXPECTED',
+        code: null,
+        evidenceDigest: hist.evidenceDigest,
+      };
+      notes.push('authoritative chain-history evidence: ZERO_UNEXPECTED');
+    } else if (hist !== null && hist.reconciliationResult === 'UNEXPECTED_OUTGOING') {
+      chainHistoryProof = {
+        status: 'UNEXPECTED_OUTGOING',
+        code: null,
+        evidenceDigest: hist.evidenceDigest,
+      };
       notes.push(
-        'CHAIN_HISTORY_PROOF_REQUIRED: provider balance observe alone cannot prove unexpected outgoing transfers; never silent PASS',
+        `authoritative chain-history evidence: UNEXPECTED_OUTGOING count=${hist.unexpectedOutgoingCount}`,
       );
+    } else {
+      notes.push(
+        'CHAIN_HISTORY_PROOF_REQUIRED: provider balance observe / caller boolean alone cannot prove unexpected outgoing transfers; never silent PASS',
+      );
+      if (input.unexpectedOutgoingHistoryProven === true) {
+        notes.push(
+          'ignored unexpectedOutgoingHistoryProven=true (caller boolean is not authoritative)',
+        );
+      }
     }
 
     return {
@@ -420,9 +463,7 @@ export async function buildPhase10HotWalletMonitorReport(
         source: balanceSource,
         observedAt: balanceObservedAt,
       },
-      chainHistoryProof: historyProven
-        ? { status: 'PROVEN_BY_OPERATOR', code: null }
-        : { status: 'PROOF_REQUIRED', code: 'CHAIN_HISTORY_PROOF_REQUIRED' },
+      chainHistoryProof,
       notes,
     };
   });

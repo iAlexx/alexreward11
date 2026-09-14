@@ -227,11 +227,7 @@ export async function updateAttemptBroadcastState(
   input: {
     readonly attemptId: string;
     readonly broadcastResultState:
-      | 'PENDING'
-      | 'BROADCASTED'
-      | 'FAILED_PRE_BROADCAST'
-      | 'UNKNOWN'
-      | 'RECONCILE_REQUIRED';
+      'PENDING' | 'BROADCASTED' | 'FAILED_PRE_BROADCAST' | 'UNKNOWN' | 'RECONCILE_REQUIRED';
     readonly markBroadcastStarted?: boolean;
     readonly chainReference?: string | null;
   },

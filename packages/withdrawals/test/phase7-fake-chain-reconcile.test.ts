@@ -416,9 +416,9 @@ describe.skipIf(phase7DatabaseUrl === '')('Phase 7 fake chain reconcile', () => 
       const leaseB = await acquireHotWalletDispatchLease(client, hotWalletId, 'worker-b');
       expect(leaseB.status).toBe('BUSY');
 
-      await expect(
-        acquireTestDispatchLease(client, hotWalletId, 'worker-b'),
-      ).rejects.toMatchObject({ code: 'STATE_CONFLICT' });
+      await expect(acquireTestDispatchLease(client, hotWalletId, 'worker-b')).rejects.toMatchObject(
+        { code: 'STATE_CONFLICT' },
+      );
 
       // Active A fence remains usable; B never obtained a competing token.
       const attempt = await createWithdrawalAttempt(client, {

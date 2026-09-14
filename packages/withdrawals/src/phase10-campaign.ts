@@ -309,8 +309,9 @@ export function planPhase10Campaign(input: PlanPhase10CampaignInput = {}): Phase
         })),
         localDeterministicCount: catalogue.filter((s) => s.classification === 'LOCAL_DETERMINISTIC')
           .length,
-        requiresRealTestnetCount: catalogue.filter((s) => s.classification === 'REQUIRES_REAL_TESTNET')
-          .length,
+        requiresRealTestnetCount: catalogue.filter(
+          (s) => s.classification === 'REQUIRES_REAL_TESTNET',
+        ).length,
         createsWithdrawals: false,
         flipsEnv: false,
       };
@@ -331,8 +332,9 @@ export function planPhase10Campaign(input: PlanPhase10CampaignInput = {}): Phase
     accepted: true,
     refusalReason: null,
     intendedMatrix,
-    localDeterministicCount: intendedMatrix.filter((i) => i.classification === 'LOCAL_DETERMINISTIC')
-      .length,
+    localDeterministicCount: intendedMatrix.filter(
+      (i) => i.classification === 'LOCAL_DETERMINISTIC',
+    ).length,
     requiresRealTestnetCount: intendedMatrix.filter(
       (i) => i.classification === 'REQUIRES_REAL_TESTNET',
     ).length,
@@ -395,8 +397,7 @@ function assertManifestShape(value: unknown): Phase10CampaignManifest {
     ...(value as Phase10CampaignManifest),
     networkCode: 'TON_TESTNET',
     assetSymbol: 'USDT',
-    controlledUserId:
-      typeof record.controlledUserId === 'string' ? record.controlledUserId : null,
+    controlledUserId: typeof record.controlledUserId === 'string' ? record.controlledUserId : null,
     plannedCount,
     plannedPayoutCount: plannedCount,
     amountPolicy: {
@@ -474,7 +475,10 @@ export async function initCampaignManifest(
 
   let status: Phase10CampaignManifest['status'] = 'INITIALIZED';
   let realModeCheckpoint: string | null = null;
-  if (mode === 'real' && (realExecutionGates === null || !allRealExecutionGatesTrue(realExecutionGates))) {
+  if (
+    mode === 'real' &&
+    (realExecutionGates === null || !allRealExecutionGatesTrue(realExecutionGates))
+  ) {
     status = 'AWAITING_OWNER_APPROVAL';
     realModeCheckpoint = 'OWNER_APPROVAL_REQUIRED';
   }
@@ -502,9 +506,7 @@ export async function initCampaignManifest(
     gates: input.gates ?? null,
     realExecutionGates,
     realModeCheckpoint,
-    baselineIsolatedHistoricalAttemptIds: [
-      ...(input.baselineIsolatedHistoricalAttemptIds ?? []),
-    ],
+    baselineIsolatedHistoricalAttemptIds: [...(input.baselineIsolatedHistoricalAttemptIds ?? [])],
     withdrawalIds: [],
     plan,
     evidence: [],
@@ -678,7 +680,10 @@ export async function attachWithdrawal(
   return updated;
 }
 
-async function withClient<T>(db: Pool | PoolClient, fn: (client: PoolClient) => Promise<T>): Promise<T> {
+async function withClient<T>(
+  db: Pool | PoolClient,
+  fn: (client: PoolClient) => Promise<T>,
+): Promise<T> {
   if (!isPool(db)) return fn(db);
   const client = await db.connect();
   try {
@@ -937,6 +942,8 @@ export async function initializeCampaign(input: {
   readonly amountPolicy?: InitPhase10CampaignManifestInput['amountPolicy'];
   readonly baselineIsolatedHistoricalAttemptIds?: readonly string[];
   readonly mode?: Phase10CampaignMode;
+  /** Required for mode:'real' — never inferred from env. */
+  readonly gates?: Phase10CampaignRealModeGates;
   readonly realExecutionGates?: Phase10CampaignRealExecutionGates;
   readonly confirmationPhrase?: string;
   readonly campaignId?: string;
@@ -944,43 +951,56 @@ export async function initializeCampaign(input: {
 }): Promise<{
   readonly accepted: boolean;
   readonly refusalReason: string | null;
-  readonly manifest: Phase10CampaignManifest;
+  readonly manifest: Phase10CampaignManifest | null;
   readonly createsWithdrawals: false;
   readonly flipsEnv: false;
   readonly unlocksSigner: false;
   readonly mutatesFinancialDb: false;
 }> {
-  const manifest = await initCampaignManifest(input.campaignDirOrManifestPath, {
-    plannedCount: input.plannedPayoutCount,
-    controlledUserId: input.controlledUserId,
-    ...(input.campaignId !== undefined ? { campaignId: input.campaignId } : {}),
-    ...(input.amountPolicy !== undefined ? { amountPolicy: input.amountPolicy } : {}),
-    ...(input.baselineIsolatedHistoricalAttemptIds !== undefined
-      ? { baselineIsolatedHistoricalAttemptIds: input.baselineIsolatedHistoricalAttemptIds }
-      : {}),
-    ...(input.mode !== undefined ? { mode: input.mode } : {}),
-    ...(input.realExecutionGates !== undefined
-      ? { realExecutionGates: input.realExecutionGates }
-      : {}),
-    ...(input.confirmationPhrase !== undefined
-      ? { confirmationPhrase: input.confirmationPhrase }
-      : {}),
-    ...(input.acceptanceCampaign !== undefined
-      ? { acceptanceCampaign: input.acceptanceCampaign }
-      : {}),
-  });
-  const awaiting = manifest.status === 'AWAITING_OWNER_APPROVAL';
-  return {
-    accepted: !awaiting,
-    refusalReason: awaiting
-      ? 'real mode stopped at Owner-approval checkpoint (gates/confirmation phrase not all true)'
-      : null,
-    manifest,
-    createsWithdrawals: false,
-    flipsEnv: false,
-    unlocksSigner: false,
-    mutatesFinancialDb: false,
-  };
+  try {
+    const manifest = await initCampaignManifest(input.campaignDirOrManifestPath, {
+      plannedCount: input.plannedPayoutCount,
+      controlledUserId: input.controlledUserId,
+      ...(input.campaignId !== undefined ? { campaignId: input.campaignId } : {}),
+      ...(input.amountPolicy !== undefined ? { amountPolicy: input.amountPolicy } : {}),
+      ...(input.baselineIsolatedHistoricalAttemptIds !== undefined
+        ? { baselineIsolatedHistoricalAttemptIds: input.baselineIsolatedHistoricalAttemptIds }
+        : {}),
+      ...(input.mode !== undefined ? { mode: input.mode } : {}),
+      ...(input.gates !== undefined ? { gates: input.gates } : {}),
+      ...(input.realExecutionGates !== undefined
+        ? { realExecutionGates: input.realExecutionGates }
+        : {}),
+      ...(input.confirmationPhrase !== undefined
+        ? { confirmationPhrase: input.confirmationPhrase }
+        : {}),
+      ...(input.acceptanceCampaign !== undefined
+        ? { acceptanceCampaign: input.acceptanceCampaign }
+        : {}),
+    });
+    const awaiting = manifest.status === 'AWAITING_OWNER_APPROVAL';
+    return {
+      accepted: !awaiting,
+      refusalReason: awaiting
+        ? 'real mode stopped at Owner-approval checkpoint (gates/confirmation phrase not all true)'
+        : null,
+      manifest,
+      createsWithdrawals: false,
+      flipsEnv: false,
+      unlocksSigner: false,
+      mutatesFinancialDb: false,
+    };
+  } catch (error) {
+    return {
+      accepted: false,
+      refusalReason: error instanceof Error ? error.message : String(error),
+      manifest: null,
+      createsWithdrawals: false,
+      flipsEnv: false,
+      unlocksSigner: false,
+      mutatesFinancialDb: false,
+    };
+  }
 }
 
 export async function attachWithdrawalIds(
@@ -1034,9 +1054,7 @@ function campaignCompletionSatisfied(manifest: Phase10CampaignManifest): boolean
   if (manifest.plannedCount < PHASE10_CAMPAIGN_MIN_ACCEPTANCE_PAYOUTS) return false;
 
   const distinctWithdrawalIds = [
-    ...new Set(
-      manifest.withdrawalIds.filter((id) => typeof id === 'string' && id.trim() !== ''),
-    ),
+    ...new Set(manifest.withdrawalIds.filter((id) => typeof id === 'string' && id.trim() !== '')),
   ];
   if (distinctWithdrawalIds.length < PHASE10_CAMPAIGN_MIN_ACCEPTANCE_PAYOUTS) return false;
 

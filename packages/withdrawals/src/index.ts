@@ -221,6 +221,9 @@ export type {
   Phase10RestoreFinding,
   Phase10RestoreFindingCategory,
   Phase10RestoreReconcileScanReport,
+  Phase10HistoricalBaselineInput,
+  Phase10HistoricalBaselineAttemptState,
+  Phase10RestoreReconcileScanOptions,
 } from './phase10-restore-reconcile.js';
 
 export { buildPhase10HotWalletMonitorReport } from './phase10-hot-wallet-monitor.js';
@@ -285,6 +288,46 @@ export type {
   Phase10PreflightReport,
   Phase10PreflightVerdict,
 } from './phase10-preflight.js';
+
+export {
+  PHASE10_PROVIDER_INDEPENDENCE_UNPROVEN,
+  evaluateProviderIndependence,
+  fingerprintProviderEndpoint,
+  runPhase10LiveExternalProbes,
+  signerLockedFromProbe,
+} from './phase10-live-probes.js';
+export type {
+  Phase10LiveExternalProbeEvidence,
+  Phase10LiveExternalProbeInput,
+  Phase10ProviderProbeObservation,
+  Phase10SignerProbeObservation,
+} from './phase10-live-probes.js';
+
+export {
+  PHASE10_LIVE_PREFLIGHT_EVIDENCE_SCHEMA_VERSION,
+  buildPhase10LivePreflightEvidence,
+  writePhase10LivePreflightEvidence,
+} from './phase10-live-readiness-evidence.js';
+export type {
+  BuildPhase10LivePreflightEvidenceInput,
+  Phase10LivePreflightEvidenceArtifact,
+} from './phase10-live-readiness-evidence.js';
+
+export {
+  PHASE10_CHAIN_HISTORY_EVIDENCE_SCHEMA_VERSION,
+  PHASE10_CHAIN_HISTORY_PROOF_REQUIRED,
+  buildPhase10ChainHistoryEvidence,
+  evaluateChainHistoryForAcceptance,
+  parsePhase10ChainHistoryEvidence,
+  readPhase10ChainHistoryEvidence,
+  writePhase10ChainHistoryEvidence,
+} from './phase10-chain-history-evidence.js';
+export type {
+  BuildPhase10ChainHistoryEvidenceInput,
+  Phase10ChainHistoryEvidenceArtifact,
+  Phase10ChainHistoryOutgoingTransfer,
+  Phase10ChainHistoryReconciliationResult,
+} from './phase10-chain-history-evidence.js';
 
 export {
   PHASE10_REQUIRED_REAL_FAILURE_SCENARIO_IDS,

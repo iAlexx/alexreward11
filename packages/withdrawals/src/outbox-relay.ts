@@ -1,7 +1,11 @@
 import { WorkflowExecutionAlreadyStartedError } from '@temporalio/client';
 import type { Pool, PoolClient } from 'pg';
 
-import { WITHDRAWAL_APPROVED_OUTBOX_EVENT, WITHDRAWAL_OWNER_REVIEW_REQUIRED_OUTBOX_EVENT, withdrawalWorkflowId } from './outbox.js';
+import {
+  WITHDRAWAL_APPROVED_OUTBOX_EVENT,
+  WITHDRAWAL_OWNER_REVIEW_REQUIRED_OUTBOX_EVENT,
+  withdrawalWorkflowId,
+} from './outbox.js';
 
 export const WITHDRAWAL_PAYOUT_WORKFLOW_TYPE = 'withdrawalPayoutWorkflow' as const;
 

@@ -31,10 +31,7 @@ import {
   listPhase10MissingResources,
   type Phase10PayoutConfig,
 } from './phase10-config.js';
-import {
-  compactTep74EvidenceSummary,
-  persistIntendedPayoutProvenEvidence,
-} from './reconcile.js';
+import { compactTep74EvidenceSummary, persistIntendedPayoutProvenEvidence } from './reconcile.js';
 import { settleWithdrawalReservation } from './settlement.js';
 import {
   SignerHttpClient,
@@ -372,8 +369,7 @@ async function confirmAndSettle(
           success: primaryEvidenceBound.success,
           bounced: primaryEvidenceBound.bounced,
           ...(primaryKind !== undefined ? { providerKind: primaryKind } : {}),
-          networkGlobalId:
-            primaryEvidenceBound.networkGlobalId ?? input.phase10.networkGlobalId,
+          networkGlobalId: primaryEvidenceBound.networkGlobalId ?? input.phase10.networkGlobalId,
           ...(primaryEvidenceBound.senderJettonWallet !== undefined
             ? { senderJettonWallet: primaryEvidenceBound.senderJettonWallet }
             : {}),
@@ -715,11 +711,7 @@ async function resumePersistedPipeline(
     await withWithdrawalTransaction(db, async (client) => {
       // Same-withdrawal may reacquire if lease expired while still pre-broadcast.
       // Same-owner reclaim keeps fencing_token STABLE (attempt fence is immutable).
-      const lease = await acquireHotWalletDispatchLease(
-        client,
-        context.hotWalletId,
-        resumeOwner,
-      );
+      const lease = await acquireHotWalletDispatchLease(client, context.hotWalletId, resumeOwner);
       if (lease.status !== 'ACQUIRED') {
         throw new WithdrawalDomainError('STATE_CONFLICT', 'Hot wallet dispatch lease unavailable', {
           details: { lease },
