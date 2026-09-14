@@ -91,12 +91,7 @@ describePhase8('phase8 owner-review Approvals delivery', () => {
     const { withdrawalId } = await createManualReviewWithdrawal(pool, userId);
     const fake = createFakeTelegram();
 
-    const result = await processOwnerReviewRequiredOutboxBatch(
-      pool,
-      ccConfig,
-      engineConfig,
-      fake,
-    );
+    const result = await processOwnerReviewRequiredOutboxBatch(pool, ccConfig, engineConfig, fake);
     expect(result.claimed).toBe(1);
     expect(result.delivered).toBe(1);
     expect(fake.sends).toBe(1);
@@ -155,12 +150,7 @@ describePhase8('phase8 owner-review Approvals delivery', () => {
        WHERE aggregate_id = $1::uuid AND event_type = 'withdrawal.owner_review_required'`,
       [withdrawalId],
     );
-    const again = await processOwnerReviewRequiredOutboxBatch(
-      pool,
-      ccConfig,
-      engineConfig,
-      fake,
-    );
+    const again = await processOwnerReviewRequiredOutboxBatch(pool, ccConfig, engineConfig, fake);
     expect(again.superseded).toBe(1);
     expect(fake.sends).toBe(1);
 
@@ -177,16 +167,9 @@ describePhase8('phase8 owner-review Approvals delivery', () => {
   it('stale expected state completes Outbox without issuing actionable tokens', async () => {
     const { userId } = await createTestUser(pool, String(++seq));
     const { withdrawalId } = await createManualReviewWithdrawal(pool, userId);
-    await pool.query(`UPDATE withdrawals SET state = 'HELD' WHERE id = $1::uuid`, [
-      withdrawalId,
-    ]);
+    await pool.query(`UPDATE withdrawals SET state = 'HELD' WHERE id = $1::uuid`, [withdrawalId]);
     const fake = createFakeTelegram();
-    const result = await processOwnerReviewRequiredOutboxBatch(
-      pool,
-      ccConfig,
-      engineConfig,
-      fake,
-    );
+    const result = await processOwnerReviewRequiredOutboxBatch(pool, ccConfig, engineConfig, fake);
     expect(result.superseded).toBe(1);
     expect(fake.sends).toBe(0);
     const open = await pool.query<{ c: number }>(
@@ -205,12 +188,7 @@ describePhase8('phase8 owner-review Approvals delivery', () => {
        WHERE purpose = 'CONTROL_CENTER_APPROVALS'`,
     );
     const fake = createFakeTelegram();
-    const result = await processOwnerReviewRequiredOutboxBatch(
-      pool,
-      ccConfig,
-      engineConfig,
-      fake,
-    );
+    const result = await processOwnerReviewRequiredOutboxBatch(pool, ccConfig, engineConfig, fake);
     expect(result.retried).toBe(1);
     expect(fake.sends).toBe(0);
   });
@@ -275,12 +253,7 @@ describePhase8('phase8 owner-review Approvals delivery', () => {
     expect(orphansBefore.rows[0]?.c).toBe(3);
 
     const ok = createFakeTelegram();
-    const second = await processOwnerReviewRequiredOutboxBatch(
-      pool,
-      ccConfig,
-      engineConfig,
-      ok,
-    );
+    const second = await processOwnerReviewRequiredOutboxBatch(pool, ccConfig, engineConfig, ok);
     expect(second.delivered).toBe(1);
     expect(ok.sends).toBe(1);
 
@@ -486,38 +459,26 @@ describePhase8('phase8 owner-review Approvals delivery', () => {
     });
     const fakeB = createFakeTelegram();
 
-    const deliverA = processOwnerReviewRequiredOutboxBatch(
-      pool,
-      ccConfig,
-      engineConfig,
-      fakeA,
-      {
-        claimedEvents: [sharedEvent],
-        serializationHooks: {
-          afterExpire: async () => {
-            aPausedAfterExpire.resolve();
-            await releaseA.promise;
-          },
+    const deliverA = processOwnerReviewRequiredOutboxBatch(pool, ccConfig, engineConfig, fakeA, {
+      claimedEvents: [sharedEvent],
+      serializationHooks: {
+        afterExpire: async () => {
+          aPausedAfterExpire.resolve();
+          await releaseA.promise;
         },
       },
-    );
+    });
 
     await aPausedAfterExpire.promise;
 
-    const deliverB = processOwnerReviewRequiredOutboxBatch(
-      pool,
-      ccConfig,
-      engineConfig,
-      fakeB,
-      {
-        claimedEvents: [sharedEvent],
-        serializationHooks: {
-          afterExpire: async () => {
-            bEnteredCritical = true;
-          },
+    const deliverB = processOwnerReviewRequiredOutboxBatch(pool, ccConfig, engineConfig, fakeB, {
+      claimedEvents: [sharedEvent],
+      serializationHooks: {
+        afterExpire: async () => {
+          bEnteredCritical = true;
         },
       },
-    );
+    });
 
     try {
       // While A holds the publication lock after expire (before issue), B must not have
@@ -631,21 +592,15 @@ describePhase8('phase8 owner-review Approvals delivery', () => {
     });
     const failingB = createFakeTelegram({ failOnce: true });
 
-    const deliverA = processOwnerReviewRequiredOutboxBatch(
-      pool,
-      ccConfig,
-      engineConfig,
-      fakeA,
-      {
-        claimedEvents: [sharedEvent],
-        serializationHooks: {
-          beforeTelegramSend: async () => {
-            aPausedBeforeSend.resolve();
-            await releaseA.promise;
-          },
+    const deliverA = processOwnerReviewRequiredOutboxBatch(pool, ccConfig, engineConfig, fakeA, {
+      claimedEvents: [sharedEvent],
+      serializationHooks: {
+        beforeTelegramSend: async () => {
+          aPausedBeforeSend.resolve();
+          await releaseA.promise;
         },
       },
-    );
+    });
 
     await aPausedBeforeSend.promise;
 
@@ -813,21 +768,15 @@ describePhase8('phase8 owner-review Approvals delivery', () => {
     });
     const failingB = createFakeTelegram({ failOnce: true });
 
-    const deliverA = processOwnerReviewRequiredOutboxBatch(
-      pool,
-      ccConfig,
-      engineConfig,
-      fakeA,
-      {
-        claimedEvents: [sharedEvent],
-        serializationHooks: {
-          beforeTelegramSend: async () => {
-            aPausedBeforeSend.resolve();
-            await releaseA.promise;
-          },
+    const deliverA = processOwnerReviewRequiredOutboxBatch(pool, ccConfig, engineConfig, fakeA, {
+      claimedEvents: [sharedEvent],
+      serializationHooks: {
+        beforeTelegramSend: async () => {
+          aPausedBeforeSend.resolve();
+          await releaseA.promise;
         },
       },
-    );
+    });
 
     await aPausedBeforeSend.promise;
 
@@ -962,12 +911,7 @@ describePhase8('phase8 owner-review Approvals delivery', () => {
       },
     });
 
-    const result = await processOwnerReviewRequiredOutboxBatch(
-      pool,
-      ccConfig,
-      engineConfig,
-      fake,
-    );
+    const result = await processOwnerReviewRequiredOutboxBatch(pool, ccConfig, engineConfig, fake);
     expect(result.delivered).toBe(1);
     expect(fake.sends).toBe(1);
 

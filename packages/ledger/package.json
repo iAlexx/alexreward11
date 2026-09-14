@@ -14,9 +14,13 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src test",
     "test": "vitest run --passWithNoTests",
-    "test:phase4": "cross-env PHASE4_LEDGER_TESTS=1 vitest run --fileParallelism=false test/phase4-posting.test.ts test/phase4-concurrency.test.ts test/phase4-reversal.test.ts test/phase4-invariants.test.ts test/phase4-assets.test.ts"
+    "test:phase4": "cross-env PHASE4_LEDGER_TESTS=1 vitest run --fileParallelism=false test/phase4-posting.test.ts test/phase4-concurrency.test.ts test/phase4-reversal.test.ts test/phase4-invariants.test.ts test/phase4-assets.test.ts",
+    "test:phase10-provision": "cross-env PHASE4_LEDGER_TESTS=1 vitest run --fileParallelism=false test/phase10-testnet-provision.test.ts",
+    "phase10:provision-available": "node dist/cli/phase10-testnet-available.js provision",
+    "phase10:reverse-available": "node dist/cli/phase10-testnet-available.js reverse"
   },
   "dependencies": {
+    "@alex-rewards/config": "workspace:*",
     "@alex-rewards/db": "workspace:*",
     "pg": "8.23.0"
   },

@@ -8,6 +8,7 @@ import {
   FakePayoutChain,
   advanceFakeReconciliation,
   createWithdrawalAttempt,
+  acquireHotWalletDispatchLease,
   acquireTestDispatchLease,
   decideWithdrawal,
   localWithdrawalEngineFixtureConfig,
@@ -395,7 +396,7 @@ describe.skipIf(phase7DatabaseUrl === '')('Phase 7 fake chain reconcile', () => 
     expect(result.state).toBe('RECONCILE_REQUIRED');
   });
 
-  it('stale fencing token rejected', async () => {
+  it('stale fencing token rejected — worker-b BUSY while A active (no steal)', async () => {
     const userId = await createTestUser(pool, '7308');
     await bindVerifiedPrimaryWallet(pool, userId, networkId);
     const withdrawalId = await createApprovedWithdrawal(pool, {
@@ -408,17 +409,27 @@ describe.skipIf(phase7DatabaseUrl === '')('Phase 7 fake chain reconcile', () => 
     });
 
     await withWithdrawalTransaction(pool, async (client) => {
-      const lease1 = await acquireTestDispatchLease(client, hotWalletId, 'worker-a');
-      await acquireTestDispatchLease(client, hotWalletId, 'worker-b');
-      await expect(
-        createWithdrawalAttempt(client, {
-          withdrawalId,
-          hotWalletId,
-          fencingToken: lease1.fencingToken,
-          signerKeyReference: 'TEST_ONLY_FAKE_HOT_1',
-          scenarioHashInputs: { scenario: 'stale' },
-        }),
-      ).rejects.toMatchObject({ code: 'STATE_CONFLICT' });
+      const leaseA = await acquireHotWalletDispatchLease(client, hotWalletId, 'worker-a');
+      expect(leaseA.status).toBe('ACQUIRED');
+      if (leaseA.status !== 'ACQUIRED') return;
+
+      const leaseB = await acquireHotWalletDispatchLease(client, hotWalletId, 'worker-b');
+      expect(leaseB.status).toBe('BUSY');
+
+      await expect(acquireTestDispatchLease(client, hotWalletId, 'worker-b')).rejects.toMatchObject(
+        { code: 'STATE_CONFLICT' },
+      );
+
+      // Active A fence remains usable; B never obtained a competing token.
+      const attempt = await createWithdrawalAttempt(client, {
+        withdrawalId,
+        hotWalletId,
+        fencingToken: leaseA.fencingToken,
+        signerKeyReference: 'TEST_ONLY_FAKE_HOT_1',
+        scenarioHashInputs: { scenario: 'owner-a-active' },
+        leaseOwnerIdentity: 'worker-a',
+      });
+      expect(attempt.dispatchFencingToken).toBe(leaseA.fencingToken.toString(10));
     });
   });
 

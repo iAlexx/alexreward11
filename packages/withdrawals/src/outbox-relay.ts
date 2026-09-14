@@ -1,7 +1,11 @@
 import { WorkflowExecutionAlreadyStartedError } from '@temporalio/client';
 import type { Pool, PoolClient } from 'pg';
 
-import { WITHDRAWAL_APPROVED_OUTBOX_EVENT, WITHDRAWAL_OWNER_REVIEW_REQUIRED_OUTBOX_EVENT, withdrawalWorkflowId } from './outbox.js';
+import {
+  WITHDRAWAL_APPROVED_OUTBOX_EVENT,
+  WITHDRAWAL_OWNER_REVIEW_REQUIRED_OUTBOX_EVENT,
+  withdrawalWorkflowId,
+} from './outbox.js';
 
 export const WITHDRAWAL_PAYOUT_WORKFLOW_TYPE = 'withdrawalPayoutWorkflow' as const;
 
@@ -78,6 +82,8 @@ function resolveWorkflowId(event: WithdrawalApprovedOutboxEvent, withdrawalId: s
 
 /**
  * Claim PENDING withdrawal.approved outbox rows (caller must be in a transaction).
+ * Serialization is FOR UPDATE SKIP LOCKED on the selected rows while the transaction
+ * is open — available_at is NOT fencing and is not bumped here.
  */
 export async function claimPendingWithdrawalApprovedEvents(
   client: PoolClient,

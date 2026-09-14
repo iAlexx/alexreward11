@@ -391,6 +391,9 @@ importers:
 
   packages/ledger:
     dependencies:
+      '@alex-rewards/config':
+        specifier: workspace:*
+        version: link:../config
       '@alex-rewards/db':
         specifier: workspace:*
         version: link:../db
@@ -558,6 +561,9 @@ importers:
       '@alex-rewards/auth':
         specifier: workspace:*
         version: link:../auth
+      '@alex-rewards/config':
+        specifier: workspace:*
+        version: link:../config
       '@alex-rewards/db':
         specifier: workspace:*
         version: link:../db

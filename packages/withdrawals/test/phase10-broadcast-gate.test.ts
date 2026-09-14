@@ -76,6 +76,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 broadcast gate (db)', () => {
         hotWalletId,
         fencingToken: lease.fencingToken,
         signerKeyReference: 'TEST_ONLY_FAKE_HOT_1',
+        leaseOwnerIdentity: 'phase10-gate',
       });
 
       await persistPreBroadcastEvidence(client, {

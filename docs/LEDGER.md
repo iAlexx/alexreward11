@@ -132,6 +132,25 @@ Invariants:
   acknowledged `TREASURY_FUNDING_CLEARING` (`acknowledgeUnresolvedAccounting`). That path is
   **not** production funding policy (ADR-009 still applies outside explicit test harnesses).
 
+## Phase 10 Testnet Owner Available provisioning (internal)
+
+**Testnet only. Owner-operated host/shell tooling. Disabled by default. Not a production
+balance editor.**
+
+Internal CLI (`@alex-rewards/ledger` → `phase10:provision-available` /
+`phase10:reverse-available`) may credit a single configured allowlisted user’s
+`USER_AVAILABLE_LIABILITY` via one `SUPPORT_ADJUSTMENT` (DR `SUPPORT_COMPENSATION_EXPENSE`).
+
+- Primary operator boundary: authorized host/shell access (not Control Center / Telegram auth).
+- Config gate `PHASE10_TESTNET_AVAILABLE_PROVISION_ENABLED` defaults to `false`.
+- LOCAL/TEST + exact `TON_TESTNET` / `USDT` only; Mainnet / `-239` fail closed.
+- `--operation-id` is a UUID and is the ledger `businessReferenceId`; **reuse the same UUID to retry**.
+- Reversal uses `reverseLedgerTransaction` against the exact original ledger transaction only
+  (linked `reverses_transaction_id`); never reconstruct opposite entries by hand.
+- Control Center remains ledger-free.
+
+See `docs/OPERATIONS_RUNBOOK.md` for env placeholders and CLI shape.
+
 ## Money representation
 
 - PostgreSQL `BIGINT` atomic units only

@@ -306,6 +306,19 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 DB crash/restart recovery', (
     expect(attemptsAfterCrash.rowCount).toBe(scenario.attemptsAfterCrash);
     expect(primary.getSendBocCallCount()).toBe(scenario.sendsAfterCrash);
     const firstAttemptId = attemptsAfterCrash.rows[0]?.id;
+    if (scenario.point === 'AFTER_SIGNED') {
+      expect(attemptsAfterCrash.rows[0]?.signed_external_message_boc).toBeNull();
+      expect(attemptsAfterCrash.rows[0]?.broadcast_submitted_at).toBeNull();
+    }
+    if (scenario.point === 'AFTER_CONFIRMATION_BEFORE_SETTLE' && firstAttemptId !== undefined) {
+      const proof = await pool.query<{ c: number }>(
+        `SELECT count(*)::int AS c FROM withdrawal_payout_reconciliations
+         WHERE withdrawal_attempt_id = $1::uuid
+           AND resolution = 'INTENDED_PAYOUT_PROVEN'`,
+        [firstAttemptId],
+      );
+      expect(proof.rows[0]?.c).toBeGreaterThanOrEqual(1);
+    }
 
     const recovered = await runRealTestnetPayoutPipeline(pool, baseInput);
     expect(recovered.state).toBe('CONFIRMED');
@@ -340,5 +353,174 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 DB crash/restart recovery', (
     expect(settled.rows[0]?.state).toBe('CONFIRMED');
     expect(settled.rows[0]?.settlement_ledger_tx_id).not.toBeNull();
     expect(settled.rows[0]?.settlement_count).toBe('1');
+  });
+
+  it('AFTER_SIGNED re-sign of SAME attempt is deterministic (no second attempt)', async () => {
+    const userId = await createTestUser(pool, String(userSequence++));
+    await createVerifiedPrimaryWallet(pool, {
+      userId,
+      networkId,
+      rawAddress: RECIPIENT_RAW,
+    });
+    const withdrawalId = await createApprovedWithdrawal(pool, {
+      userId,
+      networkId,
+      assetId,
+      adminUserId,
+      hotWalletId: baseHotWalletId,
+      amountAtomic: '200000',
+      engineConfig: nonFakeEngine,
+    });
+    const withdrawal = await pool.query<{
+      hot_wallet_id: string;
+      net_amount_atomic: string;
+    }>(
+      `SELECT hot_wallet_id::text, net_amount_atomic::text
+       FROM withdrawals WHERE id = $1::uuid`,
+      [withdrawalId],
+    );
+    const hotWalletId = withdrawal.rows[0]!.hot_wallet_id;
+    const netAmount = withdrawal.rows[0]!.net_amount_atomic;
+    await pool.query(
+      `UPDATE withdrawals SET state = 'QUEUED', queued_at = now()
+       WHERE id = $1::uuid`,
+      [withdrawalId],
+    );
+
+    const queryId =
+      (1n << 32n) +
+      BigInt(
+        Math.abs(
+          [...`${withdrawalId}:${RECIPIENT_RAW}`].reduce(
+            (acc, char) => (acc * 31 + char.charCodeAt(0)) | 0,
+            7,
+          ),
+        ),
+      );
+    const evidence = {
+      hotWallet: HOT_WALLET_RAW,
+      jettonMaster,
+      recipient: RECIPIENT_RAW,
+      amountAtomic: netAmount,
+      queryId: queryId.toString(10),
+      success: true,
+      bounced: false,
+      networkGlobalId: -3 as const,
+      senderJettonWallet: PAYOUT_JETTON_WALLET,
+    };
+    const primary = new FakeTonChainProvider();
+    const secondary = new FakeTonChainProvider();
+    primary.seedSeqno(HOT_WALLET_RAW, 12);
+    primary.seedTransfer(evidence);
+    secondary.seedTransfer(evidence);
+
+    const signCalls: string[] = [];
+    const normalizedHashes: string[] = [];
+    const testSigner: RealPayoutSignerPort = {
+      async getSigningIdentity() {
+        return {
+          publicKeyHex: TEST_PUBLIC_KEY_HEX,
+          publicKeyFingerprint: 'fp-crash-restart',
+          walletAddressRaw: HOT_WALLET_RAW,
+          signingReady: true,
+          custodyState: 'test',
+        };
+      },
+      async signWithdrawalAttempt(withdrawalAttemptId: string) {
+        signCalls.push(withdrawalAttemptId);
+        const result = await pool.query<{
+          withdrawal_id: string;
+          canonical_message_hash: string;
+        }>(
+          `SELECT withdrawal_id::text, canonical_message_hash
+           FROM withdrawal_attempts WHERE id = $1::uuid`,
+          [withdrawalAttemptId],
+        );
+        const attempt = result.rows[0]!;
+        normalizedHashes.push(NORMALIZED_HASH);
+        return {
+          withdrawalAttemptId,
+          withdrawalId: attempt.withdrawal_id,
+          canonicalMessageHash: attempt.canonical_message_hash,
+          canonicalSigningHash: attempt.canonical_message_hash,
+          signedMessageHash: NORMALIZED_HASH,
+          publicKeyFingerprint: 'fp-crash-restart',
+          walletAddressRaw: HOT_WALLET_RAW,
+          signatureBase64: 'dGVzdC1zaWc=',
+          keySpec: 'TEST_ONLY',
+          signingAlgorithm: 'ED25519_SHA_512',
+          signedWalletRequestBocBase64: 'dGVzdC13YWxsZXQtcmVxdWVzdA==',
+          externalMessageBocBase64: 'dGVzdC1ib2MtYmFzZTY0',
+          externalMessageCellHash: '44'.repeat(32),
+          normalizedExternalMessageHash: NORMALIZED_HASH,
+          signatureFingerprintHash: '55'.repeat(32),
+        };
+      },
+    };
+
+    const phase10 = buildPhase10PayoutConfig({
+      realChainEnabled: true,
+      signerServiceToken: 'local-signer-service-token-32chars!!',
+      jettonMasterIdentity: jettonMaster,
+      primaryProviderKind: 'toncenter',
+      primaryProviderUrl: 'https://testnet.toncenter.com/api/v2',
+      secondaryProviderKind: 'tonapi',
+      secondaryProviderUrl: 'https://testnet.tonapi.io',
+    });
+    const baseInput = {
+      withdrawalId,
+      phase10,
+      engine: nonFakeEngine,
+      chainProvider: primary,
+      secondaryChainProvider: secondary,
+      signer: testSigner,
+      allowTestExecutionPath: true,
+      buildCanonicalMessageHash: async () => TEST_CANONICAL_HASH,
+    };
+
+    await expect(
+      runRealTestnetPayoutPipeline(pool, {
+        ...baseInput,
+        crashAfter: 'AFTER_SIGNED' satisfies RealPipelineCrashPoint,
+      }),
+    ).rejects.toBeInstanceOf(PipelineCrashError);
+
+    const afterCrash = await pool.query<{
+      id: string;
+      attempt_number: number;
+      signed_external_message_boc: string | null;
+      normalized_external_message_hash: string | null;
+    }>(
+      `SELECT id, attempt_number, signed_external_message_boc,
+              normalized_external_message_hash
+       FROM withdrawal_attempts WHERE withdrawal_id = $1::uuid
+       ORDER BY attempt_number`,
+      [withdrawalId],
+    );
+    expect(afterCrash.rowCount).toBe(1);
+    expect(afterCrash.rows[0]?.signed_external_message_boc).toBeNull();
+    const attemptId = afterCrash.rows[0]!.id;
+    expect(signCalls).toEqual([attemptId]);
+
+    const recovered = await runRealTestnetPayoutPipeline(pool, baseInput);
+    expect(recovered.state).toBe('CONFIRMED');
+    expect(signCalls).toEqual([attemptId, attemptId]);
+    expect(normalizedHashes).toEqual([NORMALIZED_HASH, NORMALIZED_HASH]);
+
+    const finalAttempts = await pool.query<{
+      id: string;
+      attempt_number: number;
+      normalized_external_message_hash: string | null;
+    }>(
+      `SELECT id, attempt_number, normalized_external_message_hash
+       FROM withdrawal_attempts WHERE withdrawal_id = $1::uuid
+       ORDER BY attempt_number`,
+      [withdrawalId],
+    );
+    expect(finalAttempts.rowCount).toBe(1);
+    expect(finalAttempts.rows[0]?.id).toBe(attemptId);
+    expect(finalAttempts.rows[0]?.attempt_number).toBe(1);
+    expect(finalAttempts.rows[0]?.normalized_external_message_hash).toBe(NORMALIZED_HASH);
+    expect(hotWalletId).toBe(baseHotWalletId);
   });
 });

@@ -29,6 +29,24 @@ export { postLedgerTransaction, postLedgerTransactionWithReversalLink } from './
 export { reverseLedgerTransaction } from './reverse.js';
 
 export {
+  PHASE10_PROVISION_AUDIT_ACTION,
+  PHASE10_PROVISION_BUSINESS_REF_TYPE,
+  PHASE10_PROVISION_IDEMPOTENCY_SCOPE,
+  PHASE10_PROVISION_TOOL_VERSION,
+  PHASE10_REVERSE_AUDIT_ACTION,
+  PHASE10_REVERSE_BUSINESS_REF_TYPE,
+  PHASE10_REVERSE_IDEMPOTENCY_SCOPE,
+  provisionPhase10TestnetAvailable,
+  reversePhase10TestnetAvailableProvision,
+} from './phase10-testnet-provision.js';
+export type {
+  Phase10ProvisionIntent,
+  Phase10ProvisionResult,
+  Phase10ProvisionReverseResult,
+  Phase10TestnetProvisionRuntimeConfig,
+} from './phase10-testnet-provision.js';
+
+export {
   rebuildAccountProjections,
   loadStoredProjections,
   compareProjectionsToStored,

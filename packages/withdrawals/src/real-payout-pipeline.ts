@@ -1,4 +1,4 @@
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 
 import {
   createTonChainProvider,
@@ -8,8 +8,11 @@ import {
 } from '@alex-rewards/ton';
 
 import {
-  acquireTestDispatchLease,
+  acquireHotWalletDispatchLease,
+  assertHotWalletDispatchFence,
   createWithdrawalAttempt,
+  hotWalletDispatchOwnerIdentity,
+  releaseHotWalletDispatchLease,
   updateAttemptBroadcastState,
 } from './attempts.js';
 import {
@@ -28,6 +31,7 @@ import {
   listPhase10MissingResources,
   type Phase10PayoutConfig,
 } from './phase10-config.js';
+import { compactTep74EvidenceSummary, persistIntendedPayoutProvenEvidence } from './reconcile.js';
 import { settleWithdrawalReservation } from './settlement.js';
 import {
   SignerHttpClient,
@@ -36,6 +40,7 @@ import {
 } from './signer-client.js';
 import type { WithdrawalState } from './state-machine.js';
 import { transitionWithdrawal } from './transitions.js';
+import type { JettonTransferEvidence } from '@alex-rewards/ton';
 
 /** Intent fields required to compute an immutable canonical payout hash (TEP-74). */
 export interface RealPayoutCanonicalIntent {
@@ -162,6 +167,7 @@ interface PersistedPipelineAttempt {
   readonly expectedSeqno: string;
   readonly canonicalMessageHash: string;
   readonly broadcastResultState: string;
+  readonly dispatchFencingToken: string;
   readonly signedExternalMessageBoc: string | null;
   readonly signedWalletRequestBoc: string | null;
   readonly externalMessageCellHash: string | null;
@@ -186,6 +192,7 @@ async function loadPersistedAttempt(
     expected_seqno: string;
     canonical_message_hash: string;
     broadcast_result_state: string;
+    dispatch_fencing_token: string;
     signed_external_message_boc: string | null;
     signed_wallet_request_boc: string | null;
     external_message_cell_hash: string | null;
@@ -195,6 +202,7 @@ async function loadPersistedAttempt(
     `SELECT id, attempt_number, query_id::text, expected_seqno::text,
             canonical_message_hash,
             broadcast_result_state::text AS broadcast_result_state,
+            dispatch_fencing_token::text AS dispatch_fencing_token,
             signed_external_message_boc, signed_wallet_request_boc,
             external_message_cell_hash, normalized_external_message_hash,
             broadcast_submitted_at
@@ -214,6 +222,7 @@ async function loadPersistedAttempt(
         expectedSeqno: row.expected_seqno,
         canonicalMessageHash: row.canonical_message_hash,
         broadcastResultState: row.broadcast_result_state,
+        dispatchFencingToken: row.dispatch_fencing_token,
         signedExternalMessageBoc: row.signed_external_message_boc,
         signedWalletRequestBoc: row.signed_wallet_request_boc,
         externalMessageCellHash: row.external_message_cell_hash,
@@ -265,9 +274,10 @@ async function confirmAndSettle(
   stagesCompleted.push('watcher_reconciliation');
 
   let confirmed = false;
+  let secondaryEvidence: JettonTransferEvidence | null = null;
   if (primaryEvidence !== null && matchIntendedJettonPayout(primaryEvidence, expected)) {
     if (secondary !== null) {
-      const secondaryEvidence = await secondary.observeJettonTransfer(observeInput);
+      secondaryEvidence = await secondary.observeJettonTransfer(observeInput);
       if (
         secondaryEvidence !== null &&
         primarySecondaryEvidenceAgree(primaryEvidence, secondaryEvidence, expected)
@@ -279,6 +289,7 @@ async function confirmAndSettle(
       }
     } else if (testPath) {
       confirmed = true;
+      secondaryEvidence = primaryEvidence;
       stagesCompleted.push('full_tep74_proof_primary_test_path');
     } else {
       stagesCompleted.push('secondary_required_for_confirm');
@@ -312,12 +323,93 @@ async function confirmAndSettle(
     };
   }
 
+  const primaryEvidenceBound = primaryEvidence!;
+  const secondaryEvidenceBound = secondaryEvidence;
+  if (
+    secondaryEvidenceBound === null ||
+    !matchIntendedJettonPayout(secondaryEvidenceBound, expected)
+  ) {
+    await withWithdrawalTransaction(db, async (client) => {
+      await updateAttemptBroadcastState(client, {
+        attemptId: attempt.id,
+        broadcastResultState: 'RECONCILE_REQUIRED',
+      });
+    });
+    return {
+      state: 'RECONCILE_REQUIRED',
+      attemptId: attempt.id,
+      reason: 'tep74_secondary_missing_at_persist',
+      seqno: Number(attempt.expectedSeqno),
+      stagesCompleted,
+    };
+  }
+
+  // Durable INTENDED_PAYOUT_PROVEN in the same txn as CONFIRMED so
+  // AFTER_CONFIRMATION_BEFORE_SETTLE crash still leaves proof.
   await withWithdrawalTransaction(db, async (client) => {
     const current = await client.query<{ state: WithdrawalState }>(
       `SELECT state FROM withdrawals WHERE id = $1::uuid FOR UPDATE`,
       [context.withdrawalId],
     );
     const state = current.rows[0]?.state;
+    const primaryKind =
+      primaryEvidenceBound.providerKind ?? input.phase10.primaryProvider.kind ?? undefined;
+    const secondaryKind =
+      secondaryEvidenceBound.providerKind ?? input.phase10.secondaryProvider.kind ?? undefined;
+    const evidenceSummary = {
+      ...compactTep74EvidenceSummary({
+        withdrawalId: context.withdrawalId,
+        attemptId: attempt.id,
+        primary: {
+          hotWallet: primaryEvidenceBound.hotWallet,
+          jettonMaster: primaryEvidenceBound.jettonMaster,
+          recipient: primaryEvidenceBound.recipient,
+          amountAtomic: primaryEvidenceBound.amountAtomic,
+          queryId: primaryEvidenceBound.queryId,
+          success: primaryEvidenceBound.success,
+          bounced: primaryEvidenceBound.bounced,
+          ...(primaryKind !== undefined ? { providerKind: primaryKind } : {}),
+          networkGlobalId: primaryEvidenceBound.networkGlobalId ?? input.phase10.networkGlobalId,
+          ...(primaryEvidenceBound.senderJettonWallet !== undefined
+            ? { senderJettonWallet: primaryEvidenceBound.senderJettonWallet }
+            : {}),
+          ...(primaryEvidenceBound.proofStage !== undefined
+            ? { proofStage: primaryEvidenceBound.proofStage }
+            : {}),
+          ...(primaryEvidenceBound.transactionHash !== undefined
+            ? { transactionHash: primaryEvidenceBound.transactionHash }
+            : {}),
+          ...(primaryEvidenceBound.hotWalletTxHash !== undefined
+            ? { hotWalletTxHash: primaryEvidenceBound.hotWalletTxHash }
+            : {}),
+          ...(primaryEvidenceBound.jettonWalletTxHash !== undefined
+            ? { jettonWalletTxHash: primaryEvidenceBound.jettonWalletTxHash }
+            : {}),
+        },
+        secondaryAgree: true,
+        testPath,
+      }),
+      primaryProofStage: primaryEvidenceBound.proofStage ?? 'COMPLETE',
+      secondaryProviderKind: secondaryKind ?? null,
+      secondaryTxIdentity:
+        secondaryEvidenceBound.transactionHash ??
+        secondaryEvidenceBound.hotWalletTxHash ??
+        secondaryEvidenceBound.jettonWalletTxHash ??
+        null,
+      secondaryProofStage: secondaryEvidenceBound.proofStage ?? 'COMPLETE',
+      secondarySuccess: secondaryEvidenceBound.success,
+      secondaryNonBounce: secondaryEvidenceBound.bounced === false,
+    };
+    await persistIntendedPayoutProvenEvidence(client, {
+      withdrawalId: context.withdrawalId,
+      attemptId: attempt.id,
+      observedRecipient: primaryEvidenceBound.recipient,
+      observedAmountAtomic: primaryEvidenceBound.amountAtomic,
+      observedQueryId: primaryEvidenceBound.queryId,
+      correlationReference:
+        primaryEvidenceBound.transactionHash ?? primaryEvidenceBound.hotWalletTxHash ?? null,
+      evidenceSummary,
+    });
     if (state === 'CONFIRMING' || state === 'RECONCILE_REQUIRED') {
       await transitionWithdrawal(client, {
         id: context.withdrawalId,
@@ -330,10 +422,25 @@ async function confirmAndSettle(
       });
     }
   });
+  stagesCompleted.push('durable_tep74_intended_payout_proven');
   crashAt(input, 'AFTER_CONFIRMATION_BEFORE_SETTLE');
 
   await withWithdrawalTransaction(db, async (client) => {
     await settleWithdrawalReservation(client, { withdrawalId: context.withdrawalId });
+    const ownerIdentity = hotWalletDispatchOwnerIdentity(context.withdrawalId);
+    const fence = await client.query<{ fencing_token: string }>(
+      `SELECT fencing_token::text FROM hot_wallet_dispatch_leases
+       WHERE hot_wallet_id = $1::uuid AND owner_identity = $2 AND released_at IS NULL`,
+      [context.hotWalletId, ownerIdentity],
+    );
+    if (fence.rows[0] !== undefined) {
+      await releaseHotWalletDispatchLease(client, {
+        hotWalletId: context.hotWalletId,
+        ownerIdentity,
+        fencingToken: BigInt(fence.rows[0].fencing_token),
+        reason: 'CONFIRMED_SETTLED',
+      });
+    }
   });
   stagesCompleted.push('idempotent_confirmed_finalization');
   return {
@@ -342,6 +449,22 @@ async function confirmAndSettle(
     seqno: Number(attempt.expectedSeqno),
     stagesCompleted,
   };
+}
+
+async function releaseLeaseFailedPreBroadcast(
+  client: PoolClient,
+  input: {
+    readonly hotWalletId: string;
+    readonly withdrawalId: string;
+    readonly fencingToken: bigint;
+  },
+): Promise<void> {
+  await releaseHotWalletDispatchLease(client, {
+    hotWalletId: input.hotWalletId,
+    ownerIdentity: hotWalletDispatchOwnerIdentity(input.withdrawalId),
+    fencingToken: input.fencingToken,
+    reason: 'FAILED_PRE_BROADCAST',
+  });
 }
 
 function signerResultIsValid(
@@ -464,6 +587,11 @@ async function resumePersistedPipeline(
           from: 'SIGNING',
           to: 'FAILED_PRE_BROADCAST',
         });
+        await releaseLeaseFailedPreBroadcast(client, {
+          hotWalletId: context.hotWalletId,
+          withdrawalId: context.withdrawalId,
+          fencingToken: BigInt(attempt.dispatchFencingToken),
+        });
       });
       return {
         state: 'FAILED_PRE_BROADCAST',
@@ -485,6 +613,11 @@ async function resumePersistedPipeline(
           id: context.withdrawalId,
           from: 'SIGNING',
           to: 'FAILED_PRE_BROADCAST',
+        });
+        await releaseLeaseFailedPreBroadcast(client, {
+          hotWalletId: context.hotWalletId,
+          withdrawalId: context.withdrawalId,
+          fencingToken: BigInt(attempt.dispatchFencingToken),
         });
       });
       return {
@@ -528,6 +661,11 @@ async function resumePersistedPipeline(
           from: 'SIGNING',
           to: 'FAILED_PRE_BROADCAST',
         });
+        await releaseLeaseFailedPreBroadcast(client, {
+          hotWalletId: context.hotWalletId,
+          withdrawalId: context.withdrawalId,
+          fencingToken: BigInt(attempt.dispatchFencingToken),
+        });
       } else if (state === 'BROADCASTING') {
         await transitionWithdrawal(client, {
           id: context.withdrawalId,
@@ -568,7 +706,34 @@ async function resumePersistedPipeline(
       });
       state = 'BROADCASTING';
     }
+    const resumeOwner = hotWalletDispatchOwnerIdentity(context.withdrawalId);
+    const resumeFence = BigInt(attempt.dispatchFencingToken);
     await withWithdrawalTransaction(db, async (client) => {
+      // Same-withdrawal may reacquire if lease expired while still pre-broadcast.
+      // Same-owner reclaim keeps fencing_token STABLE (attempt fence is immutable).
+      const lease = await acquireHotWalletDispatchLease(client, context.hotWalletId, resumeOwner);
+      if (lease.status !== 'ACQUIRED') {
+        throw new WithdrawalDomainError('STATE_CONFLICT', 'Hot wallet dispatch lease unavailable', {
+          details: { lease },
+        });
+      }
+      if (lease.fencingToken !== resumeFence) {
+        throw new WithdrawalDomainError(
+          'STATE_CONFLICT',
+          'Pre-broadcast lease fence no longer matches immutable attempt fence',
+          {
+            details: {
+              attemptFence: resumeFence.toString(10),
+              leaseFence: lease.fencingToken.toString(10),
+            },
+          },
+        );
+      }
+      await assertHotWalletDispatchFence(client, {
+        hotWalletId: context.hotWalletId,
+        fencingToken: lease.fencingToken,
+        ownerIdentity: resumeOwner,
+      });
       await markBroadcastSubmitted(client, {
         attemptId: attempt.id,
         ambiguityClass: null,
@@ -605,6 +770,34 @@ async function resumePersistedPipeline(
           classification.kind === 'BROADCASTED'
             ? 'broadcast_outcome_unknown'
             : classification.reason,
+        seqno: Number(attempt.expectedSeqno),
+        stagesCompleted,
+      };
+    }
+    if (sendResult.accepted !== true) {
+      await withWithdrawalTransaction(db, async (client) => {
+        await markBroadcastSubmitted(client, {
+          attemptId: attempt.id,
+          ambiguityClass: 'UNKNOWN_SUBMIT_OUTCOME',
+          broadcastResultState: 'RECONCILE_REQUIRED',
+          chainReference: sendResult.providerReference ?? sendResult.messageHash ?? null,
+        });
+        await updateAttemptBroadcastState(client, {
+          attemptId: attempt.id,
+          broadcastResultState: 'RECONCILE_REQUIRED',
+          chainReference: sendResult.providerReference ?? sendResult.messageHash ?? null,
+        });
+        await transitionWithdrawal(client, {
+          id: context.withdrawalId,
+          from: 'BROADCASTING',
+          to: 'RECONCILE_REQUIRED',
+        });
+      });
+      stagesCompleted.push('provider_sendBoc_accepted_false');
+      return {
+        state: 'RECONCILE_REQUIRED',
+        attemptId: attempt.id,
+        reason: 'sendBoc_accepted_false',
         seqno: Number(attempt.expectedSeqno),
         stagesCompleted,
       };
@@ -958,11 +1151,13 @@ export async function runRealTestnetPayoutPipeline(
       enteredSigning = true;
     }
 
-    const lease = await acquireTestDispatchLease(
-      client,
-      w.hot_wallet_id,
-      `phase10-real-pipeline:${w.id}`,
-    );
+    const ownerIdentity = hotWalletDispatchOwnerIdentity(w.id);
+    const lease = await acquireHotWalletDispatchLease(client, w.hot_wallet_id, ownerIdentity);
+    if (lease.status !== 'ACQUIRED') {
+      throw new WithdrawalDomainError('STATE_CONFLICT', 'Hot wallet dispatch lease unavailable', {
+        details: { lease },
+      });
+    }
     stagesCompleted.push('fenced_dispatcher_lease');
 
     return {
@@ -975,6 +1170,7 @@ export async function runRealTestnetPayoutPipeline(
       signerKeyReference: hotRow.signer_reference,
       jettonMaster,
       fencingToken: lease.fencingToken,
+      ownerIdentity,
       enteredSigning,
     };
   });
@@ -1036,6 +1232,7 @@ export async function runRealTestnetPayoutPipeline(
       withdrawalId: context.withdrawalId,
       hotWalletId: context.hotWalletId,
       fencingToken: context.fencingToken,
+      leaseOwnerIdentity: context.ownerIdentity,
       signerKeyReference: context.signerKeyReference,
       expectedSeqno: BigInt(seqno),
       queryId,
@@ -1061,6 +1258,11 @@ export async function runRealTestnetPayoutPipeline(
         id: context.withdrawalId,
         from: 'SIGNING',
         to: 'FAILED_PRE_BROADCAST',
+      });
+      await releaseLeaseFailedPreBroadcast(client, {
+        hotWalletId: context.hotWalletId,
+        withdrawalId: context.withdrawalId,
+        fencingToken: context.fencingToken,
       });
     });
     return {
@@ -1093,6 +1295,11 @@ export async function runRealTestnetPayoutPipeline(
         from: 'SIGNING',
         to: 'FAILED_PRE_BROADCAST',
       });
+      await releaseLeaseFailedPreBroadcast(client, {
+        hotWalletId: context.hotWalletId,
+        withdrawalId: context.withdrawalId,
+        fencingToken: context.fencingToken,
+      });
     });
     return {
       state: 'FAILED_PRE_BROADCAST',
@@ -1103,8 +1310,15 @@ export async function runRealTestnetPayoutPipeline(
     };
   }
 
+  const ownerIdentity = context.ownerIdentity;
+
   // --- Persist BOC BEFORE external send (NO BLIND RESEND foundation) ---
   await withWithdrawalTransaction(db, async (client) => {
+    await assertHotWalletDispatchFence(client, {
+      hotWalletId: context.hotWalletId,
+      fencingToken: context.fencingToken,
+      ownerIdentity,
+    });
     await assertBlindResendForbidden(client, attempt.id);
     await persistPreBroadcastEvidence(client, {
       attemptId: attempt.id,
@@ -1125,6 +1339,11 @@ export async function runRealTestnetPayoutPipeline(
   // Mark submit intent immediately before sendBoc so crash/timeout cannot look like
   // FAILED_PRE_BROADCAST (ambiguous → reconcile; never blind resend).
   await withWithdrawalTransaction(db, async (client) => {
+    await assertHotWalletDispatchFence(client, {
+      hotWalletId: context.hotWalletId,
+      fencingToken: context.fencingToken,
+      ownerIdentity,
+    });
     await markBroadcastSubmitted(client, {
       attemptId: attempt.id,
       ambiguityClass: null,
@@ -1140,7 +1359,6 @@ export async function runRealTestnetPayoutPipeline(
     const classification = classifySubmitError(error);
     await withWithdrawalTransaction(db, async (client) => {
       if (classification.kind === 'FAILED_PRE_BROADCAST') {
-        // Should be rare after markBroadcastSubmitted; still fail closed to reconcile.
         await markBroadcastSubmitted(client, {
           attemptId: attempt.id,
           ambiguityClass: 'UNKNOWN_SUBMIT_OUTCOME',
@@ -1178,6 +1396,36 @@ export async function runRealTestnetPayoutPipeline(
       stagesCompleted,
     };
   }
+
+  if (sendResult.accepted !== true) {
+    await withWithdrawalTransaction(db, async (client) => {
+      await markBroadcastSubmitted(client, {
+        attemptId: attempt.id,
+        ambiguityClass: 'UNKNOWN_SUBMIT_OUTCOME',
+        broadcastResultState: 'RECONCILE_REQUIRED',
+        chainReference: sendResult.providerReference ?? sendResult.messageHash ?? null,
+      });
+      await updateAttemptBroadcastState(client, {
+        attemptId: attempt.id,
+        broadcastResultState: 'RECONCILE_REQUIRED',
+        chainReference: sendResult.providerReference ?? sendResult.messageHash ?? null,
+      });
+      await transitionWithdrawal(client, {
+        id: context.withdrawalId,
+        from: 'BROADCASTING',
+        to: 'RECONCILE_REQUIRED',
+      });
+    });
+    stagesCompleted.push('provider_sendBoc_accepted_false');
+    return {
+      state: 'RECONCILE_REQUIRED',
+      attemptId: attempt.id,
+      reason: 'sendBoc_accepted_false',
+      seqno,
+      stagesCompleted,
+    };
+  }
+
   crashAt(input, 'AFTER_SEND_ACCEPTED_BEFORE_EVIDENCE');
 
   await withWithdrawalTransaction(db, async (client) => {

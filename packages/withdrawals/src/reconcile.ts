@@ -13,6 +13,7 @@ import {
 import { settleWithdrawalReservation } from './settlement.js';
 import { transitionWithdrawal } from './transitions.js';
 import type { WithdrawalState } from './state-machine.js';
+import { hotWalletDispatchOwnerIdentity, releaseHotWalletDispatchLease } from './attempts.js';
 
 export type ReconcileResolution =
   'UNRESOLVED' | 'INTENDED_PAYOUT_PROVEN' | 'DEFINITIVE_NONPAYMENT' | 'AMBIGUOUS';
@@ -149,6 +150,113 @@ function deriveResolution(input: {
 }
 
 /**
+ * Persist durable INTENDED_PAYOUT_PROVEN evidence (compact, no secrets/BOC).
+ * Idempotent when an INTENDED_PAYOUT_PROVEN row already exists for the attempt.
+ * Survives AFTER_CONFIRMATION_BEFORE_SETTLE crash when called in the same txn
+ * as the CONFIRMED transition.
+ */
+export async function persistIntendedPayoutProvenEvidence(
+  client: PoolClient,
+  input: {
+    readonly withdrawalId: string;
+    readonly attemptId: string;
+    readonly observedRecipient: string;
+    readonly observedAmountAtomic: string;
+    readonly observedQueryId: string;
+    readonly observedAssetSymbol?: string;
+    readonly correlationReference?: string | null;
+    readonly evidenceSummary: Readonly<Record<string, unknown>>;
+  },
+): Promise<{ readonly reconciliationId: string; readonly created: boolean }> {
+  const existing = await client.query<{ id: string }>(
+    `SELECT id FROM withdrawal_payout_reconciliations
+     WHERE withdrawal_attempt_id = $1::uuid
+       AND resolution = 'INTENDED_PAYOUT_PROVEN'
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [input.attemptId],
+  );
+  if (existing.rows[0] !== undefined) {
+    return { reconciliationId: existing.rows[0].id, created: false };
+  }
+
+  const inserted = await client.query<{ id: string }>(
+    `INSERT INTO withdrawal_payout_reconciliations (
+       withdrawal_id, withdrawal_attempt_id, resolution, evidence_summary,
+       observed_recipient, observed_amount_atomic, observed_asset_symbol,
+       observed_query_id, correlation_reference, resolved_at
+     ) VALUES (
+       $1::uuid, $2::uuid, 'INTENDED_PAYOUT_PROVEN'::withdrawal_payout_reconcile_resolution, $3::jsonb,
+       $4, $5::bigint, $6, $7::bigint, $8, now()
+     )
+     RETURNING id`,
+    [
+      input.withdrawalId,
+      input.attemptId,
+      JSON.stringify(input.evidenceSummary),
+      input.observedRecipient,
+      input.observedAmountAtomic,
+      input.observedAssetSymbol ?? 'USDT',
+      input.observedQueryId,
+      input.correlationReference ?? null,
+    ],
+  );
+  const reconciliationId = inserted.rows[0]?.id;
+  if (reconciliationId === undefined) {
+    throw new WithdrawalDomainError('INTERNAL', 'INTENDED_PAYOUT_PROVEN insert failed');
+  }
+  return { reconciliationId, created: true };
+}
+
+/** Compact safe TEP-74 dual-provider evidence (no secrets / raw payloads / BOC). */
+export function compactTep74EvidenceSummary(input: {
+  readonly withdrawalId: string;
+  readonly attemptId: string;
+  readonly primary: {
+    readonly hotWallet: string;
+    readonly jettonMaster: string;
+    readonly recipient: string;
+    readonly amountAtomic: string;
+    readonly queryId: string;
+    readonly success: boolean;
+    readonly bounced: boolean;
+    readonly networkGlobalId?: number;
+    readonly senderJettonWallet?: string;
+    readonly proofStage?: string;
+    readonly transactionHash?: string;
+    readonly hotWalletTxHash?: string;
+    readonly jettonWalletTxHash?: string;
+    readonly providerKind?: string;
+  };
+  readonly secondaryAgree: boolean;
+  readonly testPath?: boolean;
+}): Readonly<Record<string, unknown>> {
+  const p = input.primary;
+  return {
+    proofStage: 'COMPLETE',
+    tep74Complete: true,
+    fullTep74: true,
+    withdrawalId: input.withdrawalId,
+    attemptId: input.attemptId,
+    queryId: p.queryId,
+    recipient: p.recipient,
+    amountAtomic: p.amountAtomic,
+    jettonMaster: p.jettonMaster,
+    hotWallet: p.hotWallet,
+    senderJettonWallet: p.senderJettonWallet ?? null,
+    networkGlobalId: p.networkGlobalId ?? null,
+    success: p.success,
+    bounced: p.bounced,
+    nonBounce: p.bounced === false,
+    txIdentity: p.transactionHash ?? p.hotWalletTxHash ?? null,
+    jettonWalletTxHash: p.jettonWalletTxHash ?? null,
+    primaryProviderKind: p.providerKind ?? null,
+    secondaryAgree: input.secondaryAgree,
+    testPath: input.testPath === true,
+  };
+}
+
+/**
  * Runtime reconciliation: obtain observation from the trusted chain adapter only.
  * Callers supply withdrawalId + attemptId — never a self-built financial observation.
  */
@@ -212,8 +320,9 @@ export async function applyObservationInTxn(
     state: WithdrawalState;
     net_amount_atomic: string;
     wallet_id: string;
+    hot_wallet_id: string | null;
   }>(
-    `SELECT id, state, net_amount_atomic::text, wallet_id
+    `SELECT id, state, net_amount_atomic::text, wallet_id, hot_wallet_id
      FROM withdrawals WHERE id = $1::uuid FOR UPDATE`,
     [input.withdrawalId],
   );
@@ -236,8 +345,12 @@ export async function applyObservationInTxn(
     query_id: string;
     attempt_number: number;
     canonical_message_hash: string;
+    dispatch_fencing_token: string;
+    hot_wallet_id: string;
   }>(
-    `SELECT id, withdrawal_id, query_id::text, attempt_number, canonical_message_hash
+    `SELECT id, withdrawal_id, query_id::text, attempt_number, canonical_message_hash,
+            dispatch_fencing_token::text AS dispatch_fencing_token,
+            hot_wallet_id
      FROM withdrawal_attempts
      WHERE id = $1::uuid
        AND withdrawal_id = $2::uuid`,
@@ -334,6 +447,12 @@ export async function applyObservationInTxn(
     });
     await settleWithdrawalReservation(client, { withdrawalId: w.id });
     state = 'CONFIRMED';
+    await releaseHotWalletDispatchLease(client, {
+      hotWalletId: a.hot_wallet_id,
+      ownerIdentity: hotWalletDispatchOwnerIdentity(w.id),
+      fencingToken: BigInt(a.dispatch_fencing_token),
+      reason: 'CONFIRMED_SETTLED',
+    }).catch(() => undefined);
   } else if (resolution === 'DEFINITIVE_NONPAYMENT' && w.state === 'RECONCILE_REQUIRED') {
     await transitionWithdrawal(client, {
       id: w.id,
@@ -342,6 +461,12 @@ export async function applyObservationInTxn(
       setHeldFromReconcile: true,
     });
     state = 'HELD';
+    await releaseHotWalletDispatchLease(client, {
+      hotWalletId: a.hot_wallet_id,
+      ownerIdentity: hotWalletDispatchOwnerIdentity(w.id),
+      fencingToken: BigInt(a.dispatch_fencing_token),
+      reason: 'DEFINITIVE_NONPAYMENT',
+    }).catch(() => undefined);
   } else if (resolution === 'AMBIGUOUS' && w.state === 'RECONCILE_REQUIRED') {
     state = 'RECONCILE_REQUIRED';
   } else if (resolution === 'DEFINITIVE_NONPAYMENT' && w.state === 'HELD') {

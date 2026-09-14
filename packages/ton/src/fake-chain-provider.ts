@@ -16,6 +16,11 @@ export interface FakeTonChainProviderOptions {
   readonly sendBocTimeout?: boolean;
   /** When true, sendBoc throws before any submit side-effect. */
   readonly sendBocFailBeforeSubmit?: boolean;
+  /**
+   * When true, sendBoc returns accepted:false (ambiguous provider reject).
+   * Pipeline must treat as UNKNOWN/RECONCILE_REQUIRED — never BROADCASTED.
+   */
+  readonly sendBocAcceptedFalse?: boolean;
 }
 
 /**
@@ -31,12 +36,14 @@ export class FakeTonChainProvider implements TonChainProvider {
   private readonly submittedBocs: string[] = [];
   private sendBocTimeout: boolean;
   private sendBocFailBeforeSubmit: boolean;
+  private sendBocAcceptedFalse: boolean;
   private sendBocCallCount = 0;
 
   constructor(options: FakeTonChainProviderOptions = {}) {
     assertTestnetOnly(options.networkGlobalId ?? TON_TESTNET_NETWORK_GLOBAL_ID);
     this.sendBocTimeout = options.sendBocTimeout === true;
     this.sendBocFailBeforeSubmit = options.sendBocFailBeforeSubmit === true;
+    this.sendBocAcceptedFalse = options.sendBocAcceptedFalse === true;
   }
 
   seedSeqno(address: string, seqno: number): void {
@@ -71,6 +78,10 @@ export class FakeTonChainProvider implements TonChainProvider {
     this.sendBocFailBeforeSubmit = value;
   }
 
+  setSendBocAcceptedFalse(value: boolean): void {
+    this.sendBocAcceptedFalse = value;
+  }
+
   async getSeqno(address: string): Promise<number> {
     return this.seqnoByAddress.get(address) ?? 0;
   }
@@ -100,6 +111,13 @@ export class FakeTonChainProvider implements TonChainProvider {
       throw new Error('FAKE_PROVIDER_RPC_TIMEOUT');
     }
     this.submittedBocs.push(bocBase64);
+    if (this.sendBocAcceptedFalse) {
+      return {
+        accepted: false,
+        messageHash: `fake-msg-rejected-${this.submittedBocs.length}`,
+        providerReference: `fake-ref-rejected-${this.submittedBocs.length}`,
+      };
+    }
     return {
       accepted: true,
       messageHash: `fake-msg-${this.submittedBocs.length}`,

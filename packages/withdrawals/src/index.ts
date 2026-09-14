@@ -120,18 +120,29 @@ export { settleWithdrawalReservation } from './settlement.js';
 export {
   createWithdrawalAttempt,
   updateAttemptBroadcastState,
+  acquireHotWalletDispatchLease,
   acquireTestDispatchLease,
+  assertHotWalletDispatchFence,
+  hotWalletDispatchOwnerForWithdrawal,
+  hotWalletDispatchOwnerIdentity,
+  releaseHotWalletDispatchLease,
 } from './attempts.js';
-export type { WithdrawalAttemptView } from './attempts.js';
+export type {
+  HotWalletDispatchLeaseAcquireResult,
+  HotWalletDispatchReleaseReason,
+  WithdrawalAttemptView,
+} from './attempts.js';
 
 export { runFakePayoutPipeline, advanceFakeReconciliation } from './pipeline.js';
 export type { FakePayoutPipelineResult } from './pipeline.js';
 
 export {
+  compactTep74EvidenceSummary,
   reconcileWithdrawalAttemptFromAdapter,
   reconcileWithdrawalAttemptFromAdapterInTxn,
   matchIntendedPayout,
   observationMatchesExpectedAttempt,
+  persistIntendedPayoutProvenEvidence,
 } from './reconcile.js';
 export type {
   ReconcileResolution,
@@ -195,3 +206,166 @@ export type {
   RealTestnetPayoutPipelineState,
   RunRealTestnetPayoutPipelineInput,
 } from './real-payout-pipeline.js';
+
+export { runPhase10Readiness } from './phase10-readiness.js';
+export type {
+  Phase10ReadinessClassification,
+  Phase10ReadinessConfig,
+  Phase10ReadinessItem,
+  Phase10ReadinessReport,
+  Phase10ReadinessStatus,
+} from './phase10-readiness.js';
+
+export { runPhase10RestoreReconcileScan } from './phase10-restore-reconcile.js';
+export type {
+  Phase10RestoreFinding,
+  Phase10RestoreFindingCategory,
+  Phase10RestoreReconcileScanReport,
+  Phase10HistoricalBaselineInput,
+  Phase10HistoricalBaselineAttemptState,
+  Phase10RestoreReconcileScanOptions,
+} from './phase10-restore-reconcile.js';
+
+export { buildPhase10HotWalletMonitorReport } from './phase10-hot-wallet-monitor.js';
+export type {
+  Phase10HotWalletBalanceBaseline,
+  Phase10HotWalletBalanceObservations,
+  Phase10HotWalletMonitorInput,
+  Phase10HotWalletMonitorReport,
+} from './phase10-hot-wallet-monitor.js';
+export { PHASE10_HOT_WALLET_CHAIN_HISTORY_PROOF_REQUIRED } from './phase10-hot-wallet-monitor.js';
+
+export {
+  checkPhase10PayoutInvariants,
+  isCompleteIntendedPayoutProof,
+} from './phase10-payout-invariants.js';
+export type {
+  CheckPhase10PayoutInvariantsOptions,
+  Phase10IntendedPayoutProofExpected,
+  Phase10IntendedPayoutProofOptions,
+  Phase10InvariantFinding,
+  Phase10InvariantSeverity,
+  Phase10PayoutInvariantReport,
+} from './phase10-payout-invariants.js';
+
+export {
+  PHASE10_CAMPAIGN_MIN_ACCEPTANCE_PAYOUTS,
+  PHASE10_FAILURE_SCENARIO_CATALOGUE,
+  PHASE10_REAL_CAMPAIGN_CONFIRMATION_PHRASE,
+  allRealExecutionGatesTrue,
+  attachWithdrawal,
+  attachWithdrawalIds,
+  generateFinalCampaignEvidence,
+  initCampaignManifest,
+  initializeCampaign,
+  isPhase10CampaignCompletionSatisfied,
+  planPhase10Campaign,
+  refreshEvidence,
+  rescanCampaignEvidence,
+  rescanWithdrawalsFromDb,
+  resumeCampaign,
+  resumeCampaignById,
+  writeEvidenceFile,
+} from './phase10-campaign.js';
+export type {
+  AttachPhase10CampaignWithdrawalInput,
+  InitPhase10CampaignManifestInput,
+  Phase10CampaignEvidenceRecord,
+  Phase10CampaignManifest,
+  Phase10CampaignMode,
+  Phase10CampaignPlan,
+  Phase10CampaignPlanItem,
+  Phase10CampaignRealExecutionGates,
+  Phase10CampaignRealModeGates,
+  Phase10CampaignSafeHashes,
+  Phase10FailureScenario,
+  Phase10ScenarioClassification,
+  PlanPhase10CampaignInput,
+} from './phase10-campaign.js';
+
+export { runPhase10Preflight } from './phase10-preflight.js';
+export type {
+  Phase10PreflightInput,
+  Phase10PreflightReport,
+  Phase10PreflightVerdict,
+} from './phase10-preflight.js';
+
+export {
+  PHASE10_PROVIDER_INDEPENDENCE_UNPROVEN,
+  PHASE10_TON_TESTNET_NETWORK_GLOBAL_ID,
+  PHASE10_TON_MAINNET_NETWORK_GLOBAL_ID,
+  PRIMARY_PROVIDER_WRONG_NETWORK,
+  SECONDARY_PROVIDER_WRONG_NETWORK,
+  evaluateProviderIndependence,
+  fingerprintProviderEndpoint,
+  runPhase10LiveExternalProbes,
+  signerLockedFromProbe,
+} from './phase10-live-probes.js';
+export type {
+  Phase10LiveExternalProbeEvidence,
+  Phase10LiveExternalProbeInput,
+  Phase10ProviderProbeObservation,
+  Phase10SignerProbeObservation,
+} from './phase10-live-probes.js';
+
+export {
+  PHASE10_LIVE_PREFLIGHT_EVIDENCE_SCHEMA_VERSION,
+  buildPhase10LivePreflightEvidence,
+  writePhase10LivePreflightEvidence,
+} from './phase10-live-readiness-evidence.js';
+export type {
+  BuildPhase10LivePreflightEvidenceInput,
+  Phase10LivePreflightEvidenceArtifact,
+} from './phase10-live-readiness-evidence.js';
+
+export {
+  PHASE10_CHAIN_HISTORY_EVIDENCE_SCHEMA_VERSION,
+  PHASE10_CHAIN_HISTORY_PROOF_REQUIRED,
+  PHASE10_CHAIN_HISTORY_PROVIDER_COLLECTOR_AVAILABLE,
+  buildPhase10ChainHistoryEvidence,
+  digestChainHistoryTransfers,
+  evaluateChainHistoryForAcceptance,
+  parsePhase10ChainHistoryEvidence,
+  readPhase10ChainHistoryEvidence,
+  writePhase10ChainHistoryEvidence,
+} from './phase10-chain-history-evidence.js';
+export type {
+  BuildPhase10ChainHistoryEvidenceInput,
+  Phase10ChainHistoryAcceptanceBinding,
+  Phase10ChainHistoryEvidenceArtifact,
+  Phase10ChainHistoryOutgoingTransfer,
+  Phase10ChainHistoryReconciliationResult,
+} from './phase10-chain-history-evidence.js';
+
+export {
+  PHASE10_HISTORICAL_BASELINE_SCHEMA_VERSION,
+  capturePhase10HistoricalBaseline,
+  historicalBaselineInputFromArtifact,
+  parsePhase10HistoricalBaseline,
+  readPhase10HistoricalBaseline,
+  writePhase10HistoricalBaseline,
+} from './phase10-historical-baseline.js';
+export type {
+  Phase10HistoricalBaselineArtifact,
+  Phase10HistoricalBaselineAttemptSnapshot,
+} from './phase10-historical-baseline.js';
+
+export { loadPhase10AuthoritativeHotWalletIdentity } from './phase10-hot-wallet-identity.js';
+export type { Phase10AuthoritativeHotWalletIdentity } from './phase10-hot-wallet-identity.js';
+
+export {
+  PHASE10_REQUIRED_REAL_FAILURE_SCENARIO_IDS,
+  evaluatePhase10AcceptanceGate,
+  evaluatePhase10AcceptanceFromEvidence,
+  parseLiveReadinessEvidence,
+  validateFailureInjectionEvidence,
+  validateLiveReadinessEvidence,
+} from './phase10-acceptance-gate.js';
+export type {
+  ParsedLiveReadinessEvidence,
+  Phase10AcceptanceFromEvidenceInput,
+  Phase10AcceptanceGateInput,
+  Phase10AcceptanceGateResult,
+  Phase10AcceptanceGateVerdict,
+  Phase10LiveEvidencePresence,
+} from './phase10-acceptance-gate.js';
