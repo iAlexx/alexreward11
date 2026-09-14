@@ -129,7 +129,25 @@ jobs:
       - name: Install from lockfile
         run: pnpm install --frozen-lockfile
       - name: Prepare local-only environment
-        run: cp .env.example .env
+        run: |
+          set -euo pipefail
+          cp .env.example .env
+          # CI-only unused placeholders for Compose host interpolation.
+          # Signer remains SIGNER_KEY_MODE=local_ephemeral from .env.example;
+          # this empty file is NOT key material and the zeroed reference is NOT
+          # an authoritative real signer identity.
+          placeholder="${RUNNER_TEMP}/alex-rewards-ci-unused-signer-bundle"
+          : > "${placeholder}"
+          signer_ref="0000000000000000000000000000000000000000000000000000000000000000"
+          echo "SIGNER_KEY_BUNDLE_PATH=${placeholder}" >> "${GITHUB_ENV}"
+          echo "SIGNER_EXPECTED_SIGNER_REFERENCE=${signer_ref}" >> "${GITHUB_ENV}"
+          export SIGNER_KEY_BUNDLE_PATH="${placeholder}"
+          export SIGNER_EXPECTED_SIGNER_REFERENCE="${signer_ref}"
+          docker compose \
+            -f infra/docker/compose.yaml \
+            --env-file .env \
+            --profile apps \
+            config --quiet
       - name: Start pinned full stack
         run: docker compose -f infra/docker/compose.yaml --env-file .env --profile apps up -d --build --wait
       - name: Run Phase 1 smoke test
