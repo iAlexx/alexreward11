@@ -25,7 +25,15 @@ export interface Phase10RestoreFinding {
 }
 
 export interface Phase10HistoricalBaselineAttemptState {
+  readonly withdrawalId: string;
   readonly broadcastResultState: string;
+  readonly broadcastSubmittedAt: string | null;
+  readonly ambiguityClass: string | null;
+  readonly withdrawalState: string;
+  readonly approvedOutboxStatus: string | null;
+  readonly workflowId: string | null;
+  readonly newerAttemptLineageCount: number;
+  readonly hasPendingApprovedOutbox: boolean;
 }
 
 /**
@@ -262,6 +270,8 @@ export async function runPhase10RestoreReconcileScan(
       attempt_created_at: Date;
       has_pending_outbox: boolean;
       newer_attempt_count: number;
+      withdrawal_state: string;
+      workflow_id: string | null;
     }>(
       `SELECT a.id, a.withdrawal_id, w.public_id,
               a.broadcast_result_state::text AS broadcast_result_state,
@@ -279,7 +289,9 @@ export async function runPhase10RestoreReconcileScan(
                 WHERE a2.withdrawal_id = a.withdrawal_id
                   AND a2.id <> a.id
                   AND a2.created_at > a.created_at
-              ) AS newer_attempt_count
+              ) AS newer_attempt_count,
+              w.state::text AS withdrawal_state,
+              w.workflow_id
        FROM withdrawal_attempts a
        JOIN withdrawals w ON w.id = a.withdrawal_id
        WHERE a.broadcast_submitted_at IS NOT NULL
@@ -287,6 +299,15 @@ export async function runPhase10RestoreReconcileScan(
          AND w.state NOT IN ('CONFIRMED', 'REJECTED', 'FAILED_PRE_BROADCAST')`,
       [WITHDRAWAL_APPROVED_OUTBOX_EVENT],
     );
+    const dispatchableStates = new Set([
+      'APPROVED',
+      'QUEUED',
+      'SIGNING',
+      'BROADCASTING',
+      'BROADCASTED',
+      'CONFIRMING',
+      'RECONCILE_REQUIRED',
+    ]);
     for (const row of submittedUnknown.rows) {
       const inBaseline = baseline.ids.has(row.id);
       const attemptMs = (row.broadcast_submitted_at ?? row.attempt_created_at).getTime();
@@ -297,10 +318,22 @@ export async function runPhase10RestoreReconcileScan(
       const expectedState = baseline.attemptStates[row.id];
       // Canonical artifacts require an exact captured state snapshot per attempt.
       const hasCanonicalState = !baseline.requireCanonicalArtifact || expectedState !== undefined;
-      const stateUnchanged =
+      const fullStateMatch =
         expectedState === undefined
           ? !baseline.requireCanonicalArtifact
-          : expectedState.broadcastResultState === row.broadcast_result_state;
+          : expectedState.withdrawalId === row.withdrawal_id &&
+            expectedState.broadcastResultState === row.broadcast_result_state &&
+            (expectedState.broadcastSubmittedAt === null ||
+              expectedState.broadcastSubmittedAt === row.broadcast_submitted_at!.toISOString()) &&
+            (expectedState.ambiguityClass ?? null) === (row.broadcast_ambiguity_class ?? null) &&
+            expectedState.withdrawalState === row.withdrawal_state &&
+            (expectedState.workflowId ?? null) === (row.workflow_id ?? null) &&
+            expectedState.newerAttemptLineageCount === row.newer_attempt_count &&
+            expectedState.hasPendingApprovedOutbox === row.has_pending_outbox &&
+            !(
+              !dispatchableStates.has(expectedState.withdrawalState) &&
+              dispatchableStates.has(row.withdrawal_state)
+            );
       const noResendPath = !row.has_pending_outbox;
       const noNewerLineage = row.newer_attempt_count === 0;
       const capturedAtPresent = baseline.capturedAtMs !== null;
@@ -312,7 +345,7 @@ export async function runPhase10RestoreReconcileScan(
         predatesWindow &&
         noResendPath &&
         noNewerLineage &&
-        stateUnchanged
+        fullStateMatch
       ) {
         push({
           category: 'historical_isolated_baseline',
@@ -343,7 +376,7 @@ export async function runPhase10RestoreReconcileScan(
         if (!predatesWindow) baselineFailureReasons.push('does_not_predate_window');
         if (!noResendPath) baselineFailureReasons.push('pending_approved_outbox');
         if (!noNewerLineage) baselineFailureReasons.push('newer_attempt_lineage');
-        if (!stateUnchanged) baselineFailureReasons.push('state_changed_from_baseline');
+        if (!fullStateMatch) baselineFailureReasons.push('state_changed_from_baseline');
       }
 
       push({

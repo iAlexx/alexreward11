@@ -17,7 +17,6 @@ import {
   attachWithdrawal,
   buildPhase10ChainHistoryEvidence,
   buildPhase10HotWalletMonitorReport,
-  buildPhase10ProviderBackedChainHistoryEvidence,
   capturePhase10HistoricalBaseline,
   createWithdrawalAttempt,
   evaluateChainHistoryForAcceptance,
@@ -39,6 +38,12 @@ import {
   writePhase10ChainHistoryEvidence,
   writePhase10LivePreflightEvidence,
 } from '../src/index.js';
+import { buildPhase10ProviderBackedChainHistoryEvidenceForTests } from '../src/phase10-chain-history-evidence.js';
+import {
+  capturePhase10HistoricalBaselineForTests,
+  digestPhase10HistoricalBaseline,
+  parsePhase10HistoricalBaseline,
+} from '../src/phase10-historical-baseline.js';
 import {
   createApprovedWithdrawal,
   createTestUser,
@@ -360,12 +365,12 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 live remediation', () => {
       );
     });
 
-    const artifact = await capturePhase10HistoricalBaseline(pool, {
-      capturedAt: new Date().toISOString(),
-    });
+    const capturedAt = new Date().toISOString();
+    const artifact = await capturePhase10HistoricalBaselineForTests(pool, capturedAt);
     expect(artifact.attempts.some((a) => a.attemptId === attemptId)).toBe(true);
     const baseline = historicalBaselineInputFromArtifact(artifact);
     const windowStart = new Date(Date.now() + 3_600_000).toISOString();
+    const capturedAttemptState = baseline.attemptStates![attemptId]!;
 
     const isolated = await runPhase10RestoreReconcileScan(pool, {
       historicalBaseline: baseline,
@@ -397,7 +402,9 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 live remediation', () => {
     const modifiedState = await runPhase10RestoreReconcileScan(pool, {
       historicalBaseline: {
         ...baseline,
-        attemptStates: { [attemptId]: { broadcastResultState: 'BROADCASTED' } },
+        attemptStates: {
+          [attemptId]: { ...capturedAttemptState, broadcastResultState: 'BROADCASTED' },
+        },
       },
       liveAuthorizationWindowStartedAt: windowStart,
     });
@@ -502,6 +509,27 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 live remediation', () => {
     const campaignPath = join(dir, 'campaign.json');
     const failurePath = join(dir, 'failures.json');
     const chainPath = join(dir, 'chain.json');
+    await bindVerifiedPrimaryWallet(pool, userId, networkId);
+    const wd = await createApprovedWithdrawal(pool, {
+      userId,
+      networkId,
+      assetId,
+      adminUserId,
+      hotWalletId,
+      amountAtomic: '200000',
+    });
+    const binding = await pool.query<{
+      address: string;
+      payout_jetton_wallet_address: string | null;
+      contract_identity: string | null;
+    }>(
+      `SELECT hw.address, hw.payout_jetton_wallet_address, a.contract_identity
+       FROM hot_wallets hw
+       JOIN assets a ON a.id = $2::uuid
+       WHERE hw.id = $1::uuid`,
+      [hotWalletId, assetId],
+    );
+    const campaignCreatedAt = new Date(Date.now() - 60_000).toISOString();
     await writeFile(
       campaignPath,
       JSON.stringify({
@@ -512,8 +540,8 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 live remediation', () => {
         mode: 'real',
         controlledUserId: userId,
         plannedCount: 100,
-        createdAt: new Date().toISOString(),
-        withdrawalIds: [randomUUID()],
+        createdAt: campaignCreatedAt,
+        withdrawalIds: [wd],
         evidence: [],
       }),
       'utf8',
@@ -533,8 +561,9 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 live remediation', () => {
       'utf8',
     );
     await writePhase10ChainHistoryEvidence(chainPath, {
-      hotWalletAddress: '0:hot',
-      jettonMaster: '0:master',
+      hotWalletAddress: binding.rows[0]!.address,
+      hotWalletJettonWallet: binding.rows[0]!.payout_jetton_wallet_address,
+      jettonMaster: binding.rows[0]!.contract_identity ?? '0:master',
       observationWindow: {
         start: new Date(Date.now() - 1000).toISOString(),
         end: new Date().toISOString(),
@@ -774,7 +803,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 live remediation', () => {
     };
     expect(evaluateChainHistoryForAcceptance(handBuilt).ok).toBe(false);
 
-    const providerBacked = buildPhase10ProviderBackedChainHistoryEvidence({
+    const providerBacked = buildPhase10ProviderBackedChainHistoryEvidenceForTests({
       hotWalletAddress: '0:hot',
       hotWalletJettonWallet: '0:jetton',
       jettonMaster: '0:master',
@@ -794,48 +823,58 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 live remediation', () => {
       expectedCampaignPayoutIdentities: [],
     });
     expect(providerBacked.reconciliationResult).toBe('ZERO_UNEXPECTED');
-    expect(evaluateChainHistoryForAcceptance(providerBacked).ok).toBe(true);
+    // Collector unavailable → claimed PROVIDER_BACKED never acceptance-ok.
+    const providerEval = evaluateChainHistoryForAcceptance(providerBacked);
+    expect(providerEval.ok).toBe(false);
+    expect(providerEval.reasons.some((r) => r.includes(PHASE10_CHAIN_HISTORY_PROOF_REQUIRED))).toBe(
+      true,
+    );
 
-    expect(
-      evaluateChainHistoryForAcceptance(providerBacked, {
-        hotWalletAddress: '0:wrong',
-        jettonMaster: '0:master',
-      }).ok,
-    ).toBe(false);
-    expect(
-      evaluateChainHistoryForAcceptance(providerBacked, {
-        hotWalletAddress: '0:hot',
-        jettonMaster: '0:wrong',
-      }).ok,
-    ).toBe(false);
-    expect(
-      evaluateChainHistoryForAcceptance(
-        { ...providerBacked, networkGlobalId: -239 },
-        { hotWalletAddress: '0:hot', jettonMaster: '0:master', networkGlobalId: -3 },
-      ).ok,
-    ).toBe(false);
-    expect(
-      evaluateChainHistoryForAcceptance(providerBacked, {
-        hotWalletAddress: '0:hot',
-        jettonMaster: '0:master',
-        campaignWindowStart: new Date(Date.now() - 3600_000).toISOString(),
-      }).ok,
-    ).toBe(false);
-    expect(
-      evaluateChainHistoryForAcceptance(
-        { ...providerBacked, evidenceDigest: 'deadbeef' },
-        { hotWalletAddress: '0:hot', jettonMaster: '0:master' },
-      ).ok,
-    ).toBe(false);
-    expect(
-      evaluateChainHistoryForAcceptance(providerBacked, {
-        hotWalletAddress: '0:hot',
-        jettonMaster: '0:master',
-        primaryEndpointFingerprint: 'https://other.example:443',
-      }).ok,
-    ).toBe(false);
+    const wrongHot = evaluateChainHistoryForAcceptance(providerBacked, {
+      hotWalletAddress: '0:wrong',
+      jettonMaster: '0:master',
+    });
+    expect(wrongHot.ok).toBe(false);
+    expect(wrongHot.reasons.some((r) => r.includes('hotWalletAddress'))).toBe(true);
 
-    const unexpected = buildPhase10ProviderBackedChainHistoryEvidence({
+    const wrongMaster = evaluateChainHistoryForAcceptance(providerBacked, {
+      hotWalletAddress: '0:hot',
+      jettonMaster: '0:wrong',
+    });
+    expect(wrongMaster.ok).toBe(false);
+    expect(wrongMaster.reasons.some((r) => r.includes('jettonMaster'))).toBe(true);
+
+    const wrongNetwork = evaluateChainHistoryForAcceptance(
+      { ...providerBacked, networkGlobalId: -239 },
+      { hotWalletAddress: '0:hot', jettonMaster: '0:master', networkGlobalId: -3 },
+    );
+    expect(wrongNetwork.ok).toBe(false);
+    expect(wrongNetwork.reasons.some((r) => r.includes('networkGlobalId'))).toBe(true);
+
+    const incompleteWindow = evaluateChainHistoryForAcceptance(providerBacked, {
+      hotWalletAddress: '0:hot',
+      jettonMaster: '0:master',
+      campaignWindowStart: new Date(Date.now() - 3600_000).toISOString(),
+    });
+    expect(incompleteWindow.ok).toBe(false);
+    expect(incompleteWindow.reasons.some((r) => r.includes('observationWindow'))).toBe(true);
+
+    const badDigest = evaluateChainHistoryForAcceptance(
+      { ...providerBacked, evidenceDigest: 'deadbeef' },
+      { hotWalletAddress: '0:hot', jettonMaster: '0:master' },
+    );
+    expect(badDigest.ok).toBe(false);
+    expect(badDigest.reasons.some((r) => r.includes('evidenceDigest'))).toBe(true);
+
+    const wrongFp = evaluateChainHistoryForAcceptance(providerBacked, {
+      hotWalletAddress: '0:hot',
+      jettonMaster: '0:master',
+      primaryEndpointFingerprint: 'https://other.example:443',
+    });
+    expect(wrongFp.ok).toBe(false);
+    expect(wrongFp.reasons.some((r) => r.includes('fingerprint'))).toBe(true);
+
+    const unexpected = buildPhase10ProviderBackedChainHistoryEvidenceForTests({
       hotWalletAddress: '0:hot',
       jettonMaster: '0:master',
       networkGlobalId: -3,
@@ -883,5 +922,589 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 live remediation', () => {
       unexpectedOutgoingHistoryProven: true,
     });
     expect(monitor.chainHistoryProof.status).toBe('PROOF_REQUIRED');
+  }, 120_000);
+
+  async function createAmbiguousSubmittedAttempt(telegramUserId: string): Promise<{
+    readonly userId: string;
+    readonly withdrawalId: string;
+    readonly attemptId: string;
+  }> {
+    const userId = await createTestUser(pool, telegramUserId);
+    await bindVerifiedPrimaryWallet(pool, userId, networkId);
+    const withdrawalId = await createApprovedWithdrawal(pool, {
+      userId,
+      networkId,
+      assetId,
+      adminUserId,
+      hotWalletId,
+      amountAtomic: '200000',
+    });
+    await pool.query(
+      `UPDATE outbox_events SET status = 'DISPATCHED', dispatched_at = now()
+       WHERE aggregate_id = $1::uuid AND status = 'PENDING'`,
+      [withdrawalId],
+    );
+    let attemptId = '';
+    await withWithdrawalTransaction(pool, async (client) => {
+      const owner = hotWalletDispatchOwnerIdentity(withdrawalId);
+      const lease = await acquireHotWalletDispatchLease(client, hotWalletId, owner);
+      expect(lease.status).toBe('ACQUIRED');
+      if (lease.status !== 'ACQUIRED') return;
+      const attempt = await createWithdrawalAttempt(client, {
+        withdrawalId,
+        hotWalletId,
+        fencingToken: lease.fencingToken,
+        signerKeyReference: 'TEST_ONLY_FAKE_HOT_1',
+        leaseOwnerIdentity: owner,
+      });
+      attemptId = attempt.id;
+      await updateAttemptBroadcastState(client, {
+        attemptId: attempt.id,
+        broadcastResultState: 'UNKNOWN',
+        markBroadcastStarted: true,
+      });
+      await client.query(
+        `UPDATE withdrawal_attempts
+         SET broadcast_submitted_at = now() - interval '1 day'
+         WHERE id = $1::uuid`,
+        [attempt.id],
+      );
+    });
+    return { userId, withdrawalId, attemptId };
+  }
+
+  async function loadAuthoritativeHotWalletBinding(): Promise<{
+    readonly hotWalletAddress: string;
+    readonly hotWalletJettonWallet: string;
+    readonly jettonMaster: string;
+  }> {
+    const hot = await pool.query<{
+      address: string;
+      payout_jetton_wallet_address: string | null;
+    }>(`SELECT address, payout_jetton_wallet_address FROM hot_wallets WHERE id = $1::uuid`, [
+      hotWalletId,
+    ]);
+    const asset = await pool.query<{ contract_identity: string | null }>(
+      `SELECT contract_identity FROM assets WHERE id = $1::uuid`,
+      [assetId],
+    );
+    const hotWalletAddress = hot.rows[0]!.address;
+    const hotWalletJettonWallet = hot.rows[0]!.payout_jetton_wallet_address;
+    const jettonMaster = asset.rows[0]!.contract_identity;
+    expect(hotWalletJettonWallet).toBeTruthy();
+    expect(jettonMaster).toBeTruthy();
+    return {
+      hotWalletAddress,
+      hotWalletJettonWallet: hotWalletJettonWallet!,
+      jettonMaster: jettonMaster!,
+    };
+  }
+
+  async function writeCanonicalAcceptanceScaffold(input: {
+    readonly dir: string;
+    readonly userId: string;
+    readonly withdrawalId: string;
+    readonly campaignCreatedAt?: string;
+  }): Promise<{
+    readonly campaignPath: string;
+    readonly failurePath: string;
+    readonly readinessPath: string;
+  }> {
+    const campaignPath = join(input.dir, 'campaign.json');
+    const failurePath = join(input.dir, 'failures.json');
+    const readinessPath = join(input.dir, 'readiness.json');
+    const campaignId = randomUUID();
+    const createdAt = input.campaignCreatedAt ?? new Date(Date.now() - 60_000).toISOString();
+    const recordedAt = new Date().toISOString();
+    await writeFile(
+      campaignPath,
+      JSON.stringify({
+        campaignId,
+        networkCode: 'TON_TESTNET',
+        assetSymbol: 'USDT',
+        acceptanceCampaign: true,
+        mode: 'real',
+        controlledUserId: input.userId,
+        plannedCount: 100,
+        createdAt,
+        withdrawalIds: [input.withdrawalId],
+        evidence: [{ campaignId, withdrawalId: input.withdrawalId, ordinal: 1 }],
+      }),
+      'utf8',
+    );
+    await writeFile(
+      failurePath,
+      JSON.stringify({
+        scenarios: PHASE10_REQUIRED_REAL_FAILURE_SCENARIO_IDS.map((id) => ({
+          id,
+          present: true,
+          executed: true,
+          classification: 'REQUIRES_REAL_TESTNET',
+          status: 'COMPLETED',
+          result: { ok: true },
+        })),
+      }),
+      'utf8',
+    );
+    await writeFile(
+      readinessPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        liveAuthorizationWindow: true,
+        verdict: 'READY_FOR_CONTROLLED_LIVE_TESTNET',
+        realChainEnabled: true,
+        fakeChainEnabled: false,
+        networkCode: 'TON_TESTNET',
+        assetSymbol: 'USDT',
+        controlledUserId: input.userId,
+        recordedAt,
+        signerProbed: true,
+        signerReady: true,
+        signerUnlocked: true,
+        signerLockState: 'UNLOCKED',
+        signerCustodyState: 'UNLOCKED',
+        preflightBlockers: [],
+        preflightWarnings: [],
+        restoreScanSummary: {
+          dangerousCount: 0,
+          warnCount: 0,
+          scannedAt: recordedAt,
+          historicalIsolatedBaselineCount: 0,
+        },
+        providers: {
+          primary: {
+            kind: 'toncenter',
+            endpointFingerprint: 'https://primary.example:443',
+            healthy: true,
+            observedNetworkGlobalId: -3,
+          },
+          secondary: {
+            kind: 'tonapi',
+            endpointFingerprint: 'https://secondary.example:443',
+            healthy: true,
+            observedNetworkGlobalId: -3,
+          },
+          independenceProven: true,
+          independenceCode: null,
+        },
+        externalProbes: {
+          schemaVersion: 1,
+          observedAt: recordedAt,
+          primary: {
+            kind: 'toncenter',
+            endpointFingerprint: 'https://primary.example:443',
+            reachable: true,
+            healthy: true,
+            observedNetworkGlobalId: -3,
+            latencyMs: 1,
+            detail: null,
+            observedAt: recordedAt,
+          },
+          secondary: {
+            kind: 'tonapi',
+            endpointFingerprint: 'https://secondary.example:443',
+            reachable: true,
+            healthy: true,
+            observedNetworkGlobalId: -3,
+            latencyMs: 1,
+            detail: null,
+            observedAt: recordedAt,
+          },
+          providerIndependence: {
+            proven: true,
+            code: null,
+            reason: null,
+            primaryFingerprint: 'https://primary.example:443',
+            secondaryFingerprint: 'https://secondary.example:443',
+          },
+          signer: {
+            probePerformed: true,
+            healthReachable: true,
+            custodyState: 'UNLOCKED',
+            signingReady: true,
+            expectedCustodyMode: 'self_hosted_encrypted',
+            identityProbed: true,
+            publicKeyFingerprint: 'aa'.repeat(32),
+            walletAddressRaw: EXPECTED_WALLET,
+            identityMatchesExpected: true,
+            walletAddressMatchesExpected: true,
+            expectedPublicKeyFingerprintPresent: true,
+            expectedWalletAddressPresent: true,
+            httpStatus: 200,
+            detail: null,
+            observedAt: recordedAt,
+          },
+          overallBlocked: false,
+          blockers: [],
+        },
+      }),
+      'utf8',
+    );
+    return { campaignPath, failurePath, readinessPath };
+  }
+
+  it('acceptance entrypoint: forged PROVIDER_BACKED JSON is REFUSED with PROOF_REQUIRED', async () => {
+    const userId = await createTestUser(pool, '9910');
+    await bindVerifiedPrimaryWallet(pool, userId, networkId);
+    const wd = await createApprovedWithdrawal(pool, {
+      userId,
+      networkId,
+      assetId,
+      adminUserId,
+      hotWalletId,
+      amountAtomic: '200000',
+    });
+    const binding = await loadAuthoritativeHotWalletBinding();
+    const dir = await mkdtemp(join(tmpdir(), 'phase10-forge-prov-'));
+    const scaffold = await writeCanonicalAcceptanceScaffold({
+      dir,
+      userId,
+      withdrawalId: wd,
+    });
+    const chainPath = join(dir, 'chain.json');
+    const forged = buildPhase10ProviderBackedChainHistoryEvidenceForTests({
+      hotWalletAddress: binding.hotWalletAddress,
+      hotWalletJettonWallet: binding.hotWalletJettonWallet,
+      jettonMaster: binding.jettonMaster,
+      networkGlobalId: -3,
+      observationWindow: {
+        start: new Date(Date.now() - 3600_000).toISOString(),
+        end: new Date().toISOString(),
+      },
+      providerIdentity: {
+        primaryKind: 'toncenter',
+        primaryEndpointFingerprint: 'https://primary.example:443',
+        secondaryKind: 'tonapi',
+        secondaryEndpointFingerprint: 'https://secondary.example:443',
+        independenceProven: true,
+      },
+      providerEnumeratedOutgoingTransfers: [],
+      expectedCampaignPayoutIdentities: [],
+    });
+    expect(forged.enumerationAuthority).toBe('PROVIDER_BACKED');
+    await writeFile(chainPath, JSON.stringify(forged), 'utf8');
+    const result = await evaluatePhase10AcceptanceFromEvidence({
+      db: pool,
+      campaignEvidencePath: scaffold.campaignPath,
+      failureInjectionEvidencePath: scaffold.failurePath,
+      readinessEvidencePath: scaffold.readinessPath,
+      chainHistoryEvidencePath: chainPath,
+    });
+    expect(result.verdict).not.toBe('PASS_EVIDENCE_PRESENT_OWNER_REVIEW_REQUIRED');
+    expect(result.reasons.some((r) => r.includes(PHASE10_CHAIN_HISTORY_PROOF_REQUIRED))).toBe(true);
+  }, 120_000);
+
+  it('acceptance entrypoint: provider-backed-looking artifact with wrong Hot Wallet is REFUSED', async () => {
+    const userId = await createTestUser(pool, '9911');
+    await bindVerifiedPrimaryWallet(pool, userId, networkId);
+    const wd = await createApprovedWithdrawal(pool, {
+      userId,
+      networkId,
+      assetId,
+      adminUserId,
+      hotWalletId,
+      amountAtomic: '200000',
+    });
+    const binding = await loadAuthoritativeHotWalletBinding();
+    const dir = await mkdtemp(join(tmpdir(), 'phase10-forge-hot-'));
+    const scaffold = await writeCanonicalAcceptanceScaffold({
+      dir,
+      userId,
+      withdrawalId: wd,
+    });
+    const chainPath = join(dir, 'chain.json');
+    const forged = {
+      ...buildPhase10ProviderBackedChainHistoryEvidenceForTests({
+        hotWalletAddress: binding.hotWalletAddress,
+        hotWalletJettonWallet: binding.hotWalletJettonWallet,
+        jettonMaster: binding.jettonMaster,
+        networkGlobalId: -3,
+        observationWindow: {
+          start: new Date(Date.now() - 3600_000).toISOString(),
+          end: new Date().toISOString(),
+        },
+        providerIdentity: {
+          primaryKind: 'toncenter',
+          primaryEndpointFingerprint: 'https://primary.example:443',
+          secondaryKind: 'tonapi',
+          secondaryEndpointFingerprint: 'https://secondary.example:443',
+          independenceProven: true,
+        },
+        providerEnumeratedOutgoingTransfers: [],
+        expectedCampaignPayoutIdentities: [],
+      }),
+      hotWalletAddress: '0:wrong-hot-wallet-address',
+    };
+    await writeFile(chainPath, JSON.stringify(forged), 'utf8');
+    const result = await evaluatePhase10AcceptanceFromEvidence({
+      db: pool,
+      campaignEvidencePath: scaffold.campaignPath,
+      failureInjectionEvidencePath: scaffold.failurePath,
+      readinessEvidencePath: scaffold.readinessPath,
+      chainHistoryEvidencePath: chainPath,
+    });
+    expect(result.verdict).not.toBe('PASS_EVIDENCE_PRESENT_OWNER_REVIEW_REQUIRED');
+    expect(result.reasons.some((r) => r.includes('hotWalletAddress'))).toBe(true);
+  }, 120_000);
+
+  it('acceptance entrypoint: wrong jetton wallet / master / fingerprints / network / window refuse', async () => {
+    const userId = await createTestUser(pool, '9912');
+    await bindVerifiedPrimaryWallet(pool, userId, networkId);
+    const wd = await createApprovedWithdrawal(pool, {
+      userId,
+      networkId,
+      assetId,
+      adminUserId,
+      hotWalletId,
+      amountAtomic: '200000',
+    });
+    const binding = await loadAuthoritativeHotWalletBinding();
+    const dir = await mkdtemp(join(tmpdir(), 'phase10-forge-bind-'));
+    const scaffold = await writeCanonicalAcceptanceScaffold({
+      dir,
+      userId,
+      withdrawalId: wd,
+    });
+
+    const base = buildPhase10ProviderBackedChainHistoryEvidenceForTests({
+      hotWalletAddress: binding.hotWalletAddress,
+      hotWalletJettonWallet: binding.hotWalletJettonWallet,
+      jettonMaster: binding.jettonMaster,
+      networkGlobalId: -3,
+      observationWindow: {
+        start: new Date(Date.now() - 3600_000).toISOString(),
+        end: new Date().toISOString(),
+      },
+      providerIdentity: {
+        primaryKind: 'toncenter',
+        primaryEndpointFingerprint: 'https://primary.example:443',
+        secondaryKind: 'tonapi',
+        secondaryEndpointFingerprint: 'https://secondary.example:443',
+        independenceProven: true,
+      },
+      providerEnumeratedOutgoingTransfers: [],
+      expectedCampaignPayoutIdentities: [],
+    });
+
+    const cases: Array<{ label: string; artifact: unknown; reasonNeedle: string }> = [
+      {
+        label: 'wrong-jetton-wallet',
+        artifact: { ...base, hotWalletJettonWallet: '0:wrong-jetton-wallet' },
+        reasonNeedle: 'hotWalletJettonWallet',
+      },
+      {
+        label: 'wrong-master',
+        artifact: { ...base, jettonMaster: '0:wrong-jetton-master' },
+        reasonNeedle: 'jettonMaster',
+      },
+      {
+        label: 'wrong-primary-fp',
+        artifact: {
+          ...base,
+          providerIdentity: {
+            ...base.providerIdentity,
+            primaryEndpointFingerprint: 'https://other-primary.example:443',
+          },
+        },
+        reasonNeedle: 'fingerprint',
+      },
+      {
+        label: 'wrong-network',
+        artifact: { ...base, networkGlobalId: -239 },
+        reasonNeedle: 'networkGlobalId',
+      },
+      {
+        label: 'incomplete-window',
+        artifact: {
+          ...base,
+          observationWindow: {
+            start: new Date().toISOString(),
+            end: new Date(Date.now() + 1000).toISOString(),
+          },
+        },
+        reasonNeedle: 'observationWindow',
+      },
+    ];
+
+    for (const c of cases) {
+      const chainPath = join(dir, `${c.label}.json`);
+      await writeFile(chainPath, JSON.stringify(c.artifact), 'utf8');
+      const result = await evaluatePhase10AcceptanceFromEvidence({
+        db: pool,
+        campaignEvidencePath: scaffold.campaignPath,
+        failureInjectionEvidencePath: scaffold.failurePath,
+        readinessEvidencePath: scaffold.readinessPath,
+        chainHistoryEvidencePath: chainPath,
+      });
+      expect(result.verdict).not.toBe('PASS_EVIDENCE_PRESENT_OWNER_REVIEW_REQUIRED');
+      expect(result.reasons.some((r) => r.includes(c.reasonNeedle))).toBe(true);
+    }
+  }, 120_000);
+
+  it('historical baseline: edit capturedAt without digest update is REFUSED by parse', async () => {
+    const { attemptId } = await createAmbiguousSubmittedAttempt('9920');
+    const capturedAt = new Date(Date.now() - 60_000).toISOString();
+    const artifact = await capturePhase10HistoricalBaselineForTests(pool, capturedAt);
+    expect(artifact.attempts.some((a) => a.attemptId === attemptId)).toBe(true);
+    const tampered = {
+      ...artifact,
+      capturedAt: new Date().toISOString(),
+    };
+    const parsed = parsePhase10HistoricalBaseline(tampered);
+    expect(parsed.parsed).toBeNull();
+    expect(parsed.errors.some((e) => e.includes('evidenceDigest'))).toBe(true);
+    // Digest helper must cover capturedAt.
+    expect(digestPhase10HistoricalBaseline(tampered.capturedAt, artifact.attempts)).not.toBe(
+      artifact.evidenceDigest,
+    );
+  }, 120_000);
+
+  it('historical baseline: production capture accepts only db (no capturedAt option)', async () => {
+    await createAmbiguousSubmittedAttempt('9921');
+    const artifact = await capturePhase10HistoricalBaseline(pool);
+    expect(typeof artifact.capturedAt).toBe('string');
+    expect(artifact.evidenceDigest).toBe(
+      digestPhase10HistoricalBaseline(artifact.capturedAt, artifact.attempts),
+    );
+    expect(artifact.attempts.length).toBeGreaterThan(0);
+  }, 120_000);
+
+  it('historical baseline: changed withdrawal state after capture → DANGER', async () => {
+    const { withdrawalId, attemptId } = await createAmbiguousSubmittedAttempt('9922');
+    const artifact = await capturePhase10HistoricalBaselineForTests(
+      pool,
+      new Date(Date.now() - 60_000).toISOString(),
+    );
+    const baseline = historicalBaselineInputFromArtifact(artifact);
+    await pool.query(`UPDATE withdrawals SET state = 'BROADCASTING' WHERE id = $1::uuid`, [
+      withdrawalId,
+    ]);
+    const scan = await runPhase10RestoreReconcileScan(pool, {
+      historicalBaseline: baseline,
+      liveAuthorizationWindowStartedAt: new Date(Date.now() + 3_600_000).toISOString(),
+    });
+    expect(scan.findings.some((f) => f.attemptId === attemptId && f.severity === 'DANGER')).toBe(
+      true,
+    );
+  }, 120_000);
+
+  it('historical baseline: changed workflowId after capture → DANGER', async () => {
+    const { withdrawalId, attemptId } = await createAmbiguousSubmittedAttempt('9923');
+    const artifact = await capturePhase10HistoricalBaselineForTests(
+      pool,
+      new Date(Date.now() - 60_000).toISOString(),
+    );
+    const baseline = historicalBaselineInputFromArtifact(artifact);
+    await pool.query(`UPDATE withdrawals SET workflow_id = $2 WHERE id = $1::uuid`, [
+      withdrawalId,
+      `mutated-workflow-${randomUUID()}`,
+    ]);
+    const scan = await runPhase10RestoreReconcileScan(pool, {
+      historicalBaseline: baseline,
+      liveAuthorizationWindowStartedAt: new Date(Date.now() + 3_600_000).toISOString(),
+    });
+    expect(scan.findings.some((f) => f.attemptId === attemptId && f.severity === 'DANGER')).toBe(
+      true,
+    );
+  }, 120_000);
+
+  it('historical baseline: changed broadcast state after capture → DANGER', async () => {
+    const { attemptId } = await createAmbiguousSubmittedAttempt('9924');
+    const artifact = await capturePhase10HistoricalBaselineForTests(
+      pool,
+      new Date(Date.now() - 60_000).toISOString(),
+    );
+    const baseline = historicalBaselineInputFromArtifact(artifact);
+    await pool.query(
+      `UPDATE withdrawal_attempts SET broadcast_result_state = 'BROADCASTED' WHERE id = $1::uuid`,
+      [attemptId],
+    );
+    const scan = await runPhase10RestoreReconcileScan(pool, {
+      historicalBaseline: baseline,
+      liveAuthorizationWindowStartedAt: new Date(Date.now() + 3_600_000).toISOString(),
+    });
+    expect(scan.findings.some((f) => f.attemptId === attemptId && f.severity === 'DANGER')).toBe(
+      true,
+    );
+  }, 120_000);
+
+  it('historical baseline: pending approved outbox after capture → DANGER', async () => {
+    const { withdrawalId, attemptId } = await createAmbiguousSubmittedAttempt('9925');
+    const artifact = await capturePhase10HistoricalBaselineForTests(
+      pool,
+      new Date(Date.now() - 60_000).toISOString(),
+    );
+    const baseline = historicalBaselineInputFromArtifact(artifact);
+    await pool.query(
+      `INSERT INTO outbox_events (aggregate_type, aggregate_id, event_type, payload, status)
+       VALUES ('withdrawal', $1::uuid, $2, $3::jsonb, 'PENDING')`,
+      [withdrawalId, 'withdrawal.approved', JSON.stringify({ withdrawalId })],
+    );
+    const scan = await runPhase10RestoreReconcileScan(pool, {
+      historicalBaseline: baseline,
+      liveAuthorizationWindowStartedAt: new Date(Date.now() + 3_600_000).toISOString(),
+    });
+    expect(scan.findings.some((f) => f.attemptId === attemptId && f.severity === 'DANGER')).toBe(
+      true,
+    );
+  }, 120_000);
+
+  it('historical baseline: newer attempt after capture → DANGER', async () => {
+    const { withdrawalId, attemptId } = await createAmbiguousSubmittedAttempt('9926');
+    const artifact = await capturePhase10HistoricalBaselineForTests(
+      pool,
+      new Date(Date.now() - 60_000).toISOString(),
+    );
+    const baseline = historicalBaselineInputFromArtifact(artifact);
+    // Domain createWithdrawalAttempt forbids a second live UNKNOWN attempt; insert a
+    // non-active newer lineage row (FAILED_PRE_BROADCAST) so the one-active index allows it.
+    await pool.query(
+      `INSERT INTO withdrawal_attempts (
+         withdrawal_id, attempt_number, hot_wallet_id, expected_seqno, query_id,
+         valid_until, canonical_message_hash, signer_key_reference,
+         dispatch_fencing_token, broadcast_result_state, created_at
+       ) VALUES (
+         $1::uuid, 2, $2::uuid, 2, $3::bigint,
+         now() + interval '1 hour', $4, 'TEST_ONLY_FAKE_HOT_1',
+         1, 'FAILED_PRE_BROADCAST', now()
+       )`,
+      [
+        withdrawalId,
+        hotWalletId,
+        BigInt(`9${Date.now()}`).toString(10),
+        `fake-hash:${withdrawalId}:2`,
+      ],
+    );
+    const scan = await runPhase10RestoreReconcileScan(pool, {
+      historicalBaseline: baseline,
+      liveAuthorizationWindowStartedAt: new Date(Date.now() + 3_600_000).toISOString(),
+    });
+    expect(scan.findings.some((f) => f.attemptId === attemptId && f.severity === 'DANGER')).toBe(
+      true,
+    );
+  }, 120_000);
+
+  it('historical baseline: untouched isolated canonical snapshot → WARN not DANGER', async () => {
+    const { attemptId } = await createAmbiguousSubmittedAttempt('9927');
+    const artifact = await capturePhase10HistoricalBaselineForTests(
+      pool,
+      new Date(Date.now() - 60_000).toISOString(),
+    );
+    const baseline = historicalBaselineInputFromArtifact(artifact);
+    const scan = await runPhase10RestoreReconcileScan(pool, {
+      historicalBaseline: baseline,
+      liveAuthorizationWindowStartedAt: new Date(Date.now() + 3_600_000).toISOString(),
+    });
+    expect(
+      scan.findings.some(
+        (f) =>
+          f.attemptId === attemptId &&
+          f.category === 'historical_isolated_baseline' &&
+          f.severity === 'WARN',
+      ),
+    ).toBe(true);
+    expect(scan.findings.some((f) => f.attemptId === attemptId && f.severity === 'DANGER')).toBe(
+      false,
+    );
   }, 120_000);
 });

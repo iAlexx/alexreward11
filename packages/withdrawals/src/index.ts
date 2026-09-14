@@ -321,8 +321,8 @@ export type {
 export {
   PHASE10_CHAIN_HISTORY_EVIDENCE_SCHEMA_VERSION,
   PHASE10_CHAIN_HISTORY_PROOF_REQUIRED,
+  PHASE10_CHAIN_HISTORY_PROVIDER_COLLECTOR_AVAILABLE,
   buildPhase10ChainHistoryEvidence,
-  buildPhase10ProviderBackedChainHistoryEvidence,
   digestChainHistoryTransfers,
   evaluateChainHistoryForAcceptance,
   parsePhase10ChainHistoryEvidence,
@@ -331,7 +331,6 @@ export {
 } from './phase10-chain-history-evidence.js';
 export type {
   BuildPhase10ChainHistoryEvidenceInput,
-  BuildPhase10ProviderBackedChainHistoryInput,
   Phase10ChainHistoryAcceptanceBinding,
   Phase10ChainHistoryEvidenceArtifact,
   Phase10ChainHistoryOutgoingTransfer,

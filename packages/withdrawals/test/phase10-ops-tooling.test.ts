@@ -11,7 +11,6 @@ import {
   WITHDRAWAL_APPROVED_OUTBOX_EVENT,
   acquireHotWalletDispatchLease,
   buildPhase10HotWalletMonitorReport,
-  buildPhase10ProviderBackedChainHistoryEvidence,
   checkPhase10PayoutInvariants,
   claimPendingWithdrawalApprovedEvents,
   compactTep74EvidenceSummary,
@@ -38,6 +37,7 @@ import {
   validateLiveReadinessEvidence,
   withWithdrawalTransaction,
 } from '../src/index.js';
+import { buildPhase10ProviderBackedChainHistoryEvidenceForTests } from '../src/phase10-chain-history-evidence.js';
 import {
   createApprovedWithdrawal,
   createTestUser,
@@ -1330,10 +1330,23 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 pre-commit blocker DB regress
       'utf8',
     );
     const chainHistoryPath = join(dirname(readinessPath), 'chain-history.json');
-    const artifact = buildPhase10ProviderBackedChainHistoryEvidence({
-      hotWalletAddress: '0:hot',
-      hotWalletJettonWallet: '0:jetton',
-      jettonMaster: '0:master',
+    const hot = await pool.query<{
+      address: string;
+      payout_jetton_wallet_address: string | null;
+    }>(`SELECT address, payout_jetton_wallet_address FROM hot_wallets WHERE id = $1::uuid`, [
+      hotWalletId,
+    ]);
+    const asset = await pool.query<{ contract_identity: string | null }>(
+      `SELECT contract_identity FROM assets WHERE id = $1::uuid`,
+      [assetId],
+    );
+    const hotAddress = hot.rows[0]!.address;
+    const jettonWallet = hot.rows[0]!.payout_jetton_wallet_address ?? '0:jetton';
+    const jettonMaster = asset.rows[0]!.contract_identity ?? '0:master';
+    const artifact = buildPhase10ProviderBackedChainHistoryEvidenceForTests({
+      hotWalletAddress: hotAddress,
+      hotWalletJettonWallet: jettonWallet,
+      jettonMaster,
       networkGlobalId: -3,
       observationWindow: {
         start: new Date(Date.now() - 3600_000).toISOString(),

@@ -8,8 +8,10 @@ import type { Pool } from 'pg';
 
 import { PHASE10_FAILURE_SCENARIO_CATALOGUE } from './phase10-campaign.js';
 import {
+  PHASE10_TON_TESTNET_NETWORK_GLOBAL_ID,
   evaluateChainHistoryForAcceptance,
   readPhase10ChainHistoryEvidence,
+  type Phase10ChainHistoryAcceptanceBinding,
 } from './phase10-chain-history-evidence.js';
 import { checkPhase10PayoutInvariants } from './phase10-payout-invariants.js';
 
@@ -249,6 +251,141 @@ function extractWithdrawalIds(file: CampaignEvidenceFile): string[] {
   return ids;
 }
 
+/**
+ * Derive authoritative Hot Wallet / Jetton master / expected payout identities
+ * from campaign withdrawal rows in DB. Never trusts chain-history artifact fields.
+ */
+async function loadAuthoritativeCampaignChainHistoryBinding(
+  db: Pool,
+  withdrawalIds: readonly string[],
+  campaignCreatedAt: Date,
+): Promise<{
+  readonly ok: boolean;
+  readonly reasons: readonly string[];
+  readonly binding: Phase10ChainHistoryAcceptanceBinding | null;
+}> {
+  const reasons: string[] = [];
+  if (withdrawalIds.length === 0) {
+    return {
+      ok: false,
+      reasons: ['no campaign withdrawals for chain-history binding'],
+      binding: null,
+    };
+  }
+
+  const rows = await db.query<{
+    withdrawal_id: string;
+    hot_wallet_id: string;
+    hot_wallet_address: string;
+    payout_jetton_wallet_address: string | null;
+    jetton_master: string | null;
+    network_code: string;
+    asset_symbol: string;
+  }>(
+    `SELECT w.id::text AS withdrawal_id,
+            hw.id::text AS hot_wallet_id,
+            hw.address AS hot_wallet_address,
+            hw.payout_jetton_wallet_address,
+            a.contract_identity AS jetton_master,
+            n.code AS network_code,
+            a.symbol AS asset_symbol
+     FROM withdrawals w
+     JOIN hot_wallets hw ON hw.id = w.hot_wallet_id
+     JOIN networks n ON n.id = w.network_id
+     JOIN assets a ON a.id = w.asset_id
+     WHERE w.id = ANY($1::uuid[])`,
+    [withdrawalIds],
+  );
+
+  if (rows.rows.length !== withdrawalIds.length) {
+    reasons.push('one or more campaign withdrawals missing from DB for chain-history binding');
+  }
+
+  const hotIds = new Set(rows.rows.map((r) => r.hot_wallet_id));
+  const hotAddresses = new Set(rows.rows.map((r) => r.hot_wallet_address.trim().toLowerCase()));
+  const jettonWallets = new Set(
+    rows.rows.map((r) => (r.payout_jetton_wallet_address ?? '').trim().toLowerCase()),
+  );
+  const masters = new Set(
+    rows.rows.map((r) => (r.jetton_master ?? '').trim().toLowerCase()).filter((m) => m !== ''),
+  );
+  const networks = new Set(rows.rows.map((r) => r.network_code));
+  const assets = new Set(rows.rows.map((r) => r.asset_symbol));
+
+  if (hotIds.size !== 1 || hotAddresses.size !== 1) {
+    reasons.push('campaign withdrawals do not agree on a single authoritative Hot Wallet');
+  }
+  if (jettonWallets.size !== 1) {
+    reasons.push(
+      'campaign withdrawals do not agree on a single authoritative Hot Wallet Jetton wallet',
+    );
+  }
+  if (masters.size !== 1) {
+    reasons.push('campaign withdrawals do not agree on a single authoritative Jetton master');
+  }
+  if (![...networks].every((n) => n === 'TON_TESTNET') || networks.size !== 1) {
+    reasons.push('campaign withdrawals must all be TON_TESTNET for chain-history binding');
+  }
+  if (![...assets].every((a) => a === 'USDT') || assets.size !== 1) {
+    reasons.push('campaign withdrawals must all be USDT for chain-history binding');
+  }
+
+  const first = rows.rows[0];
+  if (first === undefined) {
+    return {
+      ok: false,
+      reasons: reasons.length > 0 ? reasons : ['no DB rows for chain-history binding'],
+      binding: null,
+    };
+  }
+  if (
+    first.payout_jetton_wallet_address === null ||
+    first.payout_jetton_wallet_address.trim() === ''
+  ) {
+    reasons.push('authoritative Hot Wallet missing payout Jetton wallet address');
+  }
+  if (first.jetton_master === null || first.jetton_master.trim() === '') {
+    reasons.push('authoritative asset missing Jetton master / contract identity');
+  }
+
+  const proofs = await db.query<{
+    observed_query_id: string | null;
+    correlation_reference: string | null;
+  }>(
+    `SELECT observed_query_id::text AS observed_query_id, correlation_reference
+     FROM withdrawal_payout_reconciliations
+     WHERE withdrawal_id = ANY($1::uuid[])
+       AND resolution = 'INTENDED_PAYOUT_PROVEN'`,
+    [withdrawalIds],
+  );
+  const expectedCampaignPayoutIdentities = [
+    ...new Set(
+      proofs.rows.flatMap((p) =>
+        [p.observed_query_id, p.correlation_reference].filter(
+          (id): id is string => typeof id === 'string' && id.trim() !== '',
+        ),
+      ),
+    ),
+  ];
+
+  if (reasons.length > 0) {
+    return { ok: false, reasons, binding: null };
+  }
+
+  return {
+    ok: true,
+    reasons: [],
+    binding: {
+      hotWalletAddress: first.hot_wallet_address,
+      hotWalletJettonWallet: first.payout_jetton_wallet_address,
+      jettonMaster: first.jetton_master!,
+      networkGlobalId: PHASE10_TON_TESTNET_NETWORK_GLOBAL_ID,
+      campaignWindowStart: campaignCreatedAt.toISOString(),
+      expectedCampaignPayoutIdentities,
+    },
+  };
+}
+
 function parseCampaignCreatedAt(value: unknown): Date | null {
   const raw = readNonEmptyString(value);
   if (raw === null) return null;
@@ -414,7 +551,6 @@ export interface ParsedLiveReadinessEvidence {
 }
 
 const PHASE10_LIVE_PREFLIGHT_SCHEMA_VERSION = 1;
-const PHASE10_TON_TESTNET_NETWORK_GLOBAL_ID = -3;
 
 /**
  * Parse + validate live preflight evidence.
@@ -769,38 +905,6 @@ export async function evaluatePhase10AcceptanceFromEvidence(
     reasons.push(...readinessParsed.errors);
   }
 
-  // Authoritative Hot Wallet outgoing-history evidence (never caller boolean).
-  let chainHistoryUnexpected = 0;
-  let chainHistoryFail = false;
-  const chainHistoryPath = input.chainHistoryEvidencePath?.trim() || null;
-  if (chainHistoryPath === null) {
-    chainHistoryFail = true;
-    reasons.push(
-      'chain-history evidence path missing (authoritative Hot Wallet outgoing proof required)',
-    );
-  } else {
-    const chainHistory = await readPhase10ChainHistoryEvidence(chainHistoryPath);
-    if (chainHistory.parsed === null) {
-      chainHistoryFail = true;
-      reasons.push(...chainHistory.errors);
-    } else {
-      const evaluated = evaluateChainHistoryForAcceptance(chainHistory.parsed, {
-        hotWalletAddress: chainHistory.parsed.hotWalletAddress,
-        hotWalletJettonWallet: chainHistory.parsed.hotWalletJettonWallet,
-        jettonMaster: chainHistory.parsed.jettonMaster,
-        networkGlobalId: PHASE10_TON_TESTNET_NETWORK_GLOBAL_ID,
-        campaignWindowStart: parseCampaignCreatedAt(campaign.createdAt)?.toISOString() ?? null,
-        primaryEndpointFingerprint: readinessParsed.parsed?.primaryEndpointFingerprint ?? null,
-        secondaryEndpointFingerprint: readinessParsed.parsed?.secondaryEndpointFingerprint ?? null,
-      });
-      if (!evaluated.ok) {
-        chainHistoryFail = true;
-        chainHistoryUnexpected = evaluated.unexpectedOutgoingCount;
-        reasons.push(...evaluated.reasons);
-      }
-    }
-  }
-
   const controlledUserId = readNonEmptyString(campaign.controlledUserId)!;
   const campaignId = readNonEmptyString(campaign.campaignId)!;
   const campaignCreatedAt = parseCampaignCreatedAt(campaign.createdAt)!;
@@ -853,6 +957,51 @@ export async function evaluatePhase10AcceptanceFromEvidence(
 
   // Distinct IDs for defensive internal iteration (duplicates already refused above).
   const distinctIds = [...new Set(listedIds)];
+
+  // Authoritative Hot Wallet / Jetton / payout identities from DB — never from artifact self-fields.
+  const dbBinding = await loadAuthoritativeCampaignChainHistoryBinding(
+    input.db,
+    distinctIds,
+    campaignCreatedAt,
+  );
+  if (!dbBinding.ok || dbBinding.binding === null) {
+    return refuse('REFUSED_CAMPAIGN_BINDING', [...reasons, ...dbBinding.reasons]);
+  }
+
+  // Authoritative Hot Wallet outgoing-history evidence (never caller boolean / self-binding).
+  let chainHistoryUnexpected = 0;
+  let chainHistoryFail = false;
+  const chainHistoryPath = input.chainHistoryEvidencePath?.trim() || null;
+  if (chainHistoryPath === null) {
+    chainHistoryFail = true;
+    reasons.push(
+      'chain-history evidence path missing (authoritative Hot Wallet outgoing proof required)',
+    );
+  } else {
+    const chainHistory = await readPhase10ChainHistoryEvidence(chainHistoryPath);
+    if (chainHistory.parsed === null) {
+      chainHistoryFail = true;
+      reasons.push(...chainHistory.errors);
+    } else {
+      const binding: Phase10ChainHistoryAcceptanceBinding = {
+        hotWalletAddress: dbBinding.binding.hotWalletAddress,
+        hotWalletJettonWallet: dbBinding.binding.hotWalletJettonWallet ?? null,
+        jettonMaster: dbBinding.binding.jettonMaster,
+        networkGlobalId: PHASE10_TON_TESTNET_NETWORK_GLOBAL_ID,
+        campaignWindowStart: campaignCreatedAt.toISOString(),
+        campaignWindowEnd: new Date().toISOString(),
+        primaryEndpointFingerprint: readinessParsed.parsed?.primaryEndpointFingerprint ?? null,
+        secondaryEndpointFingerprint: readinessParsed.parsed?.secondaryEndpointFingerprint ?? null,
+        expectedCampaignPayoutIdentities: dbBinding.binding.expectedCampaignPayoutIdentities ?? [],
+      };
+      const evaluated = evaluateChainHistoryForAcceptance(chainHistory.parsed, binding);
+      if (!evaluated.ok) {
+        chainHistoryFail = true;
+        chainHistoryUnexpected = evaluated.unexpectedOutgoingCount;
+        reasons.push(...evaluated.reasons);
+      }
+    }
+  }
 
   const evidenceBindingErrors = validateCampaignEvidenceRecords(campaign, campaignId, distinctIds);
   if (evidenceBindingErrors.length > 0) {

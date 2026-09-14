@@ -12,6 +12,12 @@ import { dirname } from 'node:path';
 export const PHASE10_CHAIN_HISTORY_EVIDENCE_SCHEMA_VERSION = 1 as const;
 export const PHASE10_CHAIN_HISTORY_PROOF_REQUIRED = 'CHAIN_HISTORY_PROOF_REQUIRED' as const;
 export const PHASE10_TON_TESTNET_NETWORK_GLOBAL_ID = -3 as const;
+/**
+ * Flip only when a real read-only provider-backed full outgoing Jetton history
+ * collector exists and is wired into evidence generation. Until then, any claimed
+ * PROVIDER_BACKED authority is refused by acceptance.
+ */
+export const PHASE10_CHAIN_HISTORY_PROVIDER_COLLECTOR_AVAILABLE = false as const;
 
 export type Phase10ChainHistoryReconciliationResult =
   | 'ZERO_UNEXPECTED'
@@ -172,11 +178,11 @@ export function buildPhase10ChainHistoryEvidence(
 }
 
 /**
- * Provider-backed enumeration builder. Only use when transfers were produced by
- * read-only provider responses (not caller lists). Currently unused until a safe
- * full-history port exists; exported for tests of acceptance binding paths.
+ * Internal-only builder for forged/provider-shaped artifacts in package tests.
+ * NOT part of the public package API — do not re-export from index.ts.
+ * Acceptance refuses PROVIDER_BACKED until PHASE10_CHAIN_HISTORY_PROVIDER_COLLECTOR_AVAILABLE.
  */
-export function buildPhase10ProviderBackedChainHistoryEvidence(
+export function buildPhase10ProviderBackedChainHistoryEvidenceForTests(
   input: BuildPhase10ProviderBackedChainHistoryInput,
 ): Phase10ChainHistoryEvidenceArtifact {
   const generatedAt = input.generatedAt ?? new Date().toISOString();
@@ -409,8 +415,8 @@ export interface Phase10ChainHistoryAcceptanceBinding {
 
 /**
  * Acceptance evaluation of chain-history evidence.
- * ZERO_UNEXPECTED is eligible only for PROVIDER_BACKED authority with digest match
- * and optional binding checks. Caller [] / hand-built ZERO_UNEXPECTED refuse.
+ * Until a real provider-backed collector exists, claimed PROVIDER_BACKED never PASSes.
+ * Binding checks still run against authoritative (caller-supplied binding) values.
  */
 export function evaluateChainHistoryForAcceptance(
   raw: unknown,
@@ -446,7 +452,14 @@ export function evaluateChainHistoryForAcceptance(
     );
   }
 
-  if (parsed.enumerationAuthority !== 'PROVIDER_BACKED') {
+  // Fail closed: no real collector → claimed PROVIDER_BACKED is never acceptance-grade.
+  // Boolean read so flipping the const later does not trip exact `false !== true` exhaustiveness.
+  const collectorAvailable = PHASE10_CHAIN_HISTORY_PROVIDER_COLLECTOR_AVAILABLE as boolean;
+  if (!collectorAvailable) {
+    reasons.push(
+      'CHAIN_HISTORY_PROOF_REQUIRED: provider-backed outgoing Jetton history collector is not available; claimed PROVIDER_BACKED authority is refused',
+    );
+  } else if (parsed.enumerationAuthority !== 'PROVIDER_BACKED') {
     reasons.push(
       'CHAIN_HISTORY_PROOF_REQUIRED: enumerationAuthority must be PROVIDER_BACKED (caller arrays / empty lists / hand-built ZERO_UNEXPECTED are refused)',
     );
@@ -459,14 +472,6 @@ export function evaluateChainHistoryForAcceptance(
     reasons.push(
       `external hot-wallet history has ${parsed.unexpectedOutgoingCount} unexpected outgoing transfer(s)`,
     );
-  }
-  if (
-    parsed.enumerationAuthority === 'PROVIDER_BACKED' &&
-    parsed.reconciliationResult !== 'ZERO_UNEXPECTED' &&
-    parsed.reconciliationResult !== 'UNEXPECTED_OUTGOING' &&
-    parsed.reconciliationResult !== PHASE10_CHAIN_HISTORY_PROOF_REQUIRED
-  ) {
-    reasons.push(`chain-history reconciliationResult=${parsed.reconciliationResult}`);
   }
   if (parsed.providerIdentity.independenceProven !== true) {
     reasons.push('chain-history evidence provider independence not proven');
@@ -544,6 +549,7 @@ export function evaluateChainHistoryForAcceptance(
   }
 
   if (
+    collectorAvailable &&
     parsed.enumerationAuthority === 'PROVIDER_BACKED' &&
     parsed.reconciliationResult === 'ZERO_UNEXPECTED'
   ) {

@@ -33,31 +33,36 @@ export interface Phase10HistoricalBaselineAttemptSnapshot {
 
 export interface Phase10HistoricalBaselineArtifact {
   readonly schemaVersion: typeof PHASE10_HISTORICAL_BASELINE_SCHEMA_VERSION;
-  /** Tool-generated capture timestamp — never caller-manufactured alone. */
+  /** Tool-generated capture timestamp — never caller-manufactured in production. */
   readonly capturedAt: string;
   readonly attempts: readonly Phase10HistoricalBaselineAttemptSnapshot[];
-  /** SHA-256 over canonical snapshot rows (no secrets). */
+  /** SHA-256 over capturedAt + all safety-relevant snapshot fields (no secrets). */
   readonly evidenceDigest: string;
 }
 
-function digestBaseline(attempts: readonly Phase10HistoricalBaselineAttemptSnapshot[]): string {
-  const payload = attempts
-    .map((a) =>
-      [
-        a.attemptId,
-        a.withdrawalId,
-        a.broadcastResultState,
-        a.broadcastSubmittedAt ?? '',
-        a.ambiguityClass ?? '',
-        a.withdrawalState,
-        a.approvedOutboxStatus ?? '',
-        a.workflowId ?? '',
-        String(a.newerAttemptLineageCount),
-        a.hasPendingApprovedOutbox ? '1' : '0',
-      ].join('|'),
-    )
-    .sort()
-    .join('\n');
+export function digestPhase10HistoricalBaseline(
+  capturedAt: string,
+  attempts: readonly Phase10HistoricalBaselineAttemptSnapshot[],
+): string {
+  const payload = [
+    `capturedAt=${capturedAt}`,
+    ...attempts
+      .map((a) =>
+        [
+          a.attemptId,
+          a.withdrawalId,
+          a.broadcastResultState,
+          a.broadcastSubmittedAt ?? '',
+          a.ambiguityClass ?? '',
+          a.withdrawalState,
+          a.approvedOutboxStatus ?? '',
+          a.workflowId ?? '',
+          String(a.newerAttemptLineageCount),
+          a.hasPendingApprovedOutbox ? '1' : '0',
+        ].join('|'),
+      )
+      .sort(),
+  ].join('\n');
   return createHash('sha256').update(payload).digest('hex');
 }
 
@@ -74,85 +79,108 @@ async function withClient<T>(
   }
 }
 
+async function queryBaselineAttempts(
+  client: PoolClient,
+): Promise<Phase10HistoricalBaselineAttemptSnapshot[]> {
+  const rows = await client.query<{
+    attempt_id: string;
+    withdrawal_id: string;
+    broadcast_result_state: string;
+    broadcast_submitted_at: Date | null;
+    ambiguity_class: string | null;
+    withdrawal_state: string;
+    workflow_id: string | null;
+    approved_outbox_status: string | null;
+    newer_attempt_count: number;
+    has_pending_outbox: boolean;
+  }>(
+    `SELECT a.id AS attempt_id,
+            a.withdrawal_id,
+            a.broadcast_result_state::text AS broadcast_result_state,
+            a.broadcast_submitted_at,
+            a.broadcast_ambiguity_class AS ambiguity_class,
+            w.state::text AS withdrawal_state,
+            w.workflow_id,
+            (
+              SELECT o.status::text FROM outbox_events o
+              WHERE o.event_type = $1
+                AND (o.aggregate_id = a.withdrawal_id
+                     OR (o.payload->>'withdrawalId') = a.withdrawal_id::text)
+              ORDER BY CASE WHEN o.status = 'PENDING' THEN 0 ELSE 1 END, o.created_at DESC
+              LIMIT 1
+            ) AS approved_outbox_status,
+            (
+              SELECT count(*)::int FROM withdrawal_attempts a2
+              WHERE a2.withdrawal_id = a.withdrawal_id
+                AND a2.id <> a.id
+                AND a2.created_at > a.created_at
+            ) AS newer_attempt_count,
+            EXISTS (
+              SELECT 1 FROM outbox_events o
+              WHERE o.event_type = $1
+                AND o.status = 'PENDING'
+                AND (o.aggregate_id = a.withdrawal_id
+                     OR (o.payload->>'withdrawalId') = a.withdrawal_id::text)
+            ) AS has_pending_outbox
+     FROM withdrawal_attempts a
+     JOIN withdrawals w ON w.id = a.withdrawal_id
+     WHERE a.broadcast_submitted_at IS NOT NULL
+       AND a.broadcast_result_state IN ('UNKNOWN', 'RECONCILE_REQUIRED', 'BROADCASTED', 'PENDING')
+       AND w.state NOT IN ('CONFIRMED', 'REJECTED', 'FAILED_PRE_BROADCAST')
+     ORDER BY a.id ASC`,
+    [WITHDRAWAL_APPROVED_OUTBOX_EVENT],
+  );
+
+  return rows.rows.map((row) => ({
+    attemptId: row.attempt_id,
+    withdrawalId: row.withdrawal_id,
+    broadcastResultState: row.broadcast_result_state,
+    broadcastSubmittedAt: row.broadcast_submitted_at
+      ? row.broadcast_submitted_at.toISOString()
+      : null,
+    ambiguityClass: row.ambiguity_class,
+    withdrawalState: row.withdrawal_state,
+    approvedOutboxStatus: row.approved_outbox_status,
+    workflowId: row.workflow_id,
+    newerAttemptLineageCount: row.newer_attempt_count,
+    hasPendingApprovedOutbox: row.has_pending_outbox === true,
+  }));
+}
+
 /**
- * Read-only capture of currently ambiguous / submitted-unknown attempts.
- * Must run BEFORE live authorization. Does not mutate DB.
+ * Read-only production capture of currently ambiguous / submitted-unknown attempts.
+ * Always generates capturedAt internally. Does not accept a caller timestamp.
  */
 export async function capturePhase10HistoricalBaseline(
   db: Pool | PoolClient,
-  options?: { readonly capturedAt?: string },
 ): Promise<Phase10HistoricalBaselineArtifact> {
   return withClient(db, async (client) => {
-    const capturedAt = options?.capturedAt ?? new Date().toISOString();
-    const rows = await client.query<{
-      attempt_id: string;
-      withdrawal_id: string;
-      broadcast_result_state: string;
-      broadcast_submitted_at: Date | null;
-      ambiguity_class: string | null;
-      withdrawal_state: string;
-      workflow_id: string | null;
-      approved_outbox_status: string | null;
-      newer_attempt_count: number;
-      has_pending_outbox: boolean;
-    }>(
-      `SELECT a.id AS attempt_id,
-              a.withdrawal_id,
-              a.broadcast_result_state::text AS broadcast_result_state,
-              a.broadcast_submitted_at,
-              a.broadcast_ambiguity_class AS ambiguity_class,
-              w.state::text AS withdrawal_state,
-              w.workflow_id,
-              (
-                SELECT o.status::text FROM outbox_events o
-                WHERE o.event_type = $1
-                  AND (o.aggregate_id = a.withdrawal_id
-                       OR (o.payload->>'withdrawalId') = a.withdrawal_id::text)
-                ORDER BY CASE WHEN o.status = 'PENDING' THEN 0 ELSE 1 END, o.created_at DESC
-                LIMIT 1
-              ) AS approved_outbox_status,
-              (
-                SELECT count(*)::int FROM withdrawal_attempts a2
-                WHERE a2.withdrawal_id = a.withdrawal_id
-                  AND a2.id <> a.id
-                  AND a2.created_at > a.created_at
-              ) AS newer_attempt_count,
-              EXISTS (
-                SELECT 1 FROM outbox_events o
-                WHERE o.event_type = $1
-                  AND o.status = 'PENDING'
-                  AND (o.aggregate_id = a.withdrawal_id
-                       OR (o.payload->>'withdrawalId') = a.withdrawal_id::text)
-              ) AS has_pending_outbox
-       FROM withdrawal_attempts a
-       JOIN withdrawals w ON w.id = a.withdrawal_id
-       WHERE a.broadcast_submitted_at IS NOT NULL
-         AND a.broadcast_result_state IN ('UNKNOWN', 'RECONCILE_REQUIRED', 'BROADCASTED', 'PENDING')
-         AND w.state NOT IN ('CONFIRMED', 'REJECTED', 'FAILED_PRE_BROADCAST')
-       ORDER BY a.id ASC`,
-      [WITHDRAWAL_APPROVED_OUTBOX_EVENT],
-    );
-
-    const attempts: Phase10HistoricalBaselineAttemptSnapshot[] = rows.rows.map((row) => ({
-      attemptId: row.attempt_id,
-      withdrawalId: row.withdrawal_id,
-      broadcastResultState: row.broadcast_result_state,
-      broadcastSubmittedAt: row.broadcast_submitted_at
-        ? row.broadcast_submitted_at.toISOString()
-        : null,
-      ambiguityClass: row.ambiguity_class,
-      withdrawalState: row.withdrawal_state,
-      approvedOutboxStatus: row.approved_outbox_status,
-      workflowId: row.workflow_id,
-      newerAttemptLineageCount: row.newer_attempt_count,
-      hasPendingApprovedOutbox: row.has_pending_outbox === true,
-    }));
-
+    const capturedAt = new Date().toISOString();
+    const attempts = await queryBaselineAttempts(client);
     return {
       schemaVersion: PHASE10_HISTORICAL_BASELINE_SCHEMA_VERSION,
       capturedAt,
       attempts,
-      evidenceDigest: digestBaseline(attempts),
+      evidenceDigest: digestPhase10HistoricalBaseline(capturedAt, attempts),
+    };
+  });
+}
+
+/**
+ * INTERNAL test helper — not re-exported from package index.
+ * Allows deterministic capturedAt via fake timers or explicit ISO for unit tests only.
+ */
+export async function capturePhase10HistoricalBaselineForTests(
+  db: Pool | PoolClient,
+  capturedAt: string,
+): Promise<Phase10HistoricalBaselineArtifact> {
+  return withClient(db, async (client) => {
+    const attempts = await queryBaselineAttempts(client);
+    return {
+      schemaVersion: PHASE10_HISTORICAL_BASELINE_SCHEMA_VERSION,
+      capturedAt,
+      attempts,
+      evidenceDigest: digestPhase10HistoricalBaseline(capturedAt, attempts),
     };
   });
 }
@@ -235,7 +263,8 @@ export function parsePhase10HistoricalBaseline(raw: unknown): {
     return { errors, parsed: null };
   }
 
-  const expectedDigest = digestBaseline(attempts);
+  const capturedAt = (root.capturedAt as string).trim();
+  const expectedDigest = digestPhase10HistoricalBaseline(capturedAt, attempts);
   if (root.evidenceDigest !== expectedDigest) {
     return {
       errors: ['historical baseline evidenceDigest mismatch (snapshot tampered or incomplete)'],
@@ -247,7 +276,7 @@ export function parsePhase10HistoricalBaseline(raw: unknown): {
     errors: [],
     parsed: {
       schemaVersion: 1,
-      capturedAt: (root.capturedAt as string).trim(),
+      capturedAt,
       attempts,
       evidenceDigest: expectedDigest,
     },
@@ -283,7 +312,7 @@ export async function readPhase10HistoricalBaseline(path: string): Promise<{
 
 /**
  * Convert a validated canonical baseline artifact into restore-scan input.
- * Arbitrary ID lists without this artifact are not authoritative.
+ * Carries the full safety-relevant snapshot for each attempt.
  */
 export function historicalBaselineInputFromArtifact(
   artifact: Phase10HistoricalBaselineArtifact,
@@ -291,7 +320,15 @@ export function historicalBaselineInputFromArtifact(
   const attemptStates: Record<string, Phase10HistoricalBaselineAttemptState> = {};
   for (const attempt of artifact.attempts) {
     attemptStates[attempt.attemptId] = {
+      withdrawalId: attempt.withdrawalId,
       broadcastResultState: attempt.broadcastResultState,
+      broadcastSubmittedAt: attempt.broadcastSubmittedAt,
+      ambiguityClass: attempt.ambiguityClass,
+      withdrawalState: attempt.withdrawalState,
+      approvedOutboxStatus: attempt.approvedOutboxStatus,
+      workflowId: attempt.workflowId,
+      newerAttemptLineageCount: attempt.newerAttemptLineageCount,
+      hasPendingApprovedOutbox: attempt.hasPendingApprovedOutbox,
     };
   }
   return {

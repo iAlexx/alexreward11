@@ -331,19 +331,30 @@ export async function ensureTestHotWallet(pool: Pool, networkIdArg?: string): Pr
     throw new Error('multiple ACTIVE TEST_ONLY hot wallets');
   }
   if (existing.rows[0] !== undefined) {
+    await pool.query(
+      `UPDATE hot_wallets
+       SET payout_jetton_wallet_address = COALESCE(
+             payout_jetton_wallet_address,
+             $2
+           ),
+           updated_at = now()
+       WHERE id = $1::uuid`,
+      [existing.rows[0].id, `0:jetton${randomUUID().replace(/-/g, '')}`],
+    );
     return existing.rows[0].id;
   }
   const address = `0:hot${randomUUID().replace(/-/g, '')}`;
+  const jettonWallet = `0:jetton${randomUUID().replace(/-/g, '')}`;
   const result = await pool.query<{ id: string }>(
     `INSERT INTO hot_wallets (
        network_id, address, friendly_address, wallet_version,
-       signer_type, signer_reference, status, label
+       signer_type, signer_reference, status, payout_jetton_wallet_address, label
      ) VALUES (
        $1::uuid, $2, $3, 'v5R1',
-       'KMS', 'TEST_ONLY_FAKE_HOT_1', 'ACTIVE', 'phase7-test-hot'
+       'KMS', 'TEST_ONLY_FAKE_HOT_1', 'ACTIVE', $4, 'phase7-test-hot'
      )
      RETURNING id`,
-    [netId, address, `EQ${address.slice(2, 50)}`],
+    [netId, address, `EQ${address.slice(2, 50)}`, jettonWallet],
   );
   const id = result.rows[0]?.id;
   if (id === undefined) throw new Error('hot wallet insert failed');
