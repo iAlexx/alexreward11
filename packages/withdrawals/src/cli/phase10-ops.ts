@@ -26,6 +26,13 @@ import {
   type Phase10CampaignRealModeGates,
 } from '../phase10-campaign.js';
 import { buildPhase10HotWalletMonitorReport } from '../phase10-hot-wallet-monitor.js';
+import { loadPhase10AuthoritativeHotWalletIdentity } from '../phase10-hot-wallet-identity.js';
+import {
+  capturePhase10HistoricalBaseline,
+  historicalBaselineInputFromArtifact,
+  parsePhase10HistoricalBaseline,
+  writePhase10HistoricalBaseline,
+} from '../phase10-historical-baseline.js';
 import { runPhase10LiveExternalProbes, signerLockedFromProbe } from '../phase10-live-probes.js';
 import { writePhase10LivePreflightEvidence } from '../phase10-live-readiness-evidence.js';
 import { runPhase10Preflight } from '../phase10-preflight.js';
@@ -37,6 +44,7 @@ import type { DeploymentEnvironment } from '../config.js';
 const COMMANDS = new Set([
   'readiness',
   'preflight',
+  'baseline-capture',
   'restore-reconcile',
   'hot-wallet-monitor',
   'campaign-plan',
@@ -52,7 +60,7 @@ function usage(): never {
     JSON.stringify({
       ok: false,
       message:
-        'usage: phase10-ops <readiness|preflight|restore-reconcile|hot-wallet-monitor|campaign-plan|campaign-init|campaign-status|campaign-attach|campaign-rescan|campaign-finalize> [flags]',
+        'usage: phase10-ops <readiness|preflight|baseline-capture|restore-reconcile|hot-wallet-monitor|campaign-plan|campaign-init|campaign-status|campaign-attach|campaign-rescan|campaign-finalize> [flags]',
     }),
   );
   process.exit(2);
@@ -160,18 +168,58 @@ function parseRealExecutionGatesJson(
   return JSON.parse(raw) as Phase10CampaignRealExecutionGates;
 }
 
-async function loadBaselineIds(path: string | undefined): Promise<string[]> {
-  if (path === undefined) return [];
-  const raw = JSON.parse(await readFile(path, 'utf8')) as {
-    attemptIds?: unknown;
-    baselineIsolatedHistoricalAttemptIds?: unknown;
+async function loadCanonicalBaseline(path: string | undefined): Promise<{
+  readonly input: ReturnType<typeof historicalBaselineInputFromArtifact> | null;
+  readonly attemptIds: readonly string[];
+  readonly capturedAt: string | null;
+  readonly errors: readonly string[];
+}> {
+  if (path === undefined) {
+    return { input: null, attemptIds: [], capturedAt: null, errors: [] };
+  }
+  const raw = JSON.parse(await readFile(path, 'utf8')) as unknown;
+  const parsed = parsePhase10HistoricalBaseline(raw);
+  if (parsed.parsed === null) {
+    return {
+      input: null,
+      attemptIds: [],
+      capturedAt: null,
+      errors: parsed.errors.length > 0 ? parsed.errors : ['invalid historical baseline artifact'],
+    };
+  }
+  const input = historicalBaselineInputFromArtifact(parsed.parsed);
+  return {
+    input,
+    attemptIds: input.attemptIds,
+    capturedAt: input.capturedAt,
+    errors: [],
   };
-  const ids = Array.isArray(raw.attemptIds)
-    ? raw.attemptIds
-    : Array.isArray(raw.baselineIsolatedHistoricalAttemptIds)
-      ? raw.baselineIsolatedHistoricalAttemptIds
-      : [];
-  return ids.filter((id): id is string => typeof id === 'string' && id.trim() !== '');
+}
+
+async function runLiveProbes(
+  pool: ReturnType<typeof createDatabasePool>,
+  worker: ReturnType<typeof loadWorkerConfig>,
+) {
+  const hotIdentity = await loadPhase10AuthoritativeHotWalletIdentity(pool, {
+    networkCode: worker.WITHDRAWAL_NETWORK_CODE,
+  });
+  return runPhase10LiveExternalProbes({
+    primary: {
+      kind: worker.TON_PRIMARY_PROVIDER_KIND || null,
+      baseUrl: worker.TON_PRIMARY_PROVIDER_URL || null,
+      apiKey: worker.TON_PRIMARY_PROVIDER_API_KEY || null,
+    },
+    secondary: {
+      kind: worker.TON_SECONDARY_PROVIDER_KIND || null,
+      baseUrl: worker.TON_SECONDARY_PROVIDER_URL || null,
+      apiKey: worker.TON_SECONDARY_PROVIDER_API_KEY || null,
+    },
+    signerBaseUrl: worker.SIGNER_BASE_URL || null,
+    signerServiceToken: worker.SIGNER_SERVICE_TOKEN || null,
+    expectedCustodyMode: 'self_hosted_encrypted',
+    expectedPublicKeyFingerprint: hotIdentity?.signerReference ?? null,
+    expectedWalletAddressRaw: hotIdentity?.addressRaw ?? null,
+  });
 }
 
 async function main(): Promise<void> {
@@ -232,7 +280,16 @@ async function main(): Promise<void> {
     );
     const confirmationPhrase = readFlag(argv, '--confirmation-phrase');
     const baselinePath = readFlag(argv, '--baseline-json');
-    const baselineIds = await loadBaselineIds(baselinePath);
+    const baseline = await loadCanonicalBaseline(baselinePath);
+    if (baseline.errors.length > 0) {
+      printJson({
+        ok: false,
+        command: 'campaign-init',
+        error: 'canonical historical baseline required',
+        errors: baseline.errors,
+      });
+      return;
+    }
     const campaignIdFlag = readFlag(argv, '--campaign-id');
     const result = await initializeCampaign({
       campaignDirOrManifestPath: manifestPath,
@@ -242,7 +299,9 @@ async function main(): Promise<void> {
       ...(gates !== undefined ? { gates } : {}),
       ...(realExecutionGates !== undefined ? { realExecutionGates } : {}),
       ...(confirmationPhrase !== undefined ? { confirmationPhrase } : {}),
-      ...(baselineIds.length > 0 ? { baselineIsolatedHistoricalAttemptIds: baselineIds } : {}),
+      ...(baseline.attemptIds.length > 0
+        ? { baselineIsolatedHistoricalAttemptIds: baseline.attemptIds }
+        : {}),
       ...(campaignIdFlag !== undefined ? { campaignId: campaignIdFlag } : {}),
     });
     printJson({
@@ -297,20 +356,7 @@ async function main(): Promise<void> {
     }
 
     if (command === 'readiness') {
-      const probes = await runPhase10LiveExternalProbes({
-        primary: {
-          kind: worker.TON_PRIMARY_PROVIDER_KIND || null,
-          baseUrl: worker.TON_PRIMARY_PROVIDER_URL || null,
-          apiKey: worker.TON_PRIMARY_PROVIDER_API_KEY || null,
-        },
-        secondary: {
-          kind: worker.TON_SECONDARY_PROVIDER_KIND || null,
-          baseUrl: worker.TON_SECONDARY_PROVIDER_URL || null,
-          apiKey: worker.TON_SECONDARY_PROVIDER_API_KEY || null,
-        },
-        signerBaseUrl: worker.SIGNER_BASE_URL || null,
-        signerServiceToken: worker.SIGNER_SERVICE_TOKEN || null,
-      });
+      const probes = await runLiveProbes(pool, worker);
       const report = await runPhase10Readiness(
         pool,
         buildReadinessConfigFromEnv(worker, controlledUserId, signerLockedFromProbe(probes)),
@@ -319,27 +365,49 @@ async function main(): Promise<void> {
       return;
     }
 
+    if (command === 'baseline-capture') {
+      const outPath = readFlag(argv, '--out');
+      if (outPath === undefined) usage();
+      const artifact = await capturePhase10HistoricalBaseline(pool);
+      await writePhase10HistoricalBaseline(outPath, artifact);
+      printJson({
+        ok: true,
+        command: 'baseline-capture',
+        path: outPath,
+        capturedAt: artifact.capturedAt,
+        attemptCount: artifact.attempts.length,
+        evidenceDigest: artifact.evidenceDigest,
+        mutatesFinancialDb: false,
+      });
+      return;
+    }
+
     if (command === 'preflight') {
       const liveAuthorizationWindow = hasSwitch(argv, '--live-authorization-window');
       const evidenceOut = readFlag(argv, '--evidence-out');
       const baselinePath = readFlag(argv, '--baseline-json');
-      const baselineIds = await loadBaselineIds(baselinePath);
-      const baselineCapturedAt = readFlag(argv, '--baseline-captured-at') ?? null;
+      // --baseline-captured-at alone cannot manufacture historical status.
+      if (hasSwitch(argv, '--baseline-captured-at') && baselinePath === undefined) {
+        printJson({
+          ok: false,
+          command: 'preflight',
+          error:
+            '--baseline-captured-at alone is refused; capture a canonical baseline via baseline-capture',
+        });
+        return;
+      }
+      const baseline = await loadCanonicalBaseline(baselinePath);
+      if (baseline.errors.length > 0) {
+        printJson({
+          ok: false,
+          command: 'preflight',
+          error: 'canonical historical baseline required',
+          errors: baseline.errors,
+        });
+        return;
+      }
 
-      const probes = await runPhase10LiveExternalProbes({
-        primary: {
-          kind: worker.TON_PRIMARY_PROVIDER_KIND || null,
-          baseUrl: worker.TON_PRIMARY_PROVIDER_URL || null,
-          apiKey: worker.TON_PRIMARY_PROVIDER_API_KEY || null,
-        },
-        secondary: {
-          kind: worker.TON_SECONDARY_PROVIDER_KIND || null,
-          baseUrl: worker.TON_SECONDARY_PROVIDER_URL || null,
-          apiKey: worker.TON_SECONDARY_PROVIDER_API_KEY || null,
-        },
-        signerBaseUrl: worker.SIGNER_BASE_URL || null,
-        signerServiceToken: worker.SIGNER_SERVICE_TOKEN || null,
-      });
+      const probes = await runLiveProbes(pool, worker);
 
       const readinessConfig = buildReadinessConfigFromEnv(
         worker,
@@ -349,13 +417,11 @@ async function main(): Promise<void> {
       const report = await runPhase10Preflight(pool, {
         readinessConfig,
         externalProbes: probes,
-        ...(baselineIds.length > 0
+        ...(baseline.input !== null
           ? {
-              historicalBaseline: {
-                attemptIds: baselineIds,
-                capturedAt: baselineCapturedAt ?? new Date(0).toISOString(),
-              },
-              baselineIsolatedHistoricalAttemptIds: baselineIds,
+              historicalBaseline: baseline.input,
+              baselineIsolatedHistoricalAttemptIds: baseline.attemptIds,
+              liveAuthorizationWindowStartedAt: baseline.capturedAt,
             }
           : {}),
       });
@@ -369,8 +435,8 @@ async function main(): Promise<void> {
           externalProbes: probes,
           liveAuthorizationWindow,
           historicalBaselineReference:
-            baselineIds.length > 0
-              ? { attemptIds: baselineIds, capturedAt: baselineCapturedAt }
+            baseline.input !== null
+              ? { attemptIds: [...baseline.attemptIds], capturedAt: baseline.capturedAt }
               : null,
         });
         evidencePath = evidenceOut;
@@ -388,16 +454,31 @@ async function main(): Promise<void> {
 
     if (command === 'restore-reconcile') {
       const baselinePath = readFlag(argv, '--baseline-json');
-      const baselineIds = await loadBaselineIds(baselinePath);
-      const baselineCapturedAt = readFlag(argv, '--baseline-captured-at') ?? null;
+      if (hasSwitch(argv, '--baseline-captured-at') && baselinePath === undefined) {
+        printJson({
+          ok: false,
+          command: 'restore-reconcile',
+          error:
+            '--baseline-captured-at alone is refused; capture a canonical baseline via baseline-capture',
+        });
+        return;
+      }
+      const baseline = await loadCanonicalBaseline(baselinePath);
+      if (baseline.errors.length > 0) {
+        printJson({
+          ok: false,
+          command: 'restore-reconcile',
+          error: 'canonical historical baseline required',
+          errors: baseline.errors,
+        });
+        return;
+      }
       const report = await runPhase10RestoreReconcileScan(pool, {
-        ...(baselineIds.length > 0
+        ...(baseline.input !== null
           ? {
-              historicalBaseline: {
-                attemptIds: baselineIds,
-                capturedAt: baselineCapturedAt ?? new Date(0).toISOString(),
-              },
-              baselineIsolatedHistoricalAttemptIds: baselineIds,
+              historicalBaseline: baseline.input,
+              baselineIsolatedHistoricalAttemptIds: baseline.attemptIds,
+              liveAuthorizationWindowStartedAt: baseline.capturedAt,
             }
           : {}),
       });

@@ -151,14 +151,36 @@ export async function runPhase10Preflight(
       }
       if (!probes.primary.healthy) {
         blockers.push('PRIMARY_PROVIDER_UNHEALTHY');
+      } else if (probes.primary.observedNetworkGlobalId !== -3) {
+        blockers.push(
+          `PRIMARY_PROVIDER_WRONG_NETWORK: observedNetworkGlobalId=${probes.primary.observedNetworkGlobalId}`,
+        );
       }
       if (!probes.secondary.healthy) {
         blockers.push('SECONDARY_PROVIDER_UNHEALTHY');
+      } else if (probes.secondary.observedNetworkGlobalId !== -3) {
+        blockers.push(
+          `SECONDARY_PROVIDER_WRONG_NETWORK: observedNetworkGlobalId=${probes.secondary.observedNetworkGlobalId}`,
+        );
       }
       if (!probes.providerIndependence.proven) {
         blockers.push(
           `PROVIDER_INDEPENDENCE_UNPROVEN: ${probes.providerIndependence.reason ?? 'unproven'}`,
         );
+      }
+      if (!probes.signer.identityProbed) {
+        blockers.push('SIGNER_IDENTITY_NOT_PROBED');
+      }
+      if (probes.signer.custodyState?.toUpperCase() !== 'UNLOCKED') {
+        blockers.push(
+          `SIGNER_CUSTODY_NOT_UNLOCKED: custodyState=${probes.signer.custodyState ?? 'null'}`,
+        );
+      }
+      if (probes.signer.identityMatchesExpected !== true) {
+        blockers.push('SIGNER_IDENTITY_MISMATCH');
+      }
+      if (probes.signer.walletAddressMatchesExpected !== true) {
+        blockers.push('SIGNER_WALLET_ADDRESS_MISMATCH');
       }
     }
 
@@ -190,9 +212,15 @@ export async function runPhase10Preflight(
     (probes === null
       ? input.readinessConfig.realChainEnabled !== true
       : probes.signer.probePerformed &&
+        probes.signer.identityProbed &&
         probes.signer.signingReady &&
+        probes.signer.custodyState?.toUpperCase() === 'UNLOCKED' &&
+        probes.signer.identityMatchesExpected === true &&
+        probes.signer.walletAddressMatchesExpected === true &&
         probes.primary.healthy &&
         probes.secondary.healthy &&
+        probes.primary.observedNetworkGlobalId === -3 &&
+        probes.secondary.observedNetworkGlobalId === -3 &&
         probes.providerIndependence.proven);
 
   return {

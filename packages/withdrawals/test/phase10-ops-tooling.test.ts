@@ -10,8 +10,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   WITHDRAWAL_APPROVED_OUTBOX_EVENT,
   acquireHotWalletDispatchLease,
-  buildPhase10ChainHistoryEvidence,
   buildPhase10HotWalletMonitorReport,
+  buildPhase10ProviderBackedChainHistoryEvidence,
   checkPhase10PayoutInvariants,
   claimPendingWithdrawalApprovedEvents,
   compactTep74EvidenceSummary,
@@ -1014,7 +1014,8 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 pre-commit blocker DB regress
       result.verdict === 'REFUSED_CAMPAIGN_BINDING' ||
         result.verdict === 'REFUSED_INSUFFICIENT_CONFIRMED_COUNT' ||
         result.verdict === 'REFUSED_INVARIANT_FAILURE' ||
-        result.verdict === 'REFUSED_CHAIN_PROOF_REQUIRED',
+        result.verdict === 'REFUSED_CHAIN_PROOF_REQUIRED' ||
+        result.verdict === 'REFUSED_MISSING_LIVE_EVIDENCE',
     ).toBe(true);
   });
 
@@ -1219,9 +1220,11 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 pre-commit blocker DB regress
       }),
       'utf8',
     );
+    const recordedAt = new Date().toISOString();
     await writeFile(
       readinessPath,
       JSON.stringify({
+        schemaVersion: 1,
         liveAuthorizationWindow: true,
         verdict: 'READY_FOR_CONTROLLED_LIVE_TESTNET',
         realChainEnabled: true,
@@ -1229,17 +1232,109 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 pre-commit blocker DB regress
         networkCode: 'TON_TESTNET',
         assetSymbol: 'USDT',
         controlledUserId,
-        recordedAt: new Date().toISOString(),
+        recordedAt,
         signerProbed: true,
+        signerReady: true,
         signerUnlocked: true,
+        signerLockState: 'UNLOCKED',
+        signerCustodyState: 'UNLOCKED',
+        preflightBlockers: [],
+        preflightWarnings: [],
+        restoreScanSummary: {
+          dangerousCount: 0,
+          warnCount: 0,
+          scannedAt: recordedAt,
+          historicalIsolatedBaselineCount: 0,
+        },
+        providers: {
+          primary: {
+            kind: 'toncenter',
+            endpointFingerprint: 'https://toncenter.test:443',
+            healthy: true,
+            observedNetworkGlobalId: -3,
+          },
+          secondary: {
+            kind: 'tonapi',
+            endpointFingerprint: 'https://tonapi.test:443',
+            healthy: true,
+            observedNetworkGlobalId: -3,
+          },
+          independenceProven: true,
+          independenceCode: null,
+        },
+        externalProbes: {
+          schemaVersion: 1,
+          observedAt: recordedAt,
+          primary: {
+            kind: 'toncenter',
+            endpointFingerprint: 'https://toncenter.test:443',
+            reachable: true,
+            healthy: true,
+            observedNetworkGlobalId: -3,
+            latencyMs: 1,
+            detail: null,
+            observedAt: recordedAt,
+          },
+          secondary: {
+            kind: 'tonapi',
+            endpointFingerprint: 'https://tonapi.test:443',
+            reachable: true,
+            healthy: true,
+            observedNetworkGlobalId: -3,
+            latencyMs: 1,
+            detail: null,
+            observedAt: recordedAt,
+          },
+          providerIndependence: {
+            proven: true,
+            code: null,
+            reason: null,
+            primaryFingerprint: 'https://toncenter.test:443',
+            secondaryFingerprint: 'https://tonapi.test:443',
+          },
+          signer: {
+            probePerformed: true,
+            healthReachable: true,
+            custodyState: 'UNLOCKED',
+            signingReady: true,
+            expectedCustodyMode: 'self_hosted_encrypted',
+            identityProbed: true,
+            publicKeyFingerprint: 'aa'.repeat(32),
+            walletAddressRaw: '0:hot',
+            identityMatchesExpected: true,
+            walletAddressMatchesExpected: true,
+            expectedPublicKeyFingerprintPresent: true,
+            expectedWalletAddressPresent: true,
+            httpStatus: 200,
+            detail: null,
+            observedAt: recordedAt,
+          },
+          overallBlocked: false,
+          blockers: [],
+        },
+        preflight: {
+          verdict: 'READY_FOR_CONTROLLED_LIVE_TESTNET',
+          liveAuthorizationWindow: true,
+          realChainEnabled: true,
+          fakeChainEnabled: false,
+          networkCode: 'TON_TESTNET',
+          assetSymbol: 'USDT',
+          controlledUserId,
+          recordedAt,
+          signerProbed: true,
+          signerReady: true,
+          signerUnlocked: true,
+          signerLockState: 'UNLOCKED',
+        },
       }),
       'utf8',
     );
     const chainHistoryPath = join(dirname(readinessPath), 'chain-history.json');
-    const artifact = buildPhase10ChainHistoryEvidence({
+    const artifact = buildPhase10ProviderBackedChainHistoryEvidence({
       hotWalletAddress: '0:hot',
       hotWalletJettonWallet: '0:jetton',
       jettonMaster: '0:master',
+      networkGlobalId: -3,
       observationWindow: {
         start: new Date(Date.now() - 3600_000).toISOString(),
         end: new Date().toISOString(),
@@ -1251,7 +1346,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 pre-commit blocker DB regress
         secondaryEndpointFingerprint: 'https://tonapi.test:443',
         independenceProven: true,
       },
-      enumeratedOutgoingTransfers: [],
+      providerEnumeratedOutgoingTransfers: [],
       expectedCampaignPayoutIdentities: [],
     });
     await writeFile(chainHistoryPath, JSON.stringify(artifact), 'utf8');

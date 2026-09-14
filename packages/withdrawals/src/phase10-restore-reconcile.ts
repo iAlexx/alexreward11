@@ -31,13 +31,22 @@ export interface Phase10HistoricalBaselineAttemptState {
 /**
  * Authoritative baseline of historical ambiguous attempts captured BEFORE the
  * controlled campaign / live authorization window. Never uses hardcoded public IDs.
+ * Prefer a canonical artifact from capturePhase10HistoricalBaseline — arbitrary
+ * ID lists plus a caller-supplied timestamp alone are not authoritative.
  */
 export interface Phase10HistoricalBaselineInput {
   readonly attemptIds: readonly string[];
-  /** ISO timestamp — attempts must predate this window. */
+  /** ISO timestamp from the capture tool — attempts must predate this window. */
   readonly capturedAt: string;
   /** Optional per-attempt state snapshot; when present, current state must match. */
   readonly attemptStates?: Readonly<Record<string, Phase10HistoricalBaselineAttemptState>>;
+  /** Digest from the canonical capture artifact (when available). */
+  readonly artifactDigest?: string;
+  /**
+   * When true, baseline membership requires attemptStates (canonical capture).
+   * Loose ID-only baselines cannot manufacture HISTORICAL_ISOLATED_BASELINE.
+   */
+  readonly requireCanonicalArtifact?: boolean;
 }
 
 export interface Phase10RestoreReconcileScanOptions {
@@ -89,13 +98,18 @@ function resolveBaseline(options: Phase10RestoreReconcileScanOptions | undefined
   readonly capturedAtMs: number | null;
   readonly windowStartMs: number | null;
   readonly attemptStates: Readonly<Record<string, Phase10HistoricalBaselineAttemptState>>;
+  readonly requireCanonicalArtifact: boolean;
 } {
   const baseline = options?.historicalBaseline ?? null;
+  const requireCanonicalArtifact = baseline?.requireCanonicalArtifact === true;
+  // Loose legacy ID lists without canonical attemptStates cannot isolate danger.
+  const looseIds = requireCanonicalArtifact
+    ? []
+    : (options?.baselineIsolatedHistoricalAttemptIds ?? []);
   const ids = new Set<string>(
-    [
-      ...(baseline?.attemptIds ?? []),
-      ...(options?.baselineIsolatedHistoricalAttemptIds ?? []),
-    ].filter((id) => typeof id === 'string' && id.trim() !== ''),
+    [...(baseline?.attemptIds ?? []), ...looseIds].filter(
+      (id) => typeof id === 'string' && id.trim() !== '',
+    ),
   );
   const capturedAtMs = parseIsoMs(baseline?.capturedAt ?? null);
   const windowStartMs =
@@ -107,6 +121,7 @@ function resolveBaseline(options: Phase10RestoreReconcileScanOptions | undefined
     capturedAtMs,
     windowStartMs,
     attemptStates: baseline?.attemptStates ?? {},
+    requireCanonicalArtifact,
   };
 }
 
@@ -280,13 +295,25 @@ export async function runPhase10RestoreReconcileScan(
           ? attemptMs < baseline.windowStartMs
           : false;
       const expectedState = baseline.attemptStates[row.id];
+      // Canonical artifacts require an exact captured state snapshot per attempt.
+      const hasCanonicalState = !baseline.requireCanonicalArtifact || expectedState !== undefined;
       const stateUnchanged =
-        expectedState === undefined ||
-        expectedState.broadcastResultState === row.broadcast_result_state;
+        expectedState === undefined
+          ? !baseline.requireCanonicalArtifact
+          : expectedState.broadcastResultState === row.broadcast_result_state;
       const noResendPath = !row.has_pending_outbox;
       const noNewerLineage = row.newer_attempt_count === 0;
+      const capturedAtPresent = baseline.capturedAtMs !== null;
 
-      if (inBaseline && predatesWindow && noResendPath && noNewerLineage && stateUnchanged) {
+      if (
+        inBaseline &&
+        capturedAtPresent &&
+        hasCanonicalState &&
+        predatesWindow &&
+        noResendPath &&
+        noNewerLineage &&
+        stateUnchanged
+      ) {
         push({
           category: 'historical_isolated_baseline',
           severity: 'WARN',
@@ -311,6 +338,8 @@ export async function runPhase10RestoreReconcileScan(
       // Baseline claimed but isolation invariants failed → remain DANGER.
       const baselineFailureReasons: string[] = [];
       if (inBaseline) {
+        if (!capturedAtPresent) baselineFailureReasons.push('missing_captured_at');
+        if (!hasCanonicalState) baselineFailureReasons.push('missing_canonical_state_snapshot');
         if (!predatesWindow) baselineFailureReasons.push('does_not_predate_window');
         if (!noResendPath) baselineFailureReasons.push('pending_approved_outbox');
         if (!noNewerLineage) baselineFailureReasons.push('newer_attempt_lineage');

@@ -407,10 +407,20 @@ export interface ParsedLiveReadinessEvidence {
   readonly assetSymbol: 'USDT';
   readonly verdict: 'READY_FOR_CONTROLLED_LIVE_TESTNET';
   readonly recordedAt: string;
+  readonly primaryEndpointFingerprint: string | null;
+  readonly secondaryEndpointFingerprint: string | null;
+  readonly primaryNetworkGlobalId: number;
+  readonly secondaryNetworkGlobalId: number;
 }
 
+const PHASE10_LIVE_PREFLIGHT_SCHEMA_VERSION = 1;
+const PHASE10_TON_TESTNET_NETWORK_GLOBAL_ID = -3;
+
 /**
- * Parse + validate live preflight evidence. Generic ok/status/verdict=PASS alone is refused.
+ * Parse + validate live preflight evidence.
+ * Final acceptance requires the canonical Phase 10 live-preflight artifact.
+ * Hand-authored loose readiness flags alone NEVER satisfy PASS.
+ * Legacy nested preflight/readiness fields may remain for display only.
  */
 export function parseLiveReadinessEvidence(raw: unknown): {
   readonly errors: readonly string[];
@@ -425,107 +435,135 @@ export function parseLiveReadinessEvidence(raw: unknown): {
   const preflight = readNested(root, 'preflight');
   const readiness = readNested(root, 'readiness');
 
-  const liveAuthorizationWindow =
-    root.liveAuthorizationWindow === true ||
-    preflight?.liveAuthorizationWindow === true ||
-    readiness?.liveAuthorizationWindow === true;
-  if (!liveAuthorizationWindow) {
+  // Canonical artifact markers — loose flags without these never PASS acceptance.
+  if (root.schemaVersion !== PHASE10_LIVE_PREFLIGHT_SCHEMA_VERSION) {
+    errors.push(
+      'canonical live-preflight schemaVersion must be exactly 1 (hand-authored loose readiness flags are refused)',
+    );
+  }
+
+  if (root.liveAuthorizationWindow !== true) {
     errors.push('liveAuthorizationWindow must be true');
   }
 
-  const verdict =
-    readNonEmptyString(root.verdict) ??
-    readNonEmptyString(preflight?.verdict) ??
-    readNonEmptyString(readiness?.verdict);
-  if (verdict !== 'READY_FOR_CONTROLLED_LIVE_TESTNET') {
+  if (root.verdict !== 'READY_FOR_CONTROLLED_LIVE_TESTNET') {
     errors.push(
       'preflight verdict must be READY_FOR_CONTROLLED_LIVE_TESTNET (ok/status/verdict=PASS alone is insufficient)',
     );
   }
 
-  const realChainEnabled =
-    root.realChainEnabled === true ||
-    preflight?.realChainEnabled === true ||
-    readiness?.realChainEnabled === true;
-  if (!realChainEnabled) {
+  if (root.realChainEnabled !== true) {
     errors.push('realChainEnabled must be true in live readiness evidence');
   }
 
-  const fakeChainEnabled =
-    root.fakeChainEnabled === true ||
-    preflight?.fakeChainEnabled === true ||
-    readiness?.fakeChainEnabled === true;
-  const fakeChainExplicitFalse =
-    root.fakeChainEnabled === false ||
-    preflight?.fakeChainEnabled === false ||
-    readiness?.fakeChainEnabled === false;
-  if (fakeChainEnabled || !fakeChainExplicitFalse) {
+  if (root.fakeChainEnabled !== false) {
     errors.push('fakeChainEnabled must be explicitly false in live readiness evidence');
   }
 
-  const networkCode =
-    readNonEmptyString(root.networkCode) ??
-    readNonEmptyString(preflight?.networkCode) ??
-    readNonEmptyString(readiness?.networkCode) ??
-    readNonEmptyString(readiness?.acceptedNetworkCode);
+  const networkCode = readNonEmptyString(root.networkCode);
   if (networkCode !== 'TON_TESTNET') {
     errors.push('networkCode must be TON_TESTNET');
   }
 
-  const assetSymbol =
-    readNonEmptyString(root.assetSymbol) ??
-    readNonEmptyString(preflight?.assetSymbol) ??
-    readNonEmptyString(readiness?.assetSymbol) ??
-    readNonEmptyString(readiness?.usdtSymbol);
+  const assetSymbol = readNonEmptyString(root.assetSymbol);
   if (assetSymbol !== 'USDT') {
     errors.push('assetSymbol must be USDT');
   }
 
-  const controlledUserId =
-    readNonEmptyString(root.controlledUserId) ??
-    readNonEmptyString(preflight?.controlledUserId) ??
-    readNonEmptyString(readiness?.controlledUserId);
+  const controlledUserId = readNonEmptyString(root.controlledUserId);
   if (controlledUserId === null) {
     errors.push('controlledUserId missing in live readiness evidence');
   }
 
-  const recordedAt =
-    readNonEmptyString(root.recordedAt) ??
-    readNonEmptyString(root.timestamp) ??
-    readNonEmptyString(preflight?.recordedAt) ??
-    readNonEmptyString(preflight?.timestamp) ??
-    readNonEmptyString(readiness?.recordedAt) ??
-    readNonEmptyString(readiness?.timestamp);
+  const recordedAt = readNonEmptyString(root.recordedAt);
   if (recordedAt === null) {
-    errors.push('recordedAt/timestamp missing in live readiness evidence');
+    errors.push('recordedAt missing in live readiness evidence');
   }
 
-  const signerProbed =
-    root.signerProbed === true ||
-    preflight?.signerProbed === true ||
-    readiness?.signerProbed === true;
-  const signerReady =
-    root.signerReady === true ||
-    root.signerUnlocked === true ||
-    preflight?.signerReady === true ||
-    preflight?.signerUnlocked === true ||
-    readiness?.signerReady === true ||
-    readiness?.signerUnlocked === true ||
-    readNonEmptyString(root.signerLockState) === 'UNLOCKED' ||
-    readNonEmptyString(preflight?.signerLockState) === 'UNLOCKED' ||
-    readNonEmptyString(readiness?.signerLockState) === 'UNLOCKED';
-  if (!signerProbed) {
-    errors.push('signer must be explicitly probed in live readiness evidence');
-  }
-  if (!signerReady) {
-    errors.push('signer must be ready/unlocked in live readiness evidence');
+  if (!Array.isArray(root.preflightBlockers)) {
+    errors.push('canonical live-preflight preflightBlockers array required');
+  } else if (root.preflightBlockers.length !== 0) {
+    errors.push('preflightBlockers.length must be 0 for acceptance');
   }
 
-  if (
+  const restore = asRecord(root.restoreScanSummary);
+  if (restore === null) {
+    errors.push('canonical live-preflight restoreScanSummary required');
+  } else if (restore.dangerousCount !== 0) {
+    errors.push('restoreScanSummary.dangerousCount must be 0');
+  }
+
+  const providers = asRecord(root.providers);
+  const primary = providers !== null ? asRecord(providers.primary) : null;
+  const secondary = providers !== null ? asRecord(providers.secondary) : null;
+  if (providers === null || primary === null || secondary === null) {
+    errors.push('canonical live-preflight providers.primary/secondary required');
+  } else {
+    if (providers.independenceProven !== true) {
+      errors.push('provider independence must be proven');
+    }
+    if (primary.healthy !== true) {
+      errors.push('primary provider must be healthy');
+    }
+    if (secondary.healthy !== true) {
+      errors.push('secondary provider must be healthy');
+    }
+    if (primary.observedNetworkGlobalId !== PHASE10_TON_TESTNET_NETWORK_GLOBAL_ID) {
+      errors.push('primary observedNetworkGlobalId must be -3 (TON Testnet)');
+    }
+    if (secondary.observedNetworkGlobalId !== PHASE10_TON_TESTNET_NETWORK_GLOBAL_ID) {
+      errors.push('secondary observedNetworkGlobalId must be -3 (TON Testnet)');
+    }
+  }
+
+  const externalProbes = asRecord(root.externalProbes);
+  if (externalProbes === null) {
+    errors.push('canonical live-preflight externalProbes required');
+  } else {
+    const signer = asRecord(externalProbes.signer);
+    if (signer === null) {
+      errors.push('externalProbes.signer required');
+    } else {
+      if (signer.probePerformed !== true) {
+        errors.push('Signer probePerformed must be true');
+      }
+      if (signer.identityProbed !== true) {
+        errors.push('Signer identityProbed must be true');
+      }
+      if (readNonEmptyString(signer.custodyState) !== 'UNLOCKED') {
+        errors.push('Signer custodyState must be exactly UNLOCKED (local_ephemeral/n/a refused)');
+      }
+      if (signer.signingReady !== true) {
+        errors.push('Signer signingReady must be true');
+      }
+      if (signer.identityMatchesExpected !== true) {
+        errors.push('Signer identity must match authoritative expected fingerprint');
+      }
+      if (signer.walletAddressMatchesExpected !== true) {
+        errors.push('Signer wallet address must match authoritative Hot Wallet');
+      }
+    }
+  }
+
+  // Legacy nested flags may exist for display; they must never salvage a non-canonical artifact.
+  const legacyOnlyMasquerade =
     errors.length > 0 &&
-    (root.ok === true || root.status === 'PASS' || root.verdict === 'PASS')
-  ) {
-    errors.push('generic ok/status/verdict=PASS alone cannot satisfy live readiness');
+    (root.signerProbed === true ||
+      root.signerUnlocked === true ||
+      preflight?.signerProbed === true ||
+      preflight?.signerUnlocked === true ||
+      readiness?.signerProbed === true ||
+      readiness?.signerUnlocked === true ||
+      root.ok === true ||
+      root.status === 'PASS' ||
+      root.verdict === 'PASS' ||
+      (root.liveAuthorizationWindow === true &&
+        root.verdict === 'READY_FOR_CONTROLLED_LIVE_TESTNET' &&
+        root.schemaVersion !== PHASE10_LIVE_PREFLIGHT_SCHEMA_VERSION));
+  if (legacyOnlyMasquerade) {
+    errors.push(
+      'hand-authored loose readiness flags cannot satisfy PASS_EVIDENCE_PRESENT_OWNER_REVIEW_REQUIRED',
+    );
   }
 
   if (
@@ -534,7 +572,9 @@ export function parseLiveReadinessEvidence(raw: unknown): {
     recordedAt === null ||
     networkCode !== 'TON_TESTNET' ||
     assetSymbol !== 'USDT' ||
-    verdict !== 'READY_FOR_CONTROLLED_LIVE_TESTNET'
+    root.verdict !== 'READY_FOR_CONTROLLED_LIVE_TESTNET' ||
+    primary === null ||
+    secondary === null
   ) {
     return { errors, parsed: null };
   }
@@ -547,6 +587,10 @@ export function parseLiveReadinessEvidence(raw: unknown): {
       assetSymbol: 'USDT',
       verdict: 'READY_FOR_CONTROLLED_LIVE_TESTNET',
       recordedAt,
+      primaryEndpointFingerprint: readNonEmptyString(primary.endpointFingerprint),
+      secondaryEndpointFingerprint: readNonEmptyString(secondary.endpointFingerprint),
+      primaryNetworkGlobalId: PHASE10_TON_TESTNET_NETWORK_GLOBAL_ID,
+      secondaryNetworkGlobalId: PHASE10_TON_TESTNET_NETWORK_GLOBAL_ID,
     },
   };
 }
@@ -740,7 +784,15 @@ export async function evaluatePhase10AcceptanceFromEvidence(
       chainHistoryFail = true;
       reasons.push(...chainHistory.errors);
     } else {
-      const evaluated = evaluateChainHistoryForAcceptance(chainHistory.parsed);
+      const evaluated = evaluateChainHistoryForAcceptance(chainHistory.parsed, {
+        hotWalletAddress: chainHistory.parsed.hotWalletAddress,
+        hotWalletJettonWallet: chainHistory.parsed.hotWalletJettonWallet,
+        jettonMaster: chainHistory.parsed.jettonMaster,
+        networkGlobalId: PHASE10_TON_TESTNET_NETWORK_GLOBAL_ID,
+        campaignWindowStart: parseCampaignCreatedAt(campaign.createdAt)?.toISOString() ?? null,
+        primaryEndpointFingerprint: readinessParsed.parsed?.primaryEndpointFingerprint ?? null,
+        secondaryEndpointFingerprint: readinessParsed.parsed?.secondaryEndpointFingerprint ?? null,
+      });
       if (!evaluated.ok) {
         chainHistoryFail = true;
         chainHistoryUnexpected = evaluated.unexpectedOutgoingCount;

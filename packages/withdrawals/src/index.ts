@@ -258,6 +258,7 @@ export {
   generateFinalCampaignEvidence,
   initCampaignManifest,
   initializeCampaign,
+  isPhase10CampaignCompletionSatisfied,
   planPhase10Campaign,
   refreshEvidence,
   rescanCampaignEvidence,
@@ -291,6 +292,10 @@ export type {
 
 export {
   PHASE10_PROVIDER_INDEPENDENCE_UNPROVEN,
+  PHASE10_TON_TESTNET_NETWORK_GLOBAL_ID,
+  PHASE10_TON_MAINNET_NETWORK_GLOBAL_ID,
+  PRIMARY_PROVIDER_WRONG_NETWORK,
+  SECONDARY_PROVIDER_WRONG_NETWORK,
   evaluateProviderIndependence,
   fingerprintProviderEndpoint,
   runPhase10LiveExternalProbes,
@@ -317,6 +322,8 @@ export {
   PHASE10_CHAIN_HISTORY_EVIDENCE_SCHEMA_VERSION,
   PHASE10_CHAIN_HISTORY_PROOF_REQUIRED,
   buildPhase10ChainHistoryEvidence,
+  buildPhase10ProviderBackedChainHistoryEvidence,
+  digestChainHistoryTransfers,
   evaluateChainHistoryForAcceptance,
   parsePhase10ChainHistoryEvidence,
   readPhase10ChainHistoryEvidence,
@@ -324,10 +331,28 @@ export {
 } from './phase10-chain-history-evidence.js';
 export type {
   BuildPhase10ChainHistoryEvidenceInput,
+  BuildPhase10ProviderBackedChainHistoryInput,
+  Phase10ChainHistoryAcceptanceBinding,
   Phase10ChainHistoryEvidenceArtifact,
   Phase10ChainHistoryOutgoingTransfer,
   Phase10ChainHistoryReconciliationResult,
 } from './phase10-chain-history-evidence.js';
+
+export {
+  PHASE10_HISTORICAL_BASELINE_SCHEMA_VERSION,
+  capturePhase10HistoricalBaseline,
+  historicalBaselineInputFromArtifact,
+  parsePhase10HistoricalBaseline,
+  readPhase10HistoricalBaseline,
+  writePhase10HistoricalBaseline,
+} from './phase10-historical-baseline.js';
+export type {
+  Phase10HistoricalBaselineArtifact,
+  Phase10HistoricalBaselineAttemptSnapshot,
+} from './phase10-historical-baseline.js';
+
+export { loadPhase10AuthoritativeHotWalletIdentity } from './phase10-hot-wallet-identity.js';
+export type { Phase10AuthoritativeHotWalletIdentity } from './phase10-hot-wallet-identity.js';
 
 export {
   PHASE10_REQUIRED_REAL_FAILURE_SCENARIO_IDS,

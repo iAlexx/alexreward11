@@ -97,8 +97,20 @@ export function buildPhase10LivePreflightEvidence(
   const probes = input.externalProbes;
   const signerProbed = probes?.signer.probePerformed === true;
   const signerReady = probes?.signer.signingReady === true;
+  const signerCustodyUnlocked =
+    probes?.signer.custodyState !== null &&
+    probes?.signer.custodyState !== undefined &&
+    probes.signer.custodyState.toUpperCase() === 'UNLOCKED';
+  const signerIdentityBound =
+    probes?.signer.identityProbed === true &&
+    probes.signer.identityMatchesExpected === true &&
+    probes.signer.walletAddressMatchesExpected === true;
   const signerLockState =
-    probes === null ? null : signerReady ? 'UNLOCKED' : (probes.signer.custodyState ?? 'LOCKED');
+    probes === null
+      ? null
+      : signerReady && signerCustodyUnlocked
+        ? 'UNLOCKED'
+        : (probes.signer.custodyState ?? 'LOCKED');
 
   const historicalIsolatedBaselineCount = input.preflight.restore.findings.filter(
     (f) =>
@@ -106,11 +118,23 @@ export function buildPhase10LivePreflightEvidence(
       (f.details as { historicalIsolatedBaseline?: unknown }).historicalIsolatedBaseline === true,
   ).length;
 
+  const providersOk =
+    probes?.primary.healthy === true &&
+    probes.secondary.healthy === true &&
+    probes.primary.observedNetworkGlobalId === -3 &&
+    probes.secondary.observedNetworkGlobalId === -3 &&
+    probes.providerIndependence.proven === true;
+
   const verdict: 'READY_FOR_CONTROLLED_LIVE_TESTNET' | 'BLOCKED' =
     input.liveAuthorizationWindow === true &&
     input.preflight.verdict === 'READY_FOR_CONTROLLED_LIVE_TESTNET' &&
+    input.preflight.blockers.length === 0 &&
+    input.preflight.restore.dangerousCount === 0 &&
     signerProbed &&
-    signerReady
+    signerReady &&
+    signerCustodyUnlocked &&
+    signerIdentityBound &&
+    providersOk
       ? 'READY_FOR_CONTROLLED_LIVE_TESTNET'
       : 'BLOCKED';
 

@@ -6,6 +6,10 @@
 import { createTonChainProvider, type TonProviderKind } from '@alex-rewards/ton';
 
 export const PHASE10_PROVIDER_INDEPENDENCE_UNPROVEN = 'PROVIDER_INDEPENDENCE_UNPROVEN' as const;
+export const PHASE10_TON_TESTNET_NETWORK_GLOBAL_ID = -3 as const;
+export const PHASE10_TON_MAINNET_NETWORK_GLOBAL_ID = -239 as const;
+export const PRIMARY_PROVIDER_WRONG_NETWORK = 'PRIMARY_PROVIDER_WRONG_NETWORK' as const;
+export const SECONDARY_PROVIDER_WRONG_NETWORK = 'SECONDARY_PROVIDER_WRONG_NETWORK' as const;
 
 export interface Phase10ProviderEndpointConfig {
   readonly kind: string | null;
@@ -36,6 +40,9 @@ export interface Phase10SignerProbeObservation {
   readonly publicKeyFingerprint: string | null;
   readonly walletAddressRaw: string | null;
   readonly identityMatchesExpected: boolean | null;
+  readonly walletAddressMatchesExpected: boolean | null;
+  readonly expectedPublicKeyFingerprintPresent: boolean;
+  readonly expectedWalletAddressPresent: boolean;
   readonly httpStatus: number | null;
   readonly detail: string | null;
   readonly observedAt: string;
@@ -66,8 +73,16 @@ export interface Phase10LiveExternalProbeInput {
   readonly signerServiceToken?: string | null;
   /** Expected custody mode label (e.g. self_hosted_encrypted). Observational only. */
   readonly expectedCustodyMode?: string | null;
-  /** Optional expected public-key fingerprint (hex) when identity is probed. */
+  /**
+   * Authoritative expected public-key fingerprint from DB Hot Wallet / reviewed config.
+   * Required for controlled live preflight eligibility.
+   */
   readonly expectedPublicKeyFingerprint?: string | null;
+  /**
+   * Authoritative expected Hot Wallet raw address from DB.
+   * Required for controlled live preflight eligibility.
+   */
+  readonly expectedWalletAddressRaw?: string | null;
   readonly fetchImpl?: typeof fetch;
   /** Injected probe ports for deterministic tests (skip live HTTP). */
   readonly inject?: {
@@ -176,6 +191,28 @@ export function evaluateProviderIndependence(input: {
     primaryFingerprint,
     secondaryFingerprint,
   };
+}
+
+function networkBlockerForProvider(
+  label: 'PRIMARY' | 'SECONDARY',
+  observation: Phase10ProviderProbeObservation,
+): string | null {
+  const code =
+    label === 'PRIMARY' ? PRIMARY_PROVIDER_WRONG_NETWORK : SECONDARY_PROVIDER_WRONG_NETWORK;
+  const networkId = observation.observedNetworkGlobalId;
+  if (!observation.healthy) {
+    return null; // unhealthy handled separately
+  }
+  if (networkId === null || networkId === undefined || !Number.isFinite(networkId)) {
+    return `${code}: observed network unknown/null (TON Testnet -3 required)`;
+  }
+  if (networkId === PHASE10_TON_MAINNET_NETWORK_GLOBAL_ID) {
+    return `${code}: observed Mainnet networkGlobalId=-239 (forbidden)`;
+  }
+  if (networkId !== PHASE10_TON_TESTNET_NETWORK_GLOBAL_ID) {
+    return `${code}: observed networkGlobalId=${networkId} (TON Testnet -3 required)`;
+  }
+  return null;
 }
 
 async function probeOneProvider(
@@ -391,8 +428,19 @@ async function probeSignerIdentity(
   }
 }
 
+function normalizeHexFingerprint(value: string): string {
+  return value.trim().toLowerCase().replace(/^0x/, '');
+}
+
+function normalizeAddress(value: string): string {
+  return value.trim().toLowerCase();
+}
+
 /**
  * Perform authoritative read-only live probes. Never unlocks/signs/broadcasts.
+ * Controlled live Phase 10 requires exact Testnet (-3) on both providers and
+ * Signer custodyState === UNLOCKED with identity bound to authoritative Hot Wallet.
+ * local_ephemeral (custodyState n/a) never qualifies.
  */
 export async function runPhase10LiveExternalProbes(
   input: Phase10LiveExternalProbeInput,
@@ -422,11 +470,17 @@ export async function runPhase10LiveExternalProbes(
     blockers.push(
       `PRIMARY_PROVIDER_UNHEALTHY: ${primary.detail ?? 'primary provider not healthy'}`,
     );
+  } else {
+    const primaryNetworkBlocker = networkBlockerForProvider('PRIMARY', primary);
+    if (primaryNetworkBlocker !== null) blockers.push(primaryNetworkBlocker);
   }
   if (!secondary.healthy) {
     blockers.push(
       `SECONDARY_PROVIDER_UNHEALTHY: ${secondary.detail ?? 'secondary provider not healthy'}`,
     );
+  } else {
+    const secondaryNetworkBlocker = networkBlockerForProvider('SECONDARY', secondary);
+    if (secondaryNetworkBlocker !== null) blockers.push(secondaryNetworkBlocker);
   }
 
   const ready = await probeSignerReady(input.signerBaseUrl, fetchImpl, input.inject);
@@ -437,33 +491,78 @@ export async function runPhase10LiveExternalProbes(
     input.inject,
   );
 
-  let identityMatchesExpected: boolean | null = null;
-  if (
-    identity.identityProbed &&
+  const expectedFingerprint =
     input.expectedPublicKeyFingerprint !== undefined &&
     input.expectedPublicKeyFingerprint !== null &&
     input.expectedPublicKeyFingerprint.trim() !== ''
-  ) {
-    identityMatchesExpected =
-      (identity.publicKeyFingerprint ?? '').toLowerCase() ===
-      input.expectedPublicKeyFingerprint.trim().toLowerCase();
+      ? normalizeHexFingerprint(input.expectedPublicKeyFingerprint)
+      : null;
+  const expectedWallet =
+    input.expectedWalletAddressRaw !== undefined &&
+    input.expectedWalletAddressRaw !== null &&
+    input.expectedWalletAddressRaw.trim() !== ''
+      ? normalizeAddress(input.expectedWalletAddressRaw)
+      : null;
+
+  let identityMatchesExpected: boolean | null = null;
+  let walletAddressMatchesExpected: boolean | null = null;
+
+  if (!ready.reachable) {
+    blockers.push('SIGNER_PROBE_FAILED: signer health probe did not succeed');
+  }
+  if (!identity.identityProbed) {
+    blockers.push('SIGNER_IDENTITY_NOT_PROBED: signer identity probe required for live preflight');
+  }
+  if (expectedFingerprint === null) {
+    blockers.push(
+      'SIGNER_EXPECTED_FINGERPRINT_MISSING: authoritative Hot Wallet signer reference required',
+    );
+  }
+  if (expectedWallet === null) {
+    blockers.push('SIGNER_EXPECTED_WALLET_MISSING: authoritative Hot Wallet raw address required');
+  }
+
+  if (identity.identityProbed && expectedFingerprint !== null) {
+    const observed = identity.publicKeyFingerprint
+      ? normalizeHexFingerprint(identity.publicKeyFingerprint)
+      : null;
+    identityMatchesExpected = observed !== null && observed === expectedFingerprint;
     if (!identityMatchesExpected) {
       blockers.push('SIGNER_IDENTITY_MISMATCH: probed fingerprint does not match expected');
     }
   }
+  if (identity.identityProbed && expectedWallet !== null) {
+    const observed = identity.walletAddressRaw ? normalizeAddress(identity.walletAddressRaw) : null;
+    walletAddressMatchesExpected = observed !== null && observed === expectedWallet;
+    if (!walletAddressMatchesExpected) {
+      blockers.push(
+        'SIGNER_WALLET_ADDRESS_MISMATCH: probed wallet address does not match authoritative Hot Wallet',
+      );
+    }
+  }
 
-  const signingReady =
+  const signingReadyObserved =
     ready.signingReady === true || (identity.identityProbed && identity.signingReady === true);
   const custodyState = ready.custodyState ?? identity.custodyState;
+  // Exact UNLOCKED only — null / n/a (local_ephemeral) never qualify for controlled live.
+  const custodyUnlocked = custodyState !== null && custodyState.toUpperCase() === 'UNLOCKED';
   const unlocked =
-    signingReady &&
-    (custodyState === null || custodyState.toUpperCase() === 'UNLOCKED' || custodyState === 'n/a');
+    ready.reachable &&
+    identity.identityProbed &&
+    signingReadyObserved &&
+    custodyUnlocked &&
+    identityMatchesExpected === true &&
+    walletAddressMatchesExpected === true &&
+    expectedFingerprint !== null &&
+    expectedWallet !== null;
 
-  if (!ready.reachable && !identity.identityProbed) {
-    blockers.push('SIGNER_PROBE_FAILED: signer health/identity probe did not succeed');
-  } else if (!unlocked) {
+  if (ready.reachable && identity.identityProbed && !custodyUnlocked) {
     blockers.push(
-      `SIGNER_NOT_READY: custodyState=${custodyState ?? 'unknown'} signingReady=${signingReady}`,
+      `SIGNER_CUSTODY_NOT_UNLOCKED: custodyState=${custodyState ?? 'null'} (UNLOCKED required; local_ephemeral/n/a never qualifies)`,
+    );
+  } else if (ready.reachable && identity.identityProbed && !signingReadyObserved) {
+    blockers.push(
+      `SIGNER_NOT_READY: custodyState=${custodyState ?? 'unknown'} signingReady=${signingReadyObserved}`,
     );
   }
 
@@ -477,6 +576,9 @@ export async function runPhase10LiveExternalProbes(
     publicKeyFingerprint: identity.publicKeyFingerprint,
     walletAddressRaw: identity.walletAddressRaw,
     identityMatchesExpected,
+    walletAddressMatchesExpected,
+    expectedPublicKeyFingerprintPresent: expectedFingerprint !== null,
+    expectedWalletAddressPresent: expectedWallet !== null,
     httpStatus: ready.httpStatus,
     detail: ready.detail ?? identity.detail,
     observedAt: new Date().toISOString(),

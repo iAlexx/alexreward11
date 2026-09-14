@@ -279,6 +279,79 @@ function allGatesTrue(gates: Phase10CampaignRealModeGates): boolean {
   );
 }
 
+export function isPhase10CampaignCompletionSatisfied(manifest: Phase10CampaignManifest): boolean {
+  return campaignCompletionSatisfied(manifest);
+}
+
+function campaignCompletionSatisfied(manifest: Phase10CampaignManifest): boolean {
+  if (manifest.acceptanceCampaign !== true) return false;
+  if (manifest.mode !== 'real') return false;
+  if (manifest.networkCode !== 'TON_TESTNET') return false;
+  if (manifest.assetSymbol !== 'USDT') return false;
+  if (manifest.controlledUserId === null || manifest.controlledUserId.trim() === '') return false;
+  // Owner checkpoint: never complete while awaiting approval or missing gates.
+  if (manifest.status === 'AWAITING_OWNER_APPROVAL') return false;
+  if (manifest.realModeCheckpoint !== null) return false;
+  if (manifest.gates === null || !allGatesTrue(manifest.gates)) return false;
+  if (
+    manifest.realExecutionGates === null ||
+    !allRealExecutionGatesTrue(manifest.realExecutionGates)
+  ) {
+    return false;
+  }
+  if (manifest.plannedCount < PHASE10_CAMPAIGN_MIN_ACCEPTANCE_PAYOUTS) return false;
+
+  const distinctWithdrawalIds = [
+    ...new Set(manifest.withdrawalIds.filter((id) => typeof id === 'string' && id.trim() !== '')),
+  ];
+  if (distinctWithdrawalIds.length < PHASE10_CAMPAIGN_MIN_ACCEPTANCE_PAYOUTS) return false;
+
+  const confirmedInCampaign = manifest.evidence.filter(
+    (e) =>
+      e.campaignId === manifest.campaignId &&
+      typeof e.withdrawalId === 'string' &&
+      distinctWithdrawalIds.includes(e.withdrawalId) &&
+      e.confirmed === true &&
+      e.finalState === 'CONFIRMED' &&
+      e.invariantResult === 'PASS',
+  );
+  const confirmedDistinct = new Set(
+    confirmedInCampaign
+      .map((e) => e.withdrawalId)
+      .filter((id): id is string => typeof id === 'string'),
+  );
+  return confirmedDistinct.size >= PHASE10_CAMPAIGN_MIN_ACCEPTANCE_PAYOUTS;
+}
+
+export async function generateFinalCampaignEvidence(
+  path: string,
+  db: Pool | PoolClient,
+): Promise<Phase10CampaignManifest> {
+  const refreshed = await rescanCampaignEvidence(path, db);
+  const complete = campaignCompletionSatisfied(refreshed);
+  // generateFinal may rescan read-only evidence but must never promote past Owner checkpoint.
+  const blockedByOwnerCheckpoint =
+    refreshed.realModeCheckpoint !== null || refreshed.status === 'AWAITING_OWNER_APPROVAL';
+  const updated: Phase10CampaignManifest = {
+    ...refreshed,
+    status:
+      complete && !blockedByOwnerCheckpoint
+        ? 'COMPLETED'
+        : refreshed.status === 'COMPLETED'
+          ? 'EVIDENCE_REFRESHED'
+          : refreshed.status === 'INITIALIZED'
+            ? 'INITIALIZED'
+            : refreshed.status === 'AWAITING_OWNER_APPROVAL'
+              ? 'AWAITING_OWNER_APPROVAL'
+              : refreshed.withdrawalIds.length > 0
+                ? 'EVIDENCE_REFRESHED'
+                : refreshed.status,
+    updatedAt: new Date().toISOString(),
+  };
+  await writeManifest(path, updated);
+  return updated;
+}
+
 export interface PlanPhase10CampaignInput {
   readonly mode?: Phase10CampaignMode;
   readonly gates?: Phase10CampaignRealModeGates;
@@ -927,7 +1000,10 @@ export async function rescanCampaignEvidence(
   const updated: Phase10CampaignManifest = {
     ...manifest,
     updatedAt: new Date().toISOString(),
-    status: 'EVIDENCE_REFRESHED',
+    status:
+      manifest.realModeCheckpoint !== null || manifest.status === 'AWAITING_OWNER_APPROVAL'
+        ? 'AWAITING_OWNER_APPROVAL'
+        : 'EVIDENCE_REFRESHED',
     evidence: refreshed,
   };
   await writeManifest(path, updated);
@@ -1040,59 +1116,6 @@ export async function writeEvidenceFile(
           .filter((id): id is string => typeof id === 'string' && id.trim() !== ''),
       ),
     ],
-  };
-  await writeManifest(path, updated);
-  return updated;
-}
-
-function campaignCompletionSatisfied(manifest: Phase10CampaignManifest): boolean {
-  if (manifest.acceptanceCampaign !== true) return false;
-  if (manifest.mode !== 'real') return false;
-  if (manifest.networkCode !== 'TON_TESTNET') return false;
-  if (manifest.assetSymbol !== 'USDT') return false;
-  if (manifest.controlledUserId === null || manifest.controlledUserId.trim() === '') return false;
-  if (manifest.plannedCount < PHASE10_CAMPAIGN_MIN_ACCEPTANCE_PAYOUTS) return false;
-
-  const distinctWithdrawalIds = [
-    ...new Set(manifest.withdrawalIds.filter((id) => typeof id === 'string' && id.trim() !== '')),
-  ];
-  if (distinctWithdrawalIds.length < PHASE10_CAMPAIGN_MIN_ACCEPTANCE_PAYOUTS) return false;
-
-  const confirmedInCampaign = manifest.evidence.filter(
-    (e) =>
-      e.campaignId === manifest.campaignId &&
-      typeof e.withdrawalId === 'string' &&
-      distinctWithdrawalIds.includes(e.withdrawalId) &&
-      e.confirmed === true &&
-      e.finalState === 'CONFIRMED' &&
-      e.invariantResult === 'PASS',
-  );
-  const confirmedDistinct = new Set(
-    confirmedInCampaign
-      .map((e) => e.withdrawalId)
-      .filter((id): id is string => typeof id === 'string'),
-  );
-  return confirmedDistinct.size >= PHASE10_CAMPAIGN_MIN_ACCEPTANCE_PAYOUTS;
-}
-
-export async function generateFinalCampaignEvidence(
-  path: string,
-  db: Pool | PoolClient,
-): Promise<Phase10CampaignManifest> {
-  const refreshed = await rescanCampaignEvidence(path, db);
-  const complete = campaignCompletionSatisfied(refreshed);
-  const updated: Phase10CampaignManifest = {
-    ...refreshed,
-    status: complete
-      ? 'COMPLETED'
-      : refreshed.status === 'COMPLETED'
-        ? 'EVIDENCE_REFRESHED'
-        : refreshed.status === 'INITIALIZED'
-          ? 'INITIALIZED'
-          : refreshed.withdrawalIds.length > 0
-            ? 'EVIDENCE_REFRESHED'
-            : refreshed.status,
-    updatedAt: new Date().toISOString(),
   };
   await writeManifest(path, updated);
   return updated;

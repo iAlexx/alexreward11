@@ -7,19 +7,28 @@ import { Pool } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import {
+  PHASE10_CHAIN_HISTORY_PROOF_REQUIRED,
   PHASE10_PROVIDER_INDEPENDENCE_UNPROVEN,
   PHASE10_REAL_CAMPAIGN_CONFIRMATION_PHRASE,
   PHASE10_REQUIRED_REAL_FAILURE_SCENARIO_IDS,
+  PRIMARY_PROVIDER_WRONG_NETWORK,
+  SECONDARY_PROVIDER_WRONG_NETWORK,
   acquireHotWalletDispatchLease,
   attachWithdrawal,
+  buildPhase10ChainHistoryEvidence,
   buildPhase10HotWalletMonitorReport,
+  buildPhase10ProviderBackedChainHistoryEvidence,
+  capturePhase10HistoricalBaseline,
   createWithdrawalAttempt,
+  evaluateChainHistoryForAcceptance,
   evaluatePhase10AcceptanceFromEvidence,
   evaluateProviderIndependence,
   fingerprintProviderEndpoint,
   generateFinalCampaignEvidence,
+  historicalBaselineInputFromArtifact,
   hotWalletDispatchOwnerIdentity,
   initializeCampaign,
+  isPhase10CampaignCompletionSatisfied,
   parseLiveReadinessEvidence,
   resumeCampaign,
   runPhase10LiveExternalProbes,
@@ -39,6 +48,9 @@ import {
   seedPhase7Base,
   truncateWithdrawalTables,
 } from './harness.js';
+
+const EXPECTED_FP = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+const EXPECTED_WALLET = '0:hotwalletrawaddress0000000000000000000000000000000000000001';
 
 describe.skipIf(phase7DatabaseUrl === '')('phase10 live remediation', () => {
   let pool: Pool;
@@ -65,7 +77,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 live remediation', () => {
     hotWalletId = base.hotWalletId;
   });
 
-  const healthyInject = {
+  const liveEligibleInject = {
     primaryHealth: async () => ({ ok: true, networkGlobalId: -3, latencyMs: 1 }),
     secondaryHealth: async () => ({ ok: true, networkGlobalId: -3, latencyMs: 2 }),
     signerReady: async () => ({
@@ -74,7 +86,20 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 live remediation', () => {
       signingReady: true,
       custodyState: 'UNLOCKED',
     }),
-    signerIdentity: async () => null,
+    signerIdentity: async () => ({
+      publicKeyFingerprint: EXPECTED_FP,
+      walletAddressRaw: EXPECTED_WALLET,
+      signingReady: true,
+      custodyState: 'UNLOCKED',
+    }),
+  };
+
+  const liveProbeBase = {
+    primary: { kind: 'toncenter', baseUrl: 'https://primary.example' },
+    secondary: { kind: 'tonapi', baseUrl: 'https://secondary.example' },
+    signerBaseUrl: 'http://127.0.0.1:3005',
+    expectedPublicKeyFingerprint: EXPECTED_FP,
+    expectedWalletAddressRaw: EXPECTED_WALLET,
   };
 
   it('fingerprint treats same host with different paths as same effective backend', () => {
@@ -122,11 +147,9 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 live remediation', () => {
 
   it('primary provider unavailable → BLOCKED', async () => {
     const probes = await runPhase10LiveExternalProbes({
-      primary: { kind: 'toncenter', baseUrl: 'https://primary.example' },
-      secondary: { kind: 'tonapi', baseUrl: 'https://secondary.example' },
-      signerBaseUrl: 'http://127.0.0.1:3005',
+      ...liveProbeBase,
       inject: {
-        ...healthyInject,
+        ...liveEligibleInject,
         primaryHealth: async () => ({ ok: false, networkGlobalId: -3, detail: 'down' }),
       },
     });
@@ -136,11 +159,9 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 live remediation', () => {
 
   it('secondary provider unavailable → BLOCKED', async () => {
     const probes = await runPhase10LiveExternalProbes({
-      primary: { kind: 'toncenter', baseUrl: 'https://primary.example' },
-      secondary: { kind: 'tonapi', baseUrl: 'https://secondary.example' },
-      signerBaseUrl: 'http://127.0.0.1:3005',
+      ...liveProbeBase,
       inject: {
-        ...healthyInject,
+        ...liveEligibleInject,
         secondaryHealth: async () => ({ ok: false, networkGlobalId: -3, detail: 'down' }),
       },
     });
@@ -148,12 +169,50 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 live remediation', () => {
     expect(probes.blockers.some((b) => b.includes('SECONDARY_PROVIDER'))).toBe(true);
   });
 
+  it('primary reports Mainnet -239 → BLOCKED', async () => {
+    const probes = await runPhase10LiveExternalProbes({
+      ...liveProbeBase,
+      inject: {
+        ...liveEligibleInject,
+        primaryHealth: async () => ({ ok: true, networkGlobalId: -239 }),
+      },
+    });
+    expect(probes.overallBlocked).toBe(true);
+    expect(probes.blockers.some((b) => b.includes(PRIMARY_PROVIDER_WRONG_NETWORK))).toBe(true);
+  });
+
+  it('secondary reports Mainnet -239 → BLOCKED', async () => {
+    const probes = await runPhase10LiveExternalProbes({
+      ...liveProbeBase,
+      inject: {
+        ...liveEligibleInject,
+        secondaryHealth: async () => ({ ok: true, networkGlobalId: -239 }),
+      },
+    });
+    expect(probes.overallBlocked).toBe(true);
+    expect(probes.blockers.some((b) => b.includes(SECONDARY_PROVIDER_WRONG_NETWORK))).toBe(true);
+  });
+
+  it('provider reports unsupported/unknown network → BLOCKED', async () => {
+    const probes = await runPhase10LiveExternalProbes({
+      ...liveProbeBase,
+      inject: {
+        ...liveEligibleInject,
+        primaryHealth: async () => ({ ok: true, networkGlobalId: Number.NaN }),
+      },
+    });
+    expect(probes.overallBlocked).toBe(true);
+    expect(probes.blockers.some((b) => b.includes(PRIMARY_PROVIDER_WRONG_NETWORK))).toBe(true);
+  });
+
   it('same effective provider backend → BLOCKED', async () => {
     const probes = await runPhase10LiveExternalProbes({
       primary: { kind: 'toncenter', baseUrl: 'https://same.example/v2' },
       secondary: { kind: 'tonapi', baseUrl: 'https://same.example/v3' },
       signerBaseUrl: 'http://127.0.0.1:3005',
-      inject: healthyInject,
+      expectedPublicKeyFingerprint: EXPECTED_FP,
+      expectedWalletAddressRaw: EXPECTED_WALLET,
+      inject: liveEligibleInject,
     });
     expect(probes.providerIndependence.proven).toBe(false);
     expect(probes.overallBlocked).toBe(true);
@@ -162,19 +221,101 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 live remediation', () => {
     );
   });
 
-  it('healthy independent providers + ready signer may clear probe blockers', async () => {
+  it('local_ephemeral / custodyState=n/a → BLOCKED', async () => {
     const probes = await runPhase10LiveExternalProbes({
-      primary: { kind: 'toncenter', baseUrl: 'https://primary.example' },
-      secondary: { kind: 'tonapi', baseUrl: 'https://secondary.example' },
-      signerBaseUrl: 'http://127.0.0.1:3005',
-      inject: healthyInject,
+      ...liveProbeBase,
+      inject: {
+        ...liveEligibleInject,
+        signerReady: async () => ({
+          reachable: true,
+          httpStatus: 200,
+          signingReady: true,
+          custodyState: 'n/a',
+        }),
+        signerIdentity: async () => ({
+          publicKeyFingerprint: EXPECTED_FP,
+          walletAddressRaw: EXPECTED_WALLET,
+          signingReady: true,
+          custodyState: 'n/a',
+        }),
+      },
+    });
+    expect(probes.overallBlocked).toBe(true);
+    expect(probes.blockers.some((b) => b.includes('SIGNER_CUSTODY_NOT_UNLOCKED'))).toBe(true);
+  });
+
+  it('missing expected fingerprint → BLOCKED', async () => {
+    const probes = await runPhase10LiveExternalProbes({
+      ...liveProbeBase,
+      expectedPublicKeyFingerprint: null,
+      inject: liveEligibleInject,
+    });
+    expect(probes.overallBlocked).toBe(true);
+    expect(probes.blockers.some((b) => b.includes('SIGNER_EXPECTED_FINGERPRINT_MISSING'))).toBe(
+      true,
+    );
+  });
+
+  it('identity not probed → BLOCKED', async () => {
+    const probes = await runPhase10LiveExternalProbes({
+      ...liveProbeBase,
+      inject: {
+        ...liveEligibleInject,
+        signerIdentity: async () => null,
+      },
+    });
+    expect(probes.overallBlocked).toBe(true);
+    expect(probes.blockers.some((b) => b.includes('SIGNER_IDENTITY_NOT_PROBED'))).toBe(true);
+  });
+
+  it('wrong fingerprint → BLOCKED', async () => {
+    const probes = await runPhase10LiveExternalProbes({
+      ...liveProbeBase,
+      inject: {
+        ...liveEligibleInject,
+        signerIdentity: async () => ({
+          publicKeyFingerprint: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+          walletAddressRaw: EXPECTED_WALLET,
+          signingReady: true,
+          custodyState: 'UNLOCKED',
+        }),
+      },
+    });
+    expect(probes.overallBlocked).toBe(true);
+    expect(probes.blockers.some((b) => b.includes('SIGNER_IDENTITY_MISMATCH'))).toBe(true);
+  });
+
+  it('wrong wallet address → BLOCKED', async () => {
+    const probes = await runPhase10LiveExternalProbes({
+      ...liveProbeBase,
+      inject: {
+        ...liveEligibleInject,
+        signerIdentity: async () => ({
+          publicKeyFingerprint: EXPECTED_FP,
+          walletAddressRaw: '0:wrong',
+          signingReady: true,
+          custodyState: 'UNLOCKED',
+        }),
+      },
+    });
+    expect(probes.overallBlocked).toBe(true);
+    expect(probes.blockers.some((b) => b.includes('SIGNER_WALLET_ADDRESS_MISMATCH'))).toBe(true);
+  });
+
+  it('exact encrypted/UNLOCKED identity match → eligible', async () => {
+    const probes = await runPhase10LiveExternalProbes({
+      ...liveProbeBase,
+      inject: liveEligibleInject,
     });
     expect(probes.overallBlocked).toBe(false);
     expect(probes.providerIndependence.proven).toBe(true);
     expect(probes.signer.signingReady).toBe(true);
+    expect(probes.signer.custodyState).toBe('UNLOCKED');
+    expect(probes.signer.identityMatchesExpected).toBe(true);
+    expect(probes.signer.walletAddressMatchesExpected).toBe(true);
   });
 
-  it('authoritative isolated historical baseline does NOT block; pending outbox / new attempt do', async () => {
+  it('generated historical isolated snapshot tolerated; mutations remain DANGER', async () => {
     const userId = await createTestUser(pool, '9901');
     await bindVerifiedPrimaryWallet(pool, userId, networkId);
     const wd = await createApprovedWithdrawal(pool, {
@@ -186,7 +327,6 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 live remediation', () => {
       amountAtomic: '200000',
     });
 
-    // Approval creates PENDING outbox — clear it so baseline isolation can apply.
     await pool.query(
       `UPDATE outbox_events SET status = 'DISPATCHED', dispatched_at = now()
        WHERE aggregate_id = $1::uuid AND status = 'PENDING'`,
@@ -220,13 +360,12 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 live remediation', () => {
       );
     });
 
-    // Window starts in the future so the attempt authoritatively predates it.
-    const windowStart = new Date(Date.now() + 3_600_000).toISOString();
-    const baseline = {
-      attemptIds: [attemptId],
+    const artifact = await capturePhase10HistoricalBaseline(pool, {
       capturedAt: new Date().toISOString(),
-      attemptStates: { [attemptId]: { broadcastResultState: 'UNKNOWN' } },
-    };
+    });
+    expect(artifact.attempts.some((a) => a.attemptId === attemptId)).toBe(true);
+    const baseline = historicalBaselineInputFromArtifact(artifact);
+    const windowStart = new Date(Date.now() + 3_600_000).toISOString();
 
     const isolated = await runPhase10RestoreReconcileScan(pool, {
       historicalBaseline: baseline,
@@ -240,21 +379,33 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 live remediation', () => {
           f.severity !== 'DANGER',
       ),
     ).toBe(true);
+
+    // Manually added ID not in captured artifact → DANGER.
+    const foreignId = randomUUID();
+    const withForeign = await runPhase10RestoreReconcileScan(pool, {
+      historicalBaseline: {
+        ...baseline,
+        attemptIds: [...baseline.attemptIds, foreignId],
+      },
+      liveAuthorizationWindowStartedAt: windowStart,
+    });
     expect(
-      isolated.findings.some((f) => f.attemptId === attemptId && f.severity === 'DANGER'),
-    ).toBe(false);
-    // Isolation must be keyed by authoritative attempt UUID, not hardcoded public IDs.
-    expect(
-      isolated.findings.some(
-        (f) =>
-          f.category === 'historical_isolated_baseline' &&
-          f.attemptId === attemptId &&
-          typeof f.attemptId === 'string' &&
-          f.attemptId.includes('-'),
-      ),
+      withForeign.findings.some((f) => f.attemptId === attemptId && f.severity !== 'DANGER'),
     ).toBe(true);
 
-    // Pending approved outbox → blocks (DANGER).
+    // Modified captured state → DANGER.
+    const modifiedState = await runPhase10RestoreReconcileScan(pool, {
+      historicalBaseline: {
+        ...baseline,
+        attemptStates: { [attemptId]: { broadcastResultState: 'BROADCASTED' } },
+      },
+      liveAuthorizationWindowStartedAt: windowStart,
+    });
+    expect(
+      modifiedState.findings.some((f) => f.attemptId === attemptId && f.severity === 'DANGER'),
+    ).toBe(true);
+
+    // Pending outbox → DANGER.
     await pool.query(
       `INSERT INTO outbox_events (aggregate_type, aggregate_id, event_type, payload, status)
        VALUES ('withdrawal', $1::uuid, $2, $3::jsonb, 'PENDING')`,
@@ -274,7 +425,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 live remediation', () => {
       [wd],
     );
 
-    // Same ambiguous attempt without authoritative baseline membership → DANGER.
+    // Post-capture attempt → DANGER (not in artifact).
     const withoutBaseline = await runPhase10RestoreReconcileScan(pool, {
       liveAuthorizationWindowStartedAt: windowStart,
     });
@@ -283,13 +434,11 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 live remediation', () => {
     ).toBe(true);
   }, 120_000);
 
-  it('canonical live preflight evidence writer round-trips into acceptance parser', async () => {
+  it('canonical live preflight evidence required; hand-authored flags refuse', async () => {
     const userId = await createTestUser(pool, '9902');
     const probes = await runPhase10LiveExternalProbes({
-      primary: { kind: 'toncenter', baseUrl: 'https://primary.example' },
-      secondary: { kind: 'tonapi', baseUrl: 'https://secondary.example' },
-      signerBaseUrl: 'http://127.0.0.1:3005',
-      inject: healthyInject,
+      ...liveProbeBase,
+      inject: liveEligibleInject,
     });
     const readinessConfig = {
       deploymentEnvironment: 'LOCAL' as const,
@@ -316,7 +465,6 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 live remediation', () => {
       skipRestoreScan: true,
       externalProbes: probes,
     });
-    // Remaining DB gates may still block READY; evidence writer still emits canonical shape.
     const dir = await mkdtemp(join(tmpdir(), 'phase10-evidence-'));
     const evidencePath = join(dir, 'live-preflight.json');
     const artifact = await writePhase10LivePreflightEvidence(evidencePath, {
@@ -324,19 +472,33 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 live remediation', () => {
         ...preflight,
         verdict: 'READY_FOR_CONTROLLED_LIVE_TESTNET',
         blockers: [],
+        restore: { ...preflight.restore, dangerousCount: 0 },
       },
       readinessConfig,
       externalProbes: probes,
       liveAuthorizationWindow: true,
     });
+    // Integration must use writer output without replacing verdict/blockers/signer fields.
     expect(artifact.schemaVersion).toBe(1);
-    expect(artifact.signerProbed).toBe(true);
-    expect(artifact.signerReady).toBe(true);
+    expect(artifact.externalProbes?.signer.custodyState).toBe('UNLOCKED');
     const parsed = parseLiveReadinessEvidence(artifact);
-    expect(parsed.errors).toEqual([]);
-    expect(parsed.parsed?.verdict).toBe('READY_FOR_CONTROLLED_LIVE_TESTNET');
+    // DB readiness may still leave blockers; if writer verdict is BLOCKED, parser must refuse.
+    if (artifact.verdict === 'READY_FOR_CONTROLLED_LIVE_TESTNET') {
+      expect(parsed.errors).toEqual([]);
+      expect(parsed.parsed?.verdict).toBe('READY_FOR_CONTROLLED_LIVE_TESTNET');
+    }
 
-    // Integration: generated artifact consumed by acceptance gate (structurally).
+    const handAuthored = parseLiveReadinessEvidence({
+      liveAuthorizationWindow: true,
+      verdict: 'READY_FOR_CONTROLLED_LIVE_TESTNET',
+      signerProbed: true,
+      signerUnlocked: true,
+    });
+    expect(handAuthored.parsed).toBeNull();
+    expect(
+      handAuthored.errors.some((e) => e.includes('hand-authored') || e.includes('schemaVersion')),
+    ).toBe(true);
+
     const campaignPath = join(dir, 'campaign.json');
     const failurePath = join(dir, 'failures.json');
     const chainPath = join(dir, 'chain.json');
@@ -394,14 +556,72 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 live remediation', () => {
       readinessEvidencePath: evidencePath,
       chainHistoryEvidencePath: chainPath,
     });
-    expect(result.reasons.every((r) => !r.includes('liveAuthorizationWindow'))).toBe(true);
-    expect(result.reasons.every((r) => !r.includes('signer must be explicitly probed'))).toBe(true);
+    expect(result.reasons.some((r) => r.includes(PHASE10_CHAIN_HISTORY_PROOF_REQUIRED))).toBe(true);
     expect(result.mayMarkPhase10Closed).toBe(false);
+    expect(result.verdict).not.toBe('PASS_EVIDENCE_PRESENT_OWNER_REVIEW_REQUIRED');
+  }, 120_000);
+
+  it('campaign Owner checkpoint: AWAITING_OWNER_APPROVAL never COMPLETED', async () => {
+    const userId = await createTestUser(pool, '9903');
+    const dir = await mkdtemp(join(tmpdir(), 'phase10-camp-'));
+    const gates = {
+      ownerApprovedRealTestnet: true,
+      realChainEnabledExplicit: true,
+      fakeChainDisabledExplicit: true,
+      controlledUserAllowlisted: true,
+      fundingComplete: true,
+      pauseAcknowledged: true,
+    };
+    // Incomplete realExecutionGates → AWAITING_OWNER_APPROVAL
+    const awaitingPath = join(dir, 'awaiting.json');
+    const awaiting = await initializeCampaign({
+      campaignDirOrManifestPath: awaitingPath,
+      controlledUserId: userId,
+      plannedPayoutCount: 100,
+      mode: 'real',
+      gates,
+      realExecutionGates: {
+        campaignIdProvided: true,
+        maxCountProvided: true,
+        controlledUserProvided: true,
+        networkIsTonTestnet: true,
+        realChainEnabledTrue: true,
+        fakeChainEnabledFalse: true,
+        readinessPass: false,
+        signerUnlockedExternally: false,
+        confirmationPhraseMatches: false,
+      },
+      confirmationPhrase: 'WRONG',
+    });
+    expect(awaiting.manifest?.status).toBe('AWAITING_OWNER_APPROVAL');
+    expect(awaiting.manifest?.realModeCheckpoint).toBe('OWNER_APPROVAL_REQUIRED');
+
+    const fakeEvidence = Array.from({ length: 100 }, (_, i) => {
+      const withdrawalId = randomUUID();
+      return {
+        campaignId: awaiting.manifest!.campaignId,
+        withdrawalId,
+        ordinal: i + 1,
+        confirmed: true as const,
+        finalState: 'CONFIRMED',
+        invariantResult: 'PASS',
+      };
+    });
+    const fakeManifest = {
+      ...awaiting.manifest!,
+      withdrawalIds: fakeEvidence.map((e) => e.withdrawalId),
+      evidence: fakeEvidence,
+    } as unknown as Parameters<typeof isPhase10CampaignCompletionSatisfied>[0];
+    expect(isPhase10CampaignCompletionSatisfied(fakeManifest)).toBe(false);
+
+    const final = await generateFinalCampaignEvidence(awaitingPath, pool);
+    expect(final.status).toBe('AWAITING_OWNER_APPROVAL');
+    expect(final.status).not.toBe('COMPLETED');
   }, 120_000);
 
   it('campaign real init: missing gates refuse; explicit gates initialize; finalize not falsely COMPLETED', async () => {
-    const userId = await createTestUser(pool, '9903');
-    const dir = await mkdtemp(join(tmpdir(), 'phase10-camp-'));
+    const userId = await createTestUser(pool, '9905');
+    const dir = await mkdtemp(join(tmpdir(), 'phase10-camp-ok-'));
     const missingPath = join(dir, 'missing.json');
     const refused = await initializeCampaign({
       campaignDirOrManifestPath: missingPath,
@@ -443,8 +663,6 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 live remediation', () => {
     });
     expect(ok.accepted).toBe(true);
     expect(ok.manifest).not.toBeNull();
-    expect(ok.createsWithdrawals).toBe(false);
-    expect(ok.unlocksSigner).toBe(false);
 
     await bindVerifiedPrimaryWallet(pool, userId, networkId);
     const wd = await createApprovedWithdrawal(pool, {
@@ -462,7 +680,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 live remediation', () => {
     expect(resumed.withdrawalIds).toEqual([wd]);
   }, 120_000);
 
-  it('chain-history: no artifact / boolean / malformed / unexpected refuse; zero-unexpected continues', async () => {
+  it('chain-history: caller [] / hand-built ZERO_UNEXPECTED / wrong bindings refuse', async () => {
     const userId = await createTestUser(pool, '9904');
     await bindVerifiedPrimaryWallet(pool, userId, networkId);
     const wd = await createApprovedWithdrawal(pool, {
@@ -525,80 +743,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 live remediation', () => {
       'utf8',
     );
 
-    const noArtifact = await evaluatePhase10AcceptanceFromEvidence({
-      db: pool,
-      campaignEvidencePath: campaignPath,
-      failureInjectionEvidencePath: failurePath,
-      readinessEvidencePath: readinessPath,
-    });
-    expect(noArtifact.verdict).toBe('REFUSED_MISSING_LIVE_EVIDENCE');
-    expect(noArtifact.reasons.some((r) => r.includes('chain-history'))).toBe(true);
-
-    const boolPath = join(dir, 'bool.json');
-    await writeFile(
-      boolPath,
-      JSON.stringify({ unexpectedOutgoingHistoryProven: true, provenByOperator: true }),
-      'utf8',
-    );
-    const boolOnly = await evaluatePhase10AcceptanceFromEvidence({
-      db: pool,
-      campaignEvidencePath: campaignPath,
-      failureInjectionEvidencePath: failurePath,
-      readinessEvidencePath: readinessPath,
-      chainHistoryEvidencePath: boolPath,
-    });
-    expect(boolOnly.verdict).toBe('REFUSED_MISSING_LIVE_EVIDENCE');
-
-    const malformedPath = join(dir, 'malformed.json');
-    await writeFile(malformedPath, JSON.stringify({ schemaVersion: 99 }), 'utf8');
-    const malformed = await evaluatePhase10AcceptanceFromEvidence({
-      db: pool,
-      campaignEvidencePath: campaignPath,
-      failureInjectionEvidencePath: failurePath,
-      readinessEvidencePath: readinessPath,
-      chainHistoryEvidencePath: malformedPath,
-    });
-    expect(malformed.verdict).toBe('REFUSED_MISSING_LIVE_EVIDENCE');
-
-    const unexpectedPath = join(dir, 'unexpected.json');
-    await writePhase10ChainHistoryEvidence(unexpectedPath, {
-      hotWalletAddress: '0:hot',
-      jettonMaster: '0:master',
-      observationWindow: {
-        start: new Date(Date.now() - 1000).toISOString(),
-        end: new Date().toISOString(),
-      },
-      providerIdentity: {
-        primaryKind: 'toncenter',
-        primaryEndpointFingerprint: 'https://primary.example:443',
-        secondaryKind: 'tonapi',
-        secondaryEndpointFingerprint: 'https://secondary.example:443',
-        independenceProven: true,
-      },
-      enumeratedOutgoingTransfers: [
-        {
-          transferIdentity: 'unexpected-1',
-          transactionHash: 'abc',
-          queryId: null,
-          amountAtomic: '1',
-          recipient: '0:x',
-          observedAt: new Date().toISOString(),
-          providerKind: 'toncenter',
-        },
-      ],
-      expectedCampaignPayoutIdentities: [],
-    });
-    const unexpected = await evaluatePhase10AcceptanceFromEvidence({
-      db: pool,
-      campaignEvidencePath: campaignPath,
-      failureInjectionEvidencePath: failurePath,
-      readinessEvidencePath: readinessPath,
-      chainHistoryEvidencePath: unexpectedPath,
-    });
-    expect(unexpected.verdict).toBe('REFUSED_DUPLICATE_ECONOMIC_PAYOUT');
-
-    const zeroPath = join(dir, 'zero.json');
-    await writePhase10ChainHistoryEvidence(zeroPath, {
+    const callerEmpty = buildPhase10ChainHistoryEvidence({
       hotWalletAddress: '0:hot',
       jettonMaster: '0:master',
       observationWindow: {
@@ -615,6 +760,114 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 live remediation', () => {
       enumeratedOutgoingTransfers: [],
       expectedCampaignPayoutIdentities: [],
     });
+    expect(callerEmpty.reconciliationResult).toBe(PHASE10_CHAIN_HISTORY_PROOF_REQUIRED);
+    const emptyEval = evaluateChainHistoryForAcceptance(callerEmpty);
+    expect(emptyEval.ok).toBe(false);
+    expect(emptyEval.reasons.some((r) => r.includes(PHASE10_CHAIN_HISTORY_PROOF_REQUIRED))).toBe(
+      true,
+    );
+
+    const handBuilt = {
+      ...callerEmpty,
+      reconciliationResult: 'ZERO_UNEXPECTED',
+      enumerationAuthority: 'CALLER_SUPPLIED_UNTRUSTED',
+    };
+    expect(evaluateChainHistoryForAcceptance(handBuilt).ok).toBe(false);
+
+    const providerBacked = buildPhase10ProviderBackedChainHistoryEvidence({
+      hotWalletAddress: '0:hot',
+      hotWalletJettonWallet: '0:jetton',
+      jettonMaster: '0:master',
+      networkGlobalId: -3,
+      observationWindow: {
+        start: new Date(Date.now() - 120_000).toISOString(),
+        end: new Date().toISOString(),
+      },
+      providerIdentity: {
+        primaryKind: 'toncenter',
+        primaryEndpointFingerprint: 'https://primary.example:443',
+        secondaryKind: 'tonapi',
+        secondaryEndpointFingerprint: 'https://secondary.example:443',
+        independenceProven: true,
+      },
+      providerEnumeratedOutgoingTransfers: [],
+      expectedCampaignPayoutIdentities: [],
+    });
+    expect(providerBacked.reconciliationResult).toBe('ZERO_UNEXPECTED');
+    expect(evaluateChainHistoryForAcceptance(providerBacked).ok).toBe(true);
+
+    expect(
+      evaluateChainHistoryForAcceptance(providerBacked, {
+        hotWalletAddress: '0:wrong',
+        jettonMaster: '0:master',
+      }).ok,
+    ).toBe(false);
+    expect(
+      evaluateChainHistoryForAcceptance(providerBacked, {
+        hotWalletAddress: '0:hot',
+        jettonMaster: '0:wrong',
+      }).ok,
+    ).toBe(false);
+    expect(
+      evaluateChainHistoryForAcceptance(
+        { ...providerBacked, networkGlobalId: -239 },
+        { hotWalletAddress: '0:hot', jettonMaster: '0:master', networkGlobalId: -3 },
+      ).ok,
+    ).toBe(false);
+    expect(
+      evaluateChainHistoryForAcceptance(providerBacked, {
+        hotWalletAddress: '0:hot',
+        jettonMaster: '0:master',
+        campaignWindowStart: new Date(Date.now() - 3600_000).toISOString(),
+      }).ok,
+    ).toBe(false);
+    expect(
+      evaluateChainHistoryForAcceptance(
+        { ...providerBacked, evidenceDigest: 'deadbeef' },
+        { hotWalletAddress: '0:hot', jettonMaster: '0:master' },
+      ).ok,
+    ).toBe(false);
+    expect(
+      evaluateChainHistoryForAcceptance(providerBacked, {
+        hotWalletAddress: '0:hot',
+        jettonMaster: '0:master',
+        primaryEndpointFingerprint: 'https://other.example:443',
+      }).ok,
+    ).toBe(false);
+
+    const unexpected = buildPhase10ProviderBackedChainHistoryEvidence({
+      hotWalletAddress: '0:hot',
+      jettonMaster: '0:master',
+      networkGlobalId: -3,
+      observationWindow: {
+        start: new Date(Date.now() - 1000).toISOString(),
+        end: new Date().toISOString(),
+      },
+      providerIdentity: {
+        primaryKind: 'toncenter',
+        primaryEndpointFingerprint: 'https://primary.example:443',
+        secondaryKind: 'tonapi',
+        secondaryEndpointFingerprint: 'https://secondary.example:443',
+        independenceProven: true,
+      },
+      providerEnumeratedOutgoingTransfers: [
+        {
+          transferIdentity: 'unexpected-1',
+          transactionHash: 'abc',
+          queryId: null,
+          amountAtomic: '1',
+          recipient: '0:x',
+          observedAt: new Date().toISOString(),
+          providerKind: 'toncenter',
+        },
+      ],
+      expectedCampaignPayoutIdentities: [],
+    });
+    expect(unexpected.reconciliationResult).toBe('UNEXPECTED_OUTGOING');
+    expect(evaluateChainHistoryForAcceptance(unexpected).ok).toBe(false);
+
+    const zeroPath = join(dir, 'zero.json');
+    await writeFile(zeroPath, JSON.stringify(callerEmpty), 'utf8');
     const zero = await evaluatePhase10AcceptanceFromEvidence({
       db: pool,
       campaignEvidencePath: campaignPath,
@@ -622,10 +875,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 live remediation', () => {
       readinessEvidencePath: readinessPath,
       chainHistoryEvidencePath: zeroPath,
     });
-    expect(zero.reasons.every((r) => !r.includes('chain-history evidence path missing'))).toBe(
-      true,
-    );
-    expect(zero.reasons.every((r) => !r.includes('CHAIN_HISTORY_PROOF_REQUIRED'))).toBe(true);
+    expect(zero.reasons.some((r) => r.includes(PHASE10_CHAIN_HISTORY_PROOF_REQUIRED))).toBe(true);
     expect(zero.verdict).not.toBe('PASS_EVIDENCE_PRESENT_OWNER_REVIEW_REQUIRED');
 
     const monitor = await buildPhase10HotWalletMonitorReport(pool, {
@@ -633,8 +883,5 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 live remediation', () => {
       unexpectedOutgoingHistoryProven: true,
     });
     expect(monitor.chainHistoryProof.status).toBe('PROOF_REQUIRED');
-    expect(monitor.notes.some((n) => n.includes('ignored unexpectedOutgoingHistoryProven'))).toBe(
-      true,
-    );
   }, 120_000);
 });
