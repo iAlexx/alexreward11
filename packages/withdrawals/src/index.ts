@@ -120,18 +120,29 @@ export { settleWithdrawalReservation } from './settlement.js';
 export {
   createWithdrawalAttempt,
   updateAttemptBroadcastState,
+  acquireHotWalletDispatchLease,
   acquireTestDispatchLease,
+  assertHotWalletDispatchFence,
+  hotWalletDispatchOwnerForWithdrawal,
+  hotWalletDispatchOwnerIdentity,
+  releaseHotWalletDispatchLease,
 } from './attempts.js';
-export type { WithdrawalAttemptView } from './attempts.js';
+export type {
+  HotWalletDispatchLeaseAcquireResult,
+  HotWalletDispatchReleaseReason,
+  WithdrawalAttemptView,
+} from './attempts.js';
 
 export { runFakePayoutPipeline, advanceFakeReconciliation } from './pipeline.js';
 export type { FakePayoutPipelineResult } from './pipeline.js';
 
 export {
+  compactTep74EvidenceSummary,
   reconcileWithdrawalAttemptFromAdapter,
   reconcileWithdrawalAttemptFromAdapterInTxn,
   matchIntendedPayout,
   observationMatchesExpectedAttempt,
+  persistIntendedPayoutProvenEvidence,
 } from './reconcile.js';
 export type {
   ReconcileResolution,
@@ -195,3 +206,99 @@ export type {
   RealTestnetPayoutPipelineState,
   RunRealTestnetPayoutPipelineInput,
 } from './real-payout-pipeline.js';
+
+export { runPhase10Readiness } from './phase10-readiness.js';
+export type {
+  Phase10ReadinessClassification,
+  Phase10ReadinessConfig,
+  Phase10ReadinessItem,
+  Phase10ReadinessReport,
+  Phase10ReadinessStatus,
+} from './phase10-readiness.js';
+
+export { runPhase10RestoreReconcileScan } from './phase10-restore-reconcile.js';
+export type {
+  Phase10RestoreFinding,
+  Phase10RestoreFindingCategory,
+  Phase10RestoreReconcileScanReport,
+} from './phase10-restore-reconcile.js';
+
+export { buildPhase10HotWalletMonitorReport } from './phase10-hot-wallet-monitor.js';
+export type {
+  Phase10HotWalletBalanceBaseline,
+  Phase10HotWalletBalanceObservations,
+  Phase10HotWalletMonitorInput,
+  Phase10HotWalletMonitorReport,
+} from './phase10-hot-wallet-monitor.js';
+export { PHASE10_HOT_WALLET_CHAIN_HISTORY_PROOF_REQUIRED } from './phase10-hot-wallet-monitor.js';
+
+export {
+  checkPhase10PayoutInvariants,
+  isCompleteIntendedPayoutProof,
+} from './phase10-payout-invariants.js';
+export type {
+  CheckPhase10PayoutInvariantsOptions,
+  Phase10IntendedPayoutProofExpected,
+  Phase10IntendedPayoutProofOptions,
+  Phase10InvariantFinding,
+  Phase10InvariantSeverity,
+  Phase10PayoutInvariantReport,
+} from './phase10-payout-invariants.js';
+
+export {
+  PHASE10_CAMPAIGN_MIN_ACCEPTANCE_PAYOUTS,
+  PHASE10_FAILURE_SCENARIO_CATALOGUE,
+  PHASE10_REAL_CAMPAIGN_CONFIRMATION_PHRASE,
+  allRealExecutionGatesTrue,
+  attachWithdrawal,
+  attachWithdrawalIds,
+  generateFinalCampaignEvidence,
+  initCampaignManifest,
+  initializeCampaign,
+  planPhase10Campaign,
+  refreshEvidence,
+  rescanCampaignEvidence,
+  rescanWithdrawalsFromDb,
+  resumeCampaign,
+  resumeCampaignById,
+  writeEvidenceFile,
+} from './phase10-campaign.js';
+export type {
+  AttachPhase10CampaignWithdrawalInput,
+  InitPhase10CampaignManifestInput,
+  Phase10CampaignEvidenceRecord,
+  Phase10CampaignManifest,
+  Phase10CampaignMode,
+  Phase10CampaignPlan,
+  Phase10CampaignPlanItem,
+  Phase10CampaignRealExecutionGates,
+  Phase10CampaignRealModeGates,
+  Phase10CampaignSafeHashes,
+  Phase10FailureScenario,
+  Phase10ScenarioClassification,
+  PlanPhase10CampaignInput,
+} from './phase10-campaign.js';
+
+export { runPhase10Preflight } from './phase10-preflight.js';
+export type {
+  Phase10PreflightInput,
+  Phase10PreflightReport,
+  Phase10PreflightVerdict,
+} from './phase10-preflight.js';
+
+export {
+  PHASE10_REQUIRED_REAL_FAILURE_SCENARIO_IDS,
+  evaluatePhase10AcceptanceGate,
+  evaluatePhase10AcceptanceFromEvidence,
+  parseLiveReadinessEvidence,
+  validateFailureInjectionEvidence,
+  validateLiveReadinessEvidence,
+} from './phase10-acceptance-gate.js';
+export type {
+  ParsedLiveReadinessEvidence,
+  Phase10AcceptanceFromEvidenceInput,
+  Phase10AcceptanceGateInput,
+  Phase10AcceptanceGateResult,
+  Phase10AcceptanceGateVerdict,
+  Phase10LiveEvidencePresence,
+} from './phase10-acceptance-gate.js';

@@ -319,4 +319,79 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 real pipeline (db + fake prov
       expect.arrayContaining(['persist_signed_boc_before_send', 'provider_sendBoc_ambiguous']),
     );
   });
+
+  it('sendBoc accepted:false → RECONCILE_REQUIRED, never BROADCASTED', async () => {
+    const userId = await createTestUser(pool, '9203');
+    await createVerifiedPrimaryWallet(pool, {
+      userId,
+      networkId,
+      rawAddress: RECIPIENT_RAW,
+    });
+    const withdrawalId = await createApprovedWithdrawal(pool, {
+      userId,
+      networkId,
+      assetId,
+      adminUserId,
+      hotWalletId,
+      amountAtomic: '200000',
+      engineConfig: nonFakeEngine,
+    });
+    const assignedHot = await pool.query<{ hot_wallet_id: string }>(
+      `SELECT hot_wallet_id::text AS hot_wallet_id FROM withdrawals WHERE id = $1::uuid`,
+      [withdrawalId],
+    );
+    expect(assignedHot.rows[0]!.hot_wallet_id).toBe(hotWalletId);
+    await pool.query(
+      `UPDATE withdrawals SET state = 'QUEUED', queued_at = now() WHERE id = $1::uuid`,
+      [withdrawalId],
+    );
+
+    const primary = new FakeTonChainProvider({ sendBocAcceptedFalse: true });
+    primary.seedSeqno(HOT_WALLET_RAW, 5);
+
+    const phase10 = buildPhase10PayoutConfig({
+      realChainEnabled: true,
+      signerServiceToken: 'local-signer-service-token-32chars!!',
+      jettonMasterIdentity: jettonMaster,
+      primaryProviderKind: 'toncenter',
+      primaryProviderUrl: 'https://testnet.toncenter.com/api/v2',
+      secondaryProviderKind: 'tonapi',
+      secondaryProviderUrl: 'https://testnet.tonapi.io',
+    });
+
+    const result = await runRealTestnetPayoutPipeline(pool, {
+      withdrawalId,
+      phase10,
+      engine: nonFakeEngine,
+      chainProvider: primary,
+      secondaryChainProvider: new FakeTonChainProvider(),
+      signer: createTestSigner(),
+      allowTestExecutionPath: true,
+      buildCanonicalMessageHash: async () => TEST_CANONICAL_HASH,
+    });
+
+    expect(result.state).toBe('RECONCILE_REQUIRED');
+    expect(result.reason).toBe('sendBoc_accepted_false');
+    expect(result.stagesCompleted).toEqual(
+      expect.arrayContaining([
+        'persist_signed_boc_before_send',
+        'provider_sendBoc_accepted_false',
+      ]),
+    );
+    expect(primary.getSendBocCallCount()).toBe(1);
+
+    const durable = await pool.query<{
+      state: string;
+      broadcast_result_state: string;
+    }>(
+      `SELECT w.state::text AS state, a.broadcast_result_state::text AS broadcast_result_state
+       FROM withdrawals w
+       INNER JOIN withdrawal_attempts a ON a.withdrawal_id = w.id
+       WHERE w.id = $1::uuid`,
+      [withdrawalId],
+    );
+    expect(durable.rows[0]?.state).toBe('RECONCILE_REQUIRED');
+    expect(durable.rows[0]?.broadcast_result_state).toBe('RECONCILE_REQUIRED');
+    expect(durable.rows[0]?.broadcast_result_state).not.toBe('BROADCASTED');
+  });
 });

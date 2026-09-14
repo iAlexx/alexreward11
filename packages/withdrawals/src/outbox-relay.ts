@@ -78,6 +78,8 @@ function resolveWorkflowId(event: WithdrawalApprovedOutboxEvent, withdrawalId: s
 
 /**
  * Claim PENDING withdrawal.approved outbox rows (caller must be in a transaction).
+ * Serialization is FOR UPDATE SKIP LOCKED on the selected rows while the transaction
+ * is open — available_at is NOT fencing and is not bumped here.
  */
 export async function claimPendingWithdrawalApprovedEvents(
   client: PoolClient,

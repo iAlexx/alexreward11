@@ -21,7 +21,7 @@ import {
   type AuthoritativePayoutObservation,
   type PayoutChainAdapter,
 } from '../src/fake-chain.js';
-import { applyObservationInTxn } from '../src/reconcile.js';
+import { applyObservationInTxn, reconcileWithdrawalAttemptFromAdapterInTxn } from '../src/reconcile.js';
 import {
   bindVerifiedPrimaryWallet,
   createApprovedWithdrawal,
@@ -198,7 +198,10 @@ describe.skipIf(phase7DatabaseUrl === '')('Phase 7 reconcile provenance', () => 
       withdrawalA,
       'BROADCAST_RESULT_UNKNOWN',
     );
-    await runFakePayoutPipeline(pool, engineConfig, withdrawalB, 'BROADCAST_RESULT_UNKNOWN');
+    // Put B into RECONCILE_REQUIRED without Hot Wallet dispatch (A still holds unresolved fence).
+    await pool.query(`UPDATE withdrawals SET state = 'RECONCILE_REQUIRED' WHERE id = $1::uuid`, [
+      withdrawalB,
+    ]);
 
     await expect(
       withWithdrawalTransaction(pool, async (client) =>
@@ -276,11 +279,19 @@ describe.skipIf(phase7DatabaseUrl === '')('Phase 7 reconcile provenance', () => 
       withdrawalId: withdrawalA,
       scenario: 'UNKNOWN_THEN_DEFINITIVE_NONPAYMENT',
     });
+    fakeChain.advance(pipeA.attemptId!);
+    const reconciledA = await withWithdrawalTransaction(pool, async (client) =>
+      reconcileWithdrawalAttemptFromAdapterInTxn(client, engineConfig, fakeChain, {
+        withdrawalId: withdrawalA,
+        attemptId: pipeA.attemptId!,
+      }),
+    );
+    expect(reconciledA.resolution).toBe('DEFINITIVE_NONPAYMENT');
+
     const pipeB = await runFakePayoutPipeline(pool, engineConfig, fakeChain, {
       withdrawalId: withdrawalB,
       scenario: 'BROADCAST_RESULT_UNKNOWN',
     });
-    fakeChain.advance(pipeA.attemptId!);
     const obsA = fakeChain.observeForAttempt({
       withdrawalId: withdrawalA,
       attemptId: pipeA.attemptId!,

@@ -1,10 +1,13 @@
 # Phase 10 Acceptance Report — TON Testnet Payout Foundation
 
-**Status:** **FOUNDATION CORRECTED — STILL BLOCKED ON OWNER EXTERNAL RESOURCES**
+**Status:** **PHASE 10 CODE COMPLETE — LIVE VALIDATION READY (NOT CLOSED)**
 
-Phase 10 foundation now implements the real payout pipeline stages and documented
-provider adapters. **No claim of Phase 10 PASS.** No real Testnet broadcast.
-Phase 11 not started. Phase 9 remains CLOSED.
+P0 software blockers from the FULL REVIEW remediation pass are addressed in-tree
+with focused tests green. Live controlled Testnet campaign evidence is still
+required before Phase 10 can close. **No claim of Phase 10 PASS.** No real
+Testnet broadcast performed in this remediation. Phase 11 not started.
+Final archive remains **refused** until authoritative live campaign evidence
+passes `evaluatePhase10AcceptanceFromEvidence` and Owner review.
 
 ## Owner external resources still required (only)
 
@@ -34,3 +37,21 @@ Phase 11 not started. Phase 9 remains CLOSED.
 - No Phase 11 work started
 - No Mainnet
 - No AWS KMS / plaintext keys
+
+## Operational tooling (IN PROGRESS — no live yet)
+
+Read-only / dry-run helpers landed in `@alex-rewards/withdrawals` (not a Phase 10 close):
+
+| Tool | Purpose |
+| --- | --- |
+| `runPhase10Readiness` / `phase10:readiness` | PASS/WARN/BLOCKED inspector + summary |
+| `runPhase10Preflight` / `phase10:preflight` | Aggregates readiness + restore → READY vs BLOCKED |
+| `runPhase10RestoreReconcileScan` / `phase10:restore-reconcile` | Post-restore scan; never auto-resend / never unpause |
+| `buildPhase10HotWalletMonitorReport` / `phase10:hot-wallet-monitor` | Hot wallet identity + injected balance observations |
+| `planPhase10Campaign` / `phase10:campaign-plan` | Dry-run scenario matrix only |
+| `checkPhase10PayoutInvariants` | Per-withdrawal reservation / settlement / TEP-74 proof checks |
+| `evaluatePhase10AcceptanceGate` / `evaluatePhase10AcceptanceFromEvidence` | Path-only refuses; authoritative gate verifies campaign JSON + DB invariants |
+| Approved outbox claim | `FOR UPDATE SKIP LOCKED` + Temporal workflow id (no `available_at` bump fencing) |
+
+**Still blocked for live execution** on Owner external resources (Jetton master, providers, funded Hot Wallet,
+signer unlock window) before any controlled live Testnet. Phase 10 remains **not closed**.

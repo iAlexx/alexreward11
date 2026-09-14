@@ -4,8 +4,10 @@ import { WithdrawalDomainError } from './errors.js';
 import { FakePayoutChain, type FakeBroadcastPhase, type FakePayoutScenario } from './fake-chain.js';
 import { isPayoutDispatchPaused } from './flags.js';
 import {
-  acquireTestDispatchLease,
+  acquireHotWalletDispatchLease,
   createWithdrawalAttempt,
+  hotWalletDispatchOwnerIdentity,
+  releaseHotWalletDispatchLease,
   updateAttemptBroadcastState,
 } from './attempts.js';
 import { reconcileWithdrawalAttemptFromAdapterInTxn } from './reconcile.js';
@@ -90,7 +92,8 @@ export async function runFakePayoutPipeline(
     if (w === undefined) {
       throw new WithdrawalDomainError('VALIDATION', 'Withdrawal not found');
     }
-    if (w.hot_wallet_id === null) {
+    const hotWalletId = w.hot_wallet_id;
+    if (hotWalletId === null) {
       throw new WithdrawalDomainError('CONFIG', 'Hot wallet missing on withdrawal');
     }
 
@@ -161,21 +164,23 @@ export async function runFakePayoutPipeline(
 
     const hot = await client.query<{ signer_reference: string }>(
       `SELECT signer_reference FROM hot_wallets WHERE id = $1::uuid`,
-      [w.hot_wallet_id],
+      [hotWalletId],
     );
     const signerRef = hot.rows[0]?.signer_reference ?? 'TEST_ONLY_FAKE';
 
     await transitionWithdrawal(client, { id: w.id, from: 'QUEUED', to: 'SIGNING' });
 
-    const lease = await acquireTestDispatchLease(
-      client,
-      w.hot_wallet_id,
-      `phase7-fake-pipeline:${w.id}`,
-    );
+    const ownerIdentity = hotWalletDispatchOwnerIdentity(w.id);
+    const lease = await acquireHotWalletDispatchLease(client, hotWalletId, ownerIdentity);
+    if (lease.status !== 'ACQUIRED') {
+      throw new WithdrawalDomainError('STATE_CONFLICT', 'Hot wallet dispatch lease unavailable', {
+        details: { lease },
+      });
+    }
 
     const attempt = await createWithdrawalAttempt(client, {
       withdrawalId: w.id,
-      hotWalletId: w.hot_wallet_id,
+      hotWalletId: hotWalletId,
       fencingToken: lease.fencingToken,
       signerKeyReference: signerRef,
       scenarioHashInputs: { scenario, recipient },
@@ -185,7 +190,7 @@ export async function runFakePayoutPipeline(
       withdrawalId: w.id,
       attemptId: attempt.id,
       attemptNumber: attempt.attemptNumber,
-      hotWalletId: w.hot_wallet_id,
+      hotWalletId: hotWalletId,
       recipientAddress: recipient,
       assetSymbol: config.usdtSymbol,
       netAmountAtomic: w.net_amount_atomic,
@@ -208,6 +213,12 @@ export async function runFakePayoutPipeline(
         attemptId: attempt.id,
         broadcastResultState: 'FAILED_PRE_BROADCAST',
         // no broadcast_started_at
+      });
+      await releaseHotWalletDispatchLease(client, {
+        hotWalletId: hotWalletId,
+        ownerIdentity,
+        fencingToken: lease.fencingToken,
+        reason: 'FAILED_PRE_BROADCAST',
       });
       return {
         withdrawalId: w.id,
@@ -282,6 +293,12 @@ export async function runFakePayoutPipeline(
         to: 'CONFIRMED',
       });
       await settleWithdrawalReservation(client, { withdrawalId: w.id });
+      await releaseHotWalletDispatchLease(client, {
+        hotWalletId: hotWalletId,
+        ownerIdentity,
+        fencingToken: lease.fencingToken,
+        reason: 'CONFIRMED_SETTLED',
+      });
       return {
         withdrawalId: w.id,
         state: 'CONFIRMED',

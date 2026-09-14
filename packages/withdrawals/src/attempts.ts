@@ -1,6 +1,25 @@
 import type { PoolClient } from 'pg';
 
 import { WithdrawalDomainError } from './errors.js';
+import {
+  assertHotWalletDispatchFence,
+  hotWalletDispatchOwnerForWithdrawal,
+} from './hot-wallet-dispatch-lease.js';
+
+export {
+  acquireHotWalletDispatchLease,
+  acquireTestDispatchLease,
+  assertHotWalletDispatchFence,
+  hotWalletDispatchOwnerForWithdrawal,
+  releaseHotWalletDispatchLease,
+} from './hot-wallet-dispatch-lease.js';
+export type {
+  HotWalletDispatchLeaseAcquireResult,
+  HotWalletDispatchReleaseReason,
+} from './hot-wallet-dispatch-lease.js';
+
+/** Alias matching Owner naming for withdrawal-scoped lease ownership. */
+export { hotWalletDispatchOwnerForWithdrawal as hotWalletDispatchOwnerIdentity } from './hot-wallet-dispatch-lease.js';
 
 export interface WithdrawalAttemptView {
   readonly id: string;
@@ -16,92 +35,6 @@ export interface WithdrawalAttemptView {
 }
 
 const LIVE_ATTEMPT_STATES = ['PENDING', 'UNKNOWN', 'RECONCILE_REQUIRED'] as const;
-
-/**
- * Upsert a test/local dispatch lease with an incrementing fencing token.
- */
-export async function acquireTestDispatchLease(
-  client: PoolClient,
-  hotWalletId: string,
-  ownerIdentity: string,
-): Promise<{ fencingToken: bigint; expiresAt: Date }> {
-  const existing = await client.query<{
-    fencing_token: string;
-    expires_at: Date;
-    released_at: Date | null;
-  }>(
-    `SELECT fencing_token::text, expires_at, released_at
-     FROM hot_wallet_dispatch_leases
-     WHERE hot_wallet_id = $1::uuid
-     FOR UPDATE`,
-    [hotWalletId],
-  );
-
-  const now = new Date();
-  const expiresAt = new Date(now.getTime() + 60_000);
-
-  if (existing.rows[0] === undefined) {
-    const inserted = await client.query<{ fencing_token: string; expires_at: Date }>(
-      `INSERT INTO hot_wallet_dispatch_leases (
-         hot_wallet_id, owner_identity, fencing_token, expires_at
-       ) VALUES ($1::uuid, $2, 1, $3::timestamptz)
-       RETURNING fencing_token::text, expires_at`,
-      [hotWalletId, ownerIdentity, expiresAt.toISOString()],
-    );
-    return {
-      fencingToken: BigInt(inserted.rows[0]!.fencing_token),
-      expiresAt: inserted.rows[0]!.expires_at,
-    };
-  }
-
-  const nextToken = BigInt(existing.rows[0].fencing_token) + 1n;
-  const updated = await client.query<{ fencing_token: string; expires_at: Date }>(
-    `UPDATE hot_wallet_dispatch_leases
-     SET owner_identity = $2,
-         fencing_token = $3::bigint,
-         renewed_at = now(),
-         expires_at = $4::timestamptz,
-         released_at = NULL
-     WHERE hot_wallet_id = $1::uuid
-     RETURNING fencing_token::text, expires_at`,
-    [hotWalletId, ownerIdentity, nextToken.toString(10), expiresAt.toISOString()],
-  );
-  return {
-    fencingToken: BigInt(updated.rows[0]!.fencing_token),
-    expiresAt: updated.rows[0]!.expires_at,
-  };
-}
-
-async function assertLeaseFencing(
-  client: PoolClient,
-  hotWalletId: string,
-  fencingToken: bigint,
-): Promise<void> {
-  const lease = await client.query<{
-    fencing_token: string;
-    expires_at: Date;
-    released_at: Date | null;
-  }>(
-    `SELECT fencing_token::text, expires_at, released_at
-     FROM hot_wallet_dispatch_leases
-     WHERE hot_wallet_id = $1::uuid
-     FOR SHARE`,
-    [hotWalletId],
-  );
-  const row = lease.rows[0];
-  if (row === undefined) {
-    throw new WithdrawalDomainError('STATE_CONFLICT', 'Dispatch lease missing');
-  }
-  if (row.released_at !== null) {
-    throw new WithdrawalDomainError('STATE_CONFLICT', 'Dispatch lease released');
-  }
-  if (row.expires_at.getTime() <= Date.now()) {
-    throw new WithdrawalDomainError('STATE_CONFLICT', 'Dispatch lease expired');
-  }
-  if (BigInt(row.fencing_token) !== fencingToken) {
-    throw new WithdrawalDomainError('STATE_CONFLICT', 'Dispatch fencing token mismatch');
-  }
-}
 
 /**
  * Create a payout attempt under a valid dispatch lease fencing token.
@@ -134,9 +67,17 @@ export async function createWithdrawalAttempt(
     readonly canonicalMessageHash?: string;
     /** Phase 10 real path: must match the unix timeout used for canonical hash. */
     readonly validUntil?: Date;
+    /** Optional lease owner identity; defaults to withdrawal:{id}. */
+    readonly leaseOwnerIdentity?: string;
   },
 ): Promise<WithdrawalAttemptView> {
-  await assertLeaseFencing(client, input.hotWalletId, input.fencingToken);
+  const ownerIdentity =
+    input.leaseOwnerIdentity ?? hotWalletDispatchOwnerForWithdrawal(input.withdrawalId);
+  await assertHotWalletDispatchFence(client, {
+    hotWalletId: input.hotWalletId,
+    fencingToken: input.fencingToken,
+    ownerIdentity,
+  });
 
   const live = await client.query<{ id: string; broadcast_result_state: string }>(
     `SELECT id, broadcast_result_state::text AS broadcast_result_state
@@ -177,8 +118,6 @@ export async function createWithdrawalAttempt(
       last.broadcast_result_state === 'RECONCILE_REQUIRED';
 
     if (!isFailedPre) {
-      // Forbidden new attempt after possible broadcast until reconcile proves retry safety
-      // (safe retry is signaled by withdrawal returning to QUEUED with no live attempt).
       if (mayHaveBroadcast) {
         const withdrawal = await client.query<{ state: string }>(
           `SELECT state::text AS state FROM withdrawals WHERE id = $1::uuid`,
@@ -204,7 +143,6 @@ export async function createWithdrawalAttempt(
 
   const attemptNumber = (prior.rows[0]?.attempt_number ?? 0) + 1;
   const expectedSeqno = input.expectedSeqno ?? BigInt(attemptNumber);
-  // Deterministic unique query_id per hot wallet: pack attempt into high bits + hash salt.
   const salt = input.scenarioHashInputs ? Object.values(input.scenarioHashInputs).join(':') : '';
   const queryId =
     input.queryId ??
@@ -289,7 +227,11 @@ export async function updateAttemptBroadcastState(
   input: {
     readonly attemptId: string;
     readonly broadcastResultState:
-      'PENDING' | 'BROADCASTED' | 'FAILED_PRE_BROADCAST' | 'UNKNOWN' | 'RECONCILE_REQUIRED';
+      | 'PENDING'
+      | 'BROADCASTED'
+      | 'FAILED_PRE_BROADCAST'
+      | 'UNKNOWN'
+      | 'RECONCILE_REQUIRED';
     readonly markBroadcastStarted?: boolean;
     readonly chainReference?: string | null;
   },

@@ -539,3 +539,104 @@ export const loadSignerConfig = (environment: NodeJS.ProcessEnv = process.env): 
 };
 export const loadWebConfig = (environment: NodeJS.ProcessEnv = process.env): WebConfig =>
   parseEnvironment(webSchema, environment);
+
+/** Optional UUID string; empty when Phase 10 provision gate is OFF. */
+const optionalUuidOrEmpty = z.preprocess(
+  (value) => (value === undefined || value === null ? '' : value),
+  z.union([z.literal(''), z.string().uuid()]),
+);
+
+const optionalPositiveAtomicOrEmpty = z.preprocess(
+  (value) => (value === undefined || value === null ? '' : value),
+  z.union([z.literal(''), z.string().regex(/^[1-9][0-9]*$/, 'must be a positive integer string')]),
+);
+
+/**
+ * Phase 10 Testnet Available provisioning CLI config.
+ * Disabled by default. LOCAL/TEST only. Not a production balance editor.
+ */
+const LOCAL_PHASE10_TESTNET_PROVISION_DEFAULTS = {
+  PHASE10_TESTNET_AVAILABLE_PROVISION_ENABLED: 'false',
+  PHASE10_TESTNET_PROVISION_ALLOWED_USER_ID: '',
+  PHASE10_TESTNET_PROVISION_MAX_ATOMIC: '1000000',
+  PHASE10_TESTNET_PROVISION_OWNER_ADMIN_USER_ID: '',
+  WITHDRAWAL_NETWORK_CODE: 'TON_TESTNET',
+  WITHDRAWAL_ASSET_SYMBOL: 'USDT',
+} as const;
+
+const phase10TestnetProvisionSchema = commonSchema
+  .extend({
+    DATABASE_URL: postgresUrl,
+    PHASE10_TESTNET_AVAILABLE_PROVISION_ENABLED: booleanFromString,
+    PHASE10_TESTNET_PROVISION_ALLOWED_USER_ID: optionalUuidOrEmpty,
+    PHASE10_TESTNET_PROVISION_MAX_ATOMIC: optionalPositiveAtomicOrEmpty,
+    PHASE10_TESTNET_PROVISION_OWNER_ADMIN_USER_ID: optionalUuidOrEmpty,
+    WITHDRAWAL_NETWORK_CODE: z.string().min(1).max(64),
+    WITHDRAWAL_ASSET_SYMBOL: z.string().min(1).max(32),
+  })
+  .superRefine((value, context) => {
+    if (value.WITHDRAWAL_NETWORK_CODE.toUpperCase().includes('MAINNET')) {
+      context.addIssue({
+        code: 'custom',
+        path: ['WITHDRAWAL_NETWORK_CODE'],
+        message: 'MAINNET network codes are forbidden',
+      });
+    }
+    if (value.PHASE10_TESTNET_AVAILABLE_PROVISION_ENABLED) {
+      if (value.DEPLOYMENT_ENV !== 'local' && value.DEPLOYMENT_ENV !== 'test') {
+        context.addIssue({
+          code: 'custom',
+          path: ['PHASE10_TESTNET_AVAILABLE_PROVISION_ENABLED'],
+          message: 'Phase 10 Testnet provisioning cannot be enabled outside local/test',
+        });
+      }
+      if (value.WITHDRAWAL_NETWORK_CODE !== 'TON_TESTNET') {
+        context.addIssue({
+          code: 'custom',
+          path: ['WITHDRAWAL_NETWORK_CODE'],
+          message: 'must be exactly TON_TESTNET when provisioning is enabled',
+        });
+      }
+      if (value.WITHDRAWAL_ASSET_SYMBOL !== 'USDT') {
+        context.addIssue({
+          code: 'custom',
+          path: ['WITHDRAWAL_ASSET_SYMBOL'],
+          message: 'must be exactly USDT when provisioning is enabled',
+        });
+      }
+      if (value.PHASE10_TESTNET_PROVISION_ALLOWED_USER_ID === '') {
+        context.addIssue({
+          code: 'custom',
+          path: ['PHASE10_TESTNET_PROVISION_ALLOWED_USER_ID'],
+          message: 'required UUID when Phase 10 Testnet provisioning is enabled',
+        });
+      }
+      if (value.PHASE10_TESTNET_PROVISION_OWNER_ADMIN_USER_ID === '') {
+        context.addIssue({
+          code: 'custom',
+          path: ['PHASE10_TESTNET_PROVISION_OWNER_ADMIN_USER_ID'],
+          message: 'required UUID when Phase 10 Testnet provisioning is enabled',
+        });
+      }
+      if (value.PHASE10_TESTNET_PROVISION_MAX_ATOMIC === '') {
+        context.addIssue({
+          code: 'custom',
+          path: ['PHASE10_TESTNET_PROVISION_MAX_ATOMIC'],
+          message: 'required positive atomic amount when Phase 10 Testnet provisioning is enabled',
+        });
+      }
+    }
+  });
+
+export type Phase10TestnetProvisionConfig = z.infer<typeof phase10TestnetProvisionSchema>;
+
+export const loadPhase10TestnetProvisionConfig = (
+  environment: NodeJS.ProcessEnv = process.env,
+): Phase10TestnetProvisionConfig => {
+  const deployment = environment.DEPLOYMENT_ENV ?? 'local';
+  const merged =
+    deployment === 'local' || deployment === 'test'
+      ? { ...LOCAL_PHASE10_TESTNET_PROVISION_DEFAULTS, ...environment }
+      : environment;
+  return parseEnvironment(phase10TestnetProvisionSchema, merged);
+};
