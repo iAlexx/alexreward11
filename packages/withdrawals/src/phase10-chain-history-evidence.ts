@@ -360,6 +360,12 @@ export function parsePhase10ChainHistoryEvidence(raw: unknown): {
       'caller boolean unexpectedOutgoingHistoryProven/provenByOperator is not authoritative',
     );
   }
+  // Reject validation-only readonly reports (distinct schema; never acceptance evidence).
+  if (root.validationOnly === true) {
+    errors.push(
+      'readonly validation report (validationOnly) is not chain-history acceptance evidence',
+    );
+  }
 
   if (errors.length > 0) {
     return { errors, parsed: null };
