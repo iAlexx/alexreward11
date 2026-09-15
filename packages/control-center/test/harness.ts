@@ -4,7 +4,7 @@
  */
 import { randomUUID } from 'node:crypto';
 
-import { migrateDatabase } from '@alex-rewards/db';
+import { assertSafeDestructiveTestDatabaseUrl, migrateDatabase } from '@alex-rewards/db';
 import {
   checkLedgerInvariants,
   getOrCreateLedgerAccount,
@@ -48,6 +48,7 @@ export function createPool(url: string): Pool {
 }
 
 export async function resetAndMigrate(url: string): Promise<void> {
+  assertSafeDestructiveTestDatabaseUrl(url);
   const client = new Client({ connectionString: url });
   await client.connect();
   try {

@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { Client } from 'pg';
 import type { Pool } from 'pg';
 
-import { migrateDatabase } from '@alex-rewards/db';
+import { assertSafeDestructiveTestDatabaseUrl, migrateDatabase } from '@alex-rewards/db';
 
 import {
   getOrCreateLedgerAccount,
@@ -21,6 +21,7 @@ const optedInUrl = process.env.PHASE4_LEDGER_TESTS === '1' ? (process.env.DATABA
 export const phase4DatabaseUrl = explicitUrl !== '' ? explicitUrl : optedInUrl;
 
 export async function resetAndMigrate(url: string): Promise<void> {
+  assertSafeDestructiveTestDatabaseUrl(url);
   const client = new Client({ connectionString: url });
   await client.connect();
   try {

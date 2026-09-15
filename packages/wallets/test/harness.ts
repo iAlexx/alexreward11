@@ -5,7 +5,7 @@
 import { beginCell, storeStateInit, Address } from '@ton/core';
 import { keyPairFromSeed, sign } from '@ton/crypto';
 import { buildTonProofSigningDigest } from '@alex-rewards/ton';
-import { migrateDatabase } from '@alex-rewards/db';
+import { assertSafeDestructiveTestDatabaseUrl, migrateDatabase } from '@alex-rewards/db';
 import { WalletContractV4 } from '@ton/ton';
 import { randomBytes } from 'node:crypto';
 import { Client, type Pool } from 'pg';
@@ -19,6 +19,7 @@ export const phase6DatabaseUrl = explicitUrl !== '' ? explicitUrl : optedInUrl;
 export const walletConfig = localWalletOwnershipFixtureConfig();
 
 export async function resetAndMigrate(url: string): Promise<void> {
+  assertSafeDestructiveTestDatabaseUrl(url);
   const client = new Client({ connectionString: url });
   await client.connect();
   try {

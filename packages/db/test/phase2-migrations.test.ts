@@ -20,6 +20,8 @@ import type { QueryResult } from 'pg';
 import { Client } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { assertSafeDestructiveTestDatabaseUrl } from '../src/index.js';
+
 const migrationsDirectory = fileURLToPath(new URL('../../../migrations/', import.meta.url));
 
 const explicitUrl = process.env.PHASE2_DATABASE_URL ?? '';
@@ -293,6 +295,7 @@ describe.skipIf(databaseUrl === '')('Phase 2 database baseline', () => {
   }
 
   beforeAll(async () => {
+    assertSafeDestructiveTestDatabaseUrl(databaseUrl);
     client = new Client({ connectionString: databaseUrl, application_name: 'alex-rewards-tests' });
     await client.connect();
     await client.query('DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;');

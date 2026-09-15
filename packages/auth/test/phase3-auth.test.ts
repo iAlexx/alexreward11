@@ -11,7 +11,7 @@ import { Client, Pool } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { buildSignedInitDataForTests } from '@alex-rewards/telegram';
-import { migrateDatabase } from '@alex-rewards/db';
+import { assertSafeDestructiveTestDatabaseUrl, migrateDatabase } from '@alex-rewards/db';
 
 import {
   AuthDomainError,
@@ -41,6 +41,7 @@ const sessionConfig = {
 };
 
 async function resetSchema(url: string): Promise<void> {
+  assertSafeDestructiveTestDatabaseUrl(url);
   const client = new Client({ connectionString: url });
   await client.connect();
   try {
