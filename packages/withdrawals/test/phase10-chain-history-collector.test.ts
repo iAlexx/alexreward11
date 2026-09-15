@@ -24,13 +24,16 @@ import {
   PHASE10_UNEXPECTED_OUTGOING,
   PHASE10_ZERO_UNEXPECTED,
   assertPhase10CollectorEvidenceIntegrity,
-  collectPhase10ProviderBackedChainHistory,
+  collectPhase10LiveProviderBackedChainHistory,
+  collectPhase10ProviderBackedChainHistoryForTests,
   digestPhase10CollectorEvidence,
   loadPhase10ExpectedCampaignPayouts,
   toPhase10ChainHistoryEvidenceArtifact,
-  type CollectPhase10ProviderBackedChainHistoryInput,
+  type CollectPhase10ProviderBackedChainHistoryForTestsInput,
   type Phase10ExpectedCampaignPayout,
 } from '../src/phase10-chain-history-collector.js';
+import { fingerprintProviderEndpoint } from '../src/phase10-live-probes.js';
+import * as publicIndex from '../src/index.js';
 
 const HOT = '0:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const JETTON_WALLET = '0:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
@@ -42,7 +45,7 @@ const WINDOW = {
 } as const;
 
 type _NoCallerTransferArray =
-  'providerEnumeratedOutgoingTransfers' extends keyof CollectPhase10ProviderBackedChainHistoryInput
+  'providerEnumeratedOutgoingTransfers' extends keyof CollectPhase10ProviderBackedChainHistoryForTestsInput
     ? never
     : true;
 const _collectInputHasNoCallerTransfers: _NoCallerTransferArray = true;
@@ -88,7 +91,7 @@ function baseCollectInput(
   primary: TonChainProvider,
   secondary: TonChainProvider,
   expectedPayouts: readonly Phase10ExpectedCampaignPayout[] = [],
-): CollectPhase10ProviderBackedChainHistoryInput {
+): CollectPhase10ProviderBackedChainHistoryForTestsInput {
   return {
     campaignId: randomUUID(),
     hotWalletAddress: HOT,
@@ -111,13 +114,16 @@ function baseCollectInput(
 class StubEnumerateProvider implements TonChainProvider {
   readonly networkGlobalId: TonNetworkGlobalId;
   private readonly result: EnumerateOutgoingJettonTransfersResult;
+  private readonly healthOk: boolean;
 
   constructor(
     result: EnumerateOutgoingJettonTransfersResult,
     networkGlobalId?: TonNetworkGlobalId,
+    healthOk = true,
   ) {
     this.result = result;
     this.networkGlobalId = networkGlobalId ?? TON_TESTNET_NETWORK_GLOBAL_ID;
+    this.healthOk = healthOk;
   }
 
   async getSeqno(): Promise<number> {
@@ -139,7 +145,11 @@ class StubEnumerateProvider implements TonChainProvider {
     return null;
   }
   async health() {
-    return { ok: true, networkGlobalId: this.networkGlobalId, latencyMs: 1 };
+    return {
+      ok: this.healthOk,
+      networkGlobalId: this.networkGlobalId,
+      latencyMs: 1,
+    };
   }
   async enumerateOutgoingJettonTransfers(): Promise<EnumerateOutgoingJettonTransfersResult> {
     return this.result;
@@ -170,6 +180,11 @@ describe('Phase 10 chain history collector', () => {
   it('keeps PHASE10_CHAIN_HISTORY_PROVIDER_COLLECTOR_AVAILABLE false', () => {
     expect(PHASE10_CHAIN_HISTORY_PROVIDER_COLLECTOR_AVAILABLE).toBe(false);
     expect(PHASE10_CHAIN_HISTORY_COLLECTOR_VERSION).toBe('1.0.0');
+    expect(
+      'collectPhase10ProviderBackedChainHistoryForTests' in publicIndex ||
+        'collectPhase10ProviderBackedChainHistory' in publicIndex,
+    ).toBe(false);
+    expect(typeof publicIndex.collectPhase10LiveProviderBackedChainHistory).toBe('function');
   });
 
   it('both providers agree → collector PASS candidate (ZERO_UNEXPECTED)', async () => {
@@ -184,7 +199,7 @@ describe('Phase 10 chain history collector', () => {
     secondary.seedEnumeratedOutgoingTransfer({ ...transfer, providerKind: 'fake-secondary' });
 
     const expected = expectedPayout({ queryId: '42', amountAtomic: '1000' });
-    const result = await collectPhase10ProviderBackedChainHistory(
+    const result = await collectPhase10ProviderBackedChainHistoryForTests(
       baseCollectInput(primary, secondary, [expected]),
     );
 
@@ -213,7 +228,7 @@ describe('Phase 10 chain history collector', () => {
       seedTransfer({ queryId: '7', amountAtomic: '100', transferIdentity: 'p-only' }),
     );
 
-    const result = await collectPhase10ProviderBackedChainHistory(
+    const result = await collectPhase10ProviderBackedChainHistoryForTests(
       baseCollectInput(primary, secondary, []),
     );
     expect(result.completeCoverage).toBe(true);
@@ -233,7 +248,7 @@ describe('Phase 10 chain history collector', () => {
       seedTransfer({ queryId: '8', amountAtomic: '100', transferIdentity: 's-only' }),
     );
 
-    const result = await collectPhase10ProviderBackedChainHistory(
+    const result = await collectPhase10ProviderBackedChainHistoryForTests(
       baseCollectInput(primary, secondary, []),
     );
     expect(result.reconciliationResult).toBe(PHASE10_PROVIDER_HISTORY_DISAGREEMENT);
@@ -251,7 +266,7 @@ describe('Phase 10 chain history collector', () => {
     primary.seedEnumeratedOutgoingTransfer(transfer);
     secondary.seedEnumeratedOutgoingTransfer(transfer);
 
-    const result = await collectPhase10ProviderBackedChainHistory(
+    const result = await collectPhase10ProviderBackedChainHistoryForTests(
       baseCollectInput(primary, secondary, []),
     );
     expect(result.reconciliationResult).toBe(PHASE10_UNEXPECTED_OUTGOING);
@@ -266,7 +281,7 @@ describe('Phase 10 chain history collector', () => {
     const secondary = new FakeTonChainProvider();
     const expected = expectedPayout({ queryId: 'missing-q', amountAtomic: '1000' });
 
-    const result = await collectPhase10ProviderBackedChainHistory(
+    const result = await collectPhase10ProviderBackedChainHistoryForTests(
       baseCollectInput(primary, secondary, [expected]),
     );
     expect(result.completeCoverage).toBe(true);
@@ -300,7 +315,7 @@ describe('Phase 10 chain history collector', () => {
     secondary.seedEnumeratedOutgoingTransfer(a);
     secondary.seedEnumeratedOutgoingTransfer(b);
 
-    const result = await collectPhase10ProviderBackedChainHistory(
+    const result = await collectPhase10ProviderBackedChainHistoryForTests(
       baseCollectInput(primary, secondary, [
         expectedPayout({ queryId: '42', amountAtomic: '1000' }),
       ]),
@@ -316,7 +331,7 @@ describe('Phase 10 chain history collector', () => {
     const primary = new FakeTonChainProvider();
     const secondary = new FakeTonChainProvider();
 
-    const result = await collectPhase10ProviderBackedChainHistory(
+    const result = await collectPhase10ProviderBackedChainHistoryForTests(
       baseCollectInput(primary, secondary, []),
     );
     expect(result.completeCoverage).toBe(true);
@@ -360,7 +375,7 @@ describe('Phase 10 chain history collector', () => {
     const primary = new StubEnumerateProvider(incomplete);
     const secondary = new StubEnumerateProvider(completeEmptyResult('tonapi'));
 
-    const result = await collectPhase10ProviderBackedChainHistory(
+    const result = await collectPhase10ProviderBackedChainHistoryForTests(
       baseCollectInput(primary, secondary, []),
     );
     expect(result.completeCoverage).toBe(false);
@@ -371,7 +386,7 @@ describe('Phase 10 chain history collector', () => {
   it('evidence digest tamper → assertIntegrity fails', async () => {
     const primary = new FakeTonChainProvider();
     const secondary = new FakeTonChainProvider();
-    const result = await collectPhase10ProviderBackedChainHistory(
+    const result = await collectPhase10ProviderBackedChainHistoryForTests(
       baseCollectInput(primary, secondary, []),
     );
     assertPhase10CollectorEvidenceIntegrity(result);
@@ -400,7 +415,7 @@ describe('Phase 10 chain history collector', () => {
       transfers: [wrongHotTransfer],
     });
     await expect(
-      collectPhase10ProviderBackedChainHistory(
+      collectPhase10ProviderBackedChainHistoryForTests(
         baseCollectInput(badHot, new StubEnumerateProvider(completeEmptyResult('tonapi')), []),
       ),
     ).rejects.toThrow(/BINDING_REFUSED.*hotWalletAddress/);
@@ -417,7 +432,7 @@ describe('Phase 10 chain history collector', () => {
       transfers: [wrongJetton],
     });
     await expect(
-      collectPhase10ProviderBackedChainHistory(
+      collectPhase10ProviderBackedChainHistoryForTests(
         baseCollectInput(badJetton, new StubEnumerateProvider(completeEmptyResult('tonapi')), []),
       ),
     ).rejects.toThrow(/BINDING_REFUSED.*senderJettonWallet|Jetton wallet/i);
@@ -434,7 +449,7 @@ describe('Phase 10 chain history collector', () => {
       transfers: [wrongMaster],
     });
     await expect(
-      collectPhase10ProviderBackedChainHistory(
+      collectPhase10ProviderBackedChainHistoryForTests(
         baseCollectInput(badMaster, new StubEnumerateProvider(completeEmptyResult('tonapi')), []),
       ),
     ).rejects.toThrow(/BINDING_REFUSED.*jettonMaster/);
@@ -443,10 +458,9 @@ describe('Phase 10 chain history collector', () => {
       ...completeEmptyResult('toncenter'),
       networkGlobalId: -239,
     };
-    // networkGlobalId on provider instance must be Testnet before enumeration.
     const badNetworkProvider = new StubEnumerateProvider(badNetworkResult, -239);
     await expect(
-      collectPhase10ProviderBackedChainHistory(
+      collectPhase10ProviderBackedChainHistoryForTests(
         baseCollectInput(
           badNetworkProvider,
           new StubEnumerateProvider(completeEmptyResult('tonapi')),
@@ -456,13 +470,119 @@ describe('Phase 10 chain history collector', () => {
     ).rejects.toThrow(/BINDING_REFUSED.*networkGlobalId/);
   });
 
+  it('Live path refuses fake kinds / mismatched fingerprints / unhealthy providers', async () => {
+    const primaryUrl = 'https://testnet.toncenter.com/api/v2';
+    const secondaryUrl = 'https://testnet.tonapi.io';
+    const primaryFp = fingerprintProviderEndpoint(primaryUrl)!;
+    const secondaryFp = fingerprintProviderEndpoint(secondaryUrl)!;
+
+    await expect(
+      collectPhase10LiveProviderBackedChainHistory({
+        campaignId: randomUUID(),
+        hotWalletAddress: HOT,
+        hotWalletJettonWallet: JETTON_WALLET,
+        jettonMaster: MASTER,
+        observationWindow: WINDOW,
+        expectedPayouts: [],
+        primary: { kind: 'fake', baseUrl: primaryUrl },
+        secondary: { kind: 'tonapi', baseUrl: secondaryUrl },
+        readinessPrimaryEndpointFingerprint: primaryFp,
+        readinessSecondaryEndpointFingerprint: secondaryFp,
+      }),
+    ).rejects.toThrow(/primary\.kind must be 'toncenter'/);
+
+    await expect(
+      collectPhase10LiveProviderBackedChainHistory({
+        campaignId: randomUUID(),
+        hotWalletAddress: HOT,
+        hotWalletJettonWallet: JETTON_WALLET,
+        jettonMaster: MASTER,
+        observationWindow: WINDOW,
+        expectedPayouts: [],
+        primary: { kind: 'toncenter', baseUrl: primaryUrl },
+        secondary: { kind: 'fake', baseUrl: secondaryUrl },
+        readinessPrimaryEndpointFingerprint: primaryFp,
+        readinessSecondaryEndpointFingerprint: secondaryFp,
+      }),
+    ).rejects.toThrow(/secondary\.kind must be 'tonapi'/);
+
+    await expect(
+      collectPhase10LiveProviderBackedChainHistory({
+        campaignId: randomUUID(),
+        hotWalletAddress: HOT,
+        hotWalletJettonWallet: JETTON_WALLET,
+        jettonMaster: MASTER,
+        observationWindow: WINDOW,
+        expectedPayouts: [],
+        primary: { kind: 'toncenter', baseUrl: primaryUrl },
+        secondary: { kind: 'tonapi', baseUrl: secondaryUrl },
+        readinessPrimaryEndpointFingerprint: 'https://wrong.example:443',
+        readinessSecondaryEndpointFingerprint: secondaryFp,
+      }),
+    ).rejects.toThrow(/primary endpoint fingerprint/);
+
+    await expect(
+      collectPhase10LiveProviderBackedChainHistory({
+        campaignId: randomUUID(),
+        hotWalletAddress: HOT,
+        hotWalletJettonWallet: JETTON_WALLET,
+        jettonMaster: MASTER,
+        observationWindow: WINDOW,
+        expectedPayouts: [],
+        primary: { kind: 'toncenter', baseUrl: primaryUrl },
+        secondary: { kind: 'tonapi', baseUrl: secondaryUrl },
+        readinessPrimaryEndpointFingerprint: primaryFp,
+        readinessSecondaryEndpointFingerprint: primaryFp,
+      }),
+    ).rejects.toThrow(/fingerprints must differ|secondary endpoint fingerprint/);
+
+    await expect(
+      collectPhase10LiveProviderBackedChainHistory({
+        campaignId: randomUUID(),
+        hotWalletAddress: HOT,
+        hotWalletJettonWallet: JETTON_WALLET,
+        jettonMaster: MASTER,
+        observationWindow: WINDOW,
+        expectedPayouts: [],
+        primary: { kind: 'toncenter', baseUrl: primaryUrl },
+        secondary: { kind: 'tonapi', baseUrl: secondaryUrl },
+        readinessPrimaryEndpointFingerprint: primaryFp,
+        readinessSecondaryEndpointFingerprint: secondaryFp,
+        fetchImpl: async (input) => {
+          const url =
+            typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+          // Unhealthy: TonCenter masterchain fails; TonAPI status offline.
+          if (url.includes('getMasterchainInfo')) {
+            return new Response(JSON.stringify({ ok: false, error: 'down' }), {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            });
+          }
+          if (url.endsWith('/v2/status')) {
+            return new Response(JSON.stringify({ rest_online: false }), {
+              status: 200,
+              headers: { 'content-type': 'application/json' },
+            });
+          }
+          throw new Error(`Unexpected live probe URL: ${url}`);
+        },
+      }),
+    ).rejects.toThrow(/health must be ok|BINDING_REFUSED/);
+  });
+
   it('loadPhase10ExpectedCampaignPayouts rejects missing INTENDED_PAYOUT_PROVEN', async () => {
     const withdrawalId = randomUUID();
     const fakeDb = {
       query: async () => ({ rows: [] }),
     };
     await expect(
-      loadPhase10ExpectedCampaignPayouts(fakeDb as never, [withdrawalId], WINDOW),
+      loadPhase10ExpectedCampaignPayouts(fakeDb as never, {
+        campaignWithdrawalIds: [withdrawalId],
+        window: WINDOW,
+        campaignCreatedAt: '2024-01-01T00:00:00.000Z',
+        expectedHotWalletAddress: HOT,
+        expectedJettonMaster: MASTER,
+      }),
     ).rejects.toThrow(/INTENDED_PAYOUT_PROVEN/);
   });
 
@@ -484,22 +604,27 @@ describe('Phase 10 chain history collector', () => {
               secondaryTransactionIdentity: 'sec-tx',
               jettonMaster: MASTER,
             },
-            resolved_at: new Date('2024-01-01T12:00:00.000Z'),
+            resolved_at: new Date('2024-01-01T18:00:00.000Z'),
             recipient: RECIPIENT,
             net_amount_atomic: '1000',
             jetton_master: MASTER,
             attempt_query_id: '42',
             broadcasted_at: new Date('2024-01-01T11:00:00.000Z'),
+            broadcast_submitted_at: new Date('2024-01-01T10:30:00.000Z'),
+            requested_at: new Date('2024-01-01T09:00:00.000Z'),
+            hot_wallet_address: HOT,
           },
         ],
       }),
     };
 
-    const payouts = await loadPhase10ExpectedCampaignPayouts(
-      fakeDb as never,
-      [withdrawalId],
-      WINDOW,
-    );
+    const payouts = await loadPhase10ExpectedCampaignPayouts(fakeDb as never, {
+      campaignWithdrawalIds: [withdrawalId],
+      window: WINDOW,
+      campaignCreatedAt: '2024-01-01T00:00:00.000Z',
+      expectedHotWalletAddress: HOT,
+      expectedJettonMaster: MASTER,
+    });
     expect(payouts).toHaveLength(1);
     expect(payouts[0]).toMatchObject({
       withdrawalId,
@@ -510,6 +635,46 @@ describe('Phase 10 chain history collector', () => {
       amountAtomic: '1000',
       recipient: RECIPIENT,
       jettonMaster: MASTER,
+      intendedAt: '2024-01-01T10:30:00.000Z',
     });
+  });
+
+  it('broadcast yesterday + resolved_at today inside window → intendedAt outside window refuse', async () => {
+    const withdrawalId = randomUUID();
+    const fakeDb = {
+      query: async () => ({
+        rows: [
+          {
+            withdrawal_id: withdrawalId,
+            attempt_id: randomUUID(),
+            observed_query_id: '42',
+            correlation_reference: 'corr-1',
+            observed_recipient: RECIPIENT,
+            observed_amount_atomic: '1000',
+            evidence_summary: { jettonMaster: MASTER },
+            // resolved_at is inside window but must NEVER drive membership.
+            resolved_at: new Date('2024-01-01T12:00:00.000Z'),
+            recipient: RECIPIENT,
+            net_amount_atomic: '1000',
+            jetton_master: MASTER,
+            attempt_query_id: '42',
+            broadcasted_at: new Date('2023-12-31T12:00:00.000Z'),
+            broadcast_submitted_at: new Date('2023-12-31T11:00:00.000Z'),
+            requested_at: new Date('2023-12-31T10:00:00.000Z'),
+            hot_wallet_address: HOT,
+          },
+        ],
+      }),
+    };
+
+    await expect(
+      loadPhase10ExpectedCampaignPayouts(fakeDb as never, {
+        campaignWithdrawalIds: [withdrawalId],
+        window: WINDOW,
+        campaignCreatedAt: '2023-12-01T00:00:00.000Z',
+        expectedHotWalletAddress: HOT,
+        expectedJettonMaster: MASTER,
+      }),
+    ).rejects.toThrow(/intendedAt outside observation window/);
   });
 });

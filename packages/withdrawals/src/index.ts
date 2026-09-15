@@ -348,18 +348,20 @@ export {
   PHASE10_ZERO_UNEXPECTED,
   assertPhase10CollectorEvidenceIntegrity,
   buildPhase10EconomicKey,
-  collectPhase10ProviderBackedChainHistory,
+  collectPhase10LiveProviderBackedChainHistory,
   digestPhase10CollectorEvidence,
   loadPhase10ExpectedCampaignPayouts,
   toPhase10ChainHistoryEvidenceArtifact,
 } from './phase10-chain-history-collector.js';
 export type {
-  CollectPhase10ProviderBackedChainHistoryInput,
+  CollectPhase10LiveProviderBackedChainHistoryInput,
+  LoadPhase10ExpectedCampaignPayoutsInput,
   Phase10ChainHistoryAgreementVerdict,
   Phase10ChainHistoryCollectorArtifact,
   Phase10ChainHistoryCollectorReconciliationResult,
   Phase10ChainHistoryProviderCoverage,
   Phase10ExpectedCampaignPayout,
+  Phase10LiveProviderEndpointConfig,
 } from './phase10-chain-history-collector.js';
 
 export {

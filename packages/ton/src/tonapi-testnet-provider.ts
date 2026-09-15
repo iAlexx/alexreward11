@@ -68,6 +68,14 @@ function optionalAddress(value: unknown): string | null {
   return typeof address === 'string' && address !== '' ? address : null;
 }
 
+function normalizeAddressKey(value: string): string {
+  try {
+    return Address.parse(value).toRawString().toLowerCase();
+  } catch {
+    return value.trim().toLowerCase();
+  }
+}
+
 function transactionSucceeded(transaction: Record<string, unknown>): boolean {
   if (transaction.success !== true || transaction.aborted !== false) return false;
   const compute = transaction.compute_phase;
@@ -107,6 +115,54 @@ function flattenTrace(
     }
   }
   return result;
+}
+
+/**
+ * Collect candidate tx hashes from TonAPI history events/actions/operations.
+ * Labels are discovery-only — never sufficient for PROVIDER inclusion.
+ */
+function collectJettonTransferCandidateHashes(body: Record<string, unknown>): string[] {
+  const hashes = new Set<string>();
+  const considerAction = (action: Record<string, unknown>): void => {
+    const type = typeof action.type === 'string' ? action.type : '';
+    const status = typeof action.status === 'string' ? action.status : '';
+    const looksLikeTransfer =
+      /jetton.?transfer/i.test(type) ||
+      action.operation === 'transfer' ||
+      type === 'JettonTransfer';
+    if (!looksLikeTransfer) return;
+    if (status !== '' && status.toLowerCase() !== 'ok') return;
+    for (const key of ['transaction_hash', 'event_id', 'hash'] as const) {
+      const value = action[key];
+      if (typeof value === 'string' && value !== '') hashes.add(value);
+    }
+  };
+  if (Array.isArray(body.events)) {
+    for (const rawEvent of body.events) {
+      const event = asRecord(rawEvent, 'TonAPI history event');
+      if (typeof event.event_id === 'string' && event.event_id !== '') hashes.add(event.event_id);
+      if (Array.isArray(event.actions)) {
+        for (const rawAction of event.actions) {
+          considerAction(asRecord(rawAction, 'TonAPI history action'));
+        }
+      }
+    }
+  }
+  if (Array.isArray(body.operations)) {
+    for (const rawOp of body.operations) {
+      const op = asRecord(rawOp, 'TonAPI history operation');
+      considerAction(op);
+      if (typeof op.transaction_hash === 'string' && op.transaction_hash !== '') {
+        hashes.add(op.transaction_hash);
+      }
+    }
+  }
+  if (Array.isArray(body.actions)) {
+    for (const rawAction of body.actions) {
+      considerAction(asRecord(rawAction, 'TonAPI history action'));
+    }
+  }
+  return [...hashes];
 }
 
 export class TonApiTestnetProvider implements TonChainProvider {
@@ -393,75 +449,100 @@ export class TonApiTestnetProvider implements TonChainProvider {
     const transfers: EnumeratedOutgoingJettonTransfer[] = [];
     const warnings: string[] = [];
     const observed = { oldest: null as number | null, newest: null as number | null };
+    const includedHashes = new Set<string>();
+    const recipientWalletCache = new Map<string, string | null>();
     let pagesFetched = 0;
     let recordsSeen = 0;
     let cursorExhausted = false;
     let truncatedBySafety = false;
     let beforeLt: string | undefined;
 
+    // Authoritative jetton-wallet binding must match input before any transfer is accepted.
+    const provedHotJettonWallet = await this.resolveJettonWallet(
+      input.hotWalletAddress,
+      input.jettonMaster,
+    );
+    const hotWalletBindingOk = addressEquals(provedHotJettonWallet, input.hotWalletJettonWallet);
+    if (!hotWalletBindingOk) {
+      warnings.push(
+        'resolveJettonWallet(hotWallet, jettonMaster) does not equal hotWalletJettonWallet; refusing all transfers',
+      );
+    }
+
     while (pagesFetched < ENUMERATE_HISTORY_MAX_PAGES) {
       const params = new URLSearchParams();
       params.set('limit', String(pageSize));
-      params.set('start_date', String(windowStartUnix));
-      params.set('end_date', String(windowEndUnix));
+      params.set('sort_order', 'desc');
       if (beforeLt !== undefined) params.set('before_lt', beforeLt);
 
       const path =
-        `/v2/accounts/${encodeURIComponent(input.hotWalletAddress)}` +
-        `/jettons/${encodeURIComponent(input.jettonMaster)}/history?${params.toString()}`;
-      const body = await this.get(path, 'TonAPI jetton history');
+        `/v2/blockchain/accounts/${encodeURIComponent(input.hotWalletJettonWallet)}` +
+        `/transactions?${params.toString()}`;
+      const body = await this.get(path, 'TonAPI blockchain account transactions');
       pagesFetched += 1;
 
-      if (!Array.isArray(body.operations)) {
-        throw new Error('MALFORMED_RESPONSE: TonAPI jetton history operations missing');
+      if (!Array.isArray(body.transactions)) {
+        throw new Error('MALFORMED_RESPONSE: TonAPI blockchain transactions missing');
       }
-      const operations = body.operations;
-      if (operations.length === 0) {
+      const transactions = body.transactions;
+      if (transactions.length === 0) {
         cursorExhausted = true;
         break;
       }
 
-      let pageOldest: number | null = null;
-      for (const raw of operations) {
-        const operation = asRecord(raw, 'TonAPI jetton operation');
+      let pageOldestUtime: number | null = null;
+      let pageOldestLt: string | null = null;
+      for (const raw of transactions) {
+        const transaction = asRecord(raw, 'TonAPI blockchain transaction');
         recordsSeen += 1;
-        const utime = Number(operation.utime);
+        const utime = Number(transaction.utime);
         if (!Number.isFinite(utime)) {
-          warnings.push('skipped operation with invalid utime');
+          warnings.push('skipped transaction with invalid utime');
           continue;
         }
         trackObservedBounds(observed, utime);
-        if (pageOldest === null || utime < pageOldest) pageOldest = utime;
+        if (pageOldestUtime === null || utime < pageOldestUtime) pageOldestUtime = utime;
 
-        const mapped = this.mapOutgoingJettonOperation(
-          operation,
+        const lt =
+          typeof transaction.lt === 'string' || typeof transaction.lt === 'number'
+            ? String(transaction.lt)
+            : null;
+        if (lt !== null && (pageOldestLt === null || BigInt(lt) < BigInt(pageOldestLt))) {
+          pageOldestLt = lt;
+        }
+
+        if (!hotWalletBindingOk) continue;
+
+        const proved = await this.proveOutgoingJettonTransferFromRawTransaction(
+          transaction,
           input,
-          utime,
-          windowStartUnix,
-          windowEndUnix,
+          recipientWalletCache,
+          warnings,
         );
-        if (mapped !== null) transfers.push(mapped);
+        if (proved === null) continue;
+        if (!timestampInInclusiveWindow(utime, windowStartUnix, windowEndUnix)) continue;
+        if (proved.transactionHash !== null) includedHashes.add(proved.transactionHash);
+        transfers.push(proved);
       }
 
-      if (pageOldest !== null && pageOldest < windowStartUnix) {
+      if (pageOldestUtime !== null && pageOldestUtime < windowStartUnix) {
         break;
       }
 
-      const nextFrom = body.next_from;
-      const nextBeforeLt =
-        typeof nextFrom === 'string' || typeof nextFrom === 'number' || typeof nextFrom === 'bigint'
-          ? String(nextFrom)
-          : null;
-      if (nextBeforeLt === null || nextBeforeLt === '' || nextBeforeLt === '0') {
+      if (pageOldestLt === null || pageOldestLt === '' || pageOldestLt === '0') {
         cursorExhausted = true;
         break;
       }
-      if (beforeLt !== undefined && nextBeforeLt === beforeLt) {
+      if (beforeLt !== undefined && pageOldestLt === beforeLt) {
         warnings.push('cursor repetition: before_lt did not advance');
         truncatedBySafety = true;
         break;
       }
-      beforeLt = nextBeforeLt;
+      if (transactions.length < pageSize) {
+        cursorExhausted = true;
+        break;
+      }
+      beforeLt = pageOldestLt;
     }
 
     if (pagesFetched >= ENUMERATE_HISTORY_MAX_PAGES && !cursorExhausted) {
@@ -471,6 +552,20 @@ export class TonApiTestnetProvider implements TonChainProvider {
         warnings.push(`page cap reached (${ENUMERATE_HISTORY_MAX_PAGES})`);
       }
     }
+
+    // Optional discovery: events/actions may suggest candidate hashes only.
+    // Every included transfer must still pass raw TEP-74 proof.
+    await this.discoverOutgoingCandidatesFromJettonHistory(
+      input,
+      windowStartUnix,
+      windowEndUnix,
+      observed,
+      includedHashes,
+      recipientWalletCache,
+      transfers,
+      warnings,
+      hotWalletBindingOk,
+    );
 
     const coverage = finalizeWindowCoverage({
       truncatedBySafety,
@@ -498,86 +593,212 @@ export class TonApiTestnetProvider implements TonChainProvider {
     };
   }
 
-  private mapOutgoingJettonOperation(
-    operation: Record<string, unknown>,
+  /**
+   * Optional history discovery. Collects candidate transaction hashes from
+   * events/actions (JettonTransfer labels) and includes them ONLY when raw
+   * blockchain transaction proof succeeds. Action labels alone never produce
+   * PROVIDER transfers.
+   */
+  private async discoverOutgoingCandidatesFromJettonHistory(
     input: EnumerateOutgoingJettonTransfersInput,
-    utime: number,
     windowStartUnix: number,
     windowEndUnix: number,
-  ): EnumeratedOutgoingJettonTransfer | null {
-    if (operation.operation !== 'transfer') return null;
-    if (!timestampInInclusiveWindow(utime, windowStartUnix, windowEndUnix)) return null;
+    observed: { oldest: number | null; newest: number | null },
+    includedHashes: Set<string>,
+    recipientWalletCache: Map<string, string | null>,
+    transfers: EnumeratedOutgoingJettonTransfer[],
+    warnings: string[],
+    hotWalletBindingOk: boolean,
+  ): Promise<void> {
+    if (!hotWalletBindingOk) return;
 
-    const bounced = operation.bounced === true;
-    const success =
-      operation.success === undefined
-        ? !bounced && operation.aborted !== true
-        : operation.success === true;
-    if (!success || bounced || operation.aborted === true) return null;
+    let beforeLt: string | undefined;
+    let discoveryPages = 0;
+    while (discoveryPages < ENUMERATE_HISTORY_MAX_PAGES) {
+      const params = new URLSearchParams();
+      params.set('limit', '100');
+      params.set('start_date', String(windowStartUnix));
+      params.set('end_date', String(windowEndUnix));
+      if (beforeLt !== undefined) params.set('before_lt', beforeLt);
 
-    const jettonMaster =
-      optionalAddress(operation.jetton) ??
-      (typeof operation.jetton_master === 'string' ? operation.jetton_master : null);
-    if (jettonMaster === null || !addressEquals(jettonMaster, input.jettonMaster)) return null;
+      const path =
+        `/v2/accounts/${encodeURIComponent(input.hotWalletAddress)}` +
+        `/jettons/${encodeURIComponent(input.jettonMaster)}/history?${params.toString()}`;
 
-    const source =
-      optionalAddress(operation.source) ??
-      (typeof operation.owner === 'string' ? operation.owner : null);
-    const senderJettonWallet =
-      optionalAddress(operation.jetton_wallet) ??
-      optionalAddress(operation.sender_jetton_wallet) ??
-      optionalAddress(operation.wallet_address) ??
-      (typeof operation.jetton_wallet === 'string' ? operation.jetton_wallet : null);
+      let body: Record<string, unknown>;
+      try {
+        body = await this.get(path, 'TonAPI jetton history discovery');
+      } catch (error) {
+        warnings.push(
+          `jetton history discovery skipped: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return;
+      }
+      discoveryPages += 1;
 
-    const outgoingByOwner = source !== null && addressEquals(source, input.hotWalletAddress);
-    const outgoingByWallet =
-      senderJettonWallet !== null && addressEquals(senderJettonWallet, input.hotWalletJettonWallet);
-    if (!outgoingByOwner && !outgoingByWallet) return null;
+      const candidateHashes = collectJettonTransferCandidateHashes(body);
+      for (const hash of candidateHashes) {
+        if (includedHashes.has(hash)) continue;
+        let transactionBody: Record<string, unknown>;
+        try {
+          transactionBody = await this.get(
+            `/v2/blockchain/transactions/${encodeURIComponent(hash)}`,
+            'TonAPI blockchain transaction by hash',
+          );
+        } catch (error) {
+          warnings.push(
+            `action candidate ${hash} raw fetch failed: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+          continue;
+        }
+        const utime = Number(transactionBody.utime);
+        if (Number.isFinite(utime)) trackObservedBounds(observed, utime);
+        const proved = await this.proveOutgoingJettonTransferFromRawTransaction(
+          transactionBody,
+          input,
+          recipientWalletCache,
+          warnings,
+          `action-claimed ${hash}`,
+        );
+        if (proved === null) {
+          warnings.push(`action claimed JettonTransfer but raw proof failed for ${hash}; skipped`);
+          continue;
+        }
+        if (
+          !Number.isFinite(utime) ||
+          !timestampInInclusiveWindow(utime, windowStartUnix, windowEndUnix)
+        ) {
+          continue;
+        }
+        includedHashes.add(hash);
+        transfers.push(proved);
+      }
 
-    const recipient =
-      optionalAddress(operation.destination) ??
-      (typeof operation.destination === 'string' ? operation.destination : null);
-    if (recipient === null || recipient === '') return null;
-    // Incoming to hot wallet is never outgoing, even if wallet fields match.
+      const nextFrom = body.next_from;
+      const nextBeforeLt =
+        typeof nextFrom === 'string' || typeof nextFrom === 'number' || typeof nextFrom === 'bigint'
+          ? String(nextFrom)
+          : null;
+      if (nextBeforeLt === null || nextBeforeLt === '' || nextBeforeLt === '0') break;
+      if (beforeLt !== undefined && nextBeforeLt === beforeLt) break;
+      beforeLt = nextBeforeLt;
+
+      const hasEvents = Array.isArray(body.events) && body.events.length > 0;
+      const hasOperations = Array.isArray(body.operations) && body.operations.length > 0;
+      if (!hasEvents && !hasOperations) break;
+    }
+  }
+
+  /**
+   * Prove a TEP-74 outgoing Jetton transfer from RAW transaction messages only.
+   * High-level action/operation labels are never consulted here.
+   */
+  private async proveOutgoingJettonTransferFromRawTransaction(
+    transaction: Record<string, unknown>,
+    input: EnumerateOutgoingJettonTransfersInput,
+    recipientWalletCache: Map<string, string | null>,
+    warnings: string[],
+    contextLabel = 'transaction',
+  ): Promise<EnumeratedOutgoingJettonTransfer | null> {
+    const account = optionalAddress(transaction.account);
+    if (account === null || !addressEquals(account, input.hotWalletJettonWallet)) {
+      return null;
+    }
+    if (!transactionSucceeded(transaction)) return null;
+
+    const incoming =
+      transaction.in_msg === undefined
+        ? null
+        : asRecord(transaction.in_msg, 'TonAPI jetton wallet in_msg');
+    if (
+      incoming === null ||
+      incoming.msg_type !== 'int_msg' ||
+      incoming.bounced === true ||
+      optionalAddress(incoming.source) === null ||
+      !addressEquals(optionalAddress(incoming.source)!, input.hotWalletAddress) ||
+      optionalAddress(incoming.destination) === null ||
+      !addressEquals(optionalAddress(incoming.destination)!, input.hotWalletJettonWallet)
+    ) {
+      return null;
+    }
+
+    const transferBody = messageBody(incoming);
+    const transfer = transferBody === null ? null : parseJettonMessageHex(transferBody);
+    if (
+      transfer?.op !== JETTON_TRANSFER_OP ||
+      transfer.address === undefined ||
+      transfer.queryId === '' ||
+      transfer.amountAtomic === ''
+    ) {
+      return null;
+    }
+    const recipient = transfer.address;
     if (addressEquals(recipient, input.hotWalletAddress)) return null;
 
-    const amountAtomic = decimalString(operation.amount, 'TonAPI jetton history amount');
-    const transactionHash =
-      typeof operation.transaction_hash === 'string' && operation.transaction_hash !== ''
-        ? operation.transaction_hash
-        : null;
-    const transactionLt =
-      typeof operation.lt === 'string' || typeof operation.lt === 'number'
-        ? String(operation.lt)
-        : null;
-    const queryIdRaw = operation.query_id;
-    let queryId: string | null = null;
-    if (
-      typeof queryIdRaw === 'string' ||
-      typeof queryIdRaw === 'number' ||
-      typeof queryIdRaw === 'bigint'
-    ) {
-      const asString = String(queryIdRaw);
-      queryId = asString === '' ? null : asString;
+    const matchingInternal = transactionMessages(transaction, 'out_msgs').find((message) => {
+      if (message.msg_type !== 'int_msg' || message.bounced === true) return false;
+      const body = messageBody(message);
+      const internal = body === null ? null : parseJettonMessageHex(body);
+      return (
+        internal?.op === JETTON_INTERNAL_TRANSFER_OP &&
+        internal.queryId === transfer.queryId &&
+        internal.amountAtomic === transfer.amountAtomic
+      );
+    });
+    if (matchingInternal === undefined) return null;
+
+    const recipientJettonWallet = optionalAddress(matchingInternal.destination);
+    if (recipientJettonWallet === null) return null;
+
+    const recipientKey = normalizeAddressKey(recipient);
+    let resolvedRecipientWallet = recipientWalletCache.get(recipientKey);
+    if (resolvedRecipientWallet === undefined) {
+      try {
+        resolvedRecipientWallet = await this.resolveJettonWallet(recipient, input.jettonMaster);
+        recipientWalletCache.set(recipientKey, resolvedRecipientWallet);
+      } catch (error) {
+        warnings.push(
+          `resolveJettonWallet(recipient) failed for ${contextLabel}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+        // Optional recipient-wallet check — still accept when transfer+internal_transfer prove.
+        recipientWalletCache.set(recipientKey, null);
+        resolvedRecipientWallet = null;
+      }
     }
-    const traceId =
-      typeof operation.trace_id === 'string' && operation.trace_id !== ''
-        ? operation.trace_id
+    if (
+      resolvedRecipientWallet !== null &&
+      resolvedRecipientWallet !== undefined &&
+      !addressEquals(resolvedRecipientWallet, recipientJettonWallet)
+    ) {
+      warnings.push(`recipient jetton wallet mismatch for ${contextLabel}; skipped`);
+      return null;
+    }
+
+    const transactionHash =
+      typeof transaction.hash === 'string' && transaction.hash !== '' ? transaction.hash : null;
+    const transactionLt =
+      typeof transaction.lt === 'string' || typeof transaction.lt === 'number'
+        ? String(transaction.lt)
         : null;
+    const queryId = transfer.queryId === '0' ? null : transfer.queryId;
+    const amountAtomic = transfer.amountAtomic;
 
     return {
       providerKind: 'tonapi',
       networkGlobalId: this.networkGlobalId,
       hotWalletAddress: input.hotWalletAddress,
-      senderJettonWallet:
-        senderJettonWallet ?? (outgoingByWallet ? input.hotWalletJettonWallet : null),
+      senderJettonWallet: input.hotWalletJettonWallet,
       jettonMaster: input.jettonMaster,
       transactionHash,
       transactionLt,
       queryId,
       amountAtomic,
       recipient,
-      timestamp: unixSecondsToIso(utime),
+      timestamp: unixSecondsToIso(Number(transaction.utime)),
       success: true,
       bounced: false,
       transferIdentity: buildTransferIdentity({
@@ -587,7 +808,6 @@ export class TonApiTestnetProvider implements TonChainProvider {
         amountAtomic,
         recipient,
       }),
-      ...(traceId !== null ? { traceId } : {}),
     };
   }
 

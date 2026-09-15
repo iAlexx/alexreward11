@@ -181,18 +181,6 @@ export function deriveTonCenterV3BaseUrl(baseUrl: string): string {
   return `${trimmed}/api/v3`;
 }
 
-function optionalStringField(
-  record: Record<string, unknown>,
-  keys: readonly string[],
-): string | null {
-  for (const key of keys) {
-    const value = record[key];
-    if (typeof value === 'string' && value !== '') return value;
-    if (typeof value === 'number' || typeof value === 'bigint') return String(value);
-  }
-  return null;
-}
-
 export class TonCenterTestnetProvider implements TonChainProvider {
   readonly networkGlobalId = TON_TESTNET_NETWORK_GLOBAL_ID;
   private readonly baseUrl: string;
@@ -651,7 +639,10 @@ export class TonCenterTestnetProvider implements TonChainProvider {
       for (const raw of rows) {
         const row = asRecord(raw, 'TonCenter jetton transfer');
         recordsSeen += 1;
-        const utimeRaw = optionalStringField(row, ['transaction_now', 'utime', 'tx_now', 'now']);
+        const utimeRaw =
+          typeof row.transaction_now === 'string' || typeof row.transaction_now === 'number'
+            ? String(row.transaction_now)
+            : null;
         const utime = utimeRaw === null ? Number.NaN : Number(utimeRaw);
         if (!Number.isFinite(utime)) {
           warnings.push('skipped transfer with invalid utime');
@@ -724,37 +715,44 @@ export class TonCenterTestnetProvider implements TonChainProvider {
   ): EnumeratedOutgoingJettonTransfer | null {
     if (!timestampInInclusiveWindow(utime, windowStartUnix, windowEndUnix)) return null;
 
-    if (row.aborted === true || row.failed === true || row.success === false) return null;
-    if (row.bounced === true) return null;
+    // Official TonCenter v3 field: eligible only when transaction_aborted === false.
+    // Missing / non-boolean aborted is unproven → skip (do not treat as success).
+    if (row.transaction_aborted !== false) return null;
 
-    const jettonMaster = optionalStringField(row, ['jetton_master', 'jetton', 'master']);
+    const jettonMaster =
+      typeof row.jetton_master === 'string' && row.jetton_master !== '' ? row.jetton_master : null;
     if (jettonMaster === null || !addressEquals(jettonMaster, input.jettonMaster)) return null;
 
-    const source = optionalStringField(row, ['source', 'source_owner', 'owner_address', 'owner']);
-    const senderJettonWallet = optionalStringField(row, [
-      'jetton_wallet',
-      'source_wallet',
-      'sender_jetton_wallet',
-      'wallet',
-    ]);
-    const destination = optionalStringField(row, ['destination', 'destination_owner', 'recipient']);
+    const source = typeof row.source === 'string' && row.source !== '' ? row.source : null;
+    const senderJettonWallet =
+      typeof row.source_wallet === 'string' && row.source_wallet !== '' ? row.source_wallet : null;
+    const destination =
+      typeof row.destination === 'string' && row.destination !== '' ? row.destination : null;
 
     const outgoingByOwner = source !== null && addressEquals(source, input.hotWalletAddress);
     const outgoingByWallet =
       senderJettonWallet !== null && addressEquals(senderJettonWallet, input.hotWalletJettonWallet);
     if (!outgoingByOwner && !outgoingByWallet) return null;
-    if (destination !== null && addressEquals(destination, input.hotWalletAddress)) return null;
     if (destination === null) return null;
+    if (addressEquals(destination, input.hotWalletAddress)) return null;
 
-    const amountAtomic = decimalString(
-      row.amount ?? row.jetton_amount ?? row.value,
-      'TonCenter jetton transfer amount',
-    );
-    const transactionHash = optionalStringField(row, ['transaction_hash', 'tx_hash', 'hash']);
-    const transactionLt = optionalStringField(row, ['transaction_lt', 'tx_lt', 'lt']);
-    const queryIdRaw = optionalStringField(row, ['query_id', 'queryId']);
-    const queryId = queryIdRaw;
-    const traceId = optionalStringField(row, ['trace_id', 'traceId']);
+    const amountAtomic = decimalString(row.amount, 'TonCenter jetton transfer amount');
+    const transactionHash =
+      typeof row.transaction_hash === 'string' && row.transaction_hash !== ''
+        ? row.transaction_hash
+        : null;
+    const transactionLt =
+      typeof row.transaction_lt === 'string' || typeof row.transaction_lt === 'number'
+        ? String(row.transaction_lt)
+        : null;
+    const queryId =
+      typeof row.query_id === 'string' ||
+      typeof row.query_id === 'number' ||
+      typeof row.query_id === 'bigint'
+        ? String(row.query_id)
+        : null;
+    const normalizedQueryId = queryId === '' ? null : queryId;
+    const traceId = typeof row.trace_id === 'string' && row.trace_id !== '' ? row.trace_id : null;
 
     return {
       providerKind: 'toncenter',
@@ -764,14 +762,14 @@ export class TonCenterTestnetProvider implements TonChainProvider {
       jettonMaster: input.jettonMaster,
       transactionHash,
       transactionLt,
-      queryId,
+      queryId: normalizedQueryId,
       amountAtomic,
       recipient: destination,
       timestamp: unixSecondsToIso(utime),
       success: true,
       bounced: false,
       transferIdentity: buildTransferIdentity({
-        queryId,
+        queryId: normalizedQueryId,
         transactionHash,
         transactionLt,
         amountAtomic,

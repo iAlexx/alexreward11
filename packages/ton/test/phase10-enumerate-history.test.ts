@@ -1,3 +1,4 @@
+import { Address } from '@ton/core';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -8,17 +9,25 @@ import {
 } from '../src/index.js';
 import { ENUMERATE_HISTORY_MAX_PAGES } from '../src/outgoing-jetton-history.js';
 
+// Matches packages/ton/test/fixtures/tonapi/responses.json address roles.
 const HOT = '0:1111111111111111111111111111111111111111111111111111111111111111';
 const RECIPIENT = '0:2222222222222222222222222222222222222222222222222222222222222222';
 const JETTON_WALLET = '0:3333333333333333333333333333333333333333333333333333333333333333';
 const MASTER = '0:4444444444444444444444444444444444444444444444444444444444444444';
-const OTHER_MASTER = '0:5555555555555555555555555555555555555555555555555555555555555555';
+const RECIPIENT_JETTON_WALLET =
+  '0:5555555555555555555555555555555555555555555555555555555555555555';
 const OTHER_OWNER = '0:6666666666666666666666666666666666666666666666666666666666666666';
+const WRONG_JETTON_WALLET = '0:7777777777777777777777777777777777777777777777777777777777777777';
+
+// Reused from fixtures/tonapi/responses.json (transfer / internal_transfer raw_body).
+const TRANSFER_RAW_BODY =
+  'b5ee9c724101010100560000a80f8a7ea5000000000000002a302e630800444444444444444444444444444444444444444444444444444444444444444500044444444444444444444444444444444444444444444444444444444444444442029b293b36';
+const INTERNAL_TRANSFER_RAW_BODY =
+  'b5ee9c724101010100560000a7178d4519000000000000002a302e63080022222222222222222222222222222222222222222222222222222222222222230004444444444444444444444444444444444444444444444444444444444444444405d4832c57';
 
 const WINDOW_START = '2024-01-01T00:00:00.000Z';
 const WINDOW_END = '2024-01-02T00:00:00.000Z';
 const WINDOW_START_UNIX = Math.floor(Date.parse(WINDOW_START) / 1000);
-const WINDOW_END_UNIX = Math.floor(Date.parse(WINDOW_END) / 1000);
 
 function response(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -43,29 +52,114 @@ function baseEnumerateInput() {
   };
 }
 
-function tonApiOperation(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+function jettonBalanceBody(walletAddress: string): Record<string, unknown> {
   return {
-    operation: 'transfer',
-    utime: WINDOW_START_UNIX + 3600,
-    lt: '1001',
-    transaction_hash: 'abc111',
-    query_id: '42',
-    amount: '190000',
-    source: { address: HOT },
-    destination: { address: RECIPIENT },
+    balance: '190000',
+    wallet_address: { address: walletAddress, is_scam: false, is_wallet: true },
     jetton: {
       address: MASTER,
-      name: 'ALEx',
-      symbol: 'ALEX',
+      name: 'Testnet Reward',
+      symbol: 'TST',
       decimals: 9,
       verification: 'none',
-      image: '',
-      score: 0,
     },
-    trace_id: 'trace-1',
+  };
+}
+
+function succeededPhases(): Record<string, unknown> {
+  return {
     success: true,
-    bounced: false,
+    aborted: false,
+    compute_phase: { skipped: false, success: true, exit_code: 0 },
+    action_phase: { success: true, result_code: 0 },
+  };
+}
+
+/** Authoritative raw TEP-74 outgoing transfer on the hot-wallet jetton wallet account. */
+function rawOutgoingJettonTx(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    hash: 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+    lt: 50000000002,
+    utime: WINDOW_START_UNIX + 3600,
+    account: { address: JETTON_WALLET, is_scam: false, is_wallet: false },
+    ...succeededPhases(),
+    in_msg: {
+      msg_type: 'int_msg',
+      source: { address: HOT, is_scam: false, is_wallet: true },
+      destination: { address: JETTON_WALLET, is_scam: false, is_wallet: false },
+      bounced: false,
+      raw_body: TRANSFER_RAW_BODY,
+    },
+    out_msgs: [
+      {
+        msg_type: 'int_msg',
+        source: { address: JETTON_WALLET, is_scam: false, is_wallet: false },
+        destination: { address: RECIPIENT_JETTON_WALLET, is_scam: false, is_wallet: false },
+        bounced: false,
+        raw_body: INTERNAL_TRANSFER_RAW_BODY,
+      },
+    ],
     ...overrides,
+  };
+}
+
+/**
+ * Discovery-only history shape (events/actions/next_from).
+ * Actions alone must never produce PROVIDER transfers without raw proof.
+ */
+function tonApiEventsHistory(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    events: [
+      {
+        event_id: 'event-claimed-1',
+        timestamp: WINDOW_START_UNIX + 3600,
+        actions: [
+          {
+            type: 'JettonTransfer',
+            status: 'ok',
+            transaction_hash: 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+          },
+        ],
+      },
+    ],
+    next_from: 0,
+    ...overrides,
+  };
+}
+
+function addressInUrl(url: string, rawAddress: string): boolean {
+  if (url.includes(encodeURIComponent(rawAddress)) || url.includes(rawAddress)) return true;
+  try {
+    const friendly = Address.parse(rawAddress).toString();
+    return url.includes(encodeURIComponent(friendly)) || url.includes(friendly);
+  } catch {
+    return false;
+  }
+}
+
+function tonApiFetchRouter(handler: (url: string) => Response | null): typeof fetch {
+  return async (input) => {
+    const url = requestUrl(input);
+    if (
+      url.includes(`/jettons/`) &&
+      url.includes(encodeURIComponent(MASTER)) &&
+      !url.includes('/history')
+    ) {
+      if (addressInUrl(url, RECIPIENT)) {
+        return response(jettonBalanceBody(RECIPIENT_JETTON_WALLET));
+      }
+      if (addressInUrl(url, HOT)) {
+        return response(jettonBalanceBody(JETTON_WALLET));
+      }
+      return response(jettonBalanceBody(JETTON_WALLET));
+    }
+    if (url.includes('/history')) {
+      // Default: empty discovery so primary raw pagination tests stay focused.
+      return response({ events: [], operations: [], next_from: 0 });
+    }
+    const handled = handler(url);
+    if (handled !== null) return handled;
+    throw new Error(`Unexpected TonAPI fixture request: ${url}`);
   };
 }
 
@@ -76,34 +170,33 @@ function tonCenterTransfer(overrides: Record<string, unknown> = {}): Record<stri
     destination: RECIPIENT,
     amount: '190000',
     jetton_master: MASTER,
-    jetton_wallet: JETTON_WALLET,
+    source_wallet: JETTON_WALLET,
     transaction_hash: 'tc-hash-1',
     transaction_lt: '2001',
     transaction_now: WINDOW_START_UNIX + 3600,
-    aborted: false,
+    transaction_aborted: false,
+    trace_id: 'trace-tc-1',
     ...overrides,
   };
 }
 
 describe('TonAPI enumerateOutgoingJettonTransfers', () => {
-  it('completes a one-page outgoing history window', async () => {
+  it('completes a one-page outgoing history window via raw blockchain txs', async () => {
     const calls: string[] = [];
     const provider = new TonApiTestnetProvider({
       baseUrl: 'https://testnet.tonapi.io',
-      fetchImpl: async (input) => {
-        const url = requestUrl(input);
+      fetchImpl: tonApiFetchRouter((url) => {
         calls.push(url);
-        expect(url).toContain(
-          `/v2/accounts/${encodeURIComponent(HOT)}/jettons/${encodeURIComponent(MASTER)}/history`,
-        );
-        expect(url).toContain(`limit=2`);
-        expect(url).toContain(`start_date=${WINDOW_START_UNIX}`);
-        expect(url).toContain(`end_date=${WINDOW_END_UNIX}`);
-        return response({
-          operations: [tonApiOperation()],
-          next_from: 0,
-        });
-      },
+        if (
+          url.includes(`/v2/blockchain/accounts/${encodeURIComponent(JETTON_WALLET)}/transactions`)
+        ) {
+          expect(url).toContain('limit=2');
+          expect(url).toContain('sort_order=desc');
+          expect(url).not.toContain('start_date=');
+          return response({ transactions: [rawOutgoingJettonTx()] });
+        }
+        return null;
+      }),
     });
 
     const result = await provider.enumerateOutgoingJettonTransfers(baseEnumerateInput());
@@ -118,53 +211,57 @@ describe('TonAPI enumerateOutgoingJettonTransfers', () => {
     expect(result.transfers[0]).toMatchObject({
       queryId: '42',
       amountAtomic: '190000',
-      recipient: RECIPIENT,
       transferIdentity: '42',
       success: true,
       bounced: false,
       providerKind: 'tonapi',
+      senderJettonWallet: JETTON_WALLET,
     });
-    expect(calls).toHaveLength(1);
+    expect(calls.some((u) => u.includes('/transactions'))).toBe(true);
   });
 
   it('paginates with before_lt across multiple pages', async () => {
     const beforeLts: Array<string | null> = [];
     const provider = new TonApiTestnetProvider({
       baseUrl: 'https://testnet.tonapi.io',
-      fetchImpl: async (input) => {
-        const url = new URL(requestUrl(input));
-        beforeLts.push(url.searchParams.get('before_lt'));
+      fetchImpl: tonApiFetchRouter((url) => {
+        if (!url.includes('/transactions')) return null;
+        const parsed = new URL(url);
+        beforeLts.push(parsed.searchParams.get('before_lt'));
         if (beforeLts.length === 1) {
           return response({
-            operations: [
-              tonApiOperation({
-                query_id: '2',
+            transactions: [
+              rawOutgoingJettonTx({
+                hash: 'h2',
+                lt: 3002,
                 utime: WINDOW_START_UNIX + 7200,
-                lt: '3002',
-                transaction_hash: 'h2',
               }),
             ],
-            next_from: 3002,
           });
         }
-        return response({
-          operations: [
-            tonApiOperation({
-              query_id: '1',
-              utime: WINDOW_START_UNIX + 100,
-              lt: '3001',
-              transaction_hash: 'h1',
-            }),
-          ],
-          next_from: 0,
-        });
-      },
+        if (beforeLts.length === 2) {
+          return response({
+            transactions: [
+              rawOutgoingJettonTx({
+                hash: 'h1',
+                lt: 3001,
+                utime: WINDOW_START_UNIX + 100,
+              }),
+            ],
+          });
+        }
+        return response({ transactions: [] });
+      }),
     });
 
-    const result = await provider.enumerateOutgoingJettonTransfers(baseEnumerateInput());
-    expect(beforeLts).toEqual([null, '3002']);
-    expect(result.pagesFetched).toBe(2);
-    expect(result.transfers.map((t) => t.queryId)).toEqual(['2', '1']);
+    const result = await provider.enumerateOutgoingJettonTransfers({
+      ...baseEnumerateInput(),
+      pageSize: 1,
+    });
+    expect(beforeLts).toEqual([null, '3002', '3001']);
+    expect(result.pagesFetched).toBe(3);
+    expect(result.transfers.map((t) => t.transactionHash)).toEqual(['h2', 'h1']);
+    expect(result.cursorExhausted).toBe(true);
     expect(result.windowFullyCovered).toBe(true);
     expect(result.truncated).toBe(false);
   });
@@ -172,11 +269,16 @@ describe('TonAPI enumerateOutgoingJettonTransfers', () => {
   it('marks incomplete when before_lt cursor repeats', async () => {
     const provider = new TonApiTestnetProvider({
       baseUrl: 'https://testnet.tonapi.io',
-      fetchImpl: async () =>
-        response({
-          operations: [tonApiOperation({ utime: WINDOW_START_UNIX + 1000 })],
-          next_from: 1001,
-        }),
+      fetchImpl: tonApiFetchRouter((url) => {
+        if (!url.includes('/transactions')) return null;
+        return response({
+          // Full page so pagination continues with before_lt from oldest lt.
+          transactions: [
+            rawOutgoingJettonTx({ utime: WINDOW_START_UNIX + 1000, lt: 1001, hash: 'a' }),
+            rawOutgoingJettonTx({ utime: WINDOW_START_UNIX + 900, lt: 1001, hash: 'b' }),
+          ],
+        });
+      }),
     });
 
     const result = await provider.enumerateOutgoingJettonTransfers(baseEnumerateInput());
@@ -191,21 +293,20 @@ describe('TonAPI enumerateOutgoingJettonTransfers', () => {
     let page = 0;
     const provider = new TonApiTestnetProvider({
       baseUrl: 'https://testnet.tonapi.io',
-      fetchImpl: async () => {
+      fetchImpl: tonApiFetchRouter((url) => {
+        if (!url.includes('/transactions')) return null;
         page += 1;
         const lt = String(10_000 - page);
         return response({
-          operations: [
-            tonApiOperation({
-              query_id: String(page),
+          transactions: [
+            rawOutgoingJettonTx({
+              hash: `hash-${page}`,
+              lt: Number(lt),
               utime: WINDOW_START_UNIX + 500,
-              lt,
-              transaction_hash: `hash-${page}`,
             }),
           ],
-          next_from: Number(lt),
         });
-      },
+      }),
     });
 
     const result = await provider.enumerateOutgoingJettonTransfers({
@@ -218,79 +319,269 @@ describe('TonAPI enumerateOutgoingJettonTransfers', () => {
     expect(result.warnings.some((w) => /page cap/i.test(w))).toBe(true);
   });
 
-  it('fails on malformed JettonOperations payload', async () => {
+  it('fails on malformed transactions payload', async () => {
     const provider = new TonApiTestnetProvider({
       baseUrl: 'https://testnet.tonapi.io',
-      fetchImpl: async () => response({ next_from: 1 }),
+      fetchImpl: tonApiFetchRouter((url) => {
+        if (!url.includes('/transactions')) return null;
+        return response({ next_from: 1 });
+      }),
     });
     await expect(provider.enumerateOutgoingJettonTransfers(baseEnumerateInput())).rejects.toThrow(
       /MALFORMED_RESPONSE/,
     );
   });
 
-  it('ignores incoming transfers', async () => {
+  it('ignores incoming transfers (wrong in_msg source)', async () => {
     const provider = new TonApiTestnetProvider({
       baseUrl: 'https://testnet.tonapi.io',
-      fetchImpl: async () =>
-        response({
-          operations: [
-            tonApiOperation({
-              source: { address: OTHER_OWNER },
-              destination: { address: HOT },
-              query_id: 'incoming',
-            }),
-            tonApiOperation({ query_id: 'outgoing' }),
-          ],
-          next_from: 0,
-        }),
-    });
-    const result = await provider.enumerateOutgoingJettonTransfers(baseEnumerateInput());
-    expect(result.transfers.map((t) => t.queryId)).toEqual(['outgoing']);
-  });
-
-  it('ignores wrong jetton masters', async () => {
-    const provider = new TonApiTestnetProvider({
-      baseUrl: 'https://testnet.tonapi.io',
-      fetchImpl: async () =>
-        response({
-          operations: [
-            tonApiOperation({
-              jetton: {
-                address: OTHER_MASTER,
-                name: 'X',
-                symbol: 'X',
-                decimals: 9,
-                verification: 'none',
-                image: '',
-                score: 0,
+      fetchImpl: tonApiFetchRouter((url) => {
+        if (!url.includes('/transactions')) return null;
+        return response({
+          transactions: [
+            rawOutgoingJettonTx({
+              hash: 'incoming',
+              in_msg: {
+                msg_type: 'int_msg',
+                source: { address: OTHER_OWNER },
+                destination: { address: JETTON_WALLET },
+                bounced: false,
+                raw_body: TRANSFER_RAW_BODY,
               },
-              query_id: 'wrong',
             }),
-            tonApiOperation({ query_id: 'right' }),
+            rawOutgoingJettonTx({ hash: 'outgoing' }),
           ],
-          next_from: 0,
-        }),
+        });
+      }),
     });
-    const result = await provider.enumerateOutgoingJettonTransfers(baseEnumerateInput());
-    expect(result.transfers.map((t) => t.queryId)).toEqual(['right']);
+    const result = await provider.enumerateOutgoingJettonTransfers({
+      ...baseEnumerateInput(),
+      pageSize: 10,
+    });
+    expect(result.transfers.map((t) => t.transactionHash)).toEqual(['outgoing']);
   });
 
-  it('ignores bounced and failed operations', async () => {
+  it('refuses transfers when resolveJettonWallet returns a different wallet', async () => {
     const provider = new TonApiTestnetProvider({
       baseUrl: 'https://testnet.tonapi.io',
-      fetchImpl: async () =>
-        response({
-          operations: [
-            tonApiOperation({ query_id: 'bounced', bounced: true }),
-            tonApiOperation({ query_id: 'failed', success: false }),
-            tonApiOperation({ query_id: 'mint', operation: 'mint' }),
-            tonApiOperation({ query_id: 'ok' }),
-          ],
-          next_from: 0,
-        }),
+      fetchImpl: async (input) => {
+        const url = requestUrl(input);
+        if (url.includes(`/jettons/${encodeURIComponent(MASTER)}`) && !url.includes('/history')) {
+          // Wrong jetton wallet for the hot owner — binding fails closed.
+          return response(jettonBalanceBody(WRONG_JETTON_WALLET));
+        }
+        if (url.includes('/history')) {
+          return response({ events: [], operations: [], next_from: 0 });
+        }
+        if (url.includes('/transactions')) {
+          return response({ transactions: [rawOutgoingJettonTx()] });
+        }
+        throw new Error(`Unexpected TonAPI fixture request: ${url}`);
+      },
     });
     const result = await provider.enumerateOutgoingJettonTransfers(baseEnumerateInput());
-    expect(result.transfers.map((t) => t.queryId)).toEqual(['ok']);
+    expect(result.transfers).toHaveLength(0);
+    expect(result.warnings.some((w) => /does not equal hotWalletJettonWallet/i.test(w))).toBe(true);
+  });
+
+  it('ignores bounced and failed transactions', async () => {
+    const provider = new TonApiTestnetProvider({
+      baseUrl: 'https://testnet.tonapi.io',
+      fetchImpl: tonApiFetchRouter((url) => {
+        if (!url.includes('/transactions')) return null;
+        return response({
+          transactions: [
+            rawOutgoingJettonTx({
+              hash: 'bounced',
+              in_msg: {
+                msg_type: 'int_msg',
+                source: { address: HOT },
+                destination: { address: JETTON_WALLET },
+                bounced: true,
+                raw_body: TRANSFER_RAW_BODY,
+              },
+            }),
+            rawOutgoingJettonTx({
+              hash: 'failed',
+              success: false,
+              aborted: true,
+              compute_phase: { skipped: false, success: false, exit_code: 1 },
+            }),
+            rawOutgoingJettonTx({ hash: 'ok' }),
+          ],
+        });
+      }),
+    });
+    const result = await provider.enumerateOutgoingJettonTransfers({
+      ...baseEnumerateInput(),
+      pageSize: 10,
+    });
+    expect(result.transfers.map((t) => t.transactionHash)).toEqual(['ok']);
+  });
+
+  it('documents events/actions discovery shape but actions alone cannot produce transfers', async () => {
+    const eventsOnly = tonApiEventsHistory();
+    expect(eventsOnly).toMatchObject({
+      events: [
+        {
+          actions: [{ type: 'JettonTransfer', status: 'ok' }],
+        },
+      ],
+      next_from: 0,
+    });
+
+    const provider = new TonApiTestnetProvider({
+      baseUrl: 'https://testnet.tonapi.io',
+      fetchImpl: async (input) => {
+        const url = requestUrl(input);
+        if (url.includes(`/jettons/${encodeURIComponent(MASTER)}`) && !url.includes('/history')) {
+          return response(jettonBalanceBody(JETTON_WALLET));
+        }
+        if (url.includes('/history')) {
+          return response(eventsOnly);
+        }
+        if (url.includes('/transactions')) {
+          // Empty raw window — discovery will try the action hash next.
+          return response({ transactions: [] });
+        }
+        if (url.includes('/v2/blockchain/transactions/')) {
+          // Action claims transfer but raw messages disagree (no TEP-74 proof).
+          return response({
+            hash: 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+            lt: 1,
+            utime: WINDOW_START_UNIX + 3600,
+            account: { address: JETTON_WALLET },
+            ...succeededPhases(),
+            in_msg: {
+              msg_type: 'int_msg',
+              source: { address: HOT },
+              destination: { address: JETTON_WALLET },
+              bounced: false,
+              raw_body: '00',
+            },
+            out_msgs: [],
+          });
+        }
+        throw new Error(`Unexpected TonAPI fixture request: ${url}`);
+      },
+    });
+
+    const result = await provider.enumerateOutgoingJettonTransfers(baseEnumerateInput());
+    expect(result.transfers).toHaveLength(0);
+    expect(
+      result.warnings.some((w) => /action claimed JettonTransfer but raw proof failed/i.test(w)),
+    ).toBe(true);
+  });
+
+  it('action claims transfer but raw messages disagree → not included', async () => {
+    const claimedHash = 'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd';
+    const provider = new TonApiTestnetProvider({
+      baseUrl: 'https://testnet.tonapi.io',
+      fetchImpl: async (input) => {
+        const url = requestUrl(input);
+        if (
+          url.includes(`/jettons/`) &&
+          url.includes(encodeURIComponent(MASTER)) &&
+          !url.includes('/history')
+        ) {
+          if (addressInUrl(url, RECIPIENT)) {
+            return response(jettonBalanceBody(RECIPIENT_JETTON_WALLET));
+          }
+          return response(jettonBalanceBody(JETTON_WALLET));
+        }
+        if (url.includes('/history')) {
+          return response(
+            tonApiEventsHistory({
+              events: [
+                {
+                  event_id: claimedHash,
+                  timestamp: WINDOW_START_UNIX + 3600,
+                  actions: [
+                    {
+                      type: 'JettonTransfer',
+                      status: 'ok',
+                      transaction_hash: claimedHash,
+                    },
+                  ],
+                },
+              ],
+            }),
+          );
+        }
+        if (
+          url.includes(`/v2/blockchain/accounts/${encodeURIComponent(JETTON_WALLET)}/transactions`)
+        ) {
+          return response({ transactions: [] });
+        }
+        if (url.includes(`/v2/blockchain/transactions/${claimedHash}`)) {
+          return response({
+            hash: claimedHash,
+            lt: 9,
+            utime: WINDOW_START_UNIX + 3600,
+            account: { address: JETTON_WALLET },
+            ...succeededPhases(),
+            in_msg: {
+              msg_type: 'ext_in_msg',
+              destination: { address: JETTON_WALLET },
+              bounced: false,
+            },
+            out_msgs: [],
+          });
+        }
+        throw new Error(`Unexpected TonAPI fixture request: ${url}`);
+      },
+    });
+
+    const result = await provider.enumerateOutgoingJettonTransfers(baseEnumerateInput());
+    expect(result.transfers).toHaveLength(0);
+    expect(
+      result.warnings.some((w) => /action claimed JettonTransfer but raw proof failed/i.test(w)),
+    ).toBe(true);
+  });
+
+  it('raw proves → included (including when discovery also surfaces the hash)', async () => {
+    const hash = 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
+    const provider = new TonApiTestnetProvider({
+      baseUrl: 'https://testnet.tonapi.io',
+      fetchImpl: async (input) => {
+        const url = requestUrl(input);
+        if (
+          url.includes(`/jettons/`) &&
+          url.includes(encodeURIComponent(MASTER)) &&
+          !url.includes('/history')
+        ) {
+          if (addressInUrl(url, RECIPIENT)) {
+            return response(jettonBalanceBody(RECIPIENT_JETTON_WALLET));
+          }
+          return response(jettonBalanceBody(JETTON_WALLET));
+        }
+        if (url.includes('/history')) {
+          return response(
+            tonApiEventsHistory({
+              events: [
+                {
+                  event_id: hash,
+                  timestamp: WINDOW_START_UNIX + 3600,
+                  actions: [{ type: 'JettonTransfer', status: 'ok', transaction_hash: hash }],
+                },
+              ],
+            }),
+          );
+        }
+        if (
+          url.includes(`/v2/blockchain/accounts/${encodeURIComponent(JETTON_WALLET)}/transactions`)
+        ) {
+          return response({ transactions: [rawOutgoingJettonTx({ hash })] });
+        }
+        throw new Error(`Unexpected TonAPI fixture request: ${url}`);
+      },
+    });
+
+    const result = await provider.enumerateOutgoingJettonTransfers(baseEnumerateInput());
+    expect(result.transfers).toHaveLength(1);
+    expect(result.transfers[0]?.queryId).toBe('42');
+    expect(result.transfers[0]?.amountAtomic).toBe('190000');
+    expect(result.transfers[0]?.transactionHash).toBe(hash);
   });
 });
 
@@ -324,6 +615,7 @@ describe('TonCenter enumerateOutgoingJettonTransfers', () => {
       recipient: RECIPIENT,
       providerKind: 'toncenter',
       transferIdentity: '42',
+      senderJettonWallet: JETTON_WALLET,
     });
     expect(calls).toHaveLength(1);
   });
@@ -400,18 +692,33 @@ describe('TonCenter enumerateOutgoingJettonTransfers', () => {
     expect(result.cursorExhausted).toBe(false);
   });
 
-  it('ignores aborted transfers and wrong direction client-side', async () => {
+  it('ignores transaction_aborted true and missing aborted; never treats aborted as success', async () => {
     const provider = new TonCenterTestnetProvider({
       baseUrl: 'https://testnet.toncenter.com/api/v2',
       fetchImpl: async () =>
         response({
           jetton_transfers: [
-            tonCenterTransfer({ query_id: 'aborted', aborted: true }),
+            tonCenterTransfer({ query_id: 'aborted', transaction_aborted: true }),
+            tonCenterTransfer({ query_id: 'missing-aborted', transaction_aborted: undefined }),
+            // Legacy alternate fields must not authorize inclusion.
+            {
+              query_id: 'legacy-success',
+              source: HOT,
+              destination: RECIPIENT,
+              amount: '190000',
+              jetton_master: MASTER,
+              source_wallet: JETTON_WALLET,
+              transaction_hash: 'legacy',
+              transaction_lt: '1',
+              transaction_now: WINDOW_START_UNIX + 3600,
+              aborted: false,
+              success: true,
+            },
             tonCenterTransfer({
               query_id: 'incoming',
               source: OTHER_OWNER,
               destination: HOT,
-              jetton_wallet: '0:7777777777777777777777777777777777777777777777777777777777777777',
+              source_wallet: WRONG_JETTON_WALLET,
             }),
             tonCenterTransfer({ query_id: 'ok' }),
           ],
@@ -424,6 +731,7 @@ describe('TonCenter enumerateOutgoingJettonTransfers', () => {
     expect(result.pagesFetched).toBe(1);
     expect(result.cursorExhausted).toBe(true);
     expect(result.transfers.map((t) => t.queryId)).toEqual(['ok']);
+    expect(result.transfers.every((t) => t.success === true)).toBe(true);
   });
 });
 
