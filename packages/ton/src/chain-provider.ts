@@ -71,6 +71,52 @@ export interface FindTransactionsByQueryIdInput {
   readonly amountAtomic?: string;
 }
 
+/** Time-window enumeration of outgoing Jetton transfers (provider-neutral). */
+export interface EnumerateOutgoingJettonTransfersInput {
+  readonly hotWalletAddress: string;
+  readonly hotWalletJettonWallet: string;
+  readonly jettonMaster: string;
+  readonly windowStart: string; // ISO
+  readonly windowEnd: string; // ISO
+  readonly pageSize?: number;
+}
+
+export interface EnumeratedOutgoingJettonTransfer {
+  readonly providerKind: string;
+  readonly networkGlobalId: number;
+  readonly hotWalletAddress: string;
+  readonly senderJettonWallet: string | null;
+  readonly jettonMaster: string;
+  readonly transactionHash: string | null;
+  readonly transactionLt: string | null;
+  readonly queryId: string | null;
+  readonly amountAtomic: string;
+  readonly recipient: string;
+  readonly timestamp: string; // ISO
+  readonly success: boolean;
+  readonly bounced: boolean;
+  readonly transferIdentity: string;
+  readonly traceId?: string | null;
+}
+
+export interface EnumerateOutgoingJettonTransfersResult {
+  readonly providerKind: string;
+  readonly networkGlobalId: number;
+  readonly startedAt: string;
+  readonly completedAt: string;
+  readonly requestedWindowStart: string;
+  readonly requestedWindowEnd: string;
+  readonly pagesFetched: number;
+  readonly recordsSeen: number;
+  readonly cursorExhausted: boolean;
+  readonly windowFullyCovered: boolean;
+  readonly oldestObservedTimestamp: string | null;
+  readonly newestObservedTimestamp: string | null;
+  readonly truncated: boolean;
+  readonly warnings: readonly string[];
+  readonly transfers: readonly EnumeratedOutgoingJettonTransfer[];
+}
+
 /**
  * Thin chain provider port — HTTP adapters and fakes implement this.
  * Broadcast lives in the worker/withdrawals path, never in apps/signer.
@@ -95,6 +141,14 @@ export interface TonChainProvider {
   observeJettonTransfer(
     input: FindTransactionsByQueryIdInput,
   ): Promise<JettonTransferEvidence | null>;
+
+  /**
+   * Enumerate outgoing Jetton transfers in a time window.
+   * Distinct from findTransactionsByQueryId (targeted confirmation by query id).
+   */
+  enumerateOutgoingJettonTransfers(
+    input: EnumerateOutgoingJettonTransfersInput,
+  ): Promise<EnumerateOutgoingJettonTransfersResult>;
 
   health(): Promise<TonProviderHealth>;
 }
