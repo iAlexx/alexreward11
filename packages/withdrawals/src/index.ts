@@ -365,6 +365,23 @@ export type {
 } from './phase10-chain-history-collector.js';
 
 export {
+  PHASE10_READONLY_VALIDATION_SCHEMA_VERSION,
+  assertPhase10ReadonlyValidationReportIntegrity,
+  digestPhase10ReadonlyValidationReport,
+  parsePhase10ReadonlyValidationReport,
+  runPhase10ChainHistoryReadonlyValidate,
+  writePhase10ReadonlyValidationReport,
+} from './phase10-chain-history-readonly-validate.js';
+export type {
+  Phase10ReadonlyValidationAgreedTransfer,
+  Phase10ReadonlyValidationCoverage,
+  Phase10ReadonlyValidationHealth,
+  Phase10ReadonlyValidationReport,
+  Phase10ReadonlyValidationVerdict,
+  RunPhase10ChainHistoryReadonlyValidateInput,
+} from './phase10-chain-history-readonly-validate.js';
+
+export {
   PHASE10_HISTORICAL_BASELINE_SCHEMA_VERSION,
   capturePhase10HistoricalBaseline,
   historicalBaselineInputFromArtifact,

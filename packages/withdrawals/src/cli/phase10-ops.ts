@@ -39,7 +39,15 @@ import { runPhase10Preflight } from '../phase10-preflight.js';
 import { runPhase10Readiness, type Phase10ReadinessConfig } from '../phase10-readiness.js';
 import { runPhase10RestoreReconcileScan } from '../phase10-restore-reconcile.js';
 import { buildPhase10PayoutConfig } from '../phase10-config.js';
+import {
+  runPhase10ChainHistoryReadonlyValidate,
+  writePhase10ReadonlyValidationReport,
+} from '../phase10-chain-history-readonly-validate.js';
 import type { DeploymentEnvironment } from '../config.js';
+import {
+  readonlyValidateVerdictImpliesSuccess,
+  setPhase10OpsProcessExitCode,
+} from './phase10-ops-exit.js';
 
 const COMMANDS = new Set([
   'readiness',
@@ -53,6 +61,7 @@ const COMMANDS = new Set([
   'campaign-attach',
   'campaign-rescan',
   'campaign-finalize',
+  'chain-history-readonly-validate',
 ]);
 
 function usage(): never {
@@ -60,7 +69,7 @@ function usage(): never {
     JSON.stringify({
       ok: false,
       message:
-        'usage: phase10-ops <readiness|preflight|baseline-capture|restore-reconcile|hot-wallet-monitor|campaign-plan|campaign-init|campaign-status|campaign-attach|campaign-rescan|campaign-finalize> [flags]',
+        'usage: phase10-ops <readiness|preflight|baseline-capture|restore-reconcile|hot-wallet-monitor|campaign-plan|campaign-init|campaign-status|campaign-attach|campaign-rescan|campaign-finalize|chain-history-readonly-validate> [flags]',
     }),
   );
   process.exit(2);
@@ -335,8 +344,96 @@ async function main(): Promise<void> {
   const worker = loadWorkerConfig();
   const pool = createDatabasePool(worker.DATABASE_URL);
   const controlledUserId = readFlag(argv, '--user-id')?.trim() || null;
+  let exitCode = 0;
 
   try {
+    if (command === 'chain-history-readonly-validate') {
+      const windowStart = readFlag(argv, '--window-start');
+      const windowEnd = readFlag(argv, '--window-end');
+      const outPath = readFlag(argv, '--out');
+      if (windowStart === undefined || windowEnd === undefined) usage();
+
+      if (
+        worker.WITHDRAWAL_REAL_CHAIN_ENABLED !== false ||
+        worker.WITHDRAWAL_FAKE_CHAIN_ENABLED !== false
+      ) {
+        printJson({
+          ok: false,
+          command: 'chain-history-readonly-validate',
+          validationOnly: true,
+          acceptanceEnabled: false,
+          error:
+            'REFUSE: WITHDRAWAL_REAL_CHAIN_ENABLED and WITHDRAWAL_FAKE_CHAIN_ENABLED must both be false',
+        });
+        // process.exitCode survives early return after finally { pool.end() }.
+        exitCode = 1;
+        setPhase10OpsProcessExitCode(1);
+        return;
+      }
+
+      const report = await runPhase10ChainHistoryReadonlyValidate({
+        db: pool,
+        windowStart,
+        windowEnd,
+        primary: {
+          kind: worker.TON_PRIMARY_PROVIDER_KIND || '',
+          baseUrl: worker.TON_PRIMARY_PROVIDER_URL || '',
+          apiKey: worker.TON_PRIMARY_PROVIDER_API_KEY || null,
+        },
+        secondary: {
+          kind: worker.TON_SECONDARY_PROVIDER_KIND || '',
+          baseUrl: worker.TON_SECONDARY_PROVIDER_URL || '',
+          apiKey: worker.TON_SECONDARY_PROVIDER_API_KEY || null,
+        },
+        jettonMaster: worker.TON_TESTNET_JETTON_MASTER || '',
+        networkCode: worker.WITHDRAWAL_NETWORK_CODE,
+        realChainEnabled: worker.WITHDRAWAL_REAL_CHAIN_ENABLED,
+        fakeChainEnabled: worker.WITHDRAWAL_FAKE_CHAIN_ENABLED,
+      });
+
+      if (outPath !== undefined) {
+        await writePhase10ReadonlyValidationReport(outPath, report);
+      }
+
+      const ok = readonlyValidateVerdictImpliesSuccess(report.verdict);
+      exitCode = ok ? 0 : 1;
+      // Prefer process.exitCode over process.exit so finally pool cleanup still runs.
+      setPhase10OpsProcessExitCode(exitCode);
+      printJson({
+        ok,
+        command: 'chain-history-readonly-validate',
+        validationOnly: true as const,
+        acceptanceEnabled: false as const,
+        verdict: report.verdict,
+        report: {
+          schemaVersion: report.schemaVersion,
+          generatedAt: report.generatedAt,
+          networkCode: report.networkCode,
+          networkGlobalId: report.networkGlobalId,
+          hotWalletAddress: report.hotWalletAddress,
+          hotWalletJettonWallet: report.hotWalletJettonWallet,
+          jettonMaster: report.jettonMaster,
+          observationWindow: report.observationWindow,
+          primaryProviderFingerprint: report.primaryProviderFingerprint,
+          secondaryProviderFingerprint: report.secondaryProviderFingerprint,
+          primaryHealth: report.primaryHealth,
+          secondaryHealth: report.secondaryHealth,
+          primaryCoverage: report.primaryCoverage,
+          secondaryCoverage: report.secondaryCoverage,
+          providerAgreement: report.providerAgreement,
+          agreedTransferCount: report.agreedTransferCount,
+          onlyPrimaryCount: report.onlyPrimaryCount,
+          onlySecondaryCount: report.onlySecondaryCount,
+          agreedTransfers: report.agreedTransfers,
+          verdict: report.verdict,
+          notes: report.notes,
+          reportDigest: report.reportDigest,
+          ...(outPath !== undefined ? { path: outPath } : {}),
+        },
+      });
+      return;
+    }
+
     if (command === 'campaign-rescan' || command === 'campaign-finalize') {
       const manifestPath = readFlag(argv, '--manifest');
       if (manifestPath === undefined) usage();
@@ -510,6 +607,10 @@ async function main(): Promise<void> {
     });
   } finally {
     await pool.end();
+  }
+
+  if (exitCode !== 0) {
+    process.exit(exitCode);
   }
 }
 
