@@ -1,6 +1,9 @@
 import {
   assertTestnetOnly,
   TON_TESTNET_NETWORK_GLOBAL_ID,
+  type EnumerateOutgoingJettonTransfersInput,
+  type EnumerateOutgoingJettonTransfersResult,
+  type EnumeratedOutgoingJettonTransfer,
   type FindTransactionsByQueryIdInput,
   type JettonTransferEvidence,
   type TonAccountBalance,
@@ -33,6 +36,7 @@ export class FakeTonChainProvider implements TonChainProvider {
   private readonly balances = new Map<string, string>();
   private readonly jettonBalances = new Map<string, string>();
   private readonly transfers: JettonTransferEvidence[] = [];
+  private readonly enumeratedTransfers: EnumeratedOutgoingJettonTransfer[] = [];
   private readonly submittedBocs: string[] = [];
   private sendBocTimeout: boolean;
   private sendBocFailBeforeSubmit: boolean;
@@ -60,6 +64,10 @@ export class FakeTonChainProvider implements TonChainProvider {
 
   seedTransfer(evidence: JettonTransferEvidence): void {
     this.transfers.push(evidence);
+  }
+
+  seedEnumeratedOutgoingTransfer(record: EnumeratedOutgoingJettonTransfer): void {
+    this.enumeratedTransfers.push(record);
   }
 
   getSubmittedBocs(): readonly string[] {
@@ -145,6 +153,50 @@ export class FakeTonChainProvider implements TonChainProvider {
   ): Promise<JettonTransferEvidence | null> {
     const matches = await this.findTransactionsByQueryId(input);
     return matches.find((evidence) => evidence.proofStage === 'COMPLETE') ?? matches[0] ?? null;
+  }
+
+  async enumerateOutgoingJettonTransfers(
+    input: EnumerateOutgoingJettonTransfersInput,
+  ): Promise<EnumerateOutgoingJettonTransfersResult> {
+    const startedAt = new Date().toISOString();
+    const windowStartMs = Date.parse(input.windowStart);
+    const windowEndMs = Date.parse(input.windowEnd);
+    const transfers = this.enumeratedTransfers.filter((record) => {
+      if (record.hotWalletAddress !== input.hotWalletAddress) return false;
+      if (record.jettonMaster !== input.jettonMaster) return false;
+      if (
+        record.senderJettonWallet !== null &&
+        record.senderJettonWallet !== input.hotWalletJettonWallet
+      ) {
+        return false;
+      }
+      if (!record.success || record.bounced) return false;
+      const ts = Date.parse(record.timestamp);
+      return Number.isFinite(ts) && ts >= windowStartMs && ts <= windowEndMs;
+    });
+    const timestamps = transfers
+      .map((t) => Date.parse(t.timestamp))
+      .filter((value) => Number.isFinite(value));
+    const oldest = timestamps.length === 0 ? null : new Date(Math.min(...timestamps)).toISOString();
+    const newest = timestamps.length === 0 ? null : new Date(Math.max(...timestamps)).toISOString();
+    const completedAt = new Date().toISOString();
+    return {
+      providerKind: 'fake',
+      networkGlobalId: this.networkGlobalId,
+      startedAt,
+      completedAt,
+      requestedWindowStart: input.windowStart,
+      requestedWindowEnd: input.windowEnd,
+      pagesFetched: 1,
+      recordsSeen: transfers.length,
+      cursorExhausted: true,
+      windowFullyCovered: true,
+      oldestObservedTimestamp: oldest,
+      newestObservedTimestamp: newest,
+      truncated: false,
+      warnings: [],
+      transfers,
+    };
   }
 
   async health(): Promise<TonProviderHealth> {

@@ -2,6 +2,9 @@ import { Address } from '@ton/core';
 
 import {
   TON_TESTNET_NETWORK_GLOBAL_ID,
+  type EnumerateOutgoingJettonTransfersInput,
+  type EnumerateOutgoingJettonTransfersResult,
+  type EnumeratedOutgoingJettonTransfer,
   type FindTransactionsByQueryIdInput,
   type JettonTransferEvidence,
   type TonAccountBalance,
@@ -10,6 +13,16 @@ import {
   type TonProviderHealth,
   type TonSendBocResult,
 } from './chain-provider.js';
+import {
+  ENUMERATE_HISTORY_MAX_PAGES,
+  buildTransferIdentity,
+  finalizeWindowCoverage,
+  isoToUnixSeconds,
+  resolvePageSize,
+  timestampInInclusiveWindow,
+  trackObservedBounds,
+  unixSecondsToIso,
+} from './outgoing-jetton-history.js';
 import {
   asRecord,
   assertTestnetProviderUrl,
@@ -364,6 +377,218 @@ export class TonApiTestnetProvider implements TonChainProvider {
     input: FindTransactionsByQueryIdInput,
   ): Promise<JettonTransferEvidence | null> {
     return (await this.findTransactionsByQueryId(input))[0] ?? null;
+  }
+
+  async enumerateOutgoingJettonTransfers(
+    input: EnumerateOutgoingJettonTransfersInput,
+  ): Promise<EnumerateOutgoingJettonTransfersResult> {
+    const startedAt = new Date().toISOString();
+    const pageSize = resolvePageSize(input.pageSize);
+    const windowStartUnix = isoToUnixSeconds(input.windowStart, 'windowStart');
+    const windowEndUnix = isoToUnixSeconds(input.windowEnd, 'windowEnd');
+    if (windowEndUnix < windowStartUnix) {
+      throw new Error('MALFORMED_INPUT: windowEnd must be >= windowStart');
+    }
+
+    const transfers: EnumeratedOutgoingJettonTransfer[] = [];
+    const warnings: string[] = [];
+    const observed = { oldest: null as number | null, newest: null as number | null };
+    let pagesFetched = 0;
+    let recordsSeen = 0;
+    let cursorExhausted = false;
+    let truncatedBySafety = false;
+    let beforeLt: string | undefined;
+
+    while (pagesFetched < ENUMERATE_HISTORY_MAX_PAGES) {
+      const params = new URLSearchParams();
+      params.set('limit', String(pageSize));
+      params.set('start_date', String(windowStartUnix));
+      params.set('end_date', String(windowEndUnix));
+      if (beforeLt !== undefined) params.set('before_lt', beforeLt);
+
+      const path =
+        `/v2/accounts/${encodeURIComponent(input.hotWalletAddress)}` +
+        `/jettons/${encodeURIComponent(input.jettonMaster)}/history?${params.toString()}`;
+      const body = await this.get(path, 'TonAPI jetton history');
+      pagesFetched += 1;
+
+      if (!Array.isArray(body.operations)) {
+        throw new Error('MALFORMED_RESPONSE: TonAPI jetton history operations missing');
+      }
+      const operations = body.operations;
+      if (operations.length === 0) {
+        cursorExhausted = true;
+        break;
+      }
+
+      let pageOldest: number | null = null;
+      for (const raw of operations) {
+        const operation = asRecord(raw, 'TonAPI jetton operation');
+        recordsSeen += 1;
+        const utime = Number(operation.utime);
+        if (!Number.isFinite(utime)) {
+          warnings.push('skipped operation with invalid utime');
+          continue;
+        }
+        trackObservedBounds(observed, utime);
+        if (pageOldest === null || utime < pageOldest) pageOldest = utime;
+
+        const mapped = this.mapOutgoingJettonOperation(
+          operation,
+          input,
+          utime,
+          windowStartUnix,
+          windowEndUnix,
+        );
+        if (mapped !== null) transfers.push(mapped);
+      }
+
+      if (pageOldest !== null && pageOldest < windowStartUnix) {
+        break;
+      }
+
+      const nextFrom = body.next_from;
+      const nextBeforeLt =
+        typeof nextFrom === 'string' || typeof nextFrom === 'number' || typeof nextFrom === 'bigint'
+          ? String(nextFrom)
+          : null;
+      if (nextBeforeLt === null || nextBeforeLt === '' || nextBeforeLt === '0') {
+        cursorExhausted = true;
+        break;
+      }
+      if (beforeLt !== undefined && nextBeforeLt === beforeLt) {
+        warnings.push('cursor repetition: before_lt did not advance');
+        truncatedBySafety = true;
+        break;
+      }
+      beforeLt = nextBeforeLt;
+    }
+
+    if (pagesFetched >= ENUMERATE_HISTORY_MAX_PAGES && !cursorExhausted) {
+      const reachedPast = observed.oldest !== null && observed.oldest < windowStartUnix;
+      if (!reachedPast) {
+        truncatedBySafety = true;
+        warnings.push(`page cap reached (${ENUMERATE_HISTORY_MAX_PAGES})`);
+      }
+    }
+
+    const coverage = finalizeWindowCoverage({
+      truncatedBySafety,
+      cursorExhausted,
+      oldestObservedUnix: observed.oldest,
+      windowStartUnix,
+    });
+    const completedAt = new Date().toISOString();
+    return {
+      providerKind: 'tonapi',
+      networkGlobalId: this.networkGlobalId,
+      startedAt,
+      completedAt,
+      requestedWindowStart: input.windowStart,
+      requestedWindowEnd: input.windowEnd,
+      pagesFetched,
+      recordsSeen,
+      cursorExhausted,
+      windowFullyCovered: coverage.windowFullyCovered,
+      oldestObservedTimestamp: observed.oldest === null ? null : unixSecondsToIso(observed.oldest),
+      newestObservedTimestamp: observed.newest === null ? null : unixSecondsToIso(observed.newest),
+      truncated: coverage.truncated,
+      warnings,
+      transfers,
+    };
+  }
+
+  private mapOutgoingJettonOperation(
+    operation: Record<string, unknown>,
+    input: EnumerateOutgoingJettonTransfersInput,
+    utime: number,
+    windowStartUnix: number,
+    windowEndUnix: number,
+  ): EnumeratedOutgoingJettonTransfer | null {
+    if (operation.operation !== 'transfer') return null;
+    if (!timestampInInclusiveWindow(utime, windowStartUnix, windowEndUnix)) return null;
+
+    const bounced = operation.bounced === true;
+    const success =
+      operation.success === undefined
+        ? !bounced && operation.aborted !== true
+        : operation.success === true;
+    if (!success || bounced || operation.aborted === true) return null;
+
+    const jettonMaster =
+      optionalAddress(operation.jetton) ??
+      (typeof operation.jetton_master === 'string' ? operation.jetton_master : null);
+    if (jettonMaster === null || !addressEquals(jettonMaster, input.jettonMaster)) return null;
+
+    const source =
+      optionalAddress(operation.source) ??
+      (typeof operation.owner === 'string' ? operation.owner : null);
+    const senderJettonWallet =
+      optionalAddress(operation.jetton_wallet) ??
+      optionalAddress(operation.sender_jetton_wallet) ??
+      optionalAddress(operation.wallet_address) ??
+      (typeof operation.jetton_wallet === 'string' ? operation.jetton_wallet : null);
+
+    const outgoingByOwner = source !== null && addressEquals(source, input.hotWalletAddress);
+    const outgoingByWallet =
+      senderJettonWallet !== null && addressEquals(senderJettonWallet, input.hotWalletJettonWallet);
+    if (!outgoingByOwner && !outgoingByWallet) return null;
+
+    const recipient =
+      optionalAddress(operation.destination) ??
+      (typeof operation.destination === 'string' ? operation.destination : null);
+    if (recipient === null || recipient === '') return null;
+    // Incoming to hot wallet is never outgoing, even if wallet fields match.
+    if (addressEquals(recipient, input.hotWalletAddress)) return null;
+
+    const amountAtomic = decimalString(operation.amount, 'TonAPI jetton history amount');
+    const transactionHash =
+      typeof operation.transaction_hash === 'string' && operation.transaction_hash !== ''
+        ? operation.transaction_hash
+        : null;
+    const transactionLt =
+      typeof operation.lt === 'string' || typeof operation.lt === 'number'
+        ? String(operation.lt)
+        : null;
+    const queryIdRaw = operation.query_id;
+    let queryId: string | null = null;
+    if (
+      typeof queryIdRaw === 'string' ||
+      typeof queryIdRaw === 'number' ||
+      typeof queryIdRaw === 'bigint'
+    ) {
+      const asString = String(queryIdRaw);
+      queryId = asString === '' ? null : asString;
+    }
+    const traceId =
+      typeof operation.trace_id === 'string' && operation.trace_id !== ''
+        ? operation.trace_id
+        : null;
+
+    return {
+      providerKind: 'tonapi',
+      networkGlobalId: this.networkGlobalId,
+      hotWalletAddress: input.hotWalletAddress,
+      senderJettonWallet:
+        senderJettonWallet ?? (outgoingByWallet ? input.hotWalletJettonWallet : null),
+      jettonMaster: input.jettonMaster,
+      transactionHash,
+      transactionLt,
+      queryId,
+      amountAtomic,
+      recipient,
+      timestamp: unixSecondsToIso(utime),
+      success: true,
+      bounced: false,
+      transferIdentity: buildTransferIdentity({
+        queryId,
+        transactionHash,
+        transactionLt,
+        amountAtomic,
+        recipient,
+      }),
+      ...(traceId !== null ? { traceId } : {}),
+    };
   }
 
   async health(): Promise<TonProviderHealth> {

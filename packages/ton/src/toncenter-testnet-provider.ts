@@ -2,6 +2,9 @@ import { Address, beginCell, Cell } from '@ton/core';
 
 import {
   TON_TESTNET_NETWORK_GLOBAL_ID,
+  type EnumerateOutgoingJettonTransfersInput,
+  type EnumerateOutgoingJettonTransfersResult,
+  type EnumeratedOutgoingJettonTransfer,
   type FindTransactionsByQueryIdInput,
   type JettonTransferEvidence,
   type TonAccountBalance,
@@ -11,9 +14,20 @@ import {
   type TonSendBocResult,
 } from './chain-provider.js';
 import {
+  ENUMERATE_HISTORY_MAX_PAGES,
+  buildTransferIdentity,
+  finalizeWindowCoverage,
+  isoToUnixSeconds,
+  resolvePageSize,
+  timestampInInclusiveWindow,
+  trackObservedBounds,
+  unixSecondsToIso,
+} from './outgoing-jetton-history.js';
+import {
   asRecord,
   assertOkTonCenterBody,
   assertTestnetProviderUrl,
+  assertTestnetResponse,
   decimalString,
   fetchJson,
   parseStackNumber,
@@ -147,14 +161,48 @@ function externalInHashMatches(
   return false;
 }
 
+/** Derive Indexed API v3 base URL from a v2 or bare TonCenter base. */
+export function deriveTonCenterV3BaseUrl(baseUrl: string): string {
+  const trimmed = baseUrl.replace(/\/+$/, '');
+  if (trimmed.endsWith('/api/v2')) {
+    return `${trimmed.slice(0, -'/api/v2'.length)}/api/v3`;
+  }
+  if (trimmed.includes('/api/v3')) {
+    return trimmed;
+  }
+  try {
+    const url = new URL(trimmed);
+    if (url.pathname === '' || url.pathname === '/') {
+      return `${url.origin}/api/v3`;
+    }
+  } catch {
+    // fall through to append
+  }
+  return `${trimmed}/api/v3`;
+}
+
+function optionalStringField(
+  record: Record<string, unknown>,
+  keys: readonly string[],
+): string | null {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string' && value !== '') return value;
+    if (typeof value === 'number' || typeof value === 'bigint') return String(value);
+  }
+  return null;
+}
+
 export class TonCenterTestnetProvider implements TonChainProvider {
   readonly networkGlobalId = TON_TESTNET_NETWORK_GLOBAL_ID;
   private readonly baseUrl: string;
+  private readonly v3BaseUrl: string;
   private readonly apiKey: string | null;
   private readonly fetchImpl: typeof fetch;
 
   constructor(config: TonCenterTestnetProviderConfig) {
     this.baseUrl = assertTestnetProviderUrl(config.baseUrl, 'TonCenterTestnetProvider');
+    this.v3BaseUrl = deriveTonCenterV3BaseUrl(this.baseUrl);
     this.apiKey = config.apiKey?.trim() ? config.apiKey.trim() : null;
     this.fetchImpl = config.fetchImpl ?? fetch;
   }
@@ -186,6 +234,17 @@ export class TonCenterTestnetProvider implements TonChainProvider {
     );
     assertOkTonCenterBody(body, context);
     return body.result;
+  }
+
+  private async getV3(pathWithQuery: string, context: string): Promise<Record<string, unknown>> {
+    const body = await fetchJson(
+      this.fetchImpl,
+      `${this.v3BaseUrl}/${pathWithQuery.replace(/^\//, '')}`,
+      { method: 'GET', headers: this.headers() },
+      context,
+    );
+    assertTestnetResponse(body, context);
+    return asRecord(body, context);
   }
 
   private async runGetMethod(
@@ -535,6 +594,191 @@ export class TonCenterTestnetProvider implements TonChainProvider {
     input: FindTransactionsByQueryIdInput,
   ): Promise<JettonTransferEvidence | null> {
     return (await this.findTransactionsByQueryId(input))[0] ?? null;
+  }
+
+  async enumerateOutgoingJettonTransfers(
+    input: EnumerateOutgoingJettonTransfersInput,
+  ): Promise<EnumerateOutgoingJettonTransfersResult> {
+    const startedAt = new Date().toISOString();
+    const pageSize = resolvePageSize(input.pageSize);
+    const windowStartUnix = isoToUnixSeconds(input.windowStart, 'windowStart');
+    const windowEndUnix = isoToUnixSeconds(input.windowEnd, 'windowEnd');
+    if (windowEndUnix < windowStartUnix) {
+      throw new Error('MALFORMED_INPUT: windowEnd must be >= windowStart');
+    }
+
+    const transfers: EnumeratedOutgoingJettonTransfer[] = [];
+    const warnings: string[] = [];
+    const observed = { oldest: null as number | null, newest: null as number | null };
+    let pagesFetched = 0;
+    let recordsSeen = 0;
+    let cursorExhausted = false;
+    let truncatedBySafety = false;
+    let offset = 0;
+
+    while (pagesFetched < ENUMERATE_HISTORY_MAX_PAGES) {
+      const params = new URLSearchParams();
+      params.set('owner_address', input.hotWalletAddress);
+      params.set('jetton_wallet', input.hotWalletJettonWallet);
+      params.set('jetton_master', input.jettonMaster);
+      params.set('direction', 'out');
+      params.set('start_utime', String(windowStartUnix));
+      params.set('end_utime', String(windowEndUnix));
+      params.set('limit', String(pageSize));
+      params.set('offset', String(offset));
+      params.set('sort', 'desc');
+
+      const body = await this.getV3(
+        `jetton/transfers?${params.toString()}`,
+        'TonCenter jetton transfers',
+      );
+      pagesFetched += 1;
+
+      const rows = Array.isArray(body.jetton_transfers)
+        ? body.jetton_transfers
+        : Array.isArray(body.transfers)
+          ? body.transfers
+          : null;
+      if (rows === null) {
+        throw new Error('MALFORMED_RESPONSE: TonCenter jetton transfers array missing');
+      }
+      if (rows.length === 0) {
+        cursorExhausted = true;
+        break;
+      }
+
+      let pageOldest: number | null = null;
+      for (const raw of rows) {
+        const row = asRecord(raw, 'TonCenter jetton transfer');
+        recordsSeen += 1;
+        const utimeRaw = optionalStringField(row, ['transaction_now', 'utime', 'tx_now', 'now']);
+        const utime = utimeRaw === null ? Number.NaN : Number(utimeRaw);
+        if (!Number.isFinite(utime)) {
+          warnings.push('skipped transfer with invalid utime');
+          continue;
+        }
+        trackObservedBounds(observed, utime);
+        if (pageOldest === null || utime < pageOldest) pageOldest = utime;
+
+        const mapped = this.mapOutgoingJettonTransferRow(
+          row,
+          input,
+          utime,
+          windowStartUnix,
+          windowEndUnix,
+        );
+        if (mapped !== null) transfers.push(mapped);
+      }
+
+      if (pageOldest !== null && pageOldest < windowStartUnix) {
+        break;
+      }
+
+      if (rows.length < pageSize) {
+        cursorExhausted = true;
+        break;
+      }
+      offset += pageSize;
+    }
+
+    if (pagesFetched >= ENUMERATE_HISTORY_MAX_PAGES && !cursorExhausted) {
+      const reachedPast = observed.oldest !== null && observed.oldest < windowStartUnix;
+      if (!reachedPast) {
+        truncatedBySafety = true;
+        warnings.push(`page cap reached (${ENUMERATE_HISTORY_MAX_PAGES})`);
+      }
+    }
+
+    const coverage = finalizeWindowCoverage({
+      truncatedBySafety,
+      cursorExhausted,
+      oldestObservedUnix: observed.oldest,
+      windowStartUnix,
+    });
+    const completedAt = new Date().toISOString();
+    return {
+      providerKind: 'toncenter',
+      networkGlobalId: this.networkGlobalId,
+      startedAt,
+      completedAt,
+      requestedWindowStart: input.windowStart,
+      requestedWindowEnd: input.windowEnd,
+      pagesFetched,
+      recordsSeen,
+      cursorExhausted,
+      windowFullyCovered: coverage.windowFullyCovered,
+      oldestObservedTimestamp: observed.oldest === null ? null : unixSecondsToIso(observed.oldest),
+      newestObservedTimestamp: observed.newest === null ? null : unixSecondsToIso(observed.newest),
+      truncated: coverage.truncated,
+      warnings,
+      transfers,
+    };
+  }
+
+  private mapOutgoingJettonTransferRow(
+    row: Record<string, unknown>,
+    input: EnumerateOutgoingJettonTransfersInput,
+    utime: number,
+    windowStartUnix: number,
+    windowEndUnix: number,
+  ): EnumeratedOutgoingJettonTransfer | null {
+    if (!timestampInInclusiveWindow(utime, windowStartUnix, windowEndUnix)) return null;
+
+    if (row.aborted === true || row.failed === true || row.success === false) return null;
+    if (row.bounced === true) return null;
+
+    const jettonMaster = optionalStringField(row, ['jetton_master', 'jetton', 'master']);
+    if (jettonMaster === null || !addressEquals(jettonMaster, input.jettonMaster)) return null;
+
+    const source = optionalStringField(row, ['source', 'source_owner', 'owner_address', 'owner']);
+    const senderJettonWallet = optionalStringField(row, [
+      'jetton_wallet',
+      'source_wallet',
+      'sender_jetton_wallet',
+      'wallet',
+    ]);
+    const destination = optionalStringField(row, ['destination', 'destination_owner', 'recipient']);
+
+    const outgoingByOwner = source !== null && addressEquals(source, input.hotWalletAddress);
+    const outgoingByWallet =
+      senderJettonWallet !== null && addressEquals(senderJettonWallet, input.hotWalletJettonWallet);
+    if (!outgoingByOwner && !outgoingByWallet) return null;
+    if (destination !== null && addressEquals(destination, input.hotWalletAddress)) return null;
+    if (destination === null) return null;
+
+    const amountAtomic = decimalString(
+      row.amount ?? row.jetton_amount ?? row.value,
+      'TonCenter jetton transfer amount',
+    );
+    const transactionHash = optionalStringField(row, ['transaction_hash', 'tx_hash', 'hash']);
+    const transactionLt = optionalStringField(row, ['transaction_lt', 'tx_lt', 'lt']);
+    const queryIdRaw = optionalStringField(row, ['query_id', 'queryId']);
+    const queryId = queryIdRaw;
+    const traceId = optionalStringField(row, ['trace_id', 'traceId']);
+
+    return {
+      providerKind: 'toncenter',
+      networkGlobalId: this.networkGlobalId,
+      hotWalletAddress: input.hotWalletAddress,
+      senderJettonWallet: senderJettonWallet ?? input.hotWalletJettonWallet,
+      jettonMaster: input.jettonMaster,
+      transactionHash,
+      transactionLt,
+      queryId,
+      amountAtomic,
+      recipient: destination,
+      timestamp: unixSecondsToIso(utime),
+      success: true,
+      bounced: false,
+      transferIdentity: buildTransferIdentity({
+        queryId,
+        transactionHash,
+        transactionLt,
+        amountAtomic,
+        recipient: destination,
+      }),
+      ...(traceId !== null ? { traceId } : {}),
+    };
   }
 
   async health(): Promise<TonProviderHealth> {

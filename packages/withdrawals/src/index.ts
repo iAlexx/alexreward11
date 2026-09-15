@@ -338,6 +338,31 @@ export type {
 } from './phase10-chain-history-evidence.js';
 
 export {
+  PHASE10_CHAIN_HISTORY_COLLECTOR_VERSION,
+  PHASE10_PROVIDER_HISTORY_DISAGREEMENT,
+  PHASE10_CHAIN_HISTORY_INCOMPLETE,
+  PHASE10_EXPECTED_CONFIRMED_OUTGOING,
+  PHASE10_UNEXPECTED_OUTGOING,
+  PHASE10_EXPECTED_PAYOUT_MISSING_FROM_HISTORY,
+  PHASE10_DUPLICATE_ECONOMIC_PAYOUT,
+  PHASE10_ZERO_UNEXPECTED,
+  assertPhase10CollectorEvidenceIntegrity,
+  buildPhase10EconomicKey,
+  collectPhase10ProviderBackedChainHistory,
+  digestPhase10CollectorEvidence,
+  loadPhase10ExpectedCampaignPayouts,
+  toPhase10ChainHistoryEvidenceArtifact,
+} from './phase10-chain-history-collector.js';
+export type {
+  CollectPhase10ProviderBackedChainHistoryInput,
+  Phase10ChainHistoryAgreementVerdict,
+  Phase10ChainHistoryCollectorArtifact,
+  Phase10ChainHistoryCollectorReconciliationResult,
+  Phase10ChainHistoryProviderCoverage,
+  Phase10ExpectedCampaignPayout,
+} from './phase10-chain-history-collector.js';
+
+export {
   PHASE10_HISTORICAL_BASELINE_SCHEMA_VERSION,
   capturePhase10HistoricalBaseline,
   historicalBaselineInputFromArtifact,
