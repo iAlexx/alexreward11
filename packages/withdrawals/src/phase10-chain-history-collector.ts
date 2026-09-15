@@ -6,8 +6,10 @@
  * PHASE10_CHAIN_HISTORY_PROVIDER_COLLECTOR_AVAILABLE = false.
  *
  * Production entrypoint: collectPhase10LiveProviderBackedChainHistory
- * (TonCenter primary + TonAPI secondary, readiness fingerprints, health probes).
- * Injectable dual-fake path is test-only and not exported from package index.
+ * (TonCenter primary + TonAPI secondary, readiness fingerprints, health probes,
+ * DB-loaded expected payouts via loadPhase10ExpectedCampaignPayouts).
+ * Injectable dual-fake / fetchImpl paths are test-only and not exported from
+ * package index.
  */
 
 import { createHash, randomUUID } from 'node:crypto';
@@ -67,8 +69,8 @@ export interface Phase10ExpectedCampaignPayout {
   readonly recipient: string;
   readonly amountAtomic: string;
   readonly jettonMaster: string;
-  /** For observation-window check when available. */
-  readonly intendedAt: string | null;
+  /** Occurrence timestamp for observation-window membership (never resolved_at). */
+  readonly intendedAt: string;
 }
 
 export interface Phase10ChainHistoryProviderCoverage {
@@ -114,22 +116,32 @@ export interface Phase10LiveProviderEndpointConfig {
 /**
  * Production collector input. Providers are constructed internally from
  * TonCenter (primary) + TonAPI (secondary) configs — never injectable fakes.
+ * Expected payouts are loaded from DB; never caller-supplied arrays / fetchImpl.
  */
 export interface CollectPhase10LiveProviderBackedChainHistoryInput {
+  readonly db: WithdrawalDb;
   readonly campaignId: string;
+  readonly campaignWithdrawalIds: readonly string[];
+  /** Campaign createdAt ISO — withdrawals must have requested_at >= this. */
+  readonly campaignCreatedAt: string;
+  readonly controlledUserId: string;
   readonly hotWalletAddress: string;
   readonly hotWalletJettonWallet: string;
+  /** Passed to the DB loader as expectedJettonMaster. */
   readonly jettonMaster: string;
   readonly observationWindow: { readonly start: string; readonly end: string };
-  readonly expectedPayouts: readonly Phase10ExpectedCampaignPayout[];
   readonly primary: Phase10LiveProviderEndpointConfig;
   readonly secondary: Phase10LiveProviderEndpointConfig;
   /** Fingerprints from live readiness evidence — must match derived endpoints. */
   readonly readinessPrimaryEndpointFingerprint: string;
   readonly readinessSecondaryEndpointFingerprint: string;
-  readonly fetchImpl?: typeof fetch;
   readonly collectionId?: string;
   readonly generatedAt?: string;
+}
+
+/** Test-only Live input: production shape plus optional fetchImpl injection. */
+export interface CollectPhase10LiveProviderBackedChainHistoryForTestsInput extends CollectPhase10LiveProviderBackedChainHistoryInput {
+  readonly fetchImpl?: typeof fetch;
 }
 
 export interface LoadPhase10ExpectedCampaignPayoutsInput {
@@ -138,8 +150,8 @@ export interface LoadPhase10ExpectedCampaignPayoutsInput {
   /** Campaign createdAt ISO — withdrawals must have requested_at >= this. */
   readonly campaignCreatedAt: string;
   readonly expectedHotWalletAddress: string;
-  readonly expectedJettonMaster?: string;
-  readonly controlledUserId?: string;
+  readonly expectedJettonMaster: string;
+  readonly controlledUserId: string;
 }
 
 export interface Phase10ChainHistoryCollectorArtifact {
@@ -360,20 +372,22 @@ function assertExpectedPayoutSet(
   const byQueryId = new Map<string, Phase10ExpectedCampaignPayout>();
   const windowStart = Date.parse(window.start);
   const windowEnd = Date.parse(window.end);
+  if (!Number.isFinite(windowStart) || !Number.isFinite(windowEnd)) {
+    throw new Error('REFUSE: observation window start/end is not a valid ISO timestamp');
+  }
 
   for (const payout of expectedPayouts) {
-    if (payout.intendedAt !== null && payout.intendedAt.trim() !== '') {
-      const at = Date.parse(payout.intendedAt);
-      if (
-        Number.isFinite(at) &&
-        Number.isFinite(windowStart) &&
-        Number.isFinite(windowEnd) &&
-        (at < windowStart || at > windowEnd)
-      ) {
-        throw new Error(
-          `expected payout ${payout.withdrawalId} intendedAt outside observation window`,
-        );
-      }
+    if (typeof payout.intendedAt !== 'string' || payout.intendedAt.trim() === '') {
+      throw new Error(`REFUSE: expected payout ${payout.withdrawalId} intendedAt missing or empty`);
+    }
+    const at = Date.parse(payout.intendedAt);
+    if (!Number.isFinite(at)) {
+      throw new Error(`REFUSE: expected payout ${payout.withdrawalId} intendedAt is unparseable`);
+    }
+    if (at < windowStart || at > windowEnd) {
+      throw new Error(
+        `REFUSE: expected payout ${payout.withdrawalId} intendedAt outside observation window`,
+      );
     }
 
     const economic = economicKeyFromExpected(payout);
@@ -404,9 +418,41 @@ function assertExpectedPayoutSet(
   }
 }
 
+function canonicalizeExpectedPayoutsForDigest(
+  payouts: readonly Phase10ExpectedCampaignPayout[],
+): ReadonlyArray<{
+  readonly withdrawalId: string;
+  readonly attemptId: string | null;
+  readonly queryId: string | null;
+  readonly recipient: string;
+  readonly amountAtomic: string;
+  readonly jettonMaster: string;
+  readonly intendedAt: string;
+}> {
+  return [...payouts]
+    .map((p) => ({
+      withdrawalId: p.withdrawalId,
+      attemptId: p.attemptId,
+      queryId: p.queryId,
+      recipient: normalizeAddressLoose(p.recipient),
+      amountAtomic: p.amountAtomic.trim(),
+      jettonMaster: normalizeAddressLoose(p.jettonMaster),
+      intendedAt: p.intendedAt,
+    }))
+    .sort((a, b) => {
+      const byWithdrawal = a.withdrawalId.localeCompare(b.withdrawalId);
+      if (byWithdrawal !== 0) return byWithdrawal;
+      const byAttempt = (a.attemptId ?? '').localeCompare(b.attemptId ?? '');
+      if (byAttempt !== 0) return byAttempt;
+      const byQuery = (a.queryId ?? '').localeCompare(b.queryId ?? '');
+      if (byQuery !== 0) return byQuery;
+      return a.amountAtomic.localeCompare(b.amountAtomic);
+    });
+}
+
 /**
  * Canonical digest over collector safety-relevant fields (window, wallets,
- * providers, transfers, expected set, reconciliation counts). No secrets.
+ * providers, transfers, full expected payout set, reconciliation counts). No secrets.
  */
 export function digestPhase10CollectorEvidence(payload: {
   readonly collectionId: string;
@@ -417,7 +463,7 @@ export function digestPhase10CollectorEvidence(payload: {
   readonly observationWindow: { readonly start: string; readonly end: string };
   readonly providerIdentity: Phase10ChainHistoryCollectorArtifact['providerIdentity'];
   readonly normalizedOutgoingTransfers: readonly Phase10ChainHistoryOutgoingTransfer[];
-  readonly expectedPayoutIdentities: readonly string[];
+  readonly expectedPayouts: readonly Phase10ExpectedCampaignPayout[];
   readonly matchedCount: number;
   readonly missingExpectedCount: number;
   readonly unexpectedOutgoingCount: number;
@@ -445,7 +491,7 @@ export function digestPhase10CollectorEvidence(payload: {
         providerKind: t.providerKind,
       }))
       .sort((a, b) => a.transferIdentity.localeCompare(b.transferIdentity)),
-    expectedPayoutIdentities: [...payload.expectedPayoutIdentities].sort(),
+    expectedPayouts: canonicalizeExpectedPayoutsForDigest(payload.expectedPayouts),
     matchedCount: payload.matchedCount,
     missingExpectedCount: payload.missingExpectedCount,
     unexpectedOutgoingCount: payload.unexpectedOutgoingCount,
@@ -469,7 +515,7 @@ export function assertPhase10CollectorEvidenceIntegrity(
     observationWindow: artifact.observationWindow,
     providerIdentity: artifact.providerIdentity,
     normalizedOutgoingTransfers: artifact.normalizedOutgoingTransfers,
-    expectedPayoutIdentities: artifact.expectedPayoutIdentities,
+    expectedPayouts: artifact.expectedPayouts,
     matchedCount: artifact.matchedCount,
     missingExpectedCount: artifact.missingExpectedCount,
     unexpectedOutgoingCount: artifact.unexpectedOutgoingCount,
@@ -581,11 +627,29 @@ export async function collectPhase10ProviderBackedChainHistoryForTests(
 
 /**
  * Production collector: constructs TonCenter (primary) + TonAPI (secondary),
- * verifies readiness fingerprints + Testnet health, then dual-enumerates.
- * Never accepts injectable provider fakes or caller transfer arrays.
+ * verifies readiness fingerprints + Testnet health, loads expected payouts from
+ * DB, then dual-enumerates. Never accepts injectable provider fakes, fetchImpl,
+ * or caller transfer / expectedPayout arrays.
  */
 export async function collectPhase10LiveProviderBackedChainHistory(
   input: CollectPhase10LiveProviderBackedChainHistoryInput,
+): Promise<Phase10ChainHistoryCollectorArtifact> {
+  return runLiveProviderBackedCollection(input, undefined);
+}
+
+/**
+ * Test-only Live collector: same production path with optional fetchImpl injection.
+ * Not exported from package index.
+ */
+export async function collectPhase10LiveProviderBackedChainHistoryForTests(
+  input: CollectPhase10LiveProviderBackedChainHistoryForTestsInput,
+): Promise<Phase10ChainHistoryCollectorArtifact> {
+  return runLiveProviderBackedCollection(input, input.fetchImpl);
+}
+
+async function runLiveProviderBackedCollection(
+  input: CollectPhase10LiveProviderBackedChainHistoryInput,
+  fetchImpl: typeof fetch | undefined,
 ): Promise<Phase10ChainHistoryCollectorArtifact> {
   if (input.primary.kind !== 'toncenter') {
     throw new Error(
@@ -617,7 +681,6 @@ export async function collectPhase10LiveProviderBackedChainHistory(
     throw new Error('BINDING_REFUSED: primary and secondary endpoint fingerprints must differ');
   }
 
-  const fetchImpl = input.fetchImpl;
   const primary = createTonChainProvider({
     kind: 'toncenter',
     baseUrl: input.primary.baseUrl,
@@ -652,6 +715,15 @@ export async function collectPhase10LiveProviderBackedChainHistory(
     );
   }
 
+  const expectedPayouts = await loadPhase10ExpectedCampaignPayouts(input.db, {
+    campaignWithdrawalIds: input.campaignWithdrawalIds,
+    window: input.observationWindow,
+    campaignCreatedAt: input.campaignCreatedAt,
+    expectedHotWalletAddress: input.hotWalletAddress,
+    expectedJettonMaster: input.jettonMaster,
+    controlledUserId: input.controlledUserId,
+  });
+
   return coordinateDualProviderEnumeration({
     campaignId: input.campaignId,
     hotWalletAddress: input.hotWalletAddress,
@@ -664,7 +736,7 @@ export async function collectPhase10LiveProviderBackedChainHistory(
     secondaryKind: 'tonapi',
     primaryEndpointFingerprint: primaryFingerprint,
     secondaryEndpointFingerprint: secondaryFingerprint,
-    expectedPayouts: input.expectedPayouts,
+    expectedPayouts,
     ...(input.collectionId !== undefined ? { collectionId: input.collectionId } : {}),
     ...(input.generatedAt !== undefined ? { generatedAt: input.generatedAt } : {}),
   });
@@ -812,7 +884,7 @@ async function coordinateDualProviderEnumeration(
     },
     providerIdentity,
     normalizedOutgoingTransfers,
-    expectedPayoutIdentities,
+    expectedPayouts: input.expectedPayouts,
     matchedCount: recon.matchedCount,
     missingExpectedCount: recon.missingExpectedCount,
     unexpectedOutgoingCount: recon.unexpectedOutgoingCount,
@@ -951,6 +1023,7 @@ function readEvidenceChainTimestamp(summary: unknown): string | null {
  * 1. att.broadcast_submitted_at
  * 2. w.broadcasted_at
  * 3. chain timestamp from evidence_summary (observedAt / chainTimestamp / utime)
+ * If all missing → REFUSE (do not set null).
  */
 export async function loadPhase10ExpectedCampaignPayouts(
   db: WithdrawalDb,
@@ -967,21 +1040,22 @@ export async function loadPhase10ExpectedCampaignPayouts(
     throw new Error('MALFORMED_INPUT: campaignCreatedAt is not a valid ISO timestamp');
   }
 
+  const controlledUserId = input.controlledUserId.trim();
+  const expectedJettonMaster = input.expectedJettonMaster.trim();
+  if (controlledUserId === '') {
+    throw new Error('MALFORMED_INPUT: controlledUserId is required');
+  }
+  if (expectedJettonMaster === '') {
+    throw new Error('MALFORMED_INPUT: expectedJettonMaster is required');
+  }
+
   const params: unknown[] = [
     campaignWithdrawalIds,
     campaignCreatedAt.toISOString(),
     input.expectedHotWalletAddress.trim(),
+    expectedJettonMaster,
+    controlledUserId,
   ];
-  let jettonFilterSql = '';
-  if (input.expectedJettonMaster !== undefined && input.expectedJettonMaster.trim() !== '') {
-    params.push(input.expectedJettonMaster.trim());
-    jettonFilterSql = ` AND a.contract_identity = $${params.length}`;
-  }
-  let userFilterSql = '';
-  if (input.controlledUserId !== undefined && input.controlledUserId.trim() !== '') {
-    params.push(input.controlledUserId.trim());
-    userFilterSql = ` AND w.user_id = $${params.length}::uuid`;
-  }
 
   const proofs = await db.query<{
     withdrawal_id: string;
@@ -1031,8 +1105,8 @@ export async function loadPhase10ExpectedCampaignPayouts(
        AND a.symbol = 'USDT'
        AND hw.address IS NOT NULL
        AND lower(trim(hw.address)) = lower(trim($3::text))
-       ${jettonFilterSql}
-       ${userFilterSql}
+       AND a.contract_identity = $4
+       AND w.user_id = $5::uuid
      ORDER BY r.resolved_at ASC NULLS LAST, r.id ASC`,
     params,
   );
@@ -1083,6 +1157,11 @@ export async function loadPhase10ExpectedCampaignPayouts(
       isoFromDbTimestamp(row.broadcast_submitted_at) ??
       isoFromDbTimestamp(row.broadcasted_at) ??
       readEvidenceChainTimestamp(row.evidence_summary);
+    if (intendedAt === null || intendedAt.trim() === '') {
+      throw new Error(
+        `REFUSE: expected payout ${row.withdrawal_id} missing occurrence timestamp (broadcast_submitted_at / broadcasted_at / chain evidence)`,
+      );
+    }
 
     return {
       withdrawalId: row.withdrawal_id,

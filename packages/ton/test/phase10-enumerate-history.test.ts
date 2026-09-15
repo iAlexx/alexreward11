@@ -24,6 +24,9 @@ const TRANSFER_RAW_BODY =
   'b5ee9c724101010100560000a80f8a7ea5000000000000002a302e630800444444444444444444444444444444444444444444444444444444444444444500044444444444444444444444444444444444444444444444444444444444444442029b293b36';
 const INTERNAL_TRANSFER_RAW_BODY =
   'b5ee9c724101010100560000a7178d4519000000000000002a302e63080022222222222222222222222222222222222222222222222222222222222222230004444444444444444444444444444444444444444444444444444444444444444405d4832c57';
+/** internal_transfer with from-owner = RECIPIENT (not HOT) — must be refused. */
+const INTERNAL_TRANSFER_WRONG_FROM_RAW_BODY =
+  'b5ee9c724101010100550000a6178d4519000000000000002a302e63080044444444444444444444444444444444444444444444444444444444444444450011111111111111111111111111111111111111111111111111111111111111110064620450';
 
 const WINDOW_START = '2024-01-01T00:00:00.000Z';
 const WINDOW_END = '2024-01-02T00:00:00.000Z';
@@ -384,6 +387,96 @@ describe('TonAPI enumerateOutgoingJettonTransfers', () => {
     expect(result.warnings.some((w) => /does not equal hotWalletJettonWallet/i.test(w))).toBe(true);
   });
 
+  it('skips transfer when resolveJettonWallet(recipient) fails', async () => {
+    const provider = new TonApiTestnetProvider({
+      baseUrl: 'https://testnet.tonapi.io',
+      fetchImpl: async (input) => {
+        const url = requestUrl(input);
+        if (
+          url.includes(`/jettons/`) &&
+          url.includes(encodeURIComponent(MASTER)) &&
+          !url.includes('/history')
+        ) {
+          if (addressInUrl(url, RECIPIENT)) {
+            return response({ error: 'jetton wallet missing' }, 404);
+          }
+          return response(jettonBalanceBody(JETTON_WALLET));
+        }
+        if (url.includes('/history')) {
+          return response({ events: [], operations: [], next_from: 0 });
+        }
+        if (url.includes('/transactions')) {
+          return response({ transactions: [rawOutgoingJettonTx()] });
+        }
+        throw new Error(`Unexpected TonAPI fixture request: ${url}`);
+      },
+    });
+    const result = await provider.enumerateOutgoingJettonTransfers(baseEnumerateInput());
+    expect(result.transfers).toHaveLength(0);
+    expect(result.warnings.some((w) => /resolveJettonWallet\(recipient\) failed/i.test(w))).toBe(
+      true,
+    );
+  });
+
+  it('skips transfer when internal_transfer from-owner is not hot wallet', async () => {
+    const provider = new TonApiTestnetProvider({
+      baseUrl: 'https://testnet.tonapi.io',
+      fetchImpl: tonApiFetchRouter((url) => {
+        if (!url.includes('/transactions')) return null;
+        return response({
+          transactions: [
+            rawOutgoingJettonTx({
+              hash: 'wrong-from',
+              out_msgs: [
+                {
+                  msg_type: 'int_msg',
+                  source: { address: JETTON_WALLET, is_scam: false, is_wallet: false },
+                  destination: {
+                    address: RECIPIENT_JETTON_WALLET,
+                    is_scam: false,
+                    is_wallet: false,
+                  },
+                  bounced: false,
+                  raw_body: INTERNAL_TRANSFER_WRONG_FROM_RAW_BODY,
+                },
+              ],
+            }),
+          ],
+        });
+      }),
+    });
+    const result = await provider.enumerateOutgoingJettonTransfers(baseEnumerateInput());
+    expect(result.transfers).toHaveLength(0);
+  });
+
+  it('skips transfer when recipient jetton wallet destination mismatches derived wallet', async () => {
+    const provider = new TonApiTestnetProvider({
+      baseUrl: 'https://testnet.tonapi.io',
+      fetchImpl: tonApiFetchRouter((url) => {
+        if (!url.includes('/transactions')) return null;
+        return response({
+          transactions: [
+            rawOutgoingJettonTx({
+              hash: 'wrong-dest',
+              out_msgs: [
+                {
+                  msg_type: 'int_msg',
+                  source: { address: JETTON_WALLET, is_scam: false, is_wallet: false },
+                  destination: { address: WRONG_JETTON_WALLET, is_scam: false, is_wallet: false },
+                  bounced: false,
+                  raw_body: INTERNAL_TRANSFER_RAW_BODY,
+                },
+              ],
+            }),
+          ],
+        });
+      }),
+    });
+    const result = await provider.enumerateOutgoingJettonTransfers(baseEnumerateInput());
+    expect(result.transfers).toHaveLength(0);
+    expect(result.warnings.some((w) => /recipient jetton wallet mismatch/i.test(w))).toBe(true);
+  });
+
   it('ignores bounced and failed transactions', async () => {
     const provider = new TonApiTestnetProvider({
       baseUrl: 'https://testnet.tonapi.io',
@@ -732,6 +825,46 @@ describe('TonCenter enumerateOutgoingJettonTransfers', () => {
     expect(result.cursorExhausted).toBe(true);
     expect(result.transfers.map((t) => t.queryId)).toEqual(['ok']);
     expect(result.transfers.every((t) => t.success === true)).toBe(true);
+  });
+
+  it('requires both source and source_wallet; never falls back on missing/mismatched wallet', async () => {
+    const provider = new TonCenterTestnetProvider({
+      baseUrl: 'https://testnet.toncenter.com/api/v2',
+      fetchImpl: async () =>
+        response({
+          jetton_transfers: [
+            tonCenterTransfer({
+              query_id: 'missing-wallet',
+              source_wallet: undefined,
+            }),
+            tonCenterTransfer({
+              query_id: 'empty-wallet',
+              source_wallet: '',
+            }),
+            tonCenterTransfer({
+              query_id: 'wrong-wallet',
+              source_wallet: WRONG_JETTON_WALLET,
+            }),
+            tonCenterTransfer({
+              query_id: 'owner-only',
+              source: HOT,
+              source_wallet: WRONG_JETTON_WALLET,
+            }),
+            tonCenterTransfer({
+              query_id: 'wallet-only',
+              source: OTHER_OWNER,
+              source_wallet: JETTON_WALLET,
+            }),
+            tonCenterTransfer({ query_id: 'ok-both' }),
+          ],
+        }),
+    });
+    const result = await provider.enumerateOutgoingJettonTransfers({
+      ...baseEnumerateInput(),
+      pageSize: 10,
+    });
+    expect(result.transfers.map((t) => t.queryId)).toEqual(['ok-both']);
+    expect(result.transfers[0]?.senderJettonWallet).toBe(JETTON_WALLET);
   });
 });
 

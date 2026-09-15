@@ -729,10 +729,14 @@ export class TonCenterTestnetProvider implements TonChainProvider {
     const destination =
       typeof row.destination === 'string' && row.destination !== '' ? row.destination : null;
 
-    const outgoingByOwner = source !== null && addressEquals(source, input.hotWalletAddress);
-    const outgoingByWallet =
-      senderJettonWallet !== null && addressEquals(senderJettonWallet, input.hotWalletJettonWallet);
-    if (!outgoingByOwner && !outgoingByWallet) return null;
+    // Require BOTH owner source and jetton source_wallet bindings — never OR / never fallback.
+    if (source === null || !addressEquals(source, input.hotWalletAddress)) return null;
+    if (
+      senderJettonWallet === null ||
+      !addressEquals(senderJettonWallet, input.hotWalletJettonWallet)
+    ) {
+      return null;
+    }
     if (destination === null) return null;
     if (addressEquals(destination, input.hotWalletAddress)) return null;
 
@@ -758,7 +762,7 @@ export class TonCenterTestnetProvider implements TonChainProvider {
       providerKind: 'toncenter',
       networkGlobalId: this.networkGlobalId,
       hotWalletAddress: input.hotWalletAddress,
-      senderJettonWallet: senderJettonWallet ?? input.hotWalletJettonWallet,
+      senderJettonWallet,
       jettonMaster: input.jettonMaster,
       transactionHash,
       transactionLt,

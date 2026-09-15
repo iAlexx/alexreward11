@@ -744,7 +744,9 @@ export class TonApiTestnetProvider implements TonChainProvider {
       return (
         internal?.op === JETTON_INTERNAL_TRANSFER_OP &&
         internal.queryId === transfer.queryId &&
-        internal.amountAtomic === transfer.amountAtomic
+        internal.amountAtomic === transfer.amountAtomic &&
+        internal.address !== undefined &&
+        addressEquals(internal.address, input.hotWalletAddress)
       );
     });
     if (matchingInternal === undefined) return null;
@@ -764,14 +766,14 @@ export class TonApiTestnetProvider implements TonChainProvider {
             error instanceof Error ? error.message : String(error)
           }`,
         );
-        // Optional recipient-wallet check — still accept when transfer+internal_transfer prove.
         recipientWalletCache.set(recipientKey, null);
-        resolvedRecipientWallet = null;
+        // Fail closed: recipient jetton wallet binding is required.
+        return null;
       }
     }
     if (
-      resolvedRecipientWallet !== null &&
-      resolvedRecipientWallet !== undefined &&
+      resolvedRecipientWallet === null ||
+      resolvedRecipientWallet === undefined ||
       !addressEquals(resolvedRecipientWallet, recipientJettonWallet)
     ) {
       warnings.push(`recipient jetton wallet mismatch for ${contextLabel}; skipped`);

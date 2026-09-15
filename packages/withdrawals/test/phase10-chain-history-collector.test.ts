@@ -25,10 +25,12 @@ import {
   PHASE10_ZERO_UNEXPECTED,
   assertPhase10CollectorEvidenceIntegrity,
   collectPhase10LiveProviderBackedChainHistory,
+  collectPhase10LiveProviderBackedChainHistoryForTests,
   collectPhase10ProviderBackedChainHistoryForTests,
   digestPhase10CollectorEvidence,
   loadPhase10ExpectedCampaignPayouts,
   toPhase10ChainHistoryEvidenceArtifact,
+  type CollectPhase10LiveProviderBackedChainHistoryInput,
   type CollectPhase10ProviderBackedChainHistoryForTestsInput,
   type Phase10ExpectedCampaignPayout,
 } from '../src/phase10-chain-history-collector.js';
@@ -39,6 +41,7 @@ const HOT = '0:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 const JETTON_WALLET = '0:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 const MASTER = '0:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
 const RECIPIENT = '0:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd';
+const CONTROLLED_USER = '00000000-0000-4000-8000-000000000099';
 const WINDOW = {
   start: '2024-01-01T00:00:00.000Z',
   end: '2024-01-02T00:00:00.000Z',
@@ -50,6 +53,15 @@ type _NoCallerTransferArray =
     : true;
 const _collectInputHasNoCallerTransfers: _NoCallerTransferArray = true;
 void _collectInputHasNoCallerTransfers;
+
+type _LiveHasNoFetchImpl =
+  'fetchImpl' extends keyof CollectPhase10LiveProviderBackedChainHistoryInput ? never : true;
+type _LiveHasNoExpectedPayouts =
+  'expectedPayouts' extends keyof CollectPhase10LiveProviderBackedChainHistoryInput ? never : true;
+const _liveInputHasNoFetchImpl: _LiveHasNoFetchImpl = true;
+const _liveInputHasNoExpectedPayouts: _LiveHasNoExpectedPayouts = true;
+void _liveInputHasNoFetchImpl;
+void _liveInputHasNoExpectedPayouts;
 
 function seedTransfer(
   overrides: Partial<EnumeratedOutgoingJettonTransfer> &
@@ -182,7 +194,8 @@ describe('Phase 10 chain history collector', () => {
     expect(PHASE10_CHAIN_HISTORY_COLLECTOR_VERSION).toBe('1.0.0');
     expect(
       'collectPhase10ProviderBackedChainHistoryForTests' in publicIndex ||
-        'collectPhase10ProviderBackedChainHistory' in publicIndex,
+        'collectPhase10ProviderBackedChainHistory' in publicIndex ||
+        'collectPhase10LiveProviderBackedChainHistoryForTests' in publicIndex,
     ).toBe(false);
     expect(typeof publicIndex.collectPhase10LiveProviderBackedChainHistory).toBe('function');
   });
@@ -386,20 +399,84 @@ describe('Phase 10 chain history collector', () => {
   it('evidence digest tamper → assertIntegrity fails', async () => {
     const primary = new FakeTonChainProvider();
     const secondary = new FakeTonChainProvider();
+    const expected = expectedPayout({ queryId: '42', amountAtomic: '1000' });
     const result = await collectPhase10ProviderBackedChainHistoryForTests(
-      baseCollectInput(primary, secondary, []),
+      baseCollectInput(primary, secondary, [expected]),
     );
     assertPhase10CollectorEvidenceIntegrity(result);
 
-    const tampered = {
+    const tamperedDigest = {
       ...result,
       collectorDigest: '0'.repeat(64),
       evidenceDigest: '0'.repeat(64),
     };
-    expect(() => assertPhase10CollectorEvidenceIntegrity(tampered)).toThrow(/tamper|mismatch/i);
+    expect(() => assertPhase10CollectorEvidenceIntegrity(tamperedDigest)).toThrow(
+      /tamper|mismatch/i,
+    );
 
-    const recomputed = digestPhase10CollectorEvidence(result);
+    const tamperedExpectedField = {
+      ...result,
+      expectedPayouts: [
+        {
+          ...result.expectedPayouts[0]!,
+          amountAtomic: '999999',
+        },
+      ],
+    };
+    expect(() => assertPhase10CollectorEvidenceIntegrity(tamperedExpectedField)).toThrow(
+      /tamper|mismatch/i,
+    );
+
+    const tamperedIntendedAt = {
+      ...result,
+      expectedPayouts: [
+        {
+          ...result.expectedPayouts[0]!,
+          intendedAt: '2024-01-01T13:00:00.000Z',
+        },
+      ],
+    };
+    expect(() => assertPhase10CollectorEvidenceIntegrity(tamperedIntendedAt)).toThrow(
+      /tamper|mismatch/i,
+    );
+
+    const recomputed = digestPhase10CollectorEvidence({
+      collectionId: result.collectionId,
+      campaignId: result.campaignId,
+      hotWalletAddress: result.hotWalletAddress,
+      hotWalletJettonWallet: result.hotWalletJettonWallet,
+      jettonMaster: result.jettonMaster,
+      observationWindow: result.observationWindow,
+      providerIdentity: result.providerIdentity,
+      normalizedOutgoingTransfers: result.normalizedOutgoingTransfers,
+      expectedPayouts: result.expectedPayouts,
+      matchedCount: result.matchedCount,
+      missingExpectedCount: result.missingExpectedCount,
+      unexpectedOutgoingCount: result.unexpectedOutgoingCount,
+      duplicateEconomicCount: result.duplicateEconomicCount,
+      reconciliationResult: result.reconciliationResult,
+      completeCoverage: result.completeCoverage,
+      providerAgreement: result.providerAgreement,
+    });
     expect(recomputed).toBe(result.collectorDigest);
+  });
+
+  it('null / invalid intendedAt → REFUSED by assertExpectedPayoutSet path', async () => {
+    const primary = new FakeTonChainProvider();
+    const secondary = new FakeTonChainProvider();
+    await expect(
+      collectPhase10ProviderBackedChainHistoryForTests(
+        baseCollectInput(primary, secondary, [
+          expectedPayout({ intendedAt: '' as unknown as string }),
+        ]),
+      ),
+    ).rejects.toThrow(/REFUSE.*intendedAt missing or empty/i);
+
+    await expect(
+      collectPhase10ProviderBackedChainHistoryForTests(
+        baseCollectInput(primary, secondary, [expectedPayout({ intendedAt: 'not-a-timestamp' })]),
+      ),
+    ).rejects.toThrow(/REFUSE.*intendedAt is unparseable/i);
   });
 
   it('wrong Hot Wallet / Jetton wallet / master / network → refuse', async () => {
@@ -475,79 +552,58 @@ describe('Phase 10 chain history collector', () => {
     const secondaryUrl = 'https://testnet.tonapi.io';
     const primaryFp = fingerprintProviderEndpoint(primaryUrl)!;
     const secondaryFp = fingerprintProviderEndpoint(secondaryUrl)!;
+    const unusedDb = {
+      query: async () => {
+        throw new Error('db should not be queried before provider binding checks');
+      },
+    };
+    const liveBase = {
+      db: unusedDb as never,
+      campaignId: randomUUID(),
+      campaignWithdrawalIds: [] as const,
+      campaignCreatedAt: '2024-01-01T00:00:00.000Z',
+      controlledUserId: CONTROLLED_USER,
+      hotWalletAddress: HOT,
+      hotWalletJettonWallet: JETTON_WALLET,
+      jettonMaster: MASTER,
+      observationWindow: WINDOW,
+      primary: { kind: 'toncenter', baseUrl: primaryUrl },
+      secondary: { kind: 'tonapi', baseUrl: secondaryUrl },
+      readinessPrimaryEndpointFingerprint: primaryFp,
+      readinessSecondaryEndpointFingerprint: secondaryFp,
+    };
 
     await expect(
       collectPhase10LiveProviderBackedChainHistory({
-        campaignId: randomUUID(),
-        hotWalletAddress: HOT,
-        hotWalletJettonWallet: JETTON_WALLET,
-        jettonMaster: MASTER,
-        observationWindow: WINDOW,
-        expectedPayouts: [],
+        ...liveBase,
         primary: { kind: 'fake', baseUrl: primaryUrl },
-        secondary: { kind: 'tonapi', baseUrl: secondaryUrl },
-        readinessPrimaryEndpointFingerprint: primaryFp,
-        readinessSecondaryEndpointFingerprint: secondaryFp,
       }),
     ).rejects.toThrow(/primary\.kind must be 'toncenter'/);
 
     await expect(
       collectPhase10LiveProviderBackedChainHistory({
-        campaignId: randomUUID(),
-        hotWalletAddress: HOT,
-        hotWalletJettonWallet: JETTON_WALLET,
-        jettonMaster: MASTER,
-        observationWindow: WINDOW,
-        expectedPayouts: [],
-        primary: { kind: 'toncenter', baseUrl: primaryUrl },
+        ...liveBase,
         secondary: { kind: 'fake', baseUrl: secondaryUrl },
-        readinessPrimaryEndpointFingerprint: primaryFp,
-        readinessSecondaryEndpointFingerprint: secondaryFp,
       }),
     ).rejects.toThrow(/secondary\.kind must be 'tonapi'/);
 
     await expect(
       collectPhase10LiveProviderBackedChainHistory({
-        campaignId: randomUUID(),
-        hotWalletAddress: HOT,
-        hotWalletJettonWallet: JETTON_WALLET,
-        jettonMaster: MASTER,
-        observationWindow: WINDOW,
-        expectedPayouts: [],
-        primary: { kind: 'toncenter', baseUrl: primaryUrl },
-        secondary: { kind: 'tonapi', baseUrl: secondaryUrl },
+        ...liveBase,
         readinessPrimaryEndpointFingerprint: 'https://wrong.example:443',
-        readinessSecondaryEndpointFingerprint: secondaryFp,
       }),
     ).rejects.toThrow(/primary endpoint fingerprint/);
 
     await expect(
       collectPhase10LiveProviderBackedChainHistory({
-        campaignId: randomUUID(),
-        hotWalletAddress: HOT,
-        hotWalletJettonWallet: JETTON_WALLET,
-        jettonMaster: MASTER,
-        observationWindow: WINDOW,
-        expectedPayouts: [],
-        primary: { kind: 'toncenter', baseUrl: primaryUrl },
-        secondary: { kind: 'tonapi', baseUrl: secondaryUrl },
-        readinessPrimaryEndpointFingerprint: primaryFp,
+        ...liveBase,
         readinessSecondaryEndpointFingerprint: primaryFp,
       }),
     ).rejects.toThrow(/fingerprints must differ|secondary endpoint fingerprint/);
 
     await expect(
-      collectPhase10LiveProviderBackedChainHistory({
-        campaignId: randomUUID(),
-        hotWalletAddress: HOT,
-        hotWalletJettonWallet: JETTON_WALLET,
-        jettonMaster: MASTER,
-        observationWindow: WINDOW,
-        expectedPayouts: [],
-        primary: { kind: 'toncenter', baseUrl: primaryUrl },
-        secondary: { kind: 'tonapi', baseUrl: secondaryUrl },
-        readinessPrimaryEndpointFingerprint: primaryFp,
-        readinessSecondaryEndpointFingerprint: secondaryFp,
+      collectPhase10LiveProviderBackedChainHistoryForTests({
+        ...liveBase,
         fetchImpl: async (input) => {
           const url =
             typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
@@ -582,6 +638,7 @@ describe('Phase 10 chain history collector', () => {
         campaignCreatedAt: '2024-01-01T00:00:00.000Z',
         expectedHotWalletAddress: HOT,
         expectedJettonMaster: MASTER,
+        controlledUserId: CONTROLLED_USER,
       }),
     ).rejects.toThrow(/INTENDED_PAYOUT_PROVEN/);
   });
@@ -624,6 +681,7 @@ describe('Phase 10 chain history collector', () => {
       campaignCreatedAt: '2024-01-01T00:00:00.000Z',
       expectedHotWalletAddress: HOT,
       expectedJettonMaster: MASTER,
+      controlledUserId: CONTROLLED_USER,
     });
     expect(payouts).toHaveLength(1);
     expect(payouts[0]).toMatchObject({
@@ -637,6 +695,86 @@ describe('Phase 10 chain history collector', () => {
       jettonMaster: MASTER,
       intendedAt: '2024-01-01T10:30:00.000Z',
     });
+  });
+
+  it('broadcast_submitted_at takes precedence over later reconciliation timestamps', async () => {
+    const withdrawalId = randomUUID();
+    const fakeDb = {
+      query: async () => ({
+        rows: [
+          {
+            withdrawal_id: withdrawalId,
+            attempt_id: randomUUID(),
+            observed_query_id: '42',
+            correlation_reference: 'corr-1',
+            observed_recipient: RECIPIENT,
+            observed_amount_atomic: '1000',
+            evidence_summary: {
+              jettonMaster: MASTER,
+              observedAt: '2024-01-01T20:00:00.000Z',
+            },
+            resolved_at: new Date('2024-01-01T22:00:00.000Z'),
+            recipient: RECIPIENT,
+            net_amount_atomic: '1000',
+            jetton_master: MASTER,
+            attempt_query_id: '42',
+            broadcasted_at: new Date('2024-01-01T15:00:00.000Z'),
+            broadcast_submitted_at: new Date('2024-01-01T10:30:00.000Z'),
+            requested_at: new Date('2024-01-01T09:00:00.000Z'),
+            hot_wallet_address: HOT,
+          },
+        ],
+      }),
+    };
+
+    const payouts = await loadPhase10ExpectedCampaignPayouts(fakeDb as never, {
+      campaignWithdrawalIds: [withdrawalId],
+      window: WINDOW,
+      campaignCreatedAt: '2024-01-01T00:00:00.000Z',
+      expectedHotWalletAddress: HOT,
+      expectedJettonMaster: MASTER,
+      controlledUserId: CONTROLLED_USER,
+    });
+    expect(payouts[0]?.intendedAt).toBe('2024-01-01T10:30:00.000Z');
+  });
+
+  it('missing occurrence timestamps → REFUSE (never null intendedAt)', async () => {
+    const withdrawalId = randomUUID();
+    const fakeDb = {
+      query: async () => ({
+        rows: [
+          {
+            withdrawal_id: withdrawalId,
+            attempt_id: randomUUID(),
+            observed_query_id: '42',
+            correlation_reference: 'corr-1',
+            observed_recipient: RECIPIENT,
+            observed_amount_atomic: '1000',
+            evidence_summary: { jettonMaster: MASTER },
+            resolved_at: new Date('2024-01-01T12:00:00.000Z'),
+            recipient: RECIPIENT,
+            net_amount_atomic: '1000',
+            jetton_master: MASTER,
+            attempt_query_id: '42',
+            broadcasted_at: null,
+            broadcast_submitted_at: null,
+            requested_at: new Date('2024-01-01T09:00:00.000Z'),
+            hot_wallet_address: HOT,
+          },
+        ],
+      }),
+    };
+
+    await expect(
+      loadPhase10ExpectedCampaignPayouts(fakeDb as never, {
+        campaignWithdrawalIds: [withdrawalId],
+        window: WINDOW,
+        campaignCreatedAt: '2024-01-01T00:00:00.000Z',
+        expectedHotWalletAddress: HOT,
+        expectedJettonMaster: MASTER,
+        controlledUserId: CONTROLLED_USER,
+      }),
+    ).rejects.toThrow(/REFUSE.*missing occurrence timestamp/i);
   });
 
   it('broadcast yesterday + resolved_at today inside window → intendedAt outside window refuse', async () => {
@@ -674,6 +812,7 @@ describe('Phase 10 chain history collector', () => {
         campaignCreatedAt: '2023-12-01T00:00:00.000Z',
         expectedHotWalletAddress: HOT,
         expectedJettonMaster: MASTER,
+        controlledUserId: CONTROLLED_USER,
       }),
     ).rejects.toThrow(/intendedAt outside observation window/);
   });
