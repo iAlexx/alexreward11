@@ -44,6 +44,10 @@ import {
   writePhase10ReadonlyValidationReport,
 } from '../phase10-chain-history-readonly-validate.js';
 import type { DeploymentEnvironment } from '../config.js';
+import {
+  readonlyValidateVerdictImpliesSuccess,
+  setPhase10OpsProcessExitCode,
+} from './phase10-ops-exit.js';
 
 const COMMANDS = new Set([
   'readiness',
@@ -361,7 +365,9 @@ async function main(): Promise<void> {
           error:
             'REFUSE: WITHDRAWAL_REAL_CHAIN_ENABLED and WITHDRAWAL_FAKE_CHAIN_ENABLED must both be false',
         });
+        // process.exitCode survives early return after finally { pool.end() }.
         exitCode = 1;
+        setPhase10OpsProcessExitCode(1);
         return;
       }
 
@@ -389,8 +395,10 @@ async function main(): Promise<void> {
         await writePhase10ReadonlyValidationReport(outPath, report);
       }
 
-      const ok = report.verdict.startsWith('PASS');
+      const ok = readonlyValidateVerdictImpliesSuccess(report.verdict);
       exitCode = ok ? 0 : 1;
+      // Prefer process.exitCode over process.exit so finally pool cleanup still runs.
+      setPhase10OpsProcessExitCode(exitCode);
       printJson({
         ok,
         command: 'chain-history-readonly-validate',
