@@ -3,6 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
+import { assertConnectedDestructiveTestDatabase } from '@alex-rewards/db';
+
 import {
   getOrCreateLedgerAccount,
   postLedgerTransaction,
@@ -33,6 +35,7 @@ describe.skipIf(phase4DatabaseUrl === '')('Phase 4 account-type / asset compatib
   });
 
   beforeEach(async () => {
+    await assertConnectedDestructiveTestDatabase(pool);
     await pool.query(`
       TRUNCATE TABLE
         ledger_entries,

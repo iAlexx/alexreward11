@@ -3,6 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
+import { assertConnectedDestructiveTestDatabase } from '@alex-rewards/db';
+
 import {
   checkLedgerInvariants,
   compareProjectionsToStored,
@@ -37,6 +39,7 @@ describe.skipIf(phase4DatabaseUrl === '')('Phase 4 ledger invariants + projectio
   });
 
   beforeEach(async () => {
+    await assertConnectedDestructiveTestDatabase(pool);
     await pool.query(`
       TRUNCATE TABLE
         ledger_entries,

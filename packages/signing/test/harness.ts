@@ -4,7 +4,11 @@
  */
 import { randomUUID } from 'node:crypto';
 
-import { assertSafeDestructiveTestDatabaseUrl, migrateDatabase } from '@alex-rewards/db';
+import {
+  assertConnectedDestructiveTestDatabase,
+  assertSafeDestructiveTestDatabaseUrl,
+  migrateDatabase,
+} from '@alex-rewards/db';
 import {
   getOrCreateLedgerAccount,
   postLedgerTransaction,
@@ -47,6 +51,7 @@ export async function resetAndMigrate(url: string): Promise<void> {
   const client = new Client({ connectionString: url });
   await client.connect();
   try {
+    await assertConnectedDestructiveTestDatabase(client);
     await client.query('DROP SCHEMA IF EXISTS public CASCADE');
     await client.query('CREATE SCHEMA public');
     await client.query('GRANT ALL ON SCHEMA public TO PUBLIC');

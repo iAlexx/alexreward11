@@ -5,7 +5,11 @@
  */
 import { randomUUID } from 'node:crypto';
 
-import { assertSafeDestructiveTestDatabaseUrl, migrateDatabase } from '@alex-rewards/db';
+import {
+  assertConnectedDestructiveTestDatabase,
+  assertSafeDestructiveTestDatabaseUrl,
+  migrateDatabase,
+} from '@alex-rewards/db';
 import {
   checkLedgerInvariants,
   compareProjectionsToStored,
@@ -38,6 +42,7 @@ export async function resetAndMigrate(url: string): Promise<void> {
   const client = new Client({ connectionString: url });
   await client.connect();
   try {
+    await assertConnectedDestructiveTestDatabase(client);
     await client.query('DROP SCHEMA IF EXISTS public CASCADE');
     await client.query('CREATE SCHEMA public');
     await client.query('GRANT ALL ON SCHEMA public TO PUBLIC');
@@ -662,6 +667,7 @@ export async function createApprovedWithdrawal(
 }
 
 export async function truncateWithdrawalTables(pool: Pool): Promise<void> {
+  await assertConnectedDestructiveTestDatabase(pool);
   await pool.query(`
     TRUNCATE TABLE
       withdrawal_payout_reconciliations,

@@ -26,9 +26,11 @@ export async function probeDatabase(pool: Pool): Promise<DatabaseProbeResult> {
 export { defaultMigrationsDirectory, listMigrationFiles, migrateDatabase } from './migrate.js';
 export type { MigrateDatabaseOptions, MigrateDatabaseResult, MigrationFile } from './migrate.js';
 export {
+  assertConnectedDestructiveTestDatabase,
   assertSafeDestructiveTestDatabaseUrl,
   databaseNameFromConnectionString,
   isApprovedDestructiveTestDatabaseName,
 } from './destructive-test-db.js';
+export type { DestructiveTestQueryable } from './destructive-test-db.js';
 
 export type { Pool } from 'pg';
