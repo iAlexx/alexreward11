@@ -4,6 +4,8 @@
 import { Pool } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
+import { assertConnectedDestructiveTestDatabase } from '@alex-rewards/db';
+
 import {
   changePrimaryWallet,
   createTonProofChallenge,
@@ -36,6 +38,7 @@ describeDb('Phase 6 wallet lifecycle', () => {
   });
 
   beforeEach(async () => {
+    await assertConnectedDestructiveTestDatabase(pool);
     await pool.query(`
       TRUNCATE TABLE
         outbox_events,

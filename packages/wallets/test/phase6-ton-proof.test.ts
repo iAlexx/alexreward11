@@ -9,6 +9,8 @@ import { buildTonProofSigningDigest } from '@alex-rewards/ton';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
+import { assertConnectedDestructiveTestDatabase } from '@alex-rewards/db';
+
 import {
   createTonProofChallenge,
   localWalletOwnershipFixtureConfig,
@@ -25,6 +27,7 @@ import {
 } from './harness.js';
 
 async function truncateWalletTables(pool: Pool): Promise<void> {
+  await assertConnectedDestructiveTestDatabase(pool);
   await pool.query(`
     TRUNCATE TABLE
       outbox_events,

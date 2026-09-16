@@ -1,10 +1,15 @@
 /**
  * Shared Phase 7 withdrawal-engine test helpers.
  * Destructive against PHASE7_DATABASE_URL (or PHASE7_WITHDRAWAL_TESTS=1 + DATABASE_URL).
+ * resetAndMigrate refuses operational database name "alex_rewards".
  */
 import { randomUUID } from 'node:crypto';
 
-import { migrateDatabase } from '@alex-rewards/db';
+import {
+  assertConnectedDestructiveTestDatabase,
+  assertSafeDestructiveTestDatabaseUrl,
+  migrateDatabase,
+} from '@alex-rewards/db';
 import {
   checkLedgerInvariants,
   compareProjectionsToStored,
@@ -33,9 +38,11 @@ export const engineConfig = localWithdrawalEngineFixtureConfig();
 export const withdrawalConfig = engineConfig;
 
 export async function resetAndMigrate(url: string): Promise<void> {
+  assertSafeDestructiveTestDatabaseUrl(url);
   const client = new Client({ connectionString: url });
   await client.connect();
   try {
+    await assertConnectedDestructiveTestDatabase(client);
     await client.query('DROP SCHEMA IF EXISTS public CASCADE');
     await client.query('CREATE SCHEMA public');
     await client.query('GRANT ALL ON SCHEMA public TO PUBLIC');
@@ -660,6 +667,7 @@ export async function createApprovedWithdrawal(
 }
 
 export async function truncateWithdrawalTables(pool: Pool): Promise<void> {
+  await assertConnectedDestructiveTestDatabase(pool);
   await pool.query(`
     TRUNCATE TABLE
       withdrawal_payout_reconciliations,

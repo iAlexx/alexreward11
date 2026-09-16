@@ -31,6 +31,8 @@ import { randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
+import { assertConnectedDestructiveTestDatabase } from '@alex-rewards/db';
+
 import {
   LedgerDomainError,
   getOrCreateLedgerAccount,
@@ -123,6 +125,7 @@ describePhase10('phase10 testnet available provision', () => {
   });
 
   beforeEach(async () => {
+    await assertConnectedDestructiveTestDatabase(pool);
     await pool.query(`
       TRUNCATE TABLE
         audit_logs,

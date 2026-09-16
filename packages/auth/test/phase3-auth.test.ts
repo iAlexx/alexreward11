@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Phase 3 Telegram auth + Founder claim integration suite.
  *
  * Destructive against an explicitly nominated database (drops public schema and
@@ -11,7 +11,11 @@ import { Client, Pool } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { buildSignedInitDataForTests } from '@alex-rewards/telegram';
-import { migrateDatabase } from '@alex-rewards/db';
+import {
+  assertConnectedDestructiveTestDatabase,
+  assertSafeDestructiveTestDatabaseUrl,
+  migrateDatabase,
+} from '@alex-rewards/db';
 
 import {
   AuthDomainError,
@@ -41,9 +45,11 @@ const sessionConfig = {
 };
 
 async function resetSchema(url: string): Promise<void> {
+  assertSafeDestructiveTestDatabaseUrl(url);
   const client = new Client({ connectionString: url });
   await client.connect();
   try {
+    await assertConnectedDestructiveTestDatabase(client);
     await client.query('DROP SCHEMA IF EXISTS public CASCADE');
     await client.query('CREATE SCHEMA public');
     await client.query('GRANT ALL ON SCHEMA public TO PUBLIC');
@@ -132,6 +138,7 @@ describe.skipIf(databaseUrl === '')('Phase 3 auth + membership binding', () => {
   });
 
   beforeEach(async () => {
+    await assertConnectedDestructiveTestDatabase(pool);
     await pool.query(`
       TRUNCATE TABLE
         audit_logs,
