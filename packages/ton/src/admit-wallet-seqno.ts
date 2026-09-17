@@ -230,7 +230,7 @@ export async function admitWalletSeqno(
       workchain: input.workchain ?? 0,
       walletId: { networkGlobalId: input.networkGlobalId },
     });
-    const stateInit = walletStateInitForSeqno(0, wallet.init);
+    const stateInit = walletStateInitForSeqno(0, wallet.init, 'uninit');
     if (stateInit === undefined || stateInit.code === undefined) {
       return {
         ok: false,
@@ -298,6 +298,25 @@ export async function admitWalletSeqno(
 
   if (primaryUninit && secondaryUninit) {
     // Dual-provider uninitialized → admit seqno=0 only (identity already proven above).
+    // Contradictory deployed-code evidence on an "uninit" account is fail-closed.
+    const primaryCode =
+      primaryState.codeHash !== null && primaryState.codeHash.trim() !== ''
+        ? normalizeHex(primaryState.codeHash)
+        : null;
+    const secondaryCode =
+      secondaryState.codeHash !== null && secondaryState.codeHash.trim() !== ''
+        ? normalizeHex(secondaryState.codeHash)
+        : null;
+    if (primaryCode !== null || secondaryCode !== null) {
+      return {
+        ok: false,
+        code: 'CONFLICTING_EVIDENCE',
+        message:
+          'uninitialized account reported non-null code hash (contradictory deploy evidence)',
+        primary: primaryState,
+        secondary: secondaryState,
+      };
+    }
     return {
       ok: true,
       seqno: 0,
@@ -402,11 +421,16 @@ export async function admitWalletSeqno(
   // Independent consistency where secondary can also read seqno.
   try {
     const secondarySeqno = await input.secondary.getSeqno(input.hotWalletAddress);
-    if (
-      Number.isSafeInteger(secondarySeqno) &&
-      secondarySeqno >= 0 &&
-      secondarySeqno !== primarySeqno
-    ) {
+    if (!Number.isSafeInteger(secondarySeqno) || secondarySeqno < 0) {
+      return {
+        ok: false,
+        code: 'MALFORMED_RESPONSE',
+        message: `invalid secondary seqno=${String(secondarySeqno)}`,
+        primary: primaryState,
+        secondary: secondaryState,
+      };
+    }
+    if (secondarySeqno !== primarySeqno) {
       return {
         ok: false,
         code: 'SEQNO_INCONSISTENT',
@@ -440,7 +464,8 @@ export async function admitWalletSeqno(
     ok: true,
     seqno: primarySeqno,
     accountStatus: 'active',
-    requiresStateInit: primarySeqno === 0,
+    // Active wallets never require StateInit — including rare active+seqno=0 cases.
+    requiresStateInit: false,
     derivedAddressRaw,
     approvedCodeHash,
     primary: primaryState,

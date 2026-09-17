@@ -15,6 +15,7 @@ export interface SigningViewRow {
   readonly signer_key_reference: string;
   readonly dispatch_fencing_token: string;
   readonly broadcast_result_state: string;
+  readonly requires_state_init: boolean;
   readonly signing_started_at: Date | null;
   readonly broadcast_started_at: Date | null;
   readonly settled_at: Date | null;

@@ -11,7 +11,7 @@ import type { Phase10LiveExternalProbeEvidence } from './phase10-live-probes.js'
 import type { Phase10PreflightReport } from './phase10-preflight.js';
 import type { Phase10ReadinessConfig } from './phase10-readiness.js';
 
-export const PHASE10_LIVE_PREFLIGHT_EVIDENCE_SCHEMA_VERSION = 1 as const;
+export const PHASE10_LIVE_PREFLIGHT_EVIDENCE_SCHEMA_VERSION = 2 as const;
 
 export interface Phase10LivePreflightEvidenceArtifact {
   readonly schemaVersion: typeof PHASE10_LIVE_PREFLIGHT_EVIDENCE_SCHEMA_VERSION;

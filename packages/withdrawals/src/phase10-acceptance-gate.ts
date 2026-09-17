@@ -550,7 +550,7 @@ export interface ParsedLiveReadinessEvidence {
   readonly secondaryNetworkGlobalId: number;
 }
 
-const PHASE10_LIVE_PREFLIGHT_SCHEMA_VERSION = 1;
+const PHASE10_LIVE_PREFLIGHT_SCHEMA_VERSION = 2;
 
 /**
  * Parse + validate live preflight evidence.
@@ -574,7 +574,7 @@ export function parseLiveReadinessEvidence(raw: unknown): {
   // Canonical artifact markers — loose flags without these never PASS acceptance.
   if (root.schemaVersion !== PHASE10_LIVE_PREFLIGHT_SCHEMA_VERSION) {
     errors.push(
-      'canonical live-preflight schemaVersion must be exactly 1 (hand-authored loose readiness flags are refused)',
+      'canonical live-preflight schemaVersion must be exactly 2 (schema-v1 / hand-authored artifacts without verified walletSeqnoAdmission are refused)',
     );
   }
 
@@ -678,6 +678,37 @@ export function parseLiveReadinessEvidence(raw: unknown): {
       if (signer.walletAddressMatchesExpected !== true) {
         errors.push('Signer wallet address must match authoritative Hot Wallet');
       }
+    }
+  }
+
+  // Fail-closed: verified walletSeqnoAdmission evidence is mandatory for acceptance.
+  // Top-level field or nested externalProbes.walletSeqnoAdmission must prove admission.
+  // A bare boolean / missing field / schema-v1 artifact cannot impersonate success.
+  const topAdmission = asRecord(root.walletSeqnoAdmission);
+  const nestedAdmission =
+    externalProbes !== null ? asRecord(externalProbes.walletSeqnoAdmission) : null;
+  const admissionEvidence = topAdmission ?? nestedAdmission;
+  if (admissionEvidence === null) {
+    errors.push(
+      'verified walletSeqnoAdmission evidence required (schema-v1 / hand-authored artifacts without it are refused)',
+    );
+  } else {
+    if (admissionEvidence.probePerformed !== true) {
+      errors.push('walletSeqnoAdmission.probePerformed must be true');
+    }
+    if (admissionEvidence.admitted !== true) {
+      errors.push('walletSeqnoAdmission.admitted must be true');
+    }
+    if (
+      typeof admissionEvidence.seqno !== 'number' ||
+      !Number.isSafeInteger(admissionEvidence.seqno) ||
+      admissionEvidence.seqno < 0
+    ) {
+      errors.push('walletSeqnoAdmission.seqno must be a nonnegative safe integer');
+    }
+    const accountStatus = readNonEmptyString(admissionEvidence.accountStatus);
+    if (accountStatus !== 'uninit' && accountStatus !== 'active') {
+      errors.push('walletSeqnoAdmission.accountStatus must be uninit or active');
     }
   }
 

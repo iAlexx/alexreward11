@@ -1160,7 +1160,30 @@ export async function runRealTestnetPayoutPipeline(
       payoutJettonWalletAddress: context.payoutJettonWallet,
       jettonMasterIdentity: context.jettonMaster,
     };
-    const canonicalMessageHashHex = await input.buildCanonicalMessageHash(intent);
+    let canonicalMessageHashHex: string;
+    try {
+      canonicalMessageHashHex = await input.buildCanonicalMessageHash(intent);
+    } catch (error) {
+      await withWithdrawalTransaction(db, async (client) => {
+        await transitionWithdrawal(client, {
+          id: context.withdrawalId,
+          from: 'SIGNING',
+          to: 'FAILED_PRE_BROADCAST',
+        });
+        await releaseLeaseFailedPreBroadcast(client, {
+          hotWalletId: context.hotWalletId,
+          withdrawalId: context.withdrawalId,
+          fencingToken: BigInt(lease.fencing_token!),
+        });
+      });
+      return {
+        state: 'FAILED_PRE_BROADCAST',
+        attemptId: null,
+        reason: `CANONICAL_HASH_BUILD_FAILED:${error instanceof Error ? error.message : String(error)}`,
+        seqno: admission.seqno,
+        stagesCompleted,
+      };
+    }
     const fencingToken = BigInt(lease.fencing_token!);
     let attempt;
     try {
@@ -1175,6 +1198,7 @@ export async function runRealTestnetPayoutPipeline(
           queryId,
           canonicalMessageHash: canonicalMessageHashHex,
           validUntil,
+          requiresStateInit: admission.requiresStateInit,
           scenarioHashInputs: { recipient: context.recipient, path: 'phase10-real' },
         });
       });
@@ -1383,70 +1407,57 @@ export async function runRealTestnetPayoutPipeline(
   stagesCompleted.push('authoritative_wallet_seqno');
 
   // --- Enter SIGNING + acquire dispatch lease (only after admission) ---
-  let context: {
-    readonly withdrawalId: string;
-    readonly hotWalletId: string;
-    readonly netAmountAtomic: string;
-    readonly recipient: string;
-    readonly hotWalletAddress: string;
-    readonly payoutJettonWallet: string;
-    readonly signerKeyReference: string;
-    readonly jettonMaster: string;
-    readonly fencingToken: bigint;
-    readonly ownerIdentity: string;
-  };
-  try {
-    context = await withWithdrawalTransaction(db, async (client) => {
-      const locked = await client.query<{ state: WithdrawalState }>(
-        `SELECT state FROM withdrawals WHERE id = $1::uuid FOR UPDATE`,
-        [loaded.withdrawalId],
-      );
-      const state = locked.rows[0]?.state;
-      if (state !== 'QUEUED') {
-        throw new WithdrawalDomainError(
-          'STATE_CONFLICT',
-          'Pipeline expects QUEUED before SIGNING',
-          {
-            details: { state },
-          },
-        );
-      }
+  const leaseAcquire = await withWithdrawalTransaction(db, async (client) => {
+    const locked = await client.query<{ state: WithdrawalState }>(
+      `SELECT state FROM withdrawals WHERE id = $1::uuid FOR UPDATE`,
+      [loaded.withdrawalId],
+    );
+    const state = locked.rows[0]?.state;
+    if (state !== 'QUEUED') {
+      throw new WithdrawalDomainError('STATE_CONFLICT', 'Pipeline expects QUEUED before SIGNING', {
+        details: { state },
+      });
+    }
+    await transitionWithdrawal(client, {
+      id: loaded.withdrawalId,
+      from: 'QUEUED',
+      to: 'SIGNING',
+    });
+    const ownerIdentity = hotWalletDispatchOwnerIdentity(loaded.withdrawalId);
+    const lease = await acquireHotWalletDispatchLease(client, loaded.hotWalletId, ownerIdentity);
+    if (lease.status !== 'ACQUIRED') {
+      // Commit FAILED_PRE_BROADCAST — do not throw (would roll back the transition).
       await transitionWithdrawal(client, {
         id: loaded.withdrawalId,
-        from: 'QUEUED',
-        to: 'SIGNING',
+        from: 'SIGNING',
+        to: 'FAILED_PRE_BROADCAST',
       });
-      const ownerIdentity = hotWalletDispatchOwnerIdentity(loaded.withdrawalId);
-      const lease = await acquireHotWalletDispatchLease(client, loaded.hotWalletId, ownerIdentity);
-      if (lease.status !== 'ACQUIRED') {
-        await transitionWithdrawal(client, {
-          id: loaded.withdrawalId,
-          from: 'SIGNING',
-          to: 'FAILED_PRE_BROADCAST',
-        });
-        throw new WithdrawalDomainError('STATE_CONFLICT', 'Hot wallet dispatch lease unavailable', {
-          details: { lease },
-        });
-      }
       return {
-        ...loaded,
-        fencingToken: lease.fencingToken,
-        ownerIdentity,
-      };
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (message.includes('Hot wallet dispatch lease unavailable')) {
-      return {
-        state: 'FAILED_PRE_BROADCAST',
-        attemptId: null,
-        reason: message,
-        seqno: initialAdmission.seqno,
-        stagesCompleted,
+        ok: false as const,
+        reason: 'Hot wallet dispatch lease unavailable',
+        lease,
       };
     }
-    throw error;
+    return {
+      ok: true as const,
+      fencingToken: lease.fencingToken,
+      ownerIdentity,
+    };
+  });
+  if (!leaseAcquire.ok) {
+    return {
+      state: 'FAILED_PRE_BROADCAST',
+      attemptId: null,
+      reason: leaseAcquire.reason,
+      seqno: initialAdmission.seqno,
+      stagesCompleted,
+    };
   }
+  const context = {
+    ...loaded,
+    fencingToken: leaseAcquire.fencingToken,
+    ownerIdentity: leaseAcquire.ownerIdentity,
+  };
   stagesCompleted.push('fenced_dispatcher_lease');
   crashAt(input, 'AFTER_ENTER_SIGNING');
 
@@ -1510,7 +1521,30 @@ export async function runRealTestnetPayoutPipeline(
     payoutJettonWalletAddress: context.payoutJettonWallet,
     jettonMasterIdentity: context.jettonMaster,
   };
-  const canonicalMessageHashHex = await input.buildCanonicalMessageHash(intent);
+  let canonicalMessageHashHex: string;
+  try {
+    canonicalMessageHashHex = await input.buildCanonicalMessageHash(intent);
+  } catch (error) {
+    await withWithdrawalTransaction(db, async (client) => {
+      await transitionWithdrawal(client, {
+        id: context.withdrawalId,
+        from: 'SIGNING',
+        to: 'FAILED_PRE_BROADCAST',
+      });
+      await releaseLeaseFailedPreBroadcast(client, {
+        hotWalletId: context.hotWalletId,
+        withdrawalId: context.withdrawalId,
+        fencingToken: context.fencingToken,
+      });
+    });
+    return {
+      state: 'FAILED_PRE_BROADCAST',
+      attemptId: null,
+      reason: `CANONICAL_HASH_BUILD_FAILED:${error instanceof Error ? error.message : String(error)}`,
+      seqno,
+      stagesCompleted,
+    };
+  }
 
   let attempt;
   try {
@@ -1525,6 +1559,7 @@ export async function runRealTestnetPayoutPipeline(
         queryId,
         canonicalMessageHash: canonicalMessageHashHex,
         validUntil,
+        requiresStateInit: readmission.requiresStateInit,
         scenarioHashInputs: { recipient: context.recipient, path: 'phase10-real' },
       });
     });

@@ -1224,7 +1224,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 pre-commit blocker DB regress
     await writeFile(
       readinessPath,
       JSON.stringify({
-        schemaVersion: 1,
+        schemaVersion: 2,
         liveAuthorizationWindow: true,
         verdict: 'READY_FOR_CONTROLLED_LIVE_TESTNET',
         realChainEnabled: true,
@@ -1263,7 +1263,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 pre-commit blocker DB regress
           independenceCode: null,
         },
         externalProbes: {
-          schemaVersion: 1,
+          schemaVersion: 2,
           observedAt: recordedAt,
           primary: {
             kind: 'toncenter',

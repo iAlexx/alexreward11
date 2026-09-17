@@ -350,4 +350,146 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 seqno admission pipeline / re
     );
     expect(leaseStillHeld.rows[0]?.released_at).toBeNull();
   });
+
+  it('lease contention commits FAILED_PRE_BROADCAST matching returned pipeline state', async () => {
+    const withdrawalId = await queueApprovedWithdrawal('9803');
+    const otherOwner = 'withdrawal:00000000-0000-4000-8000-000000000099';
+    await withWithdrawalTransaction(pool, async (client) => {
+      const lease = await acquireHotWalletDispatchLease(client, hotWalletId, otherOwner);
+      expect(lease.status).toBe('ACQUIRED');
+    });
+
+    const primary = new FakeTonChainProvider();
+    const secondary = new FakeTonChainProvider();
+    primary.seedActiveV5R1({
+      address: HOT_WALLET_RAW,
+      seqno: 2,
+      publicKeyHex: TEST_PUBLIC_KEY_HEX,
+    });
+    secondary.seedActiveV5R1({
+      address: HOT_WALLET_RAW,
+      seqno: 2,
+      publicKeyHex: TEST_PUBLIC_KEY_HEX,
+    });
+    const phase10 = buildPhase10PayoutConfig({
+      realChainEnabled: true,
+      signerServiceToken: 'local-signer-service-token-32chars!!',
+      jettonMasterIdentity: jettonMaster,
+      primaryProviderKind: 'toncenter',
+      primaryProviderUrl: 'https://testnet.toncenter.com/api/v2',
+      secondaryProviderKind: 'tonapi',
+      secondaryProviderUrl: 'https://testnet.tonapi.io',
+    });
+
+    const result = await runRealTestnetPayoutPipeline(pool, {
+      withdrawalId,
+      phase10,
+      engine: nonFakeEngine,
+      chainProvider: primary,
+      secondaryChainProvider: secondary,
+      signer: createTestSigner(),
+      allowTestExecutionPath: true,
+      buildCanonicalMessageHash: async () => TEST_CANONICAL_HASH,
+    });
+
+    expect(result.state).toBe('FAILED_PRE_BROADCAST');
+    expect(result.attemptId).toBeNull();
+    expect(result.reason).toMatch(/lease unavailable/i);
+
+    const durable = await pool.query<{ state: string }>(
+      `SELECT state::text AS state FROM withdrawals WHERE id = $1::uuid`,
+      [withdrawalId],
+    );
+    expect(durable.rows[0]?.state).toBe('FAILED_PRE_BROADCAST');
+    expect(durable.rows[0]?.state).toBe(result.state);
+
+    const attempts = await pool.query<{ c: number }>(
+      `SELECT count(*)::int AS c FROM withdrawal_attempts WHERE withdrawal_id = $1::uuid`,
+      [withdrawalId],
+    );
+    expect(attempts.rows[0]?.c).toBe(0);
+
+    const foreignLease = await pool.query<{ released_at: Date | null; owner_identity: string }>(
+      `SELECT released_at, owner_identity FROM hot_wallet_dispatch_leases
+       WHERE hot_wallet_id = $1::uuid`,
+      [hotWalletId],
+    );
+    expect(foreignLease.rows[0]?.owner_identity).toBe(otherOwner);
+    expect(foreignLease.rows[0]?.released_at).toBeNull();
+  });
+
+  it('canonical hash build failure after SIGNING releases lease and does not strand', async () => {
+    const withdrawalId = await queueApprovedWithdrawal('9804');
+    const primary = new FakeTonChainProvider();
+    const secondary = new FakeTonChainProvider();
+    primary.seedActiveV5R1({
+      address: HOT_WALLET_RAW,
+      seqno: 5,
+      publicKeyHex: TEST_PUBLIC_KEY_HEX,
+    });
+    secondary.seedActiveV5R1({
+      address: HOT_WALLET_RAW,
+      seqno: 5,
+      publicKeyHex: TEST_PUBLIC_KEY_HEX,
+    });
+    const phase10 = buildPhase10PayoutConfig({
+      realChainEnabled: true,
+      signerServiceToken: 'local-signer-service-token-32chars!!',
+      jettonMasterIdentity: jettonMaster,
+      primaryProviderKind: 'toncenter',
+      primaryProviderUrl: 'https://testnet.toncenter.com/api/v2',
+      secondaryProviderKind: 'tonapi',
+      secondaryProviderUrl: 'https://testnet.tonapi.io',
+    });
+
+    const result = await runRealTestnetPayoutPipeline(pool, {
+      withdrawalId,
+      phase10,
+      engine: nonFakeEngine,
+      chainProvider: primary,
+      secondaryChainProvider: secondary,
+      signer: {
+        async getSigningIdentity() {
+          return {
+            publicKeyHex: TEST_PUBLIC_KEY_HEX,
+            publicKeyFingerprint: ENCRYPTED_SIGNER_REF,
+            walletAddressRaw: HOT_WALLET_RAW,
+            signingReady: true,
+            custodyState: 'n/a',
+          };
+        },
+        async signWithdrawalAttempt() {
+          throw new Error('sign must not run after hash failure');
+        },
+      },
+      allowTestExecutionPath: true,
+      buildCanonicalMessageHash: async () => {
+        throw new Error('HASH_BOOM');
+      },
+    });
+
+    expect(result.state).toBe('FAILED_PRE_BROADCAST');
+    expect(result.reason).toMatch(/CANONICAL_HASH_BUILD_FAILED:HASH_BOOM/);
+    expect(result.attemptId).toBeNull();
+
+    const durable = await pool.query<{ state: string }>(
+      `SELECT state::text AS state FROM withdrawals WHERE id = $1::uuid`,
+      [withdrawalId],
+    );
+    expect(durable.rows[0]?.state).toBe('FAILED_PRE_BROADCAST');
+
+    const attempts = await pool.query<{ c: number }>(
+      `SELECT count(*)::int AS c FROM withdrawal_attempts WHERE withdrawal_id = $1::uuid`,
+      [withdrawalId],
+    );
+    expect(attempts.rows[0]?.c).toBe(0);
+
+    const owner = hotWalletDispatchOwnerIdentity(withdrawalId);
+    const lease = await pool.query<{ released_at: Date | null }>(
+      `SELECT released_at FROM hot_wallet_dispatch_leases
+       WHERE hot_wallet_id = $1::uuid AND owner_identity = $2`,
+      [hotWalletId, owner],
+    );
+    expect(lease.rows[0]?.released_at).not.toBeNull();
+  });
 });

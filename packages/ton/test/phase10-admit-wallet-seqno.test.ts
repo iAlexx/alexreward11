@@ -52,10 +52,96 @@ describe('admitWalletSeqno (fail-closed V5R1)', () => {
       workchain: 0,
       walletId: { networkGlobalId: -3 },
     });
-    const stateInit = walletStateInitForSeqno(0, wallet.init);
+    const stateInit = walletStateInitForSeqno(0, wallet.init, 'uninit');
     expect(stateInit).toBeDefined();
     expect(wallet.address.toRawString().toLowerCase()).toBe(HOT_WALLET_RAW.toLowerCase());
-    expect(walletStateInitForSeqno(1, wallet.init)).toBeUndefined();
+    expect(walletStateInitForSeqno(1, wallet.init, 'uninit')).toBeUndefined();
+    expect(walletStateInitForSeqno(0, wallet.init, 'active')).toBeUndefined();
+  });
+
+  it('admits active verified V5R1 with seqno=0 without requiring StateInit', async () => {
+    const primary = new FakeTonChainProvider();
+    const secondary = new FakeTonChainProvider();
+    primary.seedActiveV5R1({
+      address: HOT_WALLET_RAW,
+      seqno: 0,
+      publicKeyHex: TEST_PUBLIC_KEY_HEX,
+    });
+    secondary.seedActiveV5R1({
+      address: HOT_WALLET_RAW,
+      seqno: 0,
+      publicKeyHex: TEST_PUBLIC_KEY_HEX,
+    });
+
+    const result = await admitWalletSeqno({
+      networkGlobalId: -3,
+      hotWalletAddress: HOT_WALLET_RAW,
+      publicKeyHex: TEST_PUBLIC_KEY_HEX,
+      signerKeyReference: FINGERPRINT,
+      approvedSignerKeyReference: FINGERPRINT,
+      primary,
+      secondary,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.seqno).toBe(0);
+    expect(result.accountStatus).toBe('active');
+    expect(result.requiresStateInit).toBe(false);
+  });
+
+  it('BLOCKS uninitialized accounts that report non-null code hash', async () => {
+    const primary = new FakeTonChainProvider();
+    const secondary = new FakeTonChainProvider();
+    primary.seedAccountState(HOT_WALLET_RAW, {
+      status: 'uninit',
+      codeHash: 'ab'.repeat(32),
+      balanceNanotons: '1000000000',
+    });
+    secondary.seedUninit(HOT_WALLET_RAW);
+
+    const result = await admitWalletSeqno({
+      networkGlobalId: -3,
+      hotWalletAddress: HOT_WALLET_RAW,
+      publicKeyHex: TEST_PUBLIC_KEY_HEX,
+      signerKeyReference: FINGERPRINT,
+      approvedSignerKeyReference: FINGERPRINT,
+      primary,
+      secondary,
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe('CONFLICTING_EVIDENCE');
+  });
+
+  it('BLOCKS malformed secondary seqno values (NaN, negative, fractional, unsafe)', async () => {
+    const codeHash = approvedWalletV5R1CodeHash({
+      publicKeyHex: TEST_PUBLIC_KEY_HEX,
+      networkGlobalId: -3,
+    });
+    const cases = [Number.NaN, -1, 1.5, Number.MAX_SAFE_INTEGER + 1];
+    for (const bad of cases) {
+      const primary = new FakeTonChainProvider();
+      const secondary = new FakeTonChainProvider();
+      primary.seedAccountState(HOT_WALLET_RAW, { status: 'active', codeHash });
+      secondary.seedAccountState(HOT_WALLET_RAW, { status: 'active', codeHash });
+      primary.seedSeqno(HOT_WALLET_RAW, 4);
+      secondary.seedSeqno(HOT_WALLET_RAW, bad);
+
+      const result = await admitWalletSeqno({
+        networkGlobalId: -3,
+        hotWalletAddress: HOT_WALLET_RAW,
+        publicKeyHex: TEST_PUBLIC_KEY_HEX,
+        signerKeyReference: FINGERPRINT,
+        approvedSignerKeyReference: FINGERPRINT,
+        primary,
+        secondary,
+      });
+      expect(result.ok).toBe(false);
+      if (result.ok) continue;
+      expect(result.code).toBe('MALFORMED_RESPONSE');
+    }
   });
 
   it('admits authoritative seqno for active verified V5R1', async () => {

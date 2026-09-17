@@ -503,7 +503,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 live remediation', () => {
       liveAuthorizationWindow: true,
     });
     // Integration must use writer output without replacing verdict/blockers/signer fields.
-    expect(artifact.schemaVersion).toBe(1);
+    expect(artifact.schemaVersion).toBe(2);
     expect(artifact.externalProbes?.signer.custodyState).toBe('UNLOCKED');
     const parsed = parseLiveReadinessEvidence(artifact);
     // DB readiness may still leave blockers; if writer verdict is BLOCKED, parser must refuse.
@@ -522,6 +522,97 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 live remediation', () => {
     expect(
       handAuthored.errors.some((e) => e.includes('hand-authored') || e.includes('schemaVersion')),
     ).toBe(true);
+
+    const schemaV1WithoutAdmission = parseLiveReadinessEvidence({
+      schemaVersion: 1,
+      liveAuthorizationWindow: true,
+      verdict: 'READY_FOR_CONTROLLED_LIVE_TESTNET',
+      realChainEnabled: true,
+      fakeChainEnabled: false,
+      networkCode: 'TON_TESTNET',
+      assetSymbol: 'USDT',
+      controlledUserId: 'user',
+      recordedAt: new Date().toISOString(),
+      preflightBlockers: [],
+      restoreScanSummary: { dangerousCount: 0, warnCount: 0, scannedAt: new Date().toISOString() },
+      providers: {
+        primary: {
+          kind: 'toncenter',
+          endpointFingerprint: 'https://a.example:443',
+          healthy: true,
+          observedNetworkGlobalId: -3,
+        },
+        secondary: {
+          kind: 'tonapi',
+          endpointFingerprint: 'https://b.example:443',
+          healthy: true,
+          observedNetworkGlobalId: -3,
+        },
+        independenceProven: true,
+      },
+      externalProbes: {
+        schemaVersion: 1,
+        signer: {
+          probePerformed: true,
+          identityProbed: true,
+          custodyState: 'UNLOCKED',
+          signingReady: true,
+          identityMatchesExpected: true,
+          walletAddressMatchesExpected: true,
+        },
+      },
+    });
+    expect(schemaV1WithoutAdmission.parsed).toBeNull();
+    expect(
+      schemaV1WithoutAdmission.errors.some(
+        (e) => e.includes('schemaVersion') || e.includes('walletSeqnoAdmission'),
+      ),
+    ).toBe(true);
+
+    // Schema-v2 without verified walletSeqnoAdmission must also refuse (no hand-authored bypass).
+    const schemaV2WithoutAdmission = parseLiveReadinessEvidence({
+      schemaVersion: 2,
+      liveAuthorizationWindow: true,
+      verdict: 'READY_FOR_CONTROLLED_LIVE_TESTNET',
+      realChainEnabled: true,
+      fakeChainEnabled: false,
+      networkCode: 'TON_TESTNET',
+      assetSymbol: 'USDT',
+      controlledUserId: 'user',
+      recordedAt: new Date().toISOString(),
+      preflightBlockers: [],
+      restoreScanSummary: { dangerousCount: 0, warnCount: 0, scannedAt: new Date().toISOString() },
+      providers: {
+        primary: {
+          kind: 'toncenter',
+          endpointFingerprint: 'https://a.example:443',
+          healthy: true,
+          observedNetworkGlobalId: -3,
+        },
+        secondary: {
+          kind: 'tonapi',
+          endpointFingerprint: 'https://b.example:443',
+          healthy: true,
+          observedNetworkGlobalId: -3,
+        },
+        independenceProven: true,
+      },
+      externalProbes: {
+        schemaVersion: 2,
+        signer: {
+          probePerformed: true,
+          identityProbed: true,
+          custodyState: 'UNLOCKED',
+          signingReady: true,
+          identityMatchesExpected: true,
+          walletAddressMatchesExpected: true,
+        },
+      },
+    });
+    expect(schemaV2WithoutAdmission.parsed).toBeNull();
+    expect(schemaV2WithoutAdmission.errors.some((e) => e.includes('walletSeqnoAdmission'))).toBe(
+      true,
+    );
 
     const campaignPath = join(dir, 'campaign.json');
     const failurePath = join(dir, 'failures.json');
@@ -1066,7 +1157,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 live remediation', () => {
     await writeFile(
       readinessPath,
       JSON.stringify({
-        schemaVersion: 1,
+        schemaVersion: 2,
         liveAuthorizationWindow: true,
         verdict: 'READY_FOR_CONTROLLED_LIVE_TESTNET',
         realChainEnabled: true,
@@ -1105,7 +1196,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 live remediation', () => {
           independenceCode: null,
         },
         externalProbes: {
-          schemaVersion: 1,
+          schemaVersion: 2,
           observedAt: recordedAt,
           primary: {
             kind: 'toncenter',
