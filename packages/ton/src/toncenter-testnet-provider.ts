@@ -348,7 +348,8 @@ export class TonCenterTestnetProvider implements TonChainProvider {
         : decimalString(record.balance, 'TonCenter account balance');
 
     const lastTransactionLt =
-      typeof record.last_transaction_lt === 'string' || typeof record.last_transaction_lt === 'number'
+      typeof record.last_transaction_lt === 'string' ||
+      typeof record.last_transaction_lt === 'number'
         ? String(record.last_transaction_lt)
         : record.last_transaction_lt === null || record.last_transaction_lt === undefined
           ? null

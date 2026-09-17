@@ -249,7 +249,7 @@ export async function admitWalletSeqno(
   let primaryState: TonAccountState;
   let secondaryState: TonAccountState;
   try {
-    ;[primaryState, secondaryState] = await Promise.all([
+    [primaryState, secondaryState] = await Promise.all([
       input.primary.getAccountState(input.hotWalletAddress),
       input.secondary.getAccountState(input.hotWalletAddress),
     ]);
@@ -344,11 +344,7 @@ export async function admitWalletSeqno(
       secondary: secondaryState,
     };
   }
-  if (
-    primaryCode !== null &&
-    secondaryCode !== null &&
-    primaryCode !== secondaryCode
-  ) {
+  if (primaryCode !== null && secondaryCode !== null && primaryCode !== secondaryCode) {
     return {
       ok: false,
       code: 'PROVIDER_DISAGREEMENT',

@@ -227,7 +227,8 @@ export async function runPhase10RestoreReconcileScan(
         leaseUnreleased &&
         row.lease_expires_at !== null &&
         row.lease_expires_at.getTime() <= Date.now();
-      const staleOrExpiredLease = leaseUnreleased && (leaseExpired || row.lease_expires_at === null);
+      const staleOrExpiredLease =
+        leaseUnreleased && (leaseExpired || row.lease_expires_at === null);
       push({
         category: 'signing_zero_attempts_recovery_required',
         severity: 'DANGER',

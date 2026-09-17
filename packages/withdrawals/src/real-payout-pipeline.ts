@@ -1403,9 +1403,13 @@ export async function runRealTestnetPayoutPipeline(
       );
       const state = locked.rows[0]?.state;
       if (state !== 'QUEUED') {
-        throw new WithdrawalDomainError('STATE_CONFLICT', 'Pipeline expects QUEUED before SIGNING', {
-          details: { state },
-        });
+        throw new WithdrawalDomainError(
+          'STATE_CONFLICT',
+          'Pipeline expects QUEUED before SIGNING',
+          {
+            details: { state },
+          },
+        );
       }
       await transitionWithdrawal(client, {
         id: loaded.withdrawalId,
