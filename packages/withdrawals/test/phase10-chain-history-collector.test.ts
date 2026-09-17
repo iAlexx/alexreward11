@@ -141,6 +141,17 @@ class StubEnumerateProvider implements TonChainProvider {
   async getSeqno(): Promise<number> {
     return 0;
   }
+  async getAccountState(address: string) {
+    return {
+      address,
+      status: 'uninit' as const,
+      balanceNanotons: '0',
+      codeHash: null,
+      dataHash: null,
+      lastTransactionLt: null,
+      lastTransactionHash: null,
+    };
+  }
   async getAccountBalance(address: string) {
     return { address, balanceNanotons: '0' };
   }

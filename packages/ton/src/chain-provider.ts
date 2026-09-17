@@ -39,6 +39,24 @@ export interface TonAccountBalance {
   readonly balanceNanotons: string;
 }
 
+/** Normalized account lifecycle status (provider-neutral). */
+export type TonAccountStatus = 'uninit' | 'active' | 'frozen' | 'nonexist' | 'unknown';
+
+/**
+ * Read-only account state used for fail-closed Wallet V5R1 seqno admission.
+ * Never invent seqno from exit_code alone — callers must use admitWalletSeqno.
+ */
+export interface TonAccountState {
+  readonly address: string;
+  readonly status: TonAccountStatus;
+  readonly balanceNanotons: string | null;
+  /** Code cell hash hex (lowercase) when active and available; null otherwise. */
+  readonly codeHash: string | null;
+  readonly dataHash: string | null;
+  readonly lastTransactionLt: string | null;
+  readonly lastTransactionHash: string | null;
+}
+
 export interface TonJettonBalance {
   readonly ownerAddress: string;
   readonly jettonMaster: string;
@@ -125,6 +143,12 @@ export interface TonChainProvider {
   readonly networkGlobalId: TonNetworkGlobalId;
 
   getSeqno(address: string): Promise<number>;
+
+  /**
+   * Authoritative account state (status + optional code hash).
+   * Must not map get-method exit_code=-13 to seqno; report uninit/nonexist instead.
+   */
+  getAccountState(address: string): Promise<TonAccountState>;
 
   getAccountBalance(address: string): Promise<TonAccountBalance>;
 

@@ -8,6 +8,8 @@ import {
   type FindTransactionsByQueryIdInput,
   type JettonTransferEvidence,
   type TonAccountBalance,
+  type TonAccountState,
+  type TonAccountStatus,
   type TonChainProvider,
   type TonJettonBalance,
   type TonProviderHealth,
@@ -205,6 +207,71 @@ export class TonApiTestnetProvider implements TonChainProvider {
       throw new Error('MALFORMED_RESPONSE: TonAPI seqno is invalid');
     }
     return seqno;
+  }
+
+  async getAccountState(address: string): Promise<TonAccountState> {
+    const body = await this.get(`/v2/accounts/${encodeURIComponent(address)}`, 'TonAPI account');
+    const rawStatus = typeof body.status === 'string' ? body.status.toLowerCase() : '';
+    let status: TonAccountStatus;
+    if (rawStatus === 'uninit' || rawStatus === 'uninitialized') {
+      status = 'uninit';
+    } else if (rawStatus === 'active') {
+      status = 'active';
+    } else if (rawStatus === 'frozen') {
+      status = 'frozen';
+    } else if (rawStatus === 'nonexist' || rawStatus === 'nonexistent') {
+      status = 'nonexist';
+    } else if (rawStatus === '') {
+      throw new Error('MALFORMED_RESPONSE: TonAPI account status missing');
+    } else {
+      status = 'unknown';
+    }
+
+    const codeHashRaw =
+      typeof body.code_hash === 'string'
+        ? body.code_hash
+        : typeof body.codeHash === 'string'
+          ? body.codeHash
+          : null;
+    const dataHashRaw =
+      typeof body.data_hash === 'string'
+        ? body.data_hash
+        : typeof body.dataHash === 'string'
+          ? body.dataHash
+          : null;
+
+    const normalizeHash = (value: string | null): string | null => {
+      if (value === null || value.trim() === '') return null;
+      const trimmed = value.trim();
+      if (/^[0-9a-fA-F]{64}$/.test(trimmed)) return trimmed.toLowerCase();
+      try {
+        return Buffer.from(trimmed, 'base64').toString('hex');
+      } catch {
+        return trimmed.toLowerCase();
+      }
+    };
+
+    const lastTransactionLt =
+      typeof body.last_transaction_lt === 'string' || typeof body.last_transaction_lt === 'number'
+        ? String(body.last_transaction_lt)
+        : null;
+    const lastTransactionHash =
+      typeof body.last_transaction_hash === 'string' && body.last_transaction_hash !== ''
+        ? body.last_transaction_hash
+        : null;
+
+    return {
+      address,
+      status,
+      balanceNanotons:
+        body.balance === undefined || body.balance === null
+          ? null
+          : decimalString(body.balance, 'TonAPI account balance'),
+      codeHash: normalizeHash(codeHashRaw),
+      dataHash: normalizeHash(dataHashRaw),
+      lastTransactionLt,
+      lastTransactionHash,
+    };
   }
 
   async getAccountBalance(address: string): Promise<TonAccountBalance> {

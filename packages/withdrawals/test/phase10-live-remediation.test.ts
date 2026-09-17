@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile } from 'node:fs/promises';
+﻿import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -92,10 +92,24 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 live remediation', () => {
       custodyState: 'UNLOCKED',
     }),
     signerIdentity: async () => ({
+      publicKeyHex: '11'.repeat(32),
       publicKeyFingerprint: EXPECTED_FP,
       walletAddressRaw: EXPECTED_WALLET,
       signingReady: true,
       custodyState: 'UNLOCKED',
+    }),
+    walletSeqnoAdmission: async () => ({
+      probePerformed: true,
+      admitted: true,
+      seqno: 0,
+      accountStatus: 'uninit',
+      requiresStateInit: true,
+      code: null,
+      message: null,
+      hotWalletAddress: EXPECTED_WALLET,
+      networkGlobalId: -3,
+      publicKeyFingerprint: EXPECTED_FP,
+      observedAt: new Date().toISOString(),
     }),
   };
 
@@ -238,6 +252,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 live remediation', () => {
           custodyState: 'n/a',
         }),
         signerIdentity: async () => ({
+          publicKeyHex: '11'.repeat(32),
           publicKeyFingerprint: EXPECTED_FP,
           walletAddressRaw: EXPECTED_WALLET,
           signingReady: true,
@@ -279,6 +294,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 live remediation', () => {
       inject: {
         ...liveEligibleInject,
         signerIdentity: async () => ({
+          publicKeyHex: '11'.repeat(32),
           publicKeyFingerprint: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
           walletAddressRaw: EXPECTED_WALLET,
           signingReady: true,
@@ -296,6 +312,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 live remediation', () => {
       inject: {
         ...liveEligibleInject,
         signerIdentity: async () => ({
+          publicKeyHex: '11'.repeat(32),
           publicKeyFingerprint: EXPECTED_FP,
           walletAddressRaw: '0:wrong',
           signingReady: true,
@@ -1134,6 +1151,20 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 live remediation', () => {
             detail: null,
             observedAt: recordedAt,
           },
+          walletSeqnoAdmission: {
+            probePerformed: true,
+            admitted: true,
+            seqno: 0,
+            accountStatus: 'uninit',
+            requiresStateInit: true,
+            code: null,
+            message: null,
+            hotWalletAddress: '0:test',
+            networkGlobalId: -3,
+            publicKeyFingerprint: 'fp',
+            observedAt: recordedAt,
+          },
+
           overallBlocked: false,
           blockers: [],
         },

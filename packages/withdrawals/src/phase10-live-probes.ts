@@ -3,7 +3,7 @@
  * Never signs, unlocks, broadcasts, or returns secrets/API keys/tokens.
  */
 
-import { createTonChainProvider, type TonProviderKind } from '@alex-rewards/ton';
+import { admitWalletSeqno, createTonChainProvider, type TonProviderKind } from '@alex-rewards/ton';
 
 export const PHASE10_PROVIDER_INDEPENDENCE_UNPROVEN = 'PROVIDER_INDEPENDENCE_UNPROVEN' as const;
 export const PHASE10_TON_TESTNET_NETWORK_GLOBAL_ID = -3 as const;
@@ -48,6 +48,21 @@ export interface Phase10SignerProbeObservation {
   readonly observedAt: string;
 }
 
+export interface Phase10WalletSeqnoAdmissionObservation {
+  readonly probePerformed: boolean;
+  /** True only when admitWalletSeqno returned ok against live/injected providers. */
+  readonly admitted: boolean;
+  readonly seqno: number | null;
+  readonly accountStatus: string | null;
+  readonly requiresStateInit: boolean | null;
+  readonly code: string | null;
+  readonly message: string | null;
+  readonly hotWalletAddress: string | null;
+  readonly networkGlobalId: number | null;
+  readonly publicKeyFingerprint: string | null;
+  readonly observedAt: string;
+}
+
 export interface Phase10LiveExternalProbeEvidence {
   readonly schemaVersion: 1;
   readonly observedAt: string;
@@ -61,6 +76,12 @@ export interface Phase10LiveExternalProbeEvidence {
     readonly secondaryFingerprint: string | null;
   };
   readonly signer: Phase10SignerProbeObservation;
+  /**
+   * Fail-closed Hot Wallet account-state + seqno admission.
+   * Caller-supplied booleans cannot impersonate this evidence — only probePerformed
+   * observations produced by runPhase10LiveExternalProbes are authoritative.
+   */
+  readonly walletSeqnoAdmission: Phase10WalletSeqnoAdmissionObservation;
   readonly overallBlocked: boolean;
   readonly blockers: readonly string[];
 }
@@ -83,6 +104,11 @@ export interface Phase10LiveExternalProbeInput {
    * Required for controlled live preflight eligibility.
    */
   readonly expectedWalletAddressRaw?: string | null;
+  /**
+   * Approved Hot Wallet signer_reference (public-key fingerprint) for seqno admission.
+   * Must match expectedPublicKeyFingerprint when both are present.
+   */
+  readonly approvedSignerKeyReference?: string | null;
   readonly fetchImpl?: typeof fetch;
   /** Injected probe ports for deterministic tests (skip live HTTP). */
   readonly inject?: {
@@ -106,11 +132,17 @@ export interface Phase10LiveExternalProbeInput {
       detail?: string;
     }>;
     readonly signerIdentity?: () => Promise<{
+      publicKeyHex: string;
       publicKeyFingerprint: string;
       walletAddressRaw: string;
       signingReady: boolean;
       custodyState: string;
     } | null>;
+    /**
+     * Full admission observation only — a bare boolean cannot satisfy preflight.
+     * Tests inject the observation returned by admitWalletSeqno against fakes.
+     */
+    readonly walletSeqnoAdmission?: () => Promise<Phase10WalletSeqnoAdmissionObservation>;
   };
 }
 
@@ -345,6 +377,7 @@ async function probeSignerIdentity(
   inject?: Phase10LiveExternalProbeInput['inject'],
 ): Promise<{
   identityProbed: boolean;
+  publicKeyHex: string | null;
   publicKeyFingerprint: string | null;
   walletAddressRaw: string | null;
   signingReady: boolean | null;
@@ -356,6 +389,7 @@ async function probeSignerIdentity(
     if (r === null) {
       return {
         identityProbed: false,
+        publicKeyHex: null,
         publicKeyFingerprint: null,
         walletAddressRaw: null,
         signingReady: null,
@@ -365,6 +399,7 @@ async function probeSignerIdentity(
     }
     return {
       identityProbed: true,
+      publicKeyHex: r.publicKeyHex,
       publicKeyFingerprint: r.publicKeyFingerprint,
       walletAddressRaw: r.walletAddressRaw,
       signingReady: r.signingReady,
@@ -381,6 +416,7 @@ async function probeSignerIdentity(
   ) {
     return {
       identityProbed: false,
+      publicKeyHex: null,
       publicKeyFingerprint: null,
       walletAddressRaw: null,
       signingReady: null,
@@ -400,6 +436,7 @@ async function probeSignerIdentity(
     if (!response.ok) {
       return {
         identityProbed: false,
+        publicKeyHex: null,
         publicKeyFingerprint: null,
         walletAddressRaw: null,
         signingReady: null,
@@ -407,8 +444,13 @@ async function probeSignerIdentity(
         detail: `signer identity HTTP ${response.status}`,
       };
     }
+    const publicKeyHex =
+      typeof body.publicKeyHex === 'string' && /^[0-9a-fA-F]{64}$/.test(body.publicKeyHex)
+        ? body.publicKeyHex.toLowerCase()
+        : null;
     return {
       identityProbed: true,
+      publicKeyHex,
       publicKeyFingerprint:
         typeof body.publicKeyFingerprint === 'string' ? body.publicKeyFingerprint : null,
       walletAddressRaw: typeof body.walletAddressRaw === 'string' ? body.walletAddressRaw : null,
@@ -419,6 +461,7 @@ async function probeSignerIdentity(
   } catch (error) {
     return {
       identityProbed: false,
+      publicKeyHex: null,
       publicKeyFingerprint: null,
       walletAddressRaw: null,
       signingReady: null,
@@ -584,6 +627,15 @@ export async function runPhase10LiveExternalProbes(
     observedAt: new Date().toISOString(),
   };
 
+  const walletSeqnoAdmission = await probeWalletSeqnoAdmission(input, identity, expectedWallet);
+  if (!walletSeqnoAdmission.probePerformed) {
+    blockers.push('WALLET_SEQNO_ADMISSION_PROBE_REQUIRED');
+  } else if (!walletSeqnoAdmission.admitted) {
+    blockers.push(
+      `WALLET_SEQNO_ADMISSION_BLOCKED:${walletSeqnoAdmission.code ?? 'unknown'}:${walletSeqnoAdmission.message ?? 'not admitted'}`,
+    );
+  }
+
   return {
     schemaVersion: 1,
     observedAt,
@@ -591,9 +643,153 @@ export async function runPhase10LiveExternalProbes(
     secondary,
     providerIndependence: independence,
     signer,
-    overallBlocked: blockers.length > 0,
+    walletSeqnoAdmission,
+    overallBlocked: blockers.length > 0 || !walletSeqnoAdmission.admitted,
     blockers,
   };
+}
+
+async function probeWalletSeqnoAdmission(
+  input: Phase10LiveExternalProbeInput,
+  identity: {
+    readonly identityProbed: boolean;
+    readonly publicKeyHex: string | null;
+    readonly publicKeyFingerprint: string | null;
+  },
+  expectedWallet: string | null,
+): Promise<Phase10WalletSeqnoAdmissionObservation> {
+  const observedAt = new Date().toISOString();
+  if (input.inject?.walletSeqnoAdmission !== undefined) {
+    const injected = await input.inject.walletSeqnoAdmission();
+    // Reject bare success without probePerformed — fail-closed against impersonation.
+    if (injected.probePerformed !== true) {
+      return {
+        probePerformed: false,
+        admitted: false,
+        seqno: null,
+        accountStatus: null,
+        requiresStateInit: null,
+        code: 'INJECT_INVALID',
+        message: 'injected walletSeqnoAdmission must set probePerformed=true',
+        hotWalletAddress: expectedWallet,
+        networkGlobalId: PHASE10_TON_TESTNET_NETWORK_GLOBAL_ID,
+        publicKeyFingerprint: identity.publicKeyFingerprint,
+        observedAt,
+      };
+    }
+    return { ...injected, observedAt };
+  }
+
+  const approvedRef =
+    (input.approvedSignerKeyReference ?? input.expectedPublicKeyFingerprint)?.trim() || null;
+  if (
+    !identity.identityProbed ||
+    identity.publicKeyHex === null ||
+    identity.publicKeyFingerprint === null ||
+    expectedWallet === null ||
+    approvedRef === null
+  ) {
+    return {
+      probePerformed: false,
+      admitted: false,
+      seqno: null,
+      accountStatus: null,
+      requiresStateInit: null,
+      code: 'IDENTITY_INCOMPLETE',
+      message: 'Hot Wallet identity + public key required for seqno admission probe',
+      hotWalletAddress: expectedWallet,
+      networkGlobalId: PHASE10_TON_TESTNET_NETWORK_GLOBAL_ID,
+      publicKeyFingerprint: identity.publicKeyFingerprint,
+      observedAt,
+    };
+  }
+
+  const primaryKind = input.primary.kind?.trim().toLowerCase() || null;
+  const secondaryKind = input.secondary.kind?.trim().toLowerCase() || null;
+  if (
+    (primaryKind !== 'toncenter' && primaryKind !== 'tonapi') ||
+    (secondaryKind !== 'toncenter' && secondaryKind !== 'tonapi') ||
+    input.primary.baseUrl === null ||
+    input.secondary.baseUrl === null
+  ) {
+    return {
+      probePerformed: false,
+      admitted: false,
+      seqno: null,
+      accountStatus: null,
+      requiresStateInit: null,
+      code: 'PROVIDERS_INCOMPLETE',
+      message: 'dual Testnet providers required for seqno admission probe',
+      hotWalletAddress: expectedWallet,
+      networkGlobalId: PHASE10_TON_TESTNET_NETWORK_GLOBAL_ID,
+      publicKeyFingerprint: identity.publicKeyFingerprint,
+      observedAt,
+    };
+  }
+
+  try {
+    const primary = createTonChainProvider({
+      kind: primaryKind,
+      baseUrl: input.primary.baseUrl,
+      apiKey: input.primary.apiKey ?? null,
+    });
+    const secondary = createTonChainProvider({
+      kind: secondaryKind,
+      baseUrl: input.secondary.baseUrl,
+      apiKey: input.secondary.apiKey ?? null,
+    });
+    const result = await admitWalletSeqno({
+      networkGlobalId: PHASE10_TON_TESTNET_NETWORK_GLOBAL_ID,
+      hotWalletAddress: expectedWallet,
+      publicKeyHex: identity.publicKeyHex,
+      signerKeyReference: identity.publicKeyFingerprint,
+      approvedSignerKeyReference: approvedRef,
+      primary,
+      secondary,
+    });
+    if (result.ok) {
+      return {
+        probePerformed: true,
+        admitted: true,
+        seqno: result.seqno,
+        accountStatus: result.accountStatus,
+        requiresStateInit: result.requiresStateInit,
+        code: null,
+        message: null,
+        hotWalletAddress: expectedWallet,
+        networkGlobalId: PHASE10_TON_TESTNET_NETWORK_GLOBAL_ID,
+        publicKeyFingerprint: result.publicKeyFingerprint,
+        observedAt,
+      };
+    }
+    return {
+      probePerformed: true,
+      admitted: false,
+      seqno: null,
+      accountStatus: result.primary?.status ?? result.secondary?.status ?? null,
+      requiresStateInit: null,
+      code: result.code,
+      message: result.message,
+      hotWalletAddress: expectedWallet,
+      networkGlobalId: PHASE10_TON_TESTNET_NETWORK_GLOBAL_ID,
+      publicKeyFingerprint: identity.publicKeyFingerprint,
+      observedAt,
+    };
+  } catch (error) {
+    return {
+      probePerformed: true,
+      admitted: false,
+      seqno: null,
+      accountStatus: null,
+      requiresStateInit: null,
+      code: 'PROVIDER_ERROR',
+      message: error instanceof Error ? error.message : String(error),
+      hotWalletAddress: expectedWallet,
+      networkGlobalId: PHASE10_TON_TESTNET_NETWORK_GLOBAL_ID,
+      publicKeyFingerprint: identity.publicKeyFingerprint,
+      observedAt,
+    };
+  }
 }
 
 /** Derive readiness signerLocked from authoritative probe (null = not probed). */

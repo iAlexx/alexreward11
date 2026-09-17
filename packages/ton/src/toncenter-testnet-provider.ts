@@ -8,6 +8,8 @@ import {
   type FindTransactionsByQueryIdInput,
   type JettonTransferEvidence,
   type TonAccountBalance,
+  type TonAccountState,
+  type TonAccountStatus,
   type TonChainProvider,
   type TonJettonBalance,
   type TonProviderHealth,
@@ -291,6 +293,80 @@ export class TonCenterTestnetProvider implements TonChainProvider {
       throw new Error('MALFORMED_RESPONSE: TonCenter seqno is invalid');
     }
     return seqno;
+  }
+
+  async getAccountState(address: string): Promise<TonAccountState> {
+    const result = await this.get(
+      `getAddressInformation?address=${encodeURIComponent(address)}`,
+      'TonCenter getAddressInformation',
+    );
+    const record = asRecord(result, 'TonCenter getAddressInformation result');
+    const rawState = typeof record.state === 'string' ? record.state.toLowerCase() : '';
+    let status: TonAccountStatus;
+    if (rawState === 'uninitialized' || rawState === 'uninit') {
+      status = 'uninit';
+    } else if (rawState === 'active') {
+      status = 'active';
+    } else if (rawState === 'frozen') {
+      status = 'frozen';
+    } else if (rawState === 'nonexist' || rawState === 'nonexistent') {
+      status = 'nonexist';
+    } else if (rawState === '') {
+      throw new Error('MALFORMED_RESPONSE: TonCenter getAddressInformation state missing');
+    } else {
+      status = 'unknown';
+    }
+
+    let codeHash: string | null = null;
+    const code = record.code;
+    if (typeof code === 'string' && code.trim() !== '') {
+      try {
+        codeHash = Cell.fromBase64(code).hash().toString('hex');
+      } catch (error) {
+        throw new Error(
+          `MALFORMED_RESPONSE: TonCenter account code is not a valid cell: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+          { cause: error },
+        );
+      }
+    }
+
+    let dataHash: string | null = null;
+    const data = record.data;
+    if (typeof data === 'string' && data.trim() !== '') {
+      try {
+        dataHash = Cell.fromBase64(data).hash().toString('hex');
+      } catch {
+        dataHash = null;
+      }
+    }
+
+    const balance =
+      record.balance === undefined || record.balance === null
+        ? null
+        : decimalString(record.balance, 'TonCenter account balance');
+
+    const lastTransactionLt =
+      typeof record.last_transaction_lt === 'string' || typeof record.last_transaction_lt === 'number'
+        ? String(record.last_transaction_lt)
+        : record.last_transaction_lt === null || record.last_transaction_lt === undefined
+          ? null
+          : null;
+    const lastTransactionHash =
+      typeof record.last_transaction_hash === 'string' && record.last_transaction_hash !== ''
+        ? record.last_transaction_hash
+        : null;
+
+    return {
+      address,
+      status,
+      balanceNanotons: balance,
+      codeHash,
+      dataHash,
+      lastTransactionLt,
+      lastTransactionHash,
+    };
   }
 
   async getAccountBalance(address: string): Promise<TonAccountBalance> {

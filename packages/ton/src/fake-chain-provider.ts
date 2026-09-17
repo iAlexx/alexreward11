@@ -7,11 +7,14 @@ import {
   type FindTransactionsByQueryIdInput,
   type JettonTransferEvidence,
   type TonAccountBalance,
+  type TonAccountState,
+  type TonAccountStatus,
   type TonChainProvider,
   type TonJettonBalance,
   type TonProviderHealth,
   type TonSendBocResult,
 } from './chain-provider.js';
+import { approvedWalletV5R1CodeHash } from './admit-wallet-seqno.js';
 
 export interface FakeTonChainProviderOptions {
   readonly networkGlobalId?: number;
@@ -33,6 +36,7 @@ export class FakeTonChainProvider implements TonChainProvider {
   readonly networkGlobalId = TON_TESTNET_NETWORK_GLOBAL_ID;
 
   private readonly seqnoByAddress = new Map<string, number>();
+  private readonly accountStates = new Map<string, TonAccountState>();
   private readonly balances = new Map<string, string>();
   private readonly jettonBalances = new Map<string, string>();
   private readonly transfers: JettonTransferEvidence[] = [];
@@ -42,6 +46,8 @@ export class FakeTonChainProvider implements TonChainProvider {
   private sendBocFailBeforeSubmit: boolean;
   private sendBocAcceptedFalse: boolean;
   private sendBocCallCount = 0;
+  private seqnoErrorByAddress = new Map<string, Error>();
+  private accountStateErrorByAddress = new Map<string, Error>();
 
   constructor(options: FakeTonChainProviderOptions = {}) {
     assertTestnetOnly(options.networkGlobalId ?? TON_TESTNET_NETWORK_GLOBAL_ID);
@@ -52,6 +58,63 @@ export class FakeTonChainProvider implements TonChainProvider {
 
   seedSeqno(address: string, seqno: number): void {
     this.seqnoByAddress.set(address, seqno);
+  }
+
+  seedAccountState(
+    address: string,
+    state: {
+      readonly status: TonAccountStatus;
+      readonly balanceNanotons?: string | null;
+      readonly codeHash?: string | null;
+      readonly dataHash?: string | null;
+      readonly lastTransactionLt?: string | null;
+      readonly lastTransactionHash?: string | null;
+    },
+  ): void {
+    this.accountStates.set(address, {
+      address,
+      status: state.status,
+      balanceNanotons: state.balanceNanotons ?? null,
+      codeHash: state.codeHash ?? null,
+      dataHash: state.dataHash ?? null,
+      lastTransactionLt: state.lastTransactionLt ?? null,
+      lastTransactionHash: state.lastTransactionHash ?? null,
+    });
+  }
+
+  /** Seed active verified V5R1 account + seqno for admission tests. */
+  seedActiveV5R1(input: {
+    readonly address: string;
+    readonly seqno: number;
+    readonly publicKeyHex: string;
+    readonly networkGlobalId?: number;
+  }): void {
+    const codeHash = approvedWalletV5R1CodeHash({
+      publicKeyHex: input.publicKeyHex,
+      networkGlobalId: input.networkGlobalId ?? TON_TESTNET_NETWORK_GLOBAL_ID,
+    });
+    this.seedSeqno(input.address, input.seqno);
+    this.seedAccountState(input.address, {
+      status: 'active',
+      codeHash,
+      balanceNanotons: '1000000000',
+    });
+  }
+
+  seedUninit(address: string, balanceNanotons = '1000000000'): void {
+    this.seedAccountState(address, {
+      status: 'uninit',
+      balanceNanotons,
+      codeHash: null,
+    });
+  }
+
+  seedSeqnoError(address: string, error: Error): void {
+    this.seqnoErrorByAddress.set(address, error);
+  }
+
+  seedAccountStateError(address: string, error: Error): void {
+    this.accountStateErrorByAddress.set(address, error);
   }
 
   seedAccountBalance(address: string, balanceNanotons: string): void {
@@ -91,7 +154,36 @@ export class FakeTonChainProvider implements TonChainProvider {
   }
 
   async getSeqno(address: string): Promise<number> {
+    const error = this.seqnoErrorByAddress.get(address);
+    if (error !== undefined) throw error;
     return this.seqnoByAddress.get(address) ?? 0;
+  }
+
+  async getAccountState(address: string): Promise<TonAccountState> {
+    const error = this.accountStateErrorByAddress.get(address);
+    if (error !== undefined) throw error;
+    const seeded = this.accountStates.get(address);
+    if (seeded !== undefined) return seeded;
+    if (this.seqnoByAddress.has(address)) {
+      return {
+        address,
+        status: 'active',
+        balanceNanotons: this.balances.get(address) ?? '0',
+        codeHash: null,
+        dataHash: null,
+        lastTransactionLt: null,
+        lastTransactionHash: null,
+      };
+    }
+    return {
+      address,
+      status: 'uninit',
+      balanceNanotons: this.balances.get(address) ?? '0',
+      codeHash: null,
+      dataHash: null,
+      lastTransactionLt: null,
+      lastTransactionHash: null,
+    };
   }
 
   async getAccountBalance(address: string): Promise<TonAccountBalance> {

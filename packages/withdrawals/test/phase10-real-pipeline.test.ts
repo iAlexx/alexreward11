@@ -1,7 +1,9 @@
+import { createHash } from 'node:crypto';
+
 import { Pool } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { FakeTonChainProvider } from '@alex-rewards/ton';
+import { FakeTonChainProvider, deriveWalletV5R1AddressRaw } from '@alex-rewards/ton';
 
 import {
   buildPhase10PayoutConfig,
@@ -23,9 +25,14 @@ import {
 
 const PAYOUT_JETTON_WALLET = '0:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
 const RECIPIENT_RAW = '0:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
-const HOT_WALLET_RAW = '0:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd';
-const ENCRYPTED_SIGNER_REF = 'phase10-pipeline-encrypted-ref';
 const TEST_PUBLIC_KEY_HEX = '11'.repeat(32);
+const ENCRYPTED_SIGNER_REF = createHash('sha256')
+  .update(Buffer.from(TEST_PUBLIC_KEY_HEX, 'hex'))
+  .digest('hex');
+const HOT_WALLET_RAW = deriveWalletV5R1AddressRaw({
+  publicKeyHex: TEST_PUBLIC_KEY_HEX,
+  networkGlobalId: -3,
+});
 const TEST_CANONICAL_HASH = '22'.repeat(32);
 const nonFakeEngine = localWithdrawalEngineFixtureConfig({ fakeChainEnabled: false });
 
@@ -101,7 +108,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 real pipeline (db + fake prov
       async getSigningIdentity() {
         return {
           publicKeyHex: TEST_PUBLIC_KEY_HEX,
-          publicKeyFingerprint: 'fp-test',
+          publicKeyFingerprint: ENCRYPTED_SIGNER_REF,
           walletAddressRaw: HOT_WALLET_RAW,
           signingReady: true,
           custodyState: 'n/a',
@@ -126,7 +133,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 real pipeline (db + fake prov
           canonicalMessageHash: attempt.canonical_message_hash,
           canonicalSigningHash: attempt.canonical_message_hash,
           signedMessageHash: '33'.repeat(32),
-          publicKeyFingerprint: 'fp-test',
+          publicKeyFingerprint: ENCRYPTED_SIGNER_REF,
           walletAddressRaw: HOT_WALLET_RAW,
           signatureBase64: 'dGVzdC1zaWc=',
           keySpec: 'TEST_ONLY',
@@ -175,7 +182,16 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 real pipeline (db + fake prov
 
     const primary = new FakeTonChainProvider();
     const secondary = new FakeTonChainProvider();
-    primary.seedSeqno(HOT_WALLET_RAW, 7);
+    primary.seedActiveV5R1({
+      address: HOT_WALLET_RAW,
+      seqno: 7,
+      publicKeyHex: TEST_PUBLIC_KEY_HEX,
+    });
+    secondary.seedActiveV5R1({
+      address: HOT_WALLET_RAW,
+      seqno: 7,
+      publicKeyHex: TEST_PUBLIC_KEY_HEX,
+    });
 
     const attemptNumber = 1;
     const queryId =
@@ -290,7 +306,17 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 real pipeline (db + fake prov
     );
 
     const primary = new FakeTonChainProvider({ sendBocTimeout: true });
-    primary.seedSeqno(HOT_WALLET_RAW, 3);
+    const secondary = new FakeTonChainProvider();
+    primary.seedActiveV5R1({
+      address: HOT_WALLET_RAW,
+      seqno: 3,
+      publicKeyHex: TEST_PUBLIC_KEY_HEX,
+    });
+    secondary.seedActiveV5R1({
+      address: HOT_WALLET_RAW,
+      seqno: 3,
+      publicKeyHex: TEST_PUBLIC_KEY_HEX,
+    });
 
     const phase10 = buildPhase10PayoutConfig({
       realChainEnabled: true,
@@ -307,7 +333,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 real pipeline (db + fake prov
       phase10,
       engine: nonFakeEngine,
       chainProvider: primary,
-      secondaryChainProvider: new FakeTonChainProvider(),
+      secondaryChainProvider: secondary,
       signer: createTestSigner(),
       allowTestExecutionPath: true,
       buildCanonicalMessageHash: async () => TEST_CANONICAL_HASH,
@@ -347,7 +373,17 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 real pipeline (db + fake prov
     );
 
     const primary = new FakeTonChainProvider({ sendBocAcceptedFalse: true });
-    primary.seedSeqno(HOT_WALLET_RAW, 5);
+    const secondary = new FakeTonChainProvider();
+    primary.seedActiveV5R1({
+      address: HOT_WALLET_RAW,
+      seqno: 5,
+      publicKeyHex: TEST_PUBLIC_KEY_HEX,
+    });
+    secondary.seedActiveV5R1({
+      address: HOT_WALLET_RAW,
+      seqno: 5,
+      publicKeyHex: TEST_PUBLIC_KEY_HEX,
+    });
 
     const phase10 = buildPhase10PayoutConfig({
       realChainEnabled: true,
@@ -364,7 +400,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 real pipeline (db + fake prov
       phase10,
       engine: nonFakeEngine,
       chainProvider: primary,
-      secondaryChainProvider: new FakeTonChainProvider(),
+      secondaryChainProvider: secondary,
       signer: createTestSigner(),
       allowTestExecutionPath: true,
       buildCanonicalMessageHash: async () => TEST_CANONICAL_HASH,

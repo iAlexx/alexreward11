@@ -306,6 +306,7 @@ export type {
   Phase10LiveExternalProbeInput,
   Phase10ProviderProbeObservation,
   Phase10SignerProbeObservation,
+  Phase10WalletSeqnoAdmissionObservation,
 } from './phase10-live-probes.js';
 
 export {
