@@ -266,9 +266,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 canary signing recovery (isol
       expectedFencingToken: fencingToken,
     });
     expect(result.accepted).toBe(false);
-    expect(result.refusalReasons.some((r) => r.includes('temporalTerminatedConfirmed'))).toBe(
-      true,
-    );
+    expect(result.refusalReasons.some((r) => r.includes('temporalTerminatedConfirmed'))).toBe(true);
     expect(result.refusalReasons.some((r) => r.includes('payoutWorkerStoppedConfirmed'))).toBe(
       true,
     );

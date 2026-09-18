@@ -558,9 +558,7 @@ export async function executePhase10CanarySigningZeroAttemptsRecovery(
 
   try {
     return await withWithdrawalTransaction(db, async (client) => {
-      const dbName = await client.query<{ current_database: string }>(
-        `SELECT current_database()`,
-      );
+      const dbName = await client.query<{ current_database: string }>(`SELECT current_database()`);
       const currentDatabase = dbName.rows[0]?.current_database ?? '';
       const envRefuse = mutateEnvironmentRefuseReasons(input, currentDatabase);
       if (envRefuse.length > 0) {
