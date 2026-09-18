@@ -9,8 +9,8 @@
  *   --confirmation-phrase PHASE10_OWNER_RECOVERY_SIGNING_ZERO_ATTEMPTS
  *     (intent confirmation ONLY — not authentication)
  *   --owner-admin-user-id <ACTIVE admin_users.id with unrevoked OWNER binding>
- *   --owner-session-token <raw admin_sessions secret for that Owner>
- *     (trusted authenticated session + recent reauthentication)
+ *   Owner session token via interactive non-echoing TTY prompt only
+ *     (never CLI args, env, logs, or error output)
  *   --temporal-terminated-confirmed
  *   --payout-worker-stopped-confirmed
  *   --withdrawal-id 01a0afbd-2550-742b-967d-5aec6ee75a83
@@ -30,6 +30,7 @@ import {
   PHASE10_CANARY_RECOVERY_WITHDRAWAL_ID,
   executePhase10CanarySigningZeroAttemptsRecovery,
   isPhase10CanaryRecoveryCiEnvironment,
+  phase10CanaryRecoveryArgvExposesSessionToken,
   planPhase10CanarySigningZeroAttemptsRecovery,
 } from '../phase10-canary-signing-recovery.js';
 
@@ -39,14 +40,16 @@ function usage(exitCode = 2): never {
       {
         ok: false,
         message:
-          'usage: phase10-canary-recovery --withdrawal-id <uuid> [--mode dry-run|mutate] [--confirmation-phrase <phrase>] --owner-admin-user-id <uuid> --owner-session-token <secret> [--expected-fencing-token <n>] [--temporal-terminated-confirmed] [--payout-worker-stopped-confirmed]',
+          'usage: phase10-canary-recovery --withdrawal-id <uuid> [--mode dry-run|mutate] [--confirmation-phrase <phrase>] --owner-admin-user-id <uuid> [--expected-fencing-token <n>] [--temporal-terminated-confirmed] [--payout-worker-stopped-confirmed]',
         soleAuthorizedWithdrawalId: PHASE10_CANARY_RECOVERY_WITHDRAWAL_ID,
         confirmationPhrase: PHASE10_CANARY_RECOVERY_CONFIRMATION_PHRASE,
         confirmationIsNotAuthentication: true,
         ownerAdminUserIdRequiredForMutate: true,
-        ownerSessionTokenRequiredForMutate: true,
+        ownerSessionTokenInput: 'interactive-non-echoing-tty-only',
+        ownerSessionTokenForbiddenOnArgv: true,
+        ownerSessionTokenForbiddenOnEnv: true,
         ownerRoleBindingRequired: 'OWNER',
-        recentReauthenticationRequired: true,
+        recentReauthenticationRequiredOnExactSession: true,
         operationalMutationConfirm: PHASE10_CANARY_RECOVERY_OPERATIONAL_MUTATION_CONFIRM,
         defaultMode: 'dry-run',
         ciCannotMutateOperationalRecovery: true,
@@ -68,9 +71,97 @@ function hasSwitch(argv: ReadonlyArray<string>, name: string): boolean {
   return argv.includes(name);
 }
 
+/**
+ * Read Owner session token from an interactive TTY without echoing characters.
+ * Mirrors apps/signer local-unlock passphrase input — never accepts argv/env.
+ */
+async function readOwnerSessionTokenFromTty(): Promise<string> {
+  if (!process.stdin.isTTY) {
+    throw new Error(
+      'owner session token requires an interactive TTY (refusing non-interactive stdin; never pass via argv/env)',
+    );
+  }
+  return await new Promise<string>((resolve, reject) => {
+    process.stdout.write('Owner session token (input hidden): ');
+    let buf = '';
+    const onData = (chunk: Buffer) => {
+      const s = chunk.toString('utf8');
+      for (const ch of s) {
+        if (ch === '\n' || ch === '\r') {
+          process.stdin.off('data', onData);
+          process.stdin.setRawMode?.(false);
+          process.stdout.write('\n');
+          resolve(buf);
+          return;
+        }
+        if (ch === '\u0003') {
+          process.stdin.off('data', onData);
+          process.stdin.setRawMode?.(false);
+          process.stdout.write('\n');
+          reject(new Error('cancelled'));
+          return;
+        }
+        if (ch === '\u007f' || ch === '\b') {
+          buf = buf.slice(0, -1);
+          continue;
+        }
+        buf += ch;
+      }
+    };
+    process.stdin.setRawMode?.(true);
+    process.stdin.resume();
+    process.stdin.on('data', onData);
+  });
+}
+
+/** Redact known secrets from any string before writing to stdout/stderr. */
+function redactSecrets(text: string, secrets: ReadonlyArray<string>): string {
+  let out = text;
+  for (const secret of secrets) {
+    if (secret.length === 0) continue;
+    out = out.split(secret).join('[REDACTED]');
+  }
+  return out;
+}
+
+function printJson(value: unknown, secrets: ReadonlyArray<string>): void {
+  console.log(redactSecrets(JSON.stringify(value, null, 2), secrets));
+}
+
+function printErrorJson(value: unknown, secrets: ReadonlyArray<string>): void {
+  console.error(redactSecrets(JSON.stringify(value, null, 2), secrets));
+}
+
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   if (argv.length === 0 || hasSwitch(argv, '--help')) usage(argv.length === 0 ? 2 : 0);
+
+  if (phase10CanaryRecoveryArgvExposesSessionToken(argv)) {
+    printErrorJson(
+      {
+        ok: false,
+        error:
+          'owner session token must not be passed via CLI arguments (use interactive non-echoing TTY prompt)',
+      },
+      [],
+    );
+    process.exit(1);
+  }
+
+  if (
+    typeof process.env.PHASE10_CANARY_RECOVERY_OWNER_SESSION_TOKEN === 'string' &&
+    process.env.PHASE10_CANARY_RECOVERY_OWNER_SESSION_TOKEN.length > 0
+  ) {
+    printErrorJson(
+      {
+        ok: false,
+        error:
+          'owner session token must not be supplied via environment variables (use interactive non-echoing TTY prompt)',
+      },
+      [],
+    );
+    process.exit(1);
+  }
 
   const withdrawalId = readFlag(argv, '--withdrawal-id');
   if (withdrawalId === undefined || withdrawalId.trim() === '') usage();
@@ -90,10 +181,6 @@ async function main(): Promise<void> {
     process.env.PHASE10_CANARY_RECOVERY_OWNER_ADMIN_USER_ID ??
     process.env.PHASE10_CANARY_RECOVERY_OPERATOR_ADMIN_USER_ID ??
     null;
-  const ownerSessionToken =
-    readFlag(argv, '--owner-session-token') ??
-    process.env.PHASE10_CANARY_RECOVERY_OWNER_SESSION_TOKEN ??
-    null;
   const expectedTokenRaw = readFlag(argv, '--expected-fencing-token');
   const expectedFencingToken =
     expectedTokenRaw !== undefined && expectedTokenRaw.trim() !== ''
@@ -103,15 +190,20 @@ async function main(): Promise<void> {
     process.env.PHASE10_CANARY_RECOVERY_OPERATIONAL_MUTATION_CONFIRM ?? null;
 
   if (mode === 'mutate' && isPhase10CanaryRecoveryCiEnvironment()) {
-    console.error(
-      JSON.stringify({
-        ok: false,
-        error: 'mutate refused in CI/GitHub Actions',
-      }),
-    );
+    printErrorJson({ ok: false, error: 'mutate refused in CI/GitHub Actions' }, []);
     process.exit(1);
   }
 
+  let ownerSessionToken: string | null = null;
+  if (mode === 'mutate') {
+    ownerSessionToken = await readOwnerSessionTokenFromTty();
+    if (ownerSessionToken.trim() === '') {
+      printErrorJson({ ok: false, error: 'owner session token is required for mutate' }, []);
+      process.exit(1);
+    }
+  }
+
+  const secrets = ownerSessionToken !== null ? [ownerSessionToken] : [];
   const worker = loadWorkerConfig();
   const pool = createDatabasePool(worker.DATABASE_URL);
 
@@ -121,7 +213,7 @@ async function main(): Promise<void> {
       mode,
       confirmationPhrase,
       ownerAdminUserId,
-      ownerSessionToken,
+      ...(ownerSessionToken !== null ? { ownerSessionToken } : {}),
       temporalTerminatedConfirmed: hasSwitch(argv, '--temporal-terminated-confirmed'),
       payoutWorkerStoppedConfirmed: hasSwitch(argv, '--payout-worker-stopped-confirmed'),
       ...(expectedFencingToken !== null ? { expectedFencingToken } : {}),
@@ -130,7 +222,7 @@ async function main(): Promise<void> {
 
     if (mode === 'dry-run') {
       const plan = await planPhase10CanarySigningZeroAttemptsRecovery(pool, input);
-      console.log(JSON.stringify({ ok: plan.accepted, command: 'plan', ...plan }, null, 2));
+      printJson({ ok: plan.accepted, command: 'plan', ...plan }, secrets);
       process.exitCode = plan.accepted ? 0 : 1;
       return;
     }
@@ -139,7 +231,7 @@ async function main(): Promise<void> {
       ...input,
       mode: 'mutate',
     });
-    console.log(JSON.stringify({ ok: result.accepted, command: 'execute', ...result }, null, 2));
+    printJson({ ok: result.accepted, command: 'execute', ...result }, secrets);
     process.exitCode = result.accepted ? 0 : 1;
   } finally {
     await pool.end();
@@ -147,11 +239,12 @@ async function main(): Promise<void> {
 }
 
 main().catch((error) => {
-  console.error(
-    JSON.stringify({
+  printErrorJson(
+    {
       ok: false,
-      error: error instanceof Error ? error.message : String(error),
-    }),
+      error: error instanceof Error ? error.message : 'unexpected error',
+    },
+    [],
   );
   process.exit(1);
 });

@@ -227,6 +227,7 @@ export {
   hashPhase10CanaryOwnerSessionToken,
   isPhase10CanaryRecoveryCiEnvironment,
   isPhase10CanaryRecoveryWithdrawalAuthorized,
+  phase10CanaryRecoveryArgvExposesSessionToken,
   planPhase10CanarySigningZeroAttemptsRecovery,
 } from './phase10-canary-signing-recovery.js';
 export type {

@@ -20,6 +20,7 @@ import {
   isPhase10CanaryRecoveryCiEnvironment,
   isPhase10CanaryRecoveryWithdrawalAuthorized,
   localWithdrawalEngineFixtureConfig,
+  phase10CanaryRecoveryArgvExposesSessionToken,
   planPhase10CanarySigningZeroAttemptsRecovery,
   runPhase10RestoreReconcileScan,
   runRealTestnetPayoutPipeline,
@@ -301,7 +302,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 canary signing recovery (isol
     expect(result.refusalReasons.some((r) => r.includes('ownerSessionToken'))).toBe(true);
   });
 
-  it('ACTIVE OWNER with stale reauthentication refuses (P1)', async () => {
+  it('ACTIVE OWNER with stale session reauthentication refuses (P1)', async () => {
     const { withdrawalId, fencingToken } = await seedStuckSigning();
     const staleMs = PHASE10_CANARY_RECOVERY_REAUTH_MAX_AGE_MS + 60_000;
     await pool.query(
@@ -310,18 +311,52 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 canary signing recovery (isol
        WHERE admin_user_id = $1::uuid`,
       [adminUserId, String(staleMs)],
     );
-    await pool.query(
-      `UPDATE admin_users
-       SET last_reauthenticated_at = now() - ($2::text || ' milliseconds')::interval
-       WHERE id = $1::uuid`,
-      [adminUserId, String(staleMs)],
-    );
     const result = await executePhase10CanarySigningZeroAttemptsRecovery(
       pool,
       mutateAuth(withdrawalId, fencingToken),
     );
     expect(result.accepted).toBe(false);
-    expect(result.refusalReasons.some((r) => r.includes('reauthentication expired'))).toBe(true);
+    expect(result.refusalReasons.some((r) => r.includes('session reauthentication expired'))).toBe(
+      true,
+    );
+  });
+
+  it('admin_users.last_reauthenticated_at from another context does not authorize this session', async () => {
+    const { withdrawalId, fencingToken } = await seedStuckSigning();
+    await pool.query(
+      `UPDATE admin_sessions
+       SET reauthenticated_at = NULL
+       WHERE admin_user_id = $1::uuid`,
+      [adminUserId],
+    );
+    await pool.query(`UPDATE admin_users SET last_reauthenticated_at = now() WHERE id = $1::uuid`, [
+      adminUserId,
+    ]);
+    const result = await executePhase10CanarySigningZeroAttemptsRecovery(
+      pool,
+      mutateAuth(withdrawalId, fencingToken),
+    );
+    expect(result.accepted).toBe(false);
+    expect(
+      result.refusalReasons.some((r) =>
+        r.includes('reauthentication required on this admin session'),
+      ),
+    ).toBe(true);
+  });
+
+  it('CLI argv must not carry owner session token', () => {
+    expect(phase10CanaryRecoveryArgvExposesSessionToken(['--mode', 'mutate'])).toBe(false);
+    expect(
+      phase10CanaryRecoveryArgvExposesSessionToken([
+        '--owner-session-token',
+        'super-secret-token-value',
+      ]),
+    ).toBe(true);
+    expect(
+      phase10CanaryRecoveryArgvExposesSessionToken([
+        '--owner-session-token=super-secret-token-value',
+      ]),
+    ).toBe(true);
   });
 
   it('non-Owner ACTIVE admin cannot mutate even with a session (P1)', async () => {

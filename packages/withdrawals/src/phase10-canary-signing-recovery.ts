@@ -9,7 +9,8 @@
  * - confirmationPhrase (intent confirmation ONLY — not authentication)
  * - ownerAdminUserId of an ACTIVE admin with unrevoked OWNER role binding
  * - ownerSessionToken matching an unrevoked, unexpired admin_sessions row for that Owner
- * - recent Owner reauthentication within PHASE10_CANARY_RECOVERY_REAUTH_MAX_AGE_MS
+ * - recent reauthentication on THAT exact admin_sessions.reauthenticated_at
+ *   (admin_users.last_reauthenticated_at from another session does not authorize)
  * - temporalTerminatedConfirmed + payoutWorkerStoppedConfirmed
  * - fencing / reservation / attempt preconditions
  *
@@ -64,6 +65,19 @@ export const PHASE10_CANARY_RECOVERY_REAUTH_MAX_AGE_MS = 15 * 60 * 1000;
 /** Hash raw Owner admin session token for admin_sessions.session_token_hash lookup. */
 export function hashPhase10CanaryOwnerSessionToken(rawToken: string): string {
   return sha256Hex(`admin-session:${rawToken.trim()}`);
+}
+
+/**
+ * True when argv would put the Owner session token on the process command line
+ * (forbidden — leaks into history / process listings).
+ */
+export function phase10CanaryRecoveryArgvExposesSessionToken(argv: ReadonlyArray<string>): boolean {
+  for (const arg of argv) {
+    if (arg === '--owner-session-token' || arg.startsWith('--owner-session-token=')) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export type Phase10CanaryRecoveryMode = 'dry-run' | 'mutate';
@@ -166,6 +180,8 @@ export interface Phase10CanaryRecoveryInput {
   /**
    * Raw Owner admin session secret. Hashed and matched to an unrevoked, unexpired
    * admin_sessions row belonging to ownerAdminUserId. Required for mutate.
+   * Recent reauthentication must be on this exact session's reauthenticated_at.
+   * CLI must collect this via interactive non-echoing TTY — never argv/env.
    */
   readonly ownerSessionToken?: string | null;
   /**
@@ -382,12 +398,7 @@ async function assertAuthenticatedOwnerContext(
   const admin = await client.query<{
     id: string;
     status: string;
-    last_reauthenticated_at: Date | null;
-  }>(
-    `SELECT id::text, status::text, last_reauthenticated_at
-     FROM admin_users WHERE id = $1::uuid`,
-    [adminUserId],
-  );
+  }>(`SELECT id::text, status::text FROM admin_users WHERE id = $1::uuid`, [adminUserId]);
   const adminRow = admin.rows[0];
   if (adminRow === undefined) {
     return { ok: false, reason: 'ownerAdminUserId not found in admin_users' };
@@ -450,17 +461,20 @@ async function assertAuthenticatedOwnerContext(
     return { ok: false, reason: 'ownerSessionToken session absolute timeout expired' };
   }
 
-  const reauthAt = sessionRow.reauthenticated_at ?? adminRow.last_reauthenticated_at;
+  // Recent reauth must be on THIS session only — admin_users.last_reauthenticated_at
+  // from another session must not authorize recovery.
+  const reauthAt = sessionRow.reauthenticated_at;
   if (reauthAt === null) {
     return {
       ok: false,
-      reason: 'Owner reauthentication required (no reauthenticated_at on session or admin)',
+      reason:
+        'Owner reauthentication required on this admin session (admin_sessions.reauthenticated_at)',
     };
   }
   if (now - reauthAt.getTime() > PHASE10_CANARY_RECOVERY_REAUTH_MAX_AGE_MS) {
     return {
       ok: false,
-      reason: `Owner reauthentication expired (max age ${PHASE10_CANARY_RECOVERY_REAUTH_MAX_AGE_MS}ms)`,
+      reason: `Owner session reauthentication expired (max age ${PHASE10_CANARY_RECOVERY_REAUTH_MAX_AGE_MS}ms)`,
     };
   }
 
