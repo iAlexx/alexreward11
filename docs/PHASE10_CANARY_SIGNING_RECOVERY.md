@@ -8,14 +8,14 @@ Based on PR #5 HEAD `c4b7c1eb22c55ce6272d8ec29d44bfc17c9380af`.
 
 ## Security model
 
-| Control                                                        | Role                                                                                                                              |
-| -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `confirmationPhrase`                                           | **Intent confirmation only** — not authentication                                                                                 |
-| `operatorAdminUserId`                                          | **Authenticated operator** — must be an `ACTIVE` `admin_users` row; written to `audit_logs.admin_user_id`                         |
-| `temporalTerminatedConfirmed` / `payoutWorkerStoppedConfirmed` | Operational attestations                                                                                                          |
-| CI / `GITHUB_ACTIONS`                                          | **Cannot mutate**                                                                                                                 |
-| Operational DB `alex_rewards`                                  | Requires additional env `PHASE10_CANARY_RECOVERY_OPERATIONAL_MUTATION_CONFIRM=I_CONFIRM_OPERATIONAL_ALEX_REWARDS_CANARY_RECOVERY` |
-| Default mode                                                   | **dry-run** (plan/inspect only)                                                                                                   |
+| Control                                                        | Role                                                                                                                                                                                              |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `confirmationPhrase`                                           | **Intent confirmation only** — not authentication                                                                                                                                                 |
+| `operatorAdminUserId`                                          | **Authenticated operator** — must be an `ACTIVE` `admin_users` row; written to `audit_logs.admin_user_id`                                                                                         |
+| `temporalTerminatedConfirmed` / `payoutWorkerStoppedConfirmed` | Operational attestations                                                                                                                                                                          |
+| CI / `GITHUB_ACTIONS`                                          | **Cannot mutate operational recovery**. Narrow exception: `NODE_ENV=test` + approved isolated test DB (`*_test` / `*_phaseN`, never `alex_rewards`) + fixture env matches a **non-production** ID |
+| Operational DB `alex_rewards`                                  | Requires `PHASE10_CANARY_RECOVERY_OPERATIONAL_MUTATION_CONFIRM=…`. **Always refused in CI.**                                                                                                      |
+| Default mode                                                   | **dry-run** (plan/inspect only)                                                                                                                                                                   |
 
 ## Temporal
 

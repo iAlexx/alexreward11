@@ -11,10 +11,13 @@
  * - temporalTerminatedConfirmed + payoutWorkerStoppedConfirmed
  * - fencing / reservation / attempt preconditions
  *
- * CI / GitHub Actions cannot mutate. Operational database alex_rewards requires an
- * additional explicit operational confirmation env. Does not start Temporal, unlock
- * Signer, enable chain, or broadcast.
+ * CI / GitHub Actions cannot mutate operational recovery. Isolated NODE_ENV=test
+ * suites may mutate only when current_database() is an approved destructive test
+ * DB and PHASE10_CANARY_RECOVERY_TEST_FIXTURE_ID matches a non-production ID.
+ * Operational database alex_rewards is always refused in CI. Does not start Temporal,
+ * unlock Signer, enable chain, or broadcast.
  */
+import { isApprovedDestructiveTestDatabaseName } from '@alex-rewards/db';
 import type { Pool, PoolClient } from 'pg';
 
 import { insertWithdrawalAuditLog } from './audit.js';
@@ -175,6 +178,29 @@ function isAuthorizedCanaryRecoveryWithdrawalId(withdrawalId: string): boolean {
 
 function isCiEnvironment(): boolean {
   return process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true';
+}
+
+/**
+ * Narrow CI exception for isolated integration tests only.
+ *
+ * Requires ALL of:
+ * - NODE_ENV=test
+ * - PHASE10_CANARY_RECOVERY_TEST_FIXTURE_ID exactly equals the target withdrawalId
+ * - target is NOT the production canary ID
+ * - current_database() is an approved destructive test DB (_test / _phaseN), never alex_rewards
+ *
+ * Does not disable the CI guard globally and never authorizes operational mutation.
+ */
+function isIsolatedCiTestMutationAllowed(
+  input: Phase10CanaryRecoveryInput,
+  currentDatabase: string,
+): boolean {
+  if (process.env.NODE_ENV !== 'test') return false;
+  if (currentDatabase === 'alex_rewards') return false;
+  if (!isApprovedDestructiveTestDatabaseName(currentDatabase)) return false;
+  if (input.withdrawalId === PHASE10_CANARY_RECOVERY_WITHDRAWAL_ID) return false;
+  const fixture = process.env.PHASE10_CANARY_RECOVERY_TEST_FIXTURE_ID;
+  return typeof fixture === 'string' && fixture.length > 0 && fixture === input.withdrawalId;
 }
 
 function readConfirmationPhrase(input: Phase10CanaryRecoveryInput): string | null {
@@ -345,9 +371,18 @@ function mutateEnvironmentRefuseReasons(
   currentDatabase: string,
 ): string[] {
   const reasons: string[] = [];
-  if (isCiEnvironment()) {
-    reasons.push('mutate refused in CI/GitHub Actions (operational recovery cannot run from CI)');
+
+  // Operational DB must never mutate under CI, even with ops confirm.
+  if (currentDatabase === 'alex_rewards' && isCiEnvironment()) {
+    reasons.push('mutate refused: operational database alex_rewards cannot be mutated in CI');
   }
+
+  if (isCiEnvironment() && !isIsolatedCiTestMutationAllowed(input, currentDatabase)) {
+    reasons.push(
+      'mutate refused in CI/GitHub Actions (operational recovery cannot run from CI; isolated test DB + matching non-production fixture only)',
+    );
+  }
+
   // Production canary ID cannot be mutated under NODE_ENV=test (fixture override only).
   if (
     process.env.NODE_ENV === 'test' &&
@@ -356,7 +391,8 @@ function mutateEnvironmentRefuseReasons(
   ) {
     reasons.push('mutate of production canary ID refused under NODE_ENV=test');
   }
-  if (currentDatabase === 'alex_rewards') {
+
+  if (currentDatabase === 'alex_rewards' && !isCiEnvironment()) {
     const opsConfirm =
       input.operationalMutationConfirm ??
       process.env.PHASE10_CANARY_RECOVERY_OPERATIONAL_MUTATION_CONFIRM ??

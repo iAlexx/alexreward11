@@ -239,20 +239,57 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 canary signing recovery (isol
     expect(result.refusalReasons.some((r) => r.includes('operatorAdminUserId'))).toBe(true);
   });
 
-  it('mutate in CI environment refuses', async () => {
-    const { withdrawalId, fencingToken } = await seedStuckSigning();
-    const prev = process.env.CI;
+  it('mutate in CI refuses operational recovery (production canary ID)', async () => {
+    const prevCi = process.env.CI;
+    const prevActions = process.env.GITHUB_ACTIONS;
+    const prevFixture = process.env.PHASE10_CANARY_RECOVERY_TEST_FIXTURE_ID;
     process.env.CI = 'true';
+    process.env.GITHUB_ACTIONS = 'true';
+    delete process.env.PHASE10_CANARY_RECOVERY_TEST_FIXTURE_ID;
+    try {
+      const result = await executePhase10CanarySigningZeroAttemptsRecovery(pool, {
+        withdrawalId: PHASE10_CANARY_RECOVERY_WITHDRAWAL_ID,
+        mode: 'mutate',
+        confirmationPhrase: PHASE10_CANARY_RECOVERY_CONFIRMATION_PHRASE,
+        operatorAdminUserId: adminUserId,
+        temporalTerminatedConfirmed: true,
+        payoutWorkerStoppedConfirmed: true,
+        expectedFencingToken: 1n,
+      });
+      expect(result.accepted).toBe(false);
+      expect(result.refusalReasons.some((r) => r.includes('CI'))).toBe(true);
+    } finally {
+      if (prevCi === undefined) delete process.env.CI;
+      else process.env.CI = prevCi;
+      if (prevActions === undefined) delete process.env.GITHUB_ACTIONS;
+      else process.env.GITHUB_ACTIONS = prevActions;
+      if (prevFixture === undefined) delete process.env.PHASE10_CANARY_RECOVERY_TEST_FIXTURE_ID;
+      else process.env.PHASE10_CANARY_RECOVERY_TEST_FIXTURE_ID = prevFixture;
+    }
+  });
+
+  it('mutate in CI with isolated test DB + matching non-production fixture is allowed', async () => {
+    const { withdrawalId, fencingToken } = await seedStuckSigning();
+    const dbName = await pool.query<{ current_database: string }>(`SELECT current_database()`);
+    expect(dbName.rows[0]?.current_database).not.toBe('alex_rewards');
+    expect(withdrawalId).not.toBe(PHASE10_CANARY_RECOVERY_WITHDRAWAL_ID);
+
+    const prevCi = process.env.CI;
+    const prevActions = process.env.GITHUB_ACTIONS;
+    process.env.CI = 'true';
+    process.env.GITHUB_ACTIONS = 'true';
     try {
       const result = await executePhase10CanarySigningZeroAttemptsRecovery(
         pool,
         mutateAuth(withdrawalId, fencingToken),
       );
-      expect(result.accepted).toBe(false);
-      expect(result.refusalReasons.some((r) => r.includes('CI'))).toBe(true);
+      expect(result.accepted).toBe(true);
+      expect(result.after?.state).toBe('FAILED_PRE_BROADCAST');
     } finally {
-      if (prev === undefined) delete process.env.CI;
-      else process.env.CI = prev;
+      if (prevCi === undefined) delete process.env.CI;
+      else process.env.CI = prevCi;
+      if (prevActions === undefined) delete process.env.GITHUB_ACTIONS;
+      else process.env.GITHUB_ACTIONS = prevActions;
     }
   });
 
