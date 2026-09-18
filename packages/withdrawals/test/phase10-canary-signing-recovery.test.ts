@@ -2,7 +2,7 @@
  * Expanded isolated dry-run for Phase 10 canary SIGNING+0-attempts recovery.
  * Uses alex_rewards_test only (PHASE7_DATABASE_URL). Never touches operational alex_rewards.
  */
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 
 import { FakeTonChainProvider, deriveWalletV5R1AddressRaw } from '@alex-rewards/ton';
 import { Pool } from 'pg';
@@ -10,11 +10,15 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   PHASE10_CANARY_RECOVERY_CONFIRMATION_PHRASE,
+  PHASE10_CANARY_RECOVERY_REAUTH_MAX_AGE_MS,
   PHASE10_CANARY_RECOVERY_WITHDRAWAL_ID,
   acquireHotWalletDispatchLease,
   buildPhase10PayoutConfig,
   executePhase10CanarySigningZeroAttemptsRecovery,
+  hashPhase10CanaryOwnerSessionToken,
   hotWalletDispatchOwnerIdentity,
+  isPhase10CanaryRecoveryCiEnvironment,
+  isPhase10CanaryRecoveryWithdrawalAuthorized,
   localWithdrawalEngineFixtureConfig,
   planPhase10CanarySigningZeroAttemptsRecovery,
   runPhase10RestoreReconcileScan,
@@ -24,6 +28,7 @@ import {
 } from '../src/index.js';
 import {
   createApprovedWithdrawal,
+  createOwnerAdmin,
   createTestUser,
   createVerifiedPrimaryWallet,
   ensureEncryptedPayoutHotWallet,
@@ -50,6 +55,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 canary signing recovery (isol
   let assetId: string;
   let networkId: string;
   let adminUserId: string;
+  let ownerSessionToken: string;
   let hotWalletId: string;
   let jettonMaster: string;
   let userId: string;
@@ -64,6 +70,34 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 canary signing recovery (isol
     await pool?.end();
   });
 
+  async function provisionAuthenticatedOwner(adminId: string): Promise<string> {
+    const role = await pool.query<{ id: string }>(
+      `SELECT id FROM admin_roles WHERE code = 'OWNER' AND status = 'ACTIVE'`,
+    );
+    const roleId = role.rows[0]?.id;
+    if (roleId === undefined) throw new Error('OWNER role missing');
+    await pool.query(
+      `INSERT INTO admin_role_bindings (admin_user_id, role_id)
+       VALUES ($1::uuid, $2::uuid)
+       ON CONFLICT (admin_user_id, role_id) DO UPDATE SET revoked_at = NULL`,
+      [adminId, roleId],
+    );
+    const rawToken = randomBytes(32).toString('hex');
+    const tokenHash = hashPhase10CanaryOwnerSessionToken(rawToken);
+    await pool.query(`UPDATE admin_users SET last_reauthenticated_at = now() WHERE id = $1::uuid`, [
+      adminId,
+    ]);
+    await pool.query(
+      `INSERT INTO admin_sessions (
+         admin_user_id, session_token_hash, idle_expires_at, absolute_expires_at, reauthenticated_at
+       ) VALUES (
+         $1::uuid, $2, now() + interval '1 hour', now() + interval '8 hours', now()
+       )`,
+      [adminId, tokenHash],
+    );
+    return rawToken;
+  }
+
   beforeEach(async () => {
     delete process.env.PHASE10_CANARY_RECOVERY_TEST_FIXTURE_ID;
     await truncateWithdrawalTables(pool);
@@ -71,6 +105,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 canary signing recovery (isol
     assetId = base.assetId;
     networkId = base.networkId;
     adminUserId = base.adminUserId;
+    ownerSessionToken = await provisionAuthenticatedOwner(adminUserId);
     userId = await createTestUser(pool, '9101001');
     await createVerifiedPrimaryWallet(pool, {
       userId,
@@ -157,7 +192,8 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 canary signing recovery (isol
       withdrawalId,
       mode: 'mutate' as const,
       confirmationPhrase: PHASE10_CANARY_RECOVERY_CONFIRMATION_PHRASE,
-      operatorAdminUserId: adminUserId,
+      ownerAdminUserId: adminUserId,
+      ownerSessionToken,
       temporalTerminatedConfirmed: true,
       payoutWorkerStoppedConfirmed: true,
       expectedFencingToken: fencingToken,
@@ -211,7 +247,8 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 canary signing recovery (isol
       withdrawalId,
       mode: 'mutate',
       confirmationPhrase: 'WRONG',
-      operatorAdminUserId: adminUserId,
+      ownerAdminUserId: adminUserId,
+      ownerSessionToken,
       temporalTerminatedConfirmed: true,
       payoutWorkerStoppedConfirmed: true,
       expectedFencingToken: fencingToken,
@@ -225,18 +262,96 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 canary signing recovery (isol
     expect(state.rows[0]?.state).toBe('SIGNING');
   });
 
-  it('mutate without operatorAdminUserId refuses (phrase is not authentication)', async () => {
+  it('mutate without ownerAdminUserId refuses (phrase is not authentication)', async () => {
     const { withdrawalId, fencingToken } = await seedStuckSigning();
     const result = await executePhase10CanarySigningZeroAttemptsRecovery(pool, {
       withdrawalId,
       mode: 'mutate',
       confirmationPhrase: PHASE10_CANARY_RECOVERY_CONFIRMATION_PHRASE,
+      ownerSessionToken,
       temporalTerminatedConfirmed: true,
       payoutWorkerStoppedConfirmed: true,
       expectedFencingToken: fencingToken,
     });
     expect(result.accepted).toBe(false);
-    expect(result.refusalReasons.some((r) => r.includes('operatorAdminUserId'))).toBe(true);
+    expect(result.refusalReasons.some((r) => r.includes('ownerAdminUserId'))).toBe(true);
+  });
+
+  it('ACTIVE admin without OWNER binding refuses (P1)', async () => {
+    const { withdrawalId, fencingToken } = await seedStuckSigning();
+    await pool.query(
+      `UPDATE admin_role_bindings SET revoked_at = now() WHERE admin_user_id = $1::uuid`,
+      [adminUserId],
+    );
+    const result = await executePhase10CanarySigningZeroAttemptsRecovery(
+      pool,
+      mutateAuth(withdrawalId, fencingToken),
+    );
+    expect(result.accepted).toBe(false);
+    expect(result.refusalReasons.some((r) => r.includes('OWNER role binding'))).toBe(true);
+  });
+
+  it('ACTIVE OWNER without session token refuses (P1)', async () => {
+    const { withdrawalId, fencingToken } = await seedStuckSigning();
+    const result = await executePhase10CanarySigningZeroAttemptsRecovery(pool, {
+      ...mutateAuth(withdrawalId, fencingToken),
+      ownerSessionToken: null,
+    });
+    expect(result.accepted).toBe(false);
+    expect(result.refusalReasons.some((r) => r.includes('ownerSessionToken'))).toBe(true);
+  });
+
+  it('ACTIVE OWNER with stale reauthentication refuses (P1)', async () => {
+    const { withdrawalId, fencingToken } = await seedStuckSigning();
+    const staleMs = PHASE10_CANARY_RECOVERY_REAUTH_MAX_AGE_MS + 60_000;
+    await pool.query(
+      `UPDATE admin_sessions
+       SET reauthenticated_at = now() - ($2::text || ' milliseconds')::interval
+       WHERE admin_user_id = $1::uuid`,
+      [adminUserId, String(staleMs)],
+    );
+    await pool.query(
+      `UPDATE admin_users
+       SET last_reauthenticated_at = now() - ($2::text || ' milliseconds')::interval
+       WHERE id = $1::uuid`,
+      [adminUserId, String(staleMs)],
+    );
+    const result = await executePhase10CanarySigningZeroAttemptsRecovery(
+      pool,
+      mutateAuth(withdrawalId, fencingToken),
+    );
+    expect(result.accepted).toBe(false);
+    expect(result.refusalReasons.some((r) => r.includes('reauthentication expired'))).toBe(true);
+  });
+
+  it('non-Owner ACTIVE admin cannot mutate even with a session (P1)', async () => {
+    const { withdrawalId, fencingToken } = await seedStuckSigning();
+    const otherAdmin = await createOwnerAdmin(pool, `non-owner-${Date.now()}@example.local`);
+    const otherToken = await provisionAuthenticatedOwner(otherAdmin);
+    await pool.query(
+      `UPDATE admin_role_bindings SET revoked_at = now() WHERE admin_user_id = $1::uuid`,
+      [otherAdmin],
+    );
+    const result = await executePhase10CanarySigningZeroAttemptsRecovery(pool, {
+      ...mutateAuth(withdrawalId, fencingToken),
+      ownerAdminUserId: otherAdmin,
+      ownerSessionToken: otherToken,
+    });
+    expect(result.accepted).toBe(false);
+    expect(result.refusalReasons.some((r) => r.includes('OWNER role binding'))).toBe(true);
+  });
+
+  it('fixture override is refused against operational database name (P2)', () => {
+    const fixtureId = '00000000-0000-4000-8000-000000000042';
+    process.env.PHASE10_CANARY_RECOVERY_TEST_FIXTURE_ID = fixtureId;
+    expect(isPhase10CanaryRecoveryWithdrawalAuthorized(fixtureId, 'alex_rewards')).toBe(false);
+    expect(isPhase10CanaryRecoveryWithdrawalAuthorized(fixtureId, 'alex_rewards_test')).toBe(true);
+    expect(
+      isPhase10CanaryRecoveryWithdrawalAuthorized(
+        PHASE10_CANARY_RECOVERY_WITHDRAWAL_ID,
+        'alex_rewards',
+      ),
+    ).toBe(true);
   });
 
   it('mutate in CI refuses operational recovery (production canary ID)', async () => {
@@ -251,7 +366,8 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 canary signing recovery (isol
         withdrawalId: PHASE10_CANARY_RECOVERY_WITHDRAWAL_ID,
         mode: 'mutate',
         confirmationPhrase: PHASE10_CANARY_RECOVERY_CONFIRMATION_PHRASE,
-        operatorAdminUserId: adminUserId,
+        ownerAdminUserId: adminUserId,
+        ownerSessionToken,
         temporalTerminatedConfirmed: true,
         payoutWorkerStoppedConfirmed: true,
         expectedFencingToken: 1n,
@@ -265,6 +381,30 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 canary signing recovery (isol
       else process.env.GITHUB_ACTIONS = prevActions;
       if (prevFixture === undefined) delete process.env.PHASE10_CANARY_RECOVERY_TEST_FIXTURE_ID;
       else process.env.PHASE10_CANARY_RECOVERY_TEST_FIXTURE_ID = prevFixture;
+    }
+  });
+
+  it('CI marker detection is fail-closed for nonempty variants (P2)', () => {
+    const prevCi = process.env.CI;
+    const prevActions = process.env.GITHUB_ACTIONS;
+    try {
+      delete process.env.GITHUB_ACTIONS;
+      for (const value of ['1', 'TRUE', 'true', 'yes', 'on', 'ci']) {
+        process.env.CI = value;
+        expect(isPhase10CanaryRecoveryCiEnvironment()).toBe(true);
+      }
+      for (const value of ['0', 'false', 'FALSE', 'no', 'off', '']) {
+        process.env.CI = value;
+        expect(isPhase10CanaryRecoveryCiEnvironment()).toBe(false);
+      }
+      delete process.env.CI;
+      process.env.GITHUB_ACTIONS = '1';
+      expect(isPhase10CanaryRecoveryCiEnvironment()).toBe(true);
+    } finally {
+      if (prevCi === undefined) delete process.env.CI;
+      else process.env.CI = prevCi;
+      if (prevActions === undefined) delete process.env.GITHUB_ACTIONS;
+      else process.env.GITHUB_ACTIONS = prevActions;
     }
   });
 
@@ -299,7 +439,8 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 canary signing recovery (isol
       withdrawalId,
       mode: 'mutate',
       confirmationPhrase: PHASE10_CANARY_RECOVERY_CONFIRMATION_PHRASE,
-      operatorAdminUserId: adminUserId,
+      ownerAdminUserId: adminUserId,
+      ownerSessionToken,
       expectedFencingToken: fencingToken,
     });
     expect(result.accepted).toBe(false);

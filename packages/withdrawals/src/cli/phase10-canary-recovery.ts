@@ -8,16 +8,18 @@
  *   --mode mutate
  *   --confirmation-phrase PHASE10_OWNER_RECOVERY_SIGNING_ZERO_ATTEMPTS
  *     (intent confirmation ONLY — not authentication)
- *   --operator-admin-user-id <ACTIVE admin_users.id>
- *     (separately authenticated operator identity)
+ *   --owner-admin-user-id <ACTIVE admin_users.id with unrevoked OWNER binding>
+ *   --owner-session-token <raw admin_sessions secret for that Owner>
+ *     (trusted authenticated session + recent reauthentication)
  *   --temporal-terminated-confirmed
  *   --payout-worker-stopped-confirmed
  *   --withdrawal-id 01a0afbd-2550-742b-967d-5aec6ee75a83
  *   For operational DB alex_rewards also:
  *     PHASE10_CANARY_RECOVERY_OPERATIONAL_MUTATION_CONFIRM=I_CONFIRM_OPERATIONAL_ALEX_REWARDS_CANARY_RECOVERY
  *
- * CI/GitHub Actions cannot mutate. Never unlocks Signer, never enables real/fake
- * chain, never broadcasts, never terminates Temporal, never starts a workflow.
+ * CI/GitHub Actions cannot mutate operational recovery. Never unlocks Signer, never
+ * enables real/fake chain, never broadcasts, never terminates Temporal, never starts
+ * a workflow.
  */
 import { createDatabasePool } from '@alex-rewards/db';
 import { loadWorkerConfig } from '@alex-rewards/config';
@@ -27,6 +29,7 @@ import {
   PHASE10_CANARY_RECOVERY_OPERATIONAL_MUTATION_CONFIRM,
   PHASE10_CANARY_RECOVERY_WITHDRAWAL_ID,
   executePhase10CanarySigningZeroAttemptsRecovery,
+  isPhase10CanaryRecoveryCiEnvironment,
   planPhase10CanarySigningZeroAttemptsRecovery,
 } from '../phase10-canary-signing-recovery.js';
 
@@ -36,14 +39,17 @@ function usage(exitCode = 2): never {
       {
         ok: false,
         message:
-          'usage: phase10-canary-recovery --withdrawal-id <uuid> [--mode dry-run|mutate] [--confirmation-phrase <phrase>] --operator-admin-user-id <uuid> [--expected-fencing-token <n>] [--temporal-terminated-confirmed] [--payout-worker-stopped-confirmed]',
+          'usage: phase10-canary-recovery --withdrawal-id <uuid> [--mode dry-run|mutate] [--confirmation-phrase <phrase>] --owner-admin-user-id <uuid> --owner-session-token <secret> [--expected-fencing-token <n>] [--temporal-terminated-confirmed] [--payout-worker-stopped-confirmed]',
         soleAuthorizedWithdrawalId: PHASE10_CANARY_RECOVERY_WITHDRAWAL_ID,
         confirmationPhrase: PHASE10_CANARY_RECOVERY_CONFIRMATION_PHRASE,
         confirmationIsNotAuthentication: true,
-        operatorAdminUserIdRequiredForMutate: true,
+        ownerAdminUserIdRequiredForMutate: true,
+        ownerSessionTokenRequiredForMutate: true,
+        ownerRoleBindingRequired: 'OWNER',
+        recentReauthenticationRequired: true,
         operationalMutationConfirm: PHASE10_CANARY_RECOVERY_OPERATIONAL_MUTATION_CONFIRM,
         defaultMode: 'dry-run',
-        ciCannotMutate: true,
+        ciCannotMutateOperationalRecovery: true,
       },
       null,
       2,
@@ -78,9 +84,15 @@ async function main(): Promise<void> {
     readFlag(argv, '--authorize-phrase') ??
     process.env.PHASE10_CANARY_RECOVERY_CONFIRMATION_PHRASE ??
     null;
-  const operatorAdminUserId =
+  const ownerAdminUserId =
+    readFlag(argv, '--owner-admin-user-id') ??
     readFlag(argv, '--operator-admin-user-id') ??
+    process.env.PHASE10_CANARY_RECOVERY_OWNER_ADMIN_USER_ID ??
     process.env.PHASE10_CANARY_RECOVERY_OPERATOR_ADMIN_USER_ID ??
+    null;
+  const ownerSessionToken =
+    readFlag(argv, '--owner-session-token') ??
+    process.env.PHASE10_CANARY_RECOVERY_OWNER_SESSION_TOKEN ??
     null;
   const expectedTokenRaw = readFlag(argv, '--expected-fencing-token');
   const expectedFencingToken =
@@ -90,7 +102,7 @@ async function main(): Promise<void> {
   const operationalMutationConfirm =
     process.env.PHASE10_CANARY_RECOVERY_OPERATIONAL_MUTATION_CONFIRM ?? null;
 
-  if (mode === 'mutate' && (process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true')) {
+  if (mode === 'mutate' && isPhase10CanaryRecoveryCiEnvironment()) {
     console.error(
       JSON.stringify({
         ok: false,
@@ -108,7 +120,8 @@ async function main(): Promise<void> {
       withdrawalId,
       mode,
       confirmationPhrase,
-      operatorAdminUserId,
+      ownerAdminUserId,
+      ownerSessionToken,
       temporalTerminatedConfirmed: hasSwitch(argv, '--temporal-terminated-confirmed'),
       payoutWorkerStoppedConfirmed: hasSwitch(argv, '--payout-worker-stopped-confirmed'),
       ...(expectedFencingToken !== null ? { expectedFencingToken } : {}),

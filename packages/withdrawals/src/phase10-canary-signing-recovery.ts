@@ -7,16 +7,20 @@
  * Mutation requires ALL of:
  * - mode=mutate
  * - confirmationPhrase (intent confirmation ONLY — not authentication)
- * - operatorAdminUserId of an ACTIVE admin_users row (authenticated operator identity)
+ * - ownerAdminUserId of an ACTIVE admin with unrevoked OWNER role binding
+ * - ownerSessionToken matching an unrevoked, unexpired admin_sessions row for that Owner
+ * - recent Owner reauthentication within PHASE10_CANARY_RECOVERY_REAUTH_MAX_AGE_MS
  * - temporalTerminatedConfirmed + payoutWorkerStoppedConfirmed
  * - fencing / reservation / attempt preconditions
  *
  * CI / GitHub Actions cannot mutate operational recovery. Isolated NODE_ENV=test
  * suites may mutate only when current_database() is an approved destructive test
  * DB and PHASE10_CANARY_RECOVERY_TEST_FIXTURE_ID matches a non-production ID.
+ * Fixture overrides are never honored against operational alex_rewards.
  * Operational database alex_rewards is always refused in CI. Does not start Temporal,
  * unlock Signer, enable chain, or broadcast.
  */
+import { sha256Hex } from '@alex-rewards/auth';
 import { isApprovedDestructiveTestDatabaseName } from '@alex-rewards/db';
 import type { Pool, PoolClient } from 'pg';
 
@@ -53,6 +57,14 @@ export const PHASE10_CANARY_RECOVERY_AUDIT_ACTION =
  */
 export const PHASE10_CANARY_RECOVERY_OPERATIONAL_MUTATION_CONFIRM =
   'I_CONFIRM_OPERATIONAL_ALEX_REWARDS_CANARY_RECOVERY' as const;
+
+/** High-impact Owner reauthentication window (spec: recent reauth required). */
+export const PHASE10_CANARY_RECOVERY_REAUTH_MAX_AGE_MS = 15 * 60 * 1000;
+
+/** Hash raw Owner admin session token for admin_sessions.session_token_hash lookup. */
+export function hashPhase10CanaryOwnerSessionToken(rawToken: string): string {
+  return sha256Hex(`admin-session:${rawToken.trim()}`);
+}
 
 export type Phase10CanaryRecoveryMode = 'dry-run' | 'mutate';
 
@@ -102,7 +114,8 @@ export interface Phase10CanaryRecoveryPlan {
     readonly temporalTerminatedConfirmed: boolean;
     readonly payoutWorkerStoppedConfirmed: boolean;
     readonly migration0023Applied: boolean | null;
-    readonly operatorAdminUserIdPresent: boolean;
+    readonly ownerAdminUserIdPresent: boolean;
+    readonly ownerSessionTokenPresent: boolean;
   };
 }
 
@@ -115,6 +128,8 @@ export interface Phase10CanaryRecoveryExecuteResult {
   readonly auditLogId: string | null;
   readonly transition: { readonly id: string; readonly state: string } | null;
   readonly leaseReleased: boolean;
+  readonly ownerAdminUserId: string | null;
+  /** @deprecated Alias of ownerAdminUserId. */
   readonly operatorAdminUserId: string | null;
 }
 
@@ -139,10 +154,20 @@ export interface Phase10CanaryRecoveryInput {
    */
   readonly authorizationPhrase?: string | null;
   /**
-   * Authenticated operator identity: must be an ACTIVE admin_users.id.
+   * Authenticated Owner identity: must be ACTIVE admin_users.id with unrevoked OWNER binding.
    * Required for mutate. Bound into audit_logs.admin_user_id.
+   * UUID alone is not authentication — ownerSessionToken + recent reauth are required.
+   */
+  readonly ownerAdminUserId?: string | null;
+  /**
+   * @deprecated Use ownerAdminUserId.
    */
   readonly operatorAdminUserId?: string | null;
+  /**
+   * Raw Owner admin session secret. Hashed and matched to an unrevoked, unexpired
+   * admin_sessions row belonging to ownerAdminUserId. Required for mutate.
+   */
+  readonly ownerSessionToken?: string | null;
   /**
    * Owner attestation that Temporal workflow was terminated (TERMINATED, not COMPLETED).
    * Required for mutate.
@@ -164,9 +189,24 @@ export interface Phase10CanaryRecoveryInput {
   readonly operationalMutationConfirm?: string | null;
 }
 
-function isAuthorizedCanaryRecoveryWithdrawalId(withdrawalId: string): boolean {
+/**
+ * Sole allowlisted production canary ID, or a NODE_ENV=test fixture ID that is
+ * only honored against an approved isolated test database (never alex_rewards).
+ */
+export function isPhase10CanaryRecoveryWithdrawalAuthorized(
+  withdrawalId: string,
+  currentDatabase: string,
+): boolean {
   if (withdrawalId === PHASE10_CANARY_RECOVERY_WITHDRAWAL_ID) return true;
-  // Test-only single-ID fixture override (never enabled outside NODE_ENV=test).
+  if (process.env.NODE_ENV !== 'test') return false;
+  if (currentDatabase === 'alex_rewards') return false;
+  if (!isApprovedDestructiveTestDatabaseName(currentDatabase)) return false;
+  const fixture = process.env.PHASE10_CANARY_RECOVERY_TEST_FIXTURE_ID;
+  return typeof fixture === 'string' && fixture.length > 0 && fixture === withdrawalId;
+}
+
+function mayBeAuthorizedWithdrawalIdWithoutDb(withdrawalId: string): boolean {
+  if (withdrawalId === PHASE10_CANARY_RECOVERY_WITHDRAWAL_ID) return true;
   const fixture = process.env.PHASE10_CANARY_RECOVERY_TEST_FIXTURE_ID;
   return (
     process.env.NODE_ENV === 'test' &&
@@ -176,8 +216,23 @@ function isAuthorizedCanaryRecoveryWithdrawalId(withdrawalId: string): boolean {
   );
 }
 
+/** Fail-closed: any nonempty CI / GITHUB_ACTIONS marker except explicit falsey values. */
+export function isPhase10CanaryRecoveryCiEnvironment(): boolean {
+  return isTruthyCiMarker(process.env.CI) || isTruthyCiMarker(process.env.GITHUB_ACTIONS);
+}
+
+function isTruthyCiMarker(value: string | undefined): boolean {
+  if (value === undefined) return false;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === '') return false;
+  if (normalized === '0' || normalized === 'false' || normalized === 'no' || normalized === 'off') {
+    return false;
+  }
+  return true;
+}
+
 function isCiEnvironment(): boolean {
-  return process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true';
+  return isPhase10CanaryRecoveryCiEnvironment();
 }
 
 /**
@@ -206,6 +261,22 @@ function isIsolatedCiTestMutationAllowed(
 function readConfirmationPhrase(input: Phase10CanaryRecoveryInput): string | null {
   const phrase = input.confirmationPhrase ?? input.authorizationPhrase ?? null;
   return phrase;
+}
+
+function readOwnerAdminUserId(input: Phase10CanaryRecoveryInput): string | null {
+  const id = input.ownerAdminUserId ?? input.operatorAdminUserId ?? null;
+  if (id === undefined || id === null) return null;
+  const trimmed = id.trim();
+  return trimmed === '' ? null : trimmed;
+}
+
+function ownerAuthPrerequisites(input: Phase10CanaryRecoveryInput) {
+  const ownerAdminUserId = readOwnerAdminUserId(input);
+  return {
+    ownerAdminUserIdPresent: ownerAdminUserId !== null,
+    ownerSessionTokenPresent:
+      typeof input.ownerSessionToken === 'string' && input.ownerSessionToken.trim() !== '',
+  };
 }
 
 async function loadSnapshot(
@@ -287,32 +358,128 @@ async function migration0023Applied(client: PoolClient): Promise<boolean> {
   return (result.rowCount ?? 0) === 1;
 }
 
-async function assertActiveOperatorAdmin(
+async function assertAuthenticatedOwnerContext(
   client: PoolClient,
-  operatorAdminUserId: string,
-): Promise<string | null> {
-  const result = await client.query<{ id: string; status: string }>(
-    `SELECT id::text, status::text FROM admin_users WHERE id = $1::uuid`,
-    [operatorAdminUserId],
+  input: Phase10CanaryRecoveryInput,
+): Promise<{ ok: true; adminUserId: string } | { ok: false; reason: string }> {
+  const adminUserId = readOwnerAdminUserId(input);
+  if (adminUserId === null) {
+    return {
+      ok: false,
+      reason:
+        'ownerAdminUserId required — authenticated Owner with OWNER binding (phrase is not authentication)',
+    };
+  }
+  const sessionToken = input.ownerSessionToken;
+  if (sessionToken === undefined || sessionToken === null || sessionToken.trim() === '') {
+    return {
+      ok: false,
+      reason:
+        'ownerSessionToken required — trusted Owner admin session (admin UUID alone is not authentication)',
+    };
+  }
+
+  const admin = await client.query<{
+    id: string;
+    status: string;
+    last_reauthenticated_at: Date | null;
+  }>(
+    `SELECT id::text, status::text, last_reauthenticated_at
+     FROM admin_users WHERE id = $1::uuid`,
+    [adminUserId],
   );
-  const row = result.rows[0];
-  if (row === undefined) {
-    return 'operatorAdminUserId not found in admin_users';
+  const adminRow = admin.rows[0];
+  if (adminRow === undefined) {
+    return { ok: false, reason: 'ownerAdminUserId not found in admin_users' };
   }
-  if (row.status !== 'ACTIVE') {
-    return `operatorAdminUserId is not ACTIVE (status=${row.status})`;
+  if (adminRow.status !== 'ACTIVE') {
+    return { ok: false, reason: `ownerAdminUserId is not ACTIVE (status=${adminRow.status})` };
   }
-  return null;
+
+  const binding = await client.query<{ c: number }>(
+    `SELECT count(*)::int AS c
+     FROM admin_role_bindings b
+     INNER JOIN admin_roles r ON r.id = b.role_id
+     WHERE b.admin_user_id = $1::uuid
+       AND r.code = 'OWNER'
+       AND r.status = 'ACTIVE'
+       AND b.revoked_at IS NULL`,
+    [adminUserId],
+  );
+  if ((binding.rows[0]?.c ?? 0) < 1) {
+    return {
+      ok: false,
+      reason: 'ownerAdminUserId lacks ACTIVE unrevoked OWNER role binding',
+    };
+  }
+
+  const tokenHash = hashPhase10CanaryOwnerSessionToken(sessionToken);
+  const session = await client.query<{
+    id: string;
+    admin_user_id: string;
+    reauthenticated_at: Date | null;
+    idle_expires_at: Date;
+    absolute_expires_at: Date;
+    revoked_at: Date | null;
+  }>(
+    `SELECT id::text, admin_user_id::text, reauthenticated_at,
+            idle_expires_at, absolute_expires_at, revoked_at
+     FROM admin_sessions
+     WHERE session_token_hash = $1
+     LIMIT 1`,
+    [tokenHash],
+  );
+  const sessionRow = session.rows[0];
+  if (sessionRow === undefined) {
+    return { ok: false, reason: 'ownerSessionToken does not match an admin_sessions row' };
+  }
+  if (sessionRow.admin_user_id !== adminUserId) {
+    return {
+      ok: false,
+      reason: 'ownerSessionToken is not bound to ownerAdminUserId',
+    };
+  }
+  if (sessionRow.revoked_at !== null) {
+    return { ok: false, reason: 'ownerSessionToken session is revoked' };
+  }
+  const now = Date.now();
+  if (sessionRow.idle_expires_at.getTime() <= now) {
+    return { ok: false, reason: 'ownerSessionToken session idle timeout expired' };
+  }
+  if (sessionRow.absolute_expires_at.getTime() <= now) {
+    return { ok: false, reason: 'ownerSessionToken session absolute timeout expired' };
+  }
+
+  const reauthAt = sessionRow.reauthenticated_at ?? adminRow.last_reauthenticated_at;
+  if (reauthAt === null) {
+    return {
+      ok: false,
+      reason: 'Owner reauthentication required (no reauthenticated_at on session or admin)',
+    };
+  }
+  if (now - reauthAt.getTime() > PHASE10_CANARY_RECOVERY_REAUTH_MAX_AGE_MS) {
+    return {
+      ok: false,
+      reason: `Owner reauthentication expired (max age ${PHASE10_CANARY_RECOVERY_REAUTH_MAX_AGE_MS}ms)`,
+    };
+  }
+
+  return { ok: true, adminUserId };
 }
 
 function evaluatePreconditions(
   snapshot: Phase10CanaryRecoverySnapshot,
   input: Phase10CanaryRecoveryInput,
   migrationApplied: boolean,
+  currentDatabase: string,
 ): string[] {
   const reasons: string[] = [];
-  if (!isAuthorizedCanaryRecoveryWithdrawalId(snapshot.withdrawalId)) {
-    reasons.push('withdrawalId is not the sole authorized canary recovery target');
+  if (!isPhase10CanaryRecoveryWithdrawalAuthorized(snapshot.withdrawalId, currentDatabase)) {
+    reasons.push(
+      currentDatabase === 'alex_rewards'
+        ? 'fixture override refused against operational database alex_rewards'
+        : 'withdrawalId is not the sole authorized canary recovery target',
+    );
   }
   if (snapshot.state !== 'SIGNING') {
     reasons.push(`state must be SIGNING (observed ${snapshot.state})`);
@@ -414,13 +581,18 @@ function mutateGateReasons(input: Phase10CanaryRecoveryInput): string[] {
       'confirmationPhrase mismatch — intent confirmation only; mutate refused (dry-run is default)',
     );
   }
+  if (readOwnerAdminUserId(input) === null) {
+    reasons.push(
+      'ownerAdminUserId required — authenticated Owner with OWNER binding (phrase is not authentication)',
+    );
+  }
   if (
-    input.operatorAdminUserId === undefined ||
-    input.operatorAdminUserId === null ||
-    input.operatorAdminUserId.trim() === ''
+    input.ownerSessionToken === undefined ||
+    input.ownerSessionToken === null ||
+    input.ownerSessionToken.trim() === ''
   ) {
     reasons.push(
-      'operatorAdminUserId required — authenticated ACTIVE admin operator (phrase is not authentication)',
+      'ownerSessionToken required — trusted Owner admin session (admin UUID alone is not authentication)',
     );
   }
   if (input.temporalTerminatedConfirmed !== true) {
@@ -455,7 +627,8 @@ export async function planPhase10CanarySigningZeroAttemptsRecovery(
   db: WithdrawalDb,
   input: Phase10CanaryRecoveryInput,
 ): Promise<Phase10CanaryRecoveryPlan> {
-  if (!isAuthorizedCanaryRecoveryWithdrawalId(input.withdrawalId)) {
+  const authPrereqs = ownerAuthPrerequisites(input);
+  if (!mayBeAuthorizedWithdrawalIdWithoutDb(input.withdrawalId)) {
     return {
       mode: 'dry-run',
       authorized: false,
@@ -470,13 +643,36 @@ export async function planPhase10CanarySigningZeroAttemptsRecovery(
         temporalTerminatedConfirmed: input.temporalTerminatedConfirmed === true,
         payoutWorkerStoppedConfirmed: input.payoutWorkerStoppedConfirmed === true,
         migration0023Applied: null,
-        operatorAdminUserIdPresent:
-          typeof input.operatorAdminUserId === 'string' && input.operatorAdminUserId.trim() !== '',
+        ...authPrereqs,
       },
     };
   }
 
   return withWithdrawalTransaction(db, async (client) => {
+    const dbName = await client.query<{ current_database: string }>(`SELECT current_database()`);
+    const currentDatabase = dbName.rows[0]?.current_database ?? '';
+    if (!isPhase10CanaryRecoveryWithdrawalAuthorized(input.withdrawalId, currentDatabase)) {
+      return {
+        mode: 'dry-run' as const,
+        authorized: false,
+        accepted: false,
+        refusalReasons: [
+          currentDatabase === 'alex_rewards'
+            ? 'fixture override refused against operational database alex_rewards'
+            : `refusing non-canary withdrawalId=${input.withdrawalId} (only ${PHASE10_CANARY_RECOVERY_WITHDRAWAL_ID} is allowed)`,
+        ],
+        snapshot: null,
+        plannedTransition: null,
+        temporalNotes: temporalNotes(null),
+        prerequisites: {
+          temporalTerminatedConfirmed: input.temporalTerminatedConfirmed === true,
+          payoutWorkerStoppedConfirmed: input.payoutWorkerStoppedConfirmed === true,
+          migration0023Applied: null,
+          ...authPrereqs,
+        },
+      };
+    }
+
     const snapshot = await loadSnapshot(client, input.withdrawalId);
     if (snapshot === null) {
       return {
@@ -491,14 +687,17 @@ export async function planPhase10CanarySigningZeroAttemptsRecovery(
           temporalTerminatedConfirmed: input.temporalTerminatedConfirmed === true,
           payoutWorkerStoppedConfirmed: input.payoutWorkerStoppedConfirmed === true,
           migration0023Applied: null,
-          operatorAdminUserIdPresent:
-            typeof input.operatorAdminUserId === 'string' &&
-            input.operatorAdminUserId.trim() !== '',
+          ...authPrereqs,
         },
       };
     }
     const migrationApplied = await migration0023Applied(client);
-    const refusalReasons = evaluatePreconditions(snapshot, input, migrationApplied);
+    const refusalReasons = evaluatePreconditions(
+      snapshot,
+      input,
+      migrationApplied,
+      currentDatabase,
+    );
     const accepted = refusalReasons.length === 0;
     return {
       mode: 'dry-run' as const,
@@ -522,8 +721,7 @@ export async function planPhase10CanarySigningZeroAttemptsRecovery(
         temporalTerminatedConfirmed: input.temporalTerminatedConfirmed === true,
         payoutWorkerStoppedConfirmed: input.payoutWorkerStoppedConfirmed === true,
         migration0023Applied: migrationApplied,
-        operatorAdminUserIdPresent:
-          typeof input.operatorAdminUserId === 'string' && input.operatorAdminUserId.trim() !== '',
+        ...authPrereqs,
       },
     };
   });
@@ -531,14 +729,15 @@ export async function planPhase10CanarySigningZeroAttemptsRecovery(
 
 /**
  * Atomic recovery mutation. Dry-run is default; mutate requires confirmation phrase
- * (intent only) plus authenticated ACTIVE operatorAdminUserId and attestations.
- * Rolls back entire transaction on any mismatch.
+ * (intent only) plus authenticated Owner session (ACTIVE + OWNER binding + recent
+ * reauth) and attestations. Rolls back entire transaction on any mismatch.
  */
 export async function executePhase10CanarySigningZeroAttemptsRecovery(
   db: Pool,
   input: Phase10CanaryRecoveryInput,
 ): Promise<Phase10CanaryRecoveryExecuteResult> {
   const mode = input.mode ?? 'dry-run';
+  const ownerAdminUserId = readOwnerAdminUserId(input);
   if (mode !== 'mutate') {
     const plan = await planPhase10CanarySigningZeroAttemptsRecovery(db, {
       ...input,
@@ -556,11 +755,12 @@ export async function executePhase10CanarySigningZeroAttemptsRecovery(
       auditLogId: null,
       transition: null,
       leaseReleased: false,
+      ownerAdminUserId: null,
       operatorAdminUserId: null,
     };
   }
 
-  if (!isAuthorizedCanaryRecoveryWithdrawalId(input.withdrawalId)) {
+  if (!mayBeAuthorizedWithdrawalIdWithoutDb(input.withdrawalId)) {
     return {
       mode: 'mutate',
       accepted: false,
@@ -572,6 +772,7 @@ export async function executePhase10CanarySigningZeroAttemptsRecovery(
       auditLogId: null,
       transition: null,
       leaseReleased: false,
+      ownerAdminUserId: null,
       operatorAdminUserId: null,
     };
   }
@@ -588,7 +789,8 @@ export async function executePhase10CanarySigningZeroAttemptsRecovery(
       auditLogId: null,
       transition: null,
       leaseReleased: false,
-      operatorAdminUserId: input.operatorAdminUserId ?? null,
+      ownerAdminUserId,
+      operatorAdminUserId: ownerAdminUserId,
     };
   }
 
@@ -607,22 +809,43 @@ export async function executePhase10CanarySigningZeroAttemptsRecovery(
           auditLogId: null,
           transition: null,
           leaseReleased: false,
-          operatorAdminUserId: input.operatorAdminUserId ?? null,
+          ownerAdminUserId,
+          operatorAdminUserId: ownerAdminUserId,
         };
       }
 
-      const operatorError = await assertActiveOperatorAdmin(client, input.operatorAdminUserId!);
-      if (operatorError !== null) {
+      if (!isPhase10CanaryRecoveryWithdrawalAuthorized(input.withdrawalId, currentDatabase)) {
         return {
           mode: 'mutate' as const,
           accepted: false,
-          refusalReasons: [operatorError],
+          refusalReasons: [
+            currentDatabase === 'alex_rewards'
+              ? 'fixture override refused against operational database alex_rewards'
+              : `refusing non-canary withdrawalId=${input.withdrawalId} (only ${PHASE10_CANARY_RECOVERY_WITHDRAWAL_ID} is allowed)`,
+          ],
           before: null,
           after: null,
           auditLogId: null,
           transition: null,
           leaseReleased: false,
-          operatorAdminUserId: input.operatorAdminUserId ?? null,
+          ownerAdminUserId,
+          operatorAdminUserId: ownerAdminUserId,
+        };
+      }
+
+      const ownerAuth = await assertAuthenticatedOwnerContext(client, input);
+      if (!ownerAuth.ok) {
+        return {
+          mode: 'mutate' as const,
+          accepted: false,
+          refusalReasons: [ownerAuth.reason],
+          before: null,
+          after: null,
+          auditLogId: null,
+          transition: null,
+          leaseReleased: false,
+          ownerAdminUserId,
+          operatorAdminUserId: ownerAdminUserId,
         };
       }
 
@@ -658,12 +881,18 @@ export async function executePhase10CanarySigningZeroAttemptsRecovery(
           auditLogId: null,
           transition: null,
           leaseReleased: false,
-          operatorAdminUserId: input.operatorAdminUserId ?? null,
+          ownerAdminUserId: ownerAuth.adminUserId,
+          operatorAdminUserId: ownerAuth.adminUserId,
         };
       }
 
       const migrationApplied = await migration0023Applied(client);
-      const refusalReasons = evaluatePreconditions(before, input, migrationApplied);
+      const refusalReasons = evaluatePreconditions(
+        before,
+        input,
+        migrationApplied,
+        currentDatabase,
+      );
       if (refusalReasons.length > 0) {
         return {
           mode: 'mutate' as const,
@@ -674,7 +903,8 @@ export async function executePhase10CanarySigningZeroAttemptsRecovery(
           auditLogId: null,
           transition: null,
           leaseReleased: false,
-          operatorAdminUserId: input.operatorAdminUserId ?? null,
+          ownerAdminUserId: ownerAuth.adminUserId,
+          operatorAdminUserId: ownerAuth.adminUserId,
         };
       }
 
@@ -710,9 +940,9 @@ export async function executePhase10CanarySigningZeroAttemptsRecovery(
         resourceType: 'withdrawal',
         resourceId: input.withdrawalId,
         actorType: 'ADMIN',
-        adminUserId: input.operatorAdminUserId!,
+        adminUserId: ownerAuth.adminUserId,
         reason:
-          'Owner-gated canary recovery: SIGNING+0 attempts+expired lease; no broadcast evidence; Temporal terminated separately; confirmationPhrase is intent-only',
+          'Owner-gated canary recovery: SIGNING+0 attempts+expired lease; no broadcast evidence; Temporal terminated separately; confirmationPhrase is intent-only; Owner session+OWNER RBAC+recent reauth required',
         afterSnapshot: {
           from: 'SIGNING',
           to: 'FAILED_PRE_BROADCAST',
@@ -723,7 +953,9 @@ export async function executePhase10CanarySigningZeroAttemptsRecovery(
           workflowId: before.workflowId,
           temporalOriginalStatusExpected: 'TERMINATED',
           directPipelineRequiresNewWorkflow: false,
-          operatorAdminUserId: input.operatorAdminUserId,
+          ownerAdminUserId: ownerAuth.adminUserId,
+          ownerSessionAuthenticated: true,
+          ownerRoleBindingVerified: true,
           confirmationPhraseUsed: true,
           confirmationIsNotAuthentication: true,
           currentDatabase,
@@ -761,7 +993,8 @@ export async function executePhase10CanarySigningZeroAttemptsRecovery(
         auditLogId,
         transition,
         leaseReleased: true,
-        operatorAdminUserId: input.operatorAdminUserId ?? null,
+        ownerAdminUserId: ownerAuth.adminUserId,
+        operatorAdminUserId: ownerAuth.adminUserId,
       };
     });
   } catch (error) {
@@ -775,7 +1008,8 @@ export async function executePhase10CanarySigningZeroAttemptsRecovery(
         auditLogId: null,
         transition: null,
         leaseReleased: false,
-        operatorAdminUserId: input.operatorAdminUserId ?? null,
+        ownerAdminUserId,
+        operatorAdminUserId: ownerAdminUserId,
       };
     }
     throw error;

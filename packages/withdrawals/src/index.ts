@@ -221,8 +221,12 @@ export {
   PHASE10_CANARY_RECOVERY_AUDIT_ACTION,
   PHASE10_CANARY_RECOVERY_CONFIRMATION_PHRASE,
   PHASE10_CANARY_RECOVERY_OPERATIONAL_MUTATION_CONFIRM,
+  PHASE10_CANARY_RECOVERY_REAUTH_MAX_AGE_MS,
   PHASE10_CANARY_RECOVERY_WITHDRAWAL_ID,
   executePhase10CanarySigningZeroAttemptsRecovery,
+  hashPhase10CanaryOwnerSessionToken,
+  isPhase10CanaryRecoveryCiEnvironment,
+  isPhase10CanaryRecoveryWithdrawalAuthorized,
   planPhase10CanarySigningZeroAttemptsRecovery,
 } from './phase10-canary-signing-recovery.js';
 export type {
