@@ -216,6 +216,23 @@ export type {
   Phase10ReadinessStatus,
 } from './phase10-readiness.js';
 
+export {
+  PHASE10_CANARY_RECOVERY_AUTHORIZATION_PHRASE,
+  PHASE10_CANARY_RECOVERY_AUDIT_ACTION,
+  PHASE10_CANARY_RECOVERY_CONFIRMATION_PHRASE,
+  PHASE10_CANARY_RECOVERY_OPERATIONAL_MUTATION_CONFIRM,
+  PHASE10_CANARY_RECOVERY_WITHDRAWAL_ID,
+  executePhase10CanarySigningZeroAttemptsRecovery,
+  planPhase10CanarySigningZeroAttemptsRecovery,
+} from './phase10-canary-signing-recovery.js';
+export type {
+  Phase10CanaryRecoveryExecuteResult,
+  Phase10CanaryRecoveryInput,
+  Phase10CanaryRecoveryMode,
+  Phase10CanaryRecoveryPlan,
+  Phase10CanaryRecoverySnapshot,
+} from './phase10-canary-signing-recovery.js';
+
 export { runPhase10RestoreReconcileScan } from './phase10-restore-reconcile.js';
 export type {
   Phase10RestoreFinding,

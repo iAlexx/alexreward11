@@ -1,0 +1,749 @@
+/**
+ * Owner-gated recovery for ONE Phase 10 canary withdrawal only:
+ * 01a0afbd-2550-742b-967d-5aec6ee75a83 (SIGNING + 0 attempts + expired lease).
+ *
+ * Default mode is dry-run (plan/inspect only).
+ *
+ * Mutation requires ALL of:
+ * - mode=mutate
+ * - confirmationPhrase (intent confirmation ONLY — not authentication)
+ * - operatorAdminUserId of an ACTIVE admin_users row (authenticated operator identity)
+ * - temporalTerminatedConfirmed + payoutWorkerStoppedConfirmed
+ * - fencing / reservation / attempt preconditions
+ *
+ * CI / GitHub Actions cannot mutate. Operational database alex_rewards requires an
+ * additional explicit operational confirmation env. Does not start Temporal, unlock
+ * Signer, enable chain, or broadcast.
+ */
+import type { Pool, PoolClient } from 'pg';
+
+import { insertWithdrawalAuditLog } from './audit.js';
+import { withWithdrawalTransaction, type WithdrawalDb } from './db.js';
+import { WithdrawalDomainError } from './errors.js';
+import {
+  hotWalletDispatchOwnerIdentity,
+  releaseHotWalletDispatchLease,
+} from './hot-wallet-dispatch-lease.js';
+import { transitionWithdrawal } from './transitions.js';
+
+/** Sole production withdrawal this recovery path may touch. */
+export const PHASE10_CANARY_RECOVERY_WITHDRAWAL_ID =
+  '01a0afbd-2550-742b-967d-5aec6ee75a83' as const;
+
+/**
+ * Intent confirmation phrase only — NOT an authentication secret.
+ * Proves the operator typed the approved recovery intent; identity is operatorAdminUserId.
+ */
+export const PHASE10_CANARY_RECOVERY_CONFIRMATION_PHRASE =
+  'PHASE10_OWNER_RECOVERY_SIGNING_ZERO_ATTEMPTS' as const;
+
+/** @deprecated Alias of PHASE10_CANARY_RECOVERY_CONFIRMATION_PHRASE (confirmation, not auth). */
+export const PHASE10_CANARY_RECOVERY_AUTHORIZATION_PHRASE =
+  PHASE10_CANARY_RECOVERY_CONFIRMATION_PHRASE;
+
+export const PHASE10_CANARY_RECOVERY_AUDIT_ACTION =
+  'PHASE10_OWNER_RECOVERY_SIGNING_ZERO_ATTEMPTS' as const;
+
+/**
+ * Extra confirmation required when current_database() is operational alex_rewards.
+ * Still not authentication — operatorAdminUserId remains required.
+ */
+export const PHASE10_CANARY_RECOVERY_OPERATIONAL_MUTATION_CONFIRM =
+  'I_CONFIRM_OPERATIONAL_ALEX_REWARDS_CANARY_RECOVERY' as const;
+
+export type Phase10CanaryRecoveryMode = 'dry-run' | 'mutate';
+
+export interface Phase10CanaryRecoverySnapshot {
+  readonly withdrawalId: string;
+  readonly state: string;
+  readonly hotWalletId: string | null;
+  readonly workflowId: string | null;
+  readonly reservationLedgerTxId: string | null;
+  readonly releaseLedgerTxId: string | null;
+  readonly settlementLedgerTxId: string | null;
+  readonly attemptCount: number;
+  readonly broadcastEvidenceCount: number;
+  readonly lease: {
+    readonly ownerIdentity: string | null;
+    readonly fencingToken: string | null;
+    readonly expiresAt: string | null;
+    readonly releasedAt: string | null;
+    readonly expired: boolean;
+    readonly unreleased: boolean;
+  };
+  readonly expectedOwnerIdentity: string;
+}
+
+export interface Phase10CanaryRecoveryPlan {
+  readonly mode: Phase10CanaryRecoveryMode;
+  readonly authorized: boolean;
+  readonly accepted: boolean;
+  readonly refusalReasons: readonly string[];
+  readonly snapshot: Phase10CanaryRecoverySnapshot | null;
+  readonly plannedTransition: {
+    readonly from: 'SIGNING';
+    readonly to: 'FAILED_PRE_BROADCAST';
+    readonly leaseRelease: {
+      readonly ownerIdentity: string;
+      readonly fencingToken: string;
+      readonly reason: 'FAILED_PRE_BROADCAST';
+    };
+  } | null;
+  readonly temporalNotes: {
+    readonly originalWorkflowId: string;
+    readonly originalWorkflowMustBeTerminatedNotCompleted: true;
+    readonly directPipelineRequiresNewWorkflow: false;
+    readonly completionRecordedIn: readonly string[];
+  };
+  readonly prerequisites: {
+    readonly temporalTerminatedConfirmed: boolean;
+    readonly payoutWorkerStoppedConfirmed: boolean;
+    readonly migration0023Applied: boolean | null;
+    readonly operatorAdminUserIdPresent: boolean;
+  };
+}
+
+export interface Phase10CanaryRecoveryExecuteResult {
+  readonly mode: 'mutate';
+  readonly accepted: boolean;
+  readonly refusalReasons: readonly string[];
+  readonly before: Phase10CanaryRecoverySnapshot | null;
+  readonly after: Phase10CanaryRecoverySnapshot | null;
+  readonly auditLogId: string | null;
+  readonly transition: { readonly id: string; readonly state: string } | null;
+  readonly leaseReleased: boolean;
+  readonly operatorAdminUserId: string | null;
+}
+
+export interface Phase10CanaryRecoveryInput {
+  /**
+   * Must equal PHASE10_CANARY_RECOVERY_WITHDRAWAL_ID (or test fixture override).
+   * Any other ID is refused (no generic recovery).
+   */
+  readonly withdrawalId: string;
+  /**
+   * dry-run (default): plan only, no writes.
+   * mutate: requires confirmation + authenticated operator + attestations.
+   */
+  readonly mode?: Phase10CanaryRecoveryMode;
+  /**
+   * Intent confirmation phrase only (not authentication).
+   * Must equal PHASE10_CANARY_RECOVERY_CONFIRMATION_PHRASE for mutate.
+   */
+  readonly confirmationPhrase?: string | null;
+  /**
+   * @deprecated Use confirmationPhrase. Kept as alias; still confirmation-only.
+   */
+  readonly authorizationPhrase?: string | null;
+  /**
+   * Authenticated operator identity: must be an ACTIVE admin_users.id.
+   * Required for mutate. Bound into audit_logs.admin_user_id.
+   */
+  readonly operatorAdminUserId?: string | null;
+  /**
+   * Owner attestation that Temporal workflow was terminated (TERMINATED, not COMPLETED).
+   * Required for mutate.
+   */
+  readonly temporalTerminatedConfirmed?: boolean;
+  /**
+   * Owner attestation that payout worker is stopped (no competing activity pickup).
+   * Required for mutate.
+   */
+  readonly payoutWorkerStoppedConfirmed?: boolean;
+  /**
+   * Expected fencing token (from forensic snapshot). When provided, must match live lease.
+   */
+  readonly expectedFencingToken?: bigint | null;
+  /**
+   * Required when mutating operational database alex_rewards.
+   * Must equal PHASE10_CANARY_RECOVERY_OPERATIONAL_MUTATION_CONFIRM.
+   */
+  readonly operationalMutationConfirm?: string | null;
+}
+
+function isAuthorizedCanaryRecoveryWithdrawalId(withdrawalId: string): boolean {
+  if (withdrawalId === PHASE10_CANARY_RECOVERY_WITHDRAWAL_ID) return true;
+  // Test-only single-ID fixture override (never enabled outside NODE_ENV=test).
+  const fixture = process.env.PHASE10_CANARY_RECOVERY_TEST_FIXTURE_ID;
+  return (
+    process.env.NODE_ENV === 'test' &&
+    typeof fixture === 'string' &&
+    fixture.length > 0 &&
+    fixture === withdrawalId
+  );
+}
+
+function isCiEnvironment(): boolean {
+  return process.env.CI === 'true' || process.env.GITHUB_ACTIONS === 'true';
+}
+
+function readConfirmationPhrase(input: Phase10CanaryRecoveryInput): string | null {
+  const phrase = input.confirmationPhrase ?? input.authorizationPhrase ?? null;
+  return phrase;
+}
+
+async function loadSnapshot(
+  client: PoolClient,
+  withdrawalId: string,
+): Promise<Phase10CanaryRecoverySnapshot | null> {
+  const w = await client.query<{
+    id: string;
+    state: string;
+    hot_wallet_id: string | null;
+    workflow_id: string | null;
+    reservation_ledger_tx_id: string | null;
+    release_ledger_tx_id: string | null;
+    settlement_ledger_tx_id: string | null;
+  }>(
+    `SELECT id::text, state::text, hot_wallet_id::text, workflow_id,
+            reservation_ledger_tx_id::text, release_ledger_tx_id::text,
+            settlement_ledger_tx_id::text
+     FROM withdrawals WHERE id = $1::uuid`,
+    [withdrawalId],
+  );
+  const row = w.rows[0];
+  if (row === undefined) return null;
+
+  const attempts = await client.query<{ c: number; broadcast_evidence: number }>(
+    `SELECT count(*)::int AS c,
+            count(*) FILTER (
+              WHERE broadcast_started_at IS NOT NULL
+                 OR broadcast_submitted_at IS NOT NULL
+                 OR signed_external_message_boc IS NOT NULL
+                 OR signed_wallet_request_boc IS NOT NULL
+            )::int AS broadcast_evidence
+     FROM withdrawal_attempts WHERE withdrawal_id = $1::uuid`,
+    [withdrawalId],
+  );
+
+  const lease = await client.query<{
+    owner_identity: string | null;
+    fencing_token: string | null;
+    expires_at: Date | null;
+    released_at: Date | null;
+  }>(
+    `SELECT owner_identity, fencing_token::text, expires_at, released_at
+     FROM hot_wallet_dispatch_leases
+     WHERE hot_wallet_id = $1::uuid`,
+    [row.hot_wallet_id],
+  );
+  const leaseRow = lease.rows[0];
+  const expiresAt = leaseRow?.expires_at ?? null;
+  const releasedAt = leaseRow?.released_at ?? null;
+  const now = Date.now();
+
+  return {
+    withdrawalId: row.id,
+    state: row.state,
+    hotWalletId: row.hot_wallet_id,
+    workflowId: row.workflow_id,
+    reservationLedgerTxId: row.reservation_ledger_tx_id,
+    releaseLedgerTxId: row.release_ledger_tx_id,
+    settlementLedgerTxId: row.settlement_ledger_tx_id,
+    attemptCount: attempts.rows[0]?.c ?? 0,
+    broadcastEvidenceCount: attempts.rows[0]?.broadcast_evidence ?? 0,
+    lease: {
+      ownerIdentity: leaseRow?.owner_identity ?? null,
+      fencingToken: leaseRow?.fencing_token ?? null,
+      expiresAt: expiresAt?.toISOString() ?? null,
+      releasedAt: releasedAt?.toISOString() ?? null,
+      expired: expiresAt !== null ? expiresAt.getTime() <= now : false,
+      unreleased: releasedAt === null,
+    },
+    expectedOwnerIdentity: hotWalletDispatchOwnerIdentity(withdrawalId),
+  };
+}
+
+async function migration0023Applied(client: PoolClient): Promise<boolean> {
+  const result = await client.query(
+    `SELECT 1 FROM schema_migrations WHERE version = '0023_attempt_requires_state_init'`,
+  );
+  return (result.rowCount ?? 0) === 1;
+}
+
+async function assertActiveOperatorAdmin(
+  client: PoolClient,
+  operatorAdminUserId: string,
+): Promise<string | null> {
+  const result = await client.query<{ id: string; status: string }>(
+    `SELECT id::text, status::text FROM admin_users WHERE id = $1::uuid`,
+    [operatorAdminUserId],
+  );
+  const row = result.rows[0];
+  if (row === undefined) {
+    return 'operatorAdminUserId not found in admin_users';
+  }
+  if (row.status !== 'ACTIVE') {
+    return `operatorAdminUserId is not ACTIVE (status=${row.status})`;
+  }
+  return null;
+}
+
+function evaluatePreconditions(
+  snapshot: Phase10CanaryRecoverySnapshot,
+  input: Phase10CanaryRecoveryInput,
+  migrationApplied: boolean,
+): string[] {
+  const reasons: string[] = [];
+  if (!isAuthorizedCanaryRecoveryWithdrawalId(snapshot.withdrawalId)) {
+    reasons.push('withdrawalId is not the sole authorized canary recovery target');
+  }
+  if (snapshot.state !== 'SIGNING') {
+    reasons.push(`state must be SIGNING (observed ${snapshot.state})`);
+  }
+  if (snapshot.attemptCount !== 0) {
+    reasons.push(`attemptCount must be 0 (observed ${snapshot.attemptCount})`);
+  }
+  if (snapshot.broadcastEvidenceCount !== 0) {
+    reasons.push('broadcast evidence present on withdrawal_attempts — reconciliation only');
+  }
+  if (snapshot.reservationLedgerTxId === null) {
+    reasons.push('reservation_ledger_tx_id missing');
+  }
+  if (snapshot.releaseLedgerTxId !== null) {
+    reasons.push('release_ledger_tx_id already set — refuse');
+  }
+  if (snapshot.settlementLedgerTxId !== null) {
+    reasons.push('settlement_ledger_tx_id already set — refuse');
+  }
+  if (snapshot.hotWalletId === null) {
+    reasons.push('hot_wallet_id missing');
+  }
+  const expectedOwner = snapshot.expectedOwnerIdentity;
+  if (snapshot.lease.ownerIdentity !== expectedOwner) {
+    reasons.push(
+      `lease owner_identity mismatch (expected ${expectedOwner}, observed ${snapshot.lease.ownerIdentity})`,
+    );
+  }
+  if (!snapshot.lease.unreleased) {
+    reasons.push('lease already released');
+  }
+  if (!snapshot.lease.expired) {
+    reasons.push('lease not expired — live-lease auto path may apply; refuse Owner recovery');
+  }
+  if (snapshot.lease.fencingToken === null) {
+    reasons.push('lease fencing_token missing');
+  }
+  if (input.expectedFencingToken !== undefined && input.expectedFencingToken !== null) {
+    if (
+      snapshot.lease.fencingToken === null ||
+      BigInt(snapshot.lease.fencingToken) !== input.expectedFencingToken
+    ) {
+      reasons.push(
+        `fencing token mismatch (expected ${input.expectedFencingToken.toString(10)}, observed ${snapshot.lease.fencingToken})`,
+      );
+    }
+  }
+  if (!migrationApplied) {
+    reasons.push('migration 0023_attempt_requires_state_init not applied');
+  }
+  return reasons;
+}
+
+function mutateEnvironmentRefuseReasons(
+  input: Phase10CanaryRecoveryInput,
+  currentDatabase: string,
+): string[] {
+  const reasons: string[] = [];
+  if (isCiEnvironment()) {
+    reasons.push('mutate refused in CI/GitHub Actions (operational recovery cannot run from CI)');
+  }
+  // Production canary ID cannot be mutated under NODE_ENV=test (fixture override only).
+  if (
+    process.env.NODE_ENV === 'test' &&
+    input.withdrawalId === PHASE10_CANARY_RECOVERY_WITHDRAWAL_ID &&
+    process.env.PHASE10_CANARY_RECOVERY_TEST_FIXTURE_ID !== input.withdrawalId
+  ) {
+    reasons.push('mutate of production canary ID refused under NODE_ENV=test');
+  }
+  if (currentDatabase === 'alex_rewards') {
+    const opsConfirm =
+      input.operationalMutationConfirm ??
+      process.env.PHASE10_CANARY_RECOVERY_OPERATIONAL_MUTATION_CONFIRM ??
+      null;
+    if (opsConfirm !== PHASE10_CANARY_RECOVERY_OPERATIONAL_MUTATION_CONFIRM) {
+      reasons.push(
+        'operational database alex_rewards requires operationalMutationConfirm / env PHASE10_CANARY_RECOVERY_OPERATIONAL_MUTATION_CONFIRM',
+      );
+    }
+  }
+  return reasons;
+}
+
+function mutateGateReasons(input: Phase10CanaryRecoveryInput): string[] {
+  const reasons: string[] = [];
+  const phrase = readConfirmationPhrase(input);
+  if (phrase !== PHASE10_CANARY_RECOVERY_CONFIRMATION_PHRASE) {
+    reasons.push(
+      'confirmationPhrase mismatch — intent confirmation only; mutate refused (dry-run is default)',
+    );
+  }
+  if (
+    input.operatorAdminUserId === undefined ||
+    input.operatorAdminUserId === null ||
+    input.operatorAdminUserId.trim() === ''
+  ) {
+    reasons.push(
+      'operatorAdminUserId required — authenticated ACTIVE admin operator (phrase is not authentication)',
+    );
+  }
+  if (input.temporalTerminatedConfirmed !== true) {
+    reasons.push('temporalTerminatedConfirmed must be true before mutate');
+  }
+  if (input.payoutWorkerStoppedConfirmed !== true) {
+    reasons.push('payoutWorkerStoppedConfirmed must be true before mutate');
+  }
+  return reasons;
+}
+
+function temporalNotes(snapshot: Phase10CanaryRecoverySnapshot | null) {
+  return {
+    originalWorkflowId:
+      snapshot?.workflowId ?? `withdrawal/${PHASE10_CANARY_RECOVERY_WITHDRAWAL_ID}`,
+    originalWorkflowMustBeTerminatedNotCompleted: true as const,
+    directPipelineRequiresNewWorkflow: false as const,
+    completionRecordedIn: [
+      'withdrawals.state',
+      'withdrawal_attempts',
+      'audit_logs',
+      'hot_wallet_dispatch_leases',
+      'ledger settle/release (only via canonical pipeline outcomes)',
+    ] as const,
+  };
+}
+
+/**
+ * Plan-only inspection. Never writes.
+ */
+export async function planPhase10CanarySigningZeroAttemptsRecovery(
+  db: WithdrawalDb,
+  input: Phase10CanaryRecoveryInput,
+): Promise<Phase10CanaryRecoveryPlan> {
+  if (!isAuthorizedCanaryRecoveryWithdrawalId(input.withdrawalId)) {
+    return {
+      mode: 'dry-run',
+      authorized: false,
+      accepted: false,
+      refusalReasons: [
+        `refusing non-canary withdrawalId=${input.withdrawalId} (only ${PHASE10_CANARY_RECOVERY_WITHDRAWAL_ID} is allowed)`,
+      ],
+      snapshot: null,
+      plannedTransition: null,
+      temporalNotes: temporalNotes(null),
+      prerequisites: {
+        temporalTerminatedConfirmed: input.temporalTerminatedConfirmed === true,
+        payoutWorkerStoppedConfirmed: input.payoutWorkerStoppedConfirmed === true,
+        migration0023Applied: null,
+        operatorAdminUserIdPresent:
+          typeof input.operatorAdminUserId === 'string' && input.operatorAdminUserId.trim() !== '',
+      },
+    };
+  }
+
+  return withWithdrawalTransaction(db, async (client) => {
+    const snapshot = await loadSnapshot(client, input.withdrawalId);
+    if (snapshot === null) {
+      return {
+        mode: 'dry-run' as const,
+        authorized: false,
+        accepted: false,
+        refusalReasons: ['withdrawal not found'],
+        snapshot: null,
+        plannedTransition: null,
+        temporalNotes: temporalNotes(null),
+        prerequisites: {
+          temporalTerminatedConfirmed: input.temporalTerminatedConfirmed === true,
+          payoutWorkerStoppedConfirmed: input.payoutWorkerStoppedConfirmed === true,
+          migration0023Applied: null,
+          operatorAdminUserIdPresent:
+            typeof input.operatorAdminUserId === 'string' &&
+            input.operatorAdminUserId.trim() !== '',
+        },
+      };
+    }
+    const migrationApplied = await migration0023Applied(client);
+    const refusalReasons = evaluatePreconditions(snapshot, input, migrationApplied);
+    const accepted = refusalReasons.length === 0;
+    return {
+      mode: 'dry-run' as const,
+      authorized: false,
+      accepted,
+      refusalReasons,
+      snapshot,
+      plannedTransition: accepted
+        ? {
+            from: 'SIGNING' as const,
+            to: 'FAILED_PRE_BROADCAST' as const,
+            leaseRelease: {
+              ownerIdentity: snapshot.expectedOwnerIdentity,
+              fencingToken: snapshot.lease.fencingToken!,
+              reason: 'FAILED_PRE_BROADCAST' as const,
+            },
+          }
+        : null,
+      temporalNotes: temporalNotes(snapshot),
+      prerequisites: {
+        temporalTerminatedConfirmed: input.temporalTerminatedConfirmed === true,
+        payoutWorkerStoppedConfirmed: input.payoutWorkerStoppedConfirmed === true,
+        migration0023Applied: migrationApplied,
+        operatorAdminUserIdPresent:
+          typeof input.operatorAdminUserId === 'string' && input.operatorAdminUserId.trim() !== '',
+      },
+    };
+  });
+}
+
+/**
+ * Atomic recovery mutation. Dry-run is default; mutate requires confirmation phrase
+ * (intent only) plus authenticated ACTIVE operatorAdminUserId and attestations.
+ * Rolls back entire transaction on any mismatch.
+ */
+export async function executePhase10CanarySigningZeroAttemptsRecovery(
+  db: Pool,
+  input: Phase10CanaryRecoveryInput,
+): Promise<Phase10CanaryRecoveryExecuteResult> {
+  const mode = input.mode ?? 'dry-run';
+  if (mode !== 'mutate') {
+    const plan = await planPhase10CanarySigningZeroAttemptsRecovery(db, {
+      ...input,
+      mode: 'dry-run',
+    });
+    return {
+      mode: 'mutate',
+      accepted: false,
+      refusalReasons: [
+        'executePhase10CanarySigningZeroAttemptsRecovery requires mode=mutate; call plan* for dry-run',
+        ...plan.refusalReasons,
+      ],
+      before: plan.snapshot,
+      after: null,
+      auditLogId: null,
+      transition: null,
+      leaseReleased: false,
+      operatorAdminUserId: null,
+    };
+  }
+
+  if (!isAuthorizedCanaryRecoveryWithdrawalId(input.withdrawalId)) {
+    return {
+      mode: 'mutate',
+      accepted: false,
+      refusalReasons: [
+        `refusing non-canary withdrawalId=${input.withdrawalId} (only ${PHASE10_CANARY_RECOVERY_WITHDRAWAL_ID} is allowed)`,
+      ],
+      before: null,
+      after: null,
+      auditLogId: null,
+      transition: null,
+      leaseReleased: false,
+      operatorAdminUserId: null,
+    };
+  }
+
+  const gate = mutateGateReasons(input);
+  if (gate.length > 0) {
+    const plan = await planPhase10CanarySigningZeroAttemptsRecovery(db, input);
+    return {
+      mode: 'mutate',
+      accepted: false,
+      refusalReasons: gate,
+      before: plan.snapshot,
+      after: null,
+      auditLogId: null,
+      transition: null,
+      leaseReleased: false,
+      operatorAdminUserId: input.operatorAdminUserId ?? null,
+    };
+  }
+
+  try {
+    return await withWithdrawalTransaction(db, async (client) => {
+      const dbName = await client.query<{ current_database: string }>(
+        `SELECT current_database()`,
+      );
+      const currentDatabase = dbName.rows[0]?.current_database ?? '';
+      const envRefuse = mutateEnvironmentRefuseReasons(input, currentDatabase);
+      if (envRefuse.length > 0) {
+        return {
+          mode: 'mutate' as const,
+          accepted: false,
+          refusalReasons: envRefuse,
+          before: null,
+          after: null,
+          auditLogId: null,
+          transition: null,
+          leaseReleased: false,
+          operatorAdminUserId: input.operatorAdminUserId ?? null,
+        };
+      }
+
+      const operatorError = await assertActiveOperatorAdmin(client, input.operatorAdminUserId!);
+      if (operatorError !== null) {
+        return {
+          mode: 'mutate' as const,
+          accepted: false,
+          refusalReasons: [operatorError],
+          before: null,
+          after: null,
+          auditLogId: null,
+          transition: null,
+          leaseReleased: false,
+          operatorAdminUserId: input.operatorAdminUserId ?? null,
+        };
+      }
+
+      await client.query(`SELECT id FROM withdrawals WHERE id = $1::uuid FOR UPDATE`, [
+        input.withdrawalId,
+      ]);
+      const hwLock = await client.query<{ hot_wallet_id: string | null }>(
+        `SELECT hot_wallet_id FROM withdrawals WHERE id = $1::uuid`,
+        [input.withdrawalId],
+      );
+      if (hwLock.rows[0]?.hot_wallet_id) {
+        await client.query(
+          `SELECT hot_wallet_id FROM hot_wallet_dispatch_leases WHERE hot_wallet_id = $1::uuid FOR UPDATE`,
+          [hwLock.rows[0].hot_wallet_id],
+        );
+      }
+
+      const before = await loadSnapshot(client, input.withdrawalId);
+      if (before === null) {
+        throw new WithdrawalDomainError('VALIDATION', 'withdrawal not found');
+      }
+
+      // Idempotence: already recovered shape → refuse repeated mutate.
+      if (before.state === 'FAILED_PRE_BROADCAST' && !before.lease.unreleased) {
+        return {
+          mode: 'mutate' as const,
+          accepted: false,
+          refusalReasons: [
+            'already recovered (FAILED_PRE_BROADCAST + lease released) — repeated mutate refused',
+          ],
+          before,
+          after: before,
+          auditLogId: null,
+          transition: null,
+          leaseReleased: false,
+          operatorAdminUserId: input.operatorAdminUserId ?? null,
+        };
+      }
+
+      const migrationApplied = await migration0023Applied(client);
+      const refusalReasons = evaluatePreconditions(before, input, migrationApplied);
+      if (refusalReasons.length > 0) {
+        return {
+          mode: 'mutate' as const,
+          accepted: false,
+          refusalReasons,
+          before,
+          after: null,
+          auditLogId: null,
+          transition: null,
+          leaseReleased: false,
+          operatorAdminUserId: input.operatorAdminUserId ?? null,
+        };
+      }
+
+      const fencingToken = BigInt(before.lease.fencingToken!);
+      const transition = await transitionWithdrawal(client, {
+        id: input.withdrawalId,
+        from: 'SIGNING',
+        to: 'FAILED_PRE_BROADCAST',
+      });
+
+      const leaseReleased = await releaseHotWalletDispatchLease(client, {
+        hotWalletId: before.hotWalletId!,
+        ownerIdentity: before.expectedOwnerIdentity,
+        fencingToken,
+        reason: 'FAILED_PRE_BROADCAST',
+      });
+      if (!leaseReleased) {
+        throw new WithdrawalDomainError(
+          'STATE_CONFLICT',
+          'lease release affected 0 rows — rolling back recovery transaction',
+          {
+            details: {
+              hotWalletId: before.hotWalletId,
+              ownerIdentity: before.expectedOwnerIdentity,
+              fencingToken: fencingToken.toString(10),
+            },
+          },
+        );
+      }
+
+      const auditLogId = await insertWithdrawalAuditLog(client, {
+        actionType: PHASE10_CANARY_RECOVERY_AUDIT_ACTION,
+        resourceType: 'withdrawal',
+        resourceId: input.withdrawalId,
+        actorType: 'ADMIN',
+        adminUserId: input.operatorAdminUserId!,
+        reason:
+          'Owner-gated canary recovery: SIGNING+0 attempts+expired lease; no broadcast evidence; Temporal terminated separately; confirmationPhrase is intent-only',
+        afterSnapshot: {
+          from: 'SIGNING',
+          to: 'FAILED_PRE_BROADCAST',
+          leaseReleased: true,
+          fencingToken: fencingToken.toString(10),
+          ownerIdentity: before.expectedOwnerIdentity,
+          reservationLedgerTxId: before.reservationLedgerTxId,
+          workflowId: before.workflowId,
+          temporalOriginalStatusExpected: 'TERMINATED',
+          directPipelineRequiresNewWorkflow: false,
+          operatorAdminUserId: input.operatorAdminUserId,
+          confirmationPhraseUsed: true,
+          confirmationIsNotAuthentication: true,
+          currentDatabase,
+        },
+      });
+
+      const after = await loadSnapshot(client, input.withdrawalId);
+      if (after === null) {
+        throw new WithdrawalDomainError('INTERNAL', 'post-recovery snapshot missing');
+      }
+      if (after.state !== 'FAILED_PRE_BROADCAST') {
+        throw new WithdrawalDomainError('STATE_CONFLICT', 'post-recovery state mismatch', {
+          details: { state: after.state },
+        });
+      }
+      if (after.lease.unreleased) {
+        throw new WithdrawalDomainError('STATE_CONFLICT', 'lease still unreleased after recovery');
+      }
+      if (after.reservationLedgerTxId !== before.reservationLedgerTxId) {
+        throw new WithdrawalDomainError('STATE_CONFLICT', 'reservation_ledger_tx_id changed');
+      }
+      if (after.releaseLedgerTxId !== null || after.settlementLedgerTxId !== null) {
+        throw new WithdrawalDomainError('STATE_CONFLICT', 'release/settlement unexpectedly set');
+      }
+      if (after.attemptCount !== 0) {
+        throw new WithdrawalDomainError('STATE_CONFLICT', 'attempts appeared during recovery');
+      }
+
+      return {
+        mode: 'mutate' as const,
+        accepted: true,
+        refusalReasons: [],
+        before,
+        after,
+        auditLogId,
+        transition,
+        leaseReleased: true,
+        operatorAdminUserId: input.operatorAdminUserId ?? null,
+      };
+    });
+  } catch (error) {
+    if (error instanceof WithdrawalDomainError) {
+      return {
+        mode: 'mutate',
+        accepted: false,
+        refusalReasons: [error.publicMessage],
+        before: null,
+        after: null,
+        auditLogId: null,
+        transition: null,
+        leaseReleased: false,
+        operatorAdminUserId: input.operatorAdminUserId ?? null,
+      };
+    }
+    throw error;
+  }
+}
