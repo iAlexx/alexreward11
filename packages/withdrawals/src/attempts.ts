@@ -69,6 +69,11 @@ export async function createWithdrawalAttempt(
     readonly validUntil?: Date;
     /** Optional lease owner identity; defaults to withdrawal:{id}. */
     readonly leaseOwnerIdentity?: string;
+    /**
+     * Phase 10: true only when dual-provider admission proved uninitialized account.
+     * Drives first External-In StateInit; active+seqno=0 must remain false.
+     */
+    readonly requiresStateInit?: boolean;
   },
 ): Promise<WithdrawalAttemptView> {
   const ownerIdentity =
@@ -180,11 +185,11 @@ export async function createWithdrawalAttempt(
     `INSERT INTO withdrawal_attempts (
        withdrawal_id, attempt_number, hot_wallet_id, expected_seqno, query_id,
        valid_until, canonical_message_hash, signer_key_reference,
-       dispatch_fencing_token, broadcast_result_state
+       dispatch_fencing_token, broadcast_result_state, requires_state_init
      ) VALUES (
        $1::uuid, $2, $3::uuid, $4::bigint, $5::bigint,
        $6::timestamptz, $7, $8,
-       $9::bigint, 'PENDING'
+       $9::bigint, 'PENDING', $10
      )
      RETURNING id, withdrawal_id, attempt_number, hot_wallet_id, query_id::text,
                expected_seqno::text, canonical_message_hash,
@@ -201,6 +206,7 @@ export async function createWithdrawalAttempt(
       canonicalMessageHash,
       input.signerKeyReference,
       input.fencingToken.toString(10),
+      input.requiresStateInit === true,
     ],
   );
   const row = inserted.rows[0];

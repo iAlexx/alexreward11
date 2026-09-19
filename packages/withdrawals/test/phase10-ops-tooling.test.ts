@@ -1224,7 +1224,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 pre-commit blocker DB regress
     await writeFile(
       readinessPath,
       JSON.stringify({
-        schemaVersion: 1,
+        schemaVersion: 2,
         liveAuthorizationWindow: true,
         verdict: 'READY_FOR_CONTROLLED_LIVE_TESTNET',
         realChainEnabled: true,
@@ -1263,7 +1263,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 pre-commit blocker DB regress
           independenceCode: null,
         },
         externalProbes: {
-          schemaVersion: 1,
+          schemaVersion: 2,
           observedAt: recordedAt,
           primary: {
             kind: 'toncenter',
@@ -1309,6 +1309,20 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 pre-commit blocker DB regress
             detail: null,
             observedAt: recordedAt,
           },
+          walletSeqnoAdmission: {
+            probePerformed: true,
+            admitted: true,
+            seqno: 0,
+            accountStatus: 'uninit',
+            requiresStateInit: true,
+            code: null,
+            message: null,
+            hotWalletAddress: '0:test',
+            networkGlobalId: -3,
+            publicKeyFingerprint: 'fp',
+            observedAt: recordedAt,
+          },
+
           overallBlocked: false,
           blockers: [],
         },

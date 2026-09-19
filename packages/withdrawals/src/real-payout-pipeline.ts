@@ -1,6 +1,7 @@
 import type { Pool, PoolClient } from 'pg';
 
 import {
+  admitWalletSeqno,
   createTonChainProvider,
   FakeTonChainProvider,
   type TonChainProvider,
@@ -1043,8 +1044,219 @@ export async function runRealTestnetPayoutPipeline(
     };
   }
 
-  // --- Load withdrawal + identities (transaction 1) ---
-  const context = await withWithdrawalTransaction(db, async (client) => {
+  // Stuck SIGNING with zero attempts: only auto-continue when this withdrawal
+  // still holds a live (unexpired, unreleased) dispatch lease. Stale/expired
+  // or missing leases are recovery-required (no auto release / redispatch).
+  if (existingAttempt === null && initialState === 'SIGNING') {
+    const leaseRow = await db.query<{
+      owner_identity: string | null;
+      expires_at: Date | null;
+      released_at: Date | null;
+      fencing_token: string | null;
+    }>(
+      `SELECT l.owner_identity, l.expires_at, l.released_at, l.fencing_token::text
+       FROM withdrawals w
+       LEFT JOIN hot_wallet_dispatch_leases l
+         ON l.hot_wallet_id = w.hot_wallet_id
+        AND l.owner_identity = ('withdrawal:' || w.id::text)
+       WHERE w.id = $1::uuid`,
+      [input.withdrawalId],
+    );
+    const lease = leaseRow.rows[0];
+    const owner = hotWalletDispatchOwnerIdentity(input.withdrawalId);
+    const liveLease =
+      lease !== undefined &&
+      lease.owner_identity === owner &&
+      lease.released_at === null &&
+      lease.expires_at !== null &&
+      lease.expires_at.getTime() > Date.now() &&
+      lease.fencing_token !== null;
+    if (!liveLease) {
+      return {
+        state: 'BLOCKED',
+        attemptId: null,
+        reason: 'signing_zero_attempts_recovery_required',
+        stagesCompleted,
+      };
+    }
+
+    // In-process crash recovery: live lease held — re-admit seqno then create attempt.
+    const context = await loadPersistedContext(db, input);
+    if (secondary === null) {
+      return {
+        state: 'BLOCKED',
+        attemptId: null,
+        reason: 'SECONDARY_PROVIDER_REQUIRED: dual-provider seqno admission required',
+        stagesCompleted,
+      };
+    }
+    const identity = await signer.getSigningIdentity();
+    if (!identity.signingReady) {
+      return {
+        state: 'BLOCKED',
+        attemptId: null,
+        reason: 'PHASE10_EXTERNAL_RESOURCE_REQUIRED: signer locked / not ready',
+        missingResources: ['signer encrypted bundle unlock'],
+        stagesCompleted,
+      };
+    }
+    const publicKey = Buffer.from(identity.publicKeyHex, 'hex');
+    if (publicKey.length !== 32) {
+      throw new WithdrawalDomainError('VALIDATION', 'Signer public key must be 32 bytes');
+    }
+    const admission = await admitWalletSeqno({
+      networkGlobalId: input.phase10.networkGlobalId,
+      hotWalletAddress: context.hotWalletAddress,
+      publicKeyHex: identity.publicKeyHex,
+      signerKeyReference: identity.publicKeyFingerprint,
+      approvedSignerKeyReference: context.signerKeyReference,
+      primary,
+      secondary,
+    });
+    if (!admission.ok) {
+      await withWithdrawalTransaction(db, async (client) => {
+        await transitionWithdrawal(client, {
+          id: context.withdrawalId,
+          from: 'SIGNING',
+          to: 'FAILED_PRE_BROADCAST',
+        });
+        await releaseLeaseFailedPreBroadcast(client, {
+          hotWalletId: context.hotWalletId,
+          withdrawalId: context.withdrawalId,
+          fencingToken: BigInt(lease.fencing_token!),
+        });
+      });
+      return {
+        state: 'FAILED_PRE_BROADCAST',
+        attemptId: null,
+        reason: `WALLET_SEQNO_ADMISSION_BLOCKED:${admission.code}:${admission.message}`,
+        stagesCompleted,
+      };
+    }
+    stagesCompleted.push('authoritative_wallet_seqno');
+    stagesCompleted.push('fenced_dispatcher_lease');
+
+    const priorAttempts = await db.query<{ attempt_number: number }>(
+      `SELECT attempt_number FROM withdrawal_attempts
+       WHERE withdrawal_id = $1::uuid
+       ORDER BY attempt_number DESC LIMIT 1`,
+      [context.withdrawalId],
+    );
+    const nextAttemptNumber = (priorAttempts.rows[0]?.attempt_number ?? 0) + 1;
+    const queryId = deriveQueryId(context.withdrawalId, nextAttemptNumber, context.recipient);
+    const validUntil = new Date(Date.now() + 300_000);
+    const validUntilUnix = Math.floor(validUntil.getTime() / 1000);
+    const intent: RealPayoutCanonicalIntent = {
+      publicKey,
+      networkGlobalId: input.phase10.networkGlobalId,
+      workchain: 0,
+      subwalletNumber: 0,
+      seqno: admission.seqno,
+      validUntil: validUntilUnix,
+      queryId,
+      netAmountAtomic: BigInt(context.netAmountAtomic),
+      recipientAddress: context.recipient,
+      hotWalletAddress: context.hotWalletAddress,
+      payoutJettonWalletAddress: context.payoutJettonWallet,
+      jettonMasterIdentity: context.jettonMaster,
+    };
+    let canonicalMessageHashHex: string;
+    try {
+      canonicalMessageHashHex = await input.buildCanonicalMessageHash(intent);
+    } catch (error) {
+      await withWithdrawalTransaction(db, async (client) => {
+        await transitionWithdrawal(client, {
+          id: context.withdrawalId,
+          from: 'SIGNING',
+          to: 'FAILED_PRE_BROADCAST',
+        });
+        await releaseLeaseFailedPreBroadcast(client, {
+          hotWalletId: context.hotWalletId,
+          withdrawalId: context.withdrawalId,
+          fencingToken: BigInt(lease.fencing_token!),
+        });
+      });
+      return {
+        state: 'FAILED_PRE_BROADCAST',
+        attemptId: null,
+        reason: `CANONICAL_HASH_BUILD_FAILED:${error instanceof Error ? error.message : String(error)}`,
+        seqno: admission.seqno,
+        stagesCompleted,
+      };
+    }
+    const fencingToken = BigInt(lease.fencing_token!);
+    let attempt;
+    try {
+      attempt = await withWithdrawalTransaction(db, async (client) => {
+        return createWithdrawalAttempt(client, {
+          withdrawalId: context.withdrawalId,
+          hotWalletId: context.hotWalletId,
+          fencingToken,
+          leaseOwnerIdentity: owner,
+          signerKeyReference: context.signerKeyReference,
+          expectedSeqno: BigInt(admission.seqno),
+          queryId,
+          canonicalMessageHash: canonicalMessageHashHex,
+          validUntil,
+          requiresStateInit: admission.requiresStateInit,
+          scenarioHashInputs: { recipient: context.recipient, path: 'phase10-real' },
+        });
+      });
+    } catch (error) {
+      await withWithdrawalTransaction(db, async (client) => {
+        await transitionWithdrawal(client, {
+          id: context.withdrawalId,
+          from: 'SIGNING',
+          to: 'FAILED_PRE_BROADCAST',
+        });
+        await releaseLeaseFailedPreBroadcast(client, {
+          hotWalletId: context.hotWalletId,
+          withdrawalId: context.withdrawalId,
+          fencingToken,
+        });
+      });
+      return {
+        state: 'FAILED_PRE_BROADCAST',
+        attemptId: null,
+        reason: error instanceof Error ? error.message : String(error),
+        seqno: admission.seqno,
+        stagesCompleted,
+      };
+    }
+    stagesCompleted.push('immutable_payout_attempt');
+    const persistedAttempt = await loadPersistedAttempt(db, context.withdrawalId);
+    if (persistedAttempt === null) {
+      return {
+        state: 'RECONCILE_REQUIRED',
+        attemptId: attempt.id,
+        reason: 'missing_persisted_attempt_after_create',
+        seqno: admission.seqno,
+        stagesCompleted,
+      };
+    }
+    return resumePersistedPipeline(
+      db,
+      input,
+      primary,
+      secondary,
+      signer,
+      testPath,
+      stagesCompleted,
+      persistedAttempt,
+    );
+  }
+
+  if (secondary === null) {
+    return {
+      state: 'BLOCKED',
+      attemptId: null,
+      reason: 'SECONDARY_PROVIDER_REQUIRED: dual-provider seqno admission required',
+      stagesCompleted,
+    };
+  }
+
+  // --- Load withdrawal context WITHOUT entering SIGNING or acquiring lease ---
+  const loaded = await withWithdrawalTransaction(db, async (client) => {
     const locked = await client.query<{
       id: string;
       state: WithdrawalState;
@@ -1080,8 +1292,7 @@ export async function runRealTestnetPayoutPipeline(
       });
       state = 'QUEUED';
     }
-    let enteredSigning = false;
-    if (state !== 'QUEUED' && state !== 'SIGNING') {
+    if (state !== 'QUEUED') {
       throw new WithdrawalDomainError('STATE_CONFLICT', 'Pipeline expects APPROVED/QUEUED', {
         details: { state },
       });
@@ -1146,20 +1357,6 @@ export async function runRealTestnetPayoutPipeline(
       );
     }
 
-    if (state === 'QUEUED') {
-      await transitionWithdrawal(client, { id: w.id, from: 'QUEUED', to: 'SIGNING' });
-      enteredSigning = true;
-    }
-
-    const ownerIdentity = hotWalletDispatchOwnerIdentity(w.id);
-    const lease = await acquireHotWalletDispatchLease(client, w.hot_wallet_id, ownerIdentity);
-    if (lease.status !== 'ACQUIRED') {
-      throw new WithdrawalDomainError('STATE_CONFLICT', 'Hot wallet dispatch lease unavailable', {
-        details: { lease },
-      });
-    }
-    stagesCompleted.push('fenced_dispatcher_lease');
-
     return {
       withdrawalId: w.id,
       hotWalletId: w.hot_wallet_id,
@@ -1169,36 +1366,135 @@ export async function runRealTestnetPayoutPipeline(
       payoutJettonWallet: hotRow.payout_jetton_wallet_address,
       signerKeyReference: hotRow.signer_reference,
       jettonMaster,
-      fencingToken: lease.fencingToken,
-      ownerIdentity,
-      enteredSigning,
     };
   });
   stagesCompleted.push('approved_withdrawal_loaded');
-  if (context.enteredSigning) {
-    crashAt(input, 'AFTER_ENTER_SIGNING');
-  }
-
-  // --- Authoritative seqno (outside DB lock; chain read) ---
-  const seqno = await primary.getSeqno(context.hotWalletAddress);
-  stagesCompleted.push('authoritative_wallet_seqno');
 
   const identity = await signer.getSigningIdentity();
   if (!identity.signingReady) {
-    throw new WithdrawalDomainError(
-      'EXTERNAL_RESOURCE_REQUIRED',
-      'PHASE10_EXTERNAL_RESOURCE_REQUIRED: signer locked / not ready',
-      {
-        details: {
-          missingResources: ['signer encrypted bundle unlock'],
-        },
-      },
-    );
+    return {
+      state: 'BLOCKED',
+      attemptId: null,
+      reason: 'PHASE10_EXTERNAL_RESOURCE_REQUIRED: signer locked / not ready',
+      missingResources: ['signer encrypted bundle unlock'],
+      stagesCompleted,
+    };
   }
   const publicKey = Buffer.from(identity.publicKeyHex, 'hex');
   if (publicKey.length !== 32) {
     throw new WithdrawalDomainError('VALIDATION', 'Signer public key must be 32 bytes');
   }
+
+  // --- Account-state / seqno admission BEFORE SIGNING and lease ---
+  const initialAdmission = await admitWalletSeqno({
+    networkGlobalId: input.phase10.networkGlobalId,
+    hotWalletAddress: loaded.hotWalletAddress,
+    publicKeyHex: identity.publicKeyHex,
+    signerKeyReference: identity.publicKeyFingerprint,
+    approvedSignerKeyReference: loaded.signerKeyReference,
+    primary,
+    secondary,
+  });
+  if (!initialAdmission.ok) {
+    stagesCompleted.push('wallet_seqno_admission_blocked');
+    return {
+      state: 'BLOCKED',
+      attemptId: null,
+      reason: `WALLET_SEQNO_ADMISSION_BLOCKED:${initialAdmission.code}:${initialAdmission.message}`,
+      stagesCompleted,
+    };
+  }
+  stagesCompleted.push('authoritative_wallet_seqno');
+
+  // --- Enter SIGNING + acquire dispatch lease (only after admission) ---
+  const leaseAcquire = await withWithdrawalTransaction(db, async (client) => {
+    const locked = await client.query<{ state: WithdrawalState }>(
+      `SELECT state FROM withdrawals WHERE id = $1::uuid FOR UPDATE`,
+      [loaded.withdrawalId],
+    );
+    const state = locked.rows[0]?.state;
+    if (state !== 'QUEUED') {
+      throw new WithdrawalDomainError('STATE_CONFLICT', 'Pipeline expects QUEUED before SIGNING', {
+        details: { state },
+      });
+    }
+    await transitionWithdrawal(client, {
+      id: loaded.withdrawalId,
+      from: 'QUEUED',
+      to: 'SIGNING',
+    });
+    const ownerIdentity = hotWalletDispatchOwnerIdentity(loaded.withdrawalId);
+    const lease = await acquireHotWalletDispatchLease(client, loaded.hotWalletId, ownerIdentity);
+    if (lease.status !== 'ACQUIRED') {
+      // Commit FAILED_PRE_BROADCAST — do not throw (would roll back the transition).
+      await transitionWithdrawal(client, {
+        id: loaded.withdrawalId,
+        from: 'SIGNING',
+        to: 'FAILED_PRE_BROADCAST',
+      });
+      return {
+        ok: false as const,
+        reason: 'Hot wallet dispatch lease unavailable',
+        lease,
+      };
+    }
+    return {
+      ok: true as const,
+      fencingToken: lease.fencingToken,
+      ownerIdentity,
+    };
+  });
+  if (!leaseAcquire.ok) {
+    return {
+      state: 'FAILED_PRE_BROADCAST',
+      attemptId: null,
+      reason: leaseAcquire.reason,
+      seqno: initialAdmission.seqno,
+      stagesCompleted,
+    };
+  }
+  const context = {
+    ...loaded,
+    fencingToken: leaseAcquire.fencingToken,
+    ownerIdentity: leaseAcquire.ownerIdentity,
+  };
+  stagesCompleted.push('fenced_dispatcher_lease');
+  crashAt(input, 'AFTER_ENTER_SIGNING');
+
+  // Re-validate admission before immutable attempt (state may change between reads).
+  const readmission = await admitWalletSeqno({
+    networkGlobalId: input.phase10.networkGlobalId,
+    hotWalletAddress: context.hotWalletAddress,
+    publicKeyHex: identity.publicKeyHex,
+    signerKeyReference: identity.publicKeyFingerprint,
+    approvedSignerKeyReference: context.signerKeyReference,
+    primary,
+    secondary,
+  });
+  if (!readmission.ok || readmission.seqno !== initialAdmission.seqno) {
+    await withWithdrawalTransaction(db, async (client) => {
+      await transitionWithdrawal(client, {
+        id: context.withdrawalId,
+        from: 'SIGNING',
+        to: 'FAILED_PRE_BROADCAST',
+      });
+      await releaseLeaseFailedPreBroadcast(client, {
+        hotWalletId: context.hotWalletId,
+        withdrawalId: context.withdrawalId,
+        fencingToken: context.fencingToken,
+      });
+    });
+    return {
+      state: 'FAILED_PRE_BROADCAST',
+      attemptId: null,
+      reason: !readmission.ok
+        ? `WALLET_SEQNO_READMISSION_BLOCKED:${readmission.code}:${readmission.message}`
+        : `WALLET_SEQNO_CHANGED:initial=${initialAdmission.seqno} current=${readmission.seqno}`,
+      seqno: initialAdmission.seqno,
+      stagesCompleted,
+    };
+  }
+  const seqno = readmission.seqno;
 
   const priorAttempts = await db.query<{ attempt_number: number }>(
     `SELECT attempt_number FROM withdrawal_attempts
@@ -1225,22 +1521,69 @@ export async function runRealTestnetPayoutPipeline(
     payoutJettonWalletAddress: context.payoutJettonWallet,
     jettonMasterIdentity: context.jettonMaster,
   };
-  const canonicalMessageHashHex = await input.buildCanonicalMessageHash(intent);
-
-  const attempt = await withWithdrawalTransaction(db, async (client) => {
-    return createWithdrawalAttempt(client, {
-      withdrawalId: context.withdrawalId,
-      hotWalletId: context.hotWalletId,
-      fencingToken: context.fencingToken,
-      leaseOwnerIdentity: context.ownerIdentity,
-      signerKeyReference: context.signerKeyReference,
-      expectedSeqno: BigInt(seqno),
-      queryId,
-      canonicalMessageHash: canonicalMessageHashHex,
-      validUntil,
-      scenarioHashInputs: { recipient: context.recipient, path: 'phase10-real' },
+  let canonicalMessageHashHex: string;
+  try {
+    canonicalMessageHashHex = await input.buildCanonicalMessageHash(intent);
+  } catch (error) {
+    await withWithdrawalTransaction(db, async (client) => {
+      await transitionWithdrawal(client, {
+        id: context.withdrawalId,
+        from: 'SIGNING',
+        to: 'FAILED_PRE_BROADCAST',
+      });
+      await releaseLeaseFailedPreBroadcast(client, {
+        hotWalletId: context.hotWalletId,
+        withdrawalId: context.withdrawalId,
+        fencingToken: context.fencingToken,
+      });
     });
-  });
+    return {
+      state: 'FAILED_PRE_BROADCAST',
+      attemptId: null,
+      reason: `CANONICAL_HASH_BUILD_FAILED:${error instanceof Error ? error.message : String(error)}`,
+      seqno,
+      stagesCompleted,
+    };
+  }
+
+  let attempt;
+  try {
+    attempt = await withWithdrawalTransaction(db, async (client) => {
+      return createWithdrawalAttempt(client, {
+        withdrawalId: context.withdrawalId,
+        hotWalletId: context.hotWalletId,
+        fencingToken: context.fencingToken,
+        leaseOwnerIdentity: context.ownerIdentity,
+        signerKeyReference: context.signerKeyReference,
+        expectedSeqno: BigInt(seqno),
+        queryId,
+        canonicalMessageHash: canonicalMessageHashHex,
+        validUntil,
+        requiresStateInit: readmission.requiresStateInit,
+        scenarioHashInputs: { recipient: context.recipient, path: 'phase10-real' },
+      });
+    });
+  } catch (error) {
+    await withWithdrawalTransaction(db, async (client) => {
+      await transitionWithdrawal(client, {
+        id: context.withdrawalId,
+        from: 'SIGNING',
+        to: 'FAILED_PRE_BROADCAST',
+      });
+      await releaseLeaseFailedPreBroadcast(client, {
+        hotWalletId: context.hotWalletId,
+        withdrawalId: context.withdrawalId,
+        fencingToken: context.fencingToken,
+      });
+    });
+    return {
+      state: 'FAILED_PRE_BROADCAST',
+      attemptId: null,
+      reason: error instanceof Error ? error.message : String(error),
+      seqno,
+      stagesCompleted,
+    };
+  }
   stagesCompleted.push('immutable_payout_attempt');
   crashAt(input, 'AFTER_ATTEMPT_CREATED');
 

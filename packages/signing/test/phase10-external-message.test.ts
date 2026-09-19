@@ -29,8 +29,8 @@ function parseDirect(cell: Cell): Message {
 }
 
 describe('Phase 10 External-In message construction', () => {
-  it('builds a parseable External-In with StateInit for seqno zero', () => {
-    const firstUseStateInit = walletStateInitForSeqno(0, stateInit);
+  it('builds a parseable External-In with StateInit for proven-uninit seqno zero', () => {
+    const firstUseStateInit = walletStateInitForSeqno(0, stateInit, 'uninit');
     expect(firstUseStateInit).toBe(stateInit);
     const cell = buildExternalInMessage({
       walletAddress,
@@ -45,8 +45,12 @@ describe('Phase 10 External-In message construction', () => {
     assertExternalInMessageInitPresence(message, true);
   });
 
+  it('omits StateInit for active wallets even when seqno is zero', () => {
+    expect(walletStateInitForSeqno(0, stateInit, 'active')).toBeUndefined();
+  });
+
   it('omits StateInit after the wallet has a positive seqno', () => {
-    const deployedStateInit = walletStateInitForSeqno(1, stateInit);
+    const deployedStateInit = walletStateInitForSeqno(1, stateInit, 'active');
     expect(deployedStateInit).toBeUndefined();
     const cell = buildExternalInMessage({
       walletAddress,

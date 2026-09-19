@@ -46,9 +46,10 @@ Real signer/KMS/TON broadcast remain out of scope until later Owner-approved pha
 | `0020_signer_read_boundary.sql`                      | Phase 9: `hot_wallets.payout_jetton_wallet_address`; `signer_withdrawal_attempt_signing_v`; `alex_rewards_signer_ro` SELECT-only role                                                                        |
 | `0021_phase10_broadcast_evidence.sql`                | Phase 10: additive `signed_external_message_boc` / `broadcast_submitted_at` / `broadcast_ambiguity_class` on `withdrawal_attempts`                                                                           |
 | `0022_external_message_identity.sql`                 | Phase 10: additive signed Wallet request BOC, exact External-In cell hash, and Tonkeeper-normalized External-In hash evidence                                                                                |
+| `0023_attempt_requires_state_init.sql`               | Phase 10: additive `requires_state_init` on `withdrawal_attempts` + signer view (StateInit bound to proven uninit admission)                                                                                 |
 
-Migrations `0001`–`0021` remain immutable. Migration `0022` adds only nullable
-pre-broadcast evidence columns.
+Migrations `0001`–`0022` remain immutable. Migration `0023` adds only the proven-account
+StateInit requirement column and appends it to the signer view.
 
 ## Schema ownership
 

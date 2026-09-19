@@ -11,7 +11,7 @@ import type { Phase10LiveExternalProbeEvidence } from './phase10-live-probes.js'
 import type { Phase10PreflightReport } from './phase10-preflight.js';
 import type { Phase10ReadinessConfig } from './phase10-readiness.js';
 
-export const PHASE10_LIVE_PREFLIGHT_EVIDENCE_SCHEMA_VERSION = 1 as const;
+export const PHASE10_LIVE_PREFLIGHT_EVIDENCE_SCHEMA_VERSION = 2 as const;
 
 export interface Phase10LivePreflightEvidenceArtifact {
   readonly schemaVersion: typeof PHASE10_LIVE_PREFLIGHT_EVIDENCE_SCHEMA_VERSION;
@@ -45,6 +45,13 @@ export interface Phase10LivePreflightEvidenceArtifact {
     readonly independenceCode: string | null;
   };
   readonly externalProbes: Phase10LiveExternalProbeEvidence | null;
+  readonly walletSeqnoAdmission: {
+    readonly probePerformed: boolean;
+    readonly admitted: boolean;
+    readonly seqno: number | null;
+    readonly accountStatus: string | null;
+    readonly code: string | null;
+  } | null;
   readonly preflightBlockers: readonly string[];
   readonly preflightWarnings: readonly string[];
   readonly restoreScanSummary: {
@@ -124,6 +131,9 @@ export function buildPhase10LivePreflightEvidence(
     probes.primary.observedNetworkGlobalId === -3 &&
     probes.secondary.observedNetworkGlobalId === -3 &&
     probes.providerIndependence.proven === true;
+  const seqnoAdmitted =
+    probes?.walletSeqnoAdmission.probePerformed === true &&
+    probes.walletSeqnoAdmission.admitted === true;
 
   const verdict: 'READY_FOR_CONTROLLED_LIVE_TESTNET' | 'BLOCKED' =
     input.liveAuthorizationWindow === true &&
@@ -134,7 +144,8 @@ export function buildPhase10LivePreflightEvidence(
     signerReady &&
     signerCustodyUnlocked &&
     signerIdentityBound &&
-    providersOk
+    providersOk &&
+    seqnoAdmitted
       ? 'READY_FOR_CONTROLLED_LIVE_TESTNET'
       : 'BLOCKED';
 
@@ -185,6 +196,16 @@ export function buildPhase10LivePreflightEvidence(
       independenceCode: probes?.providerIndependence.code ?? null,
     },
     externalProbes: probes,
+    walletSeqnoAdmission:
+      probes === null
+        ? null
+        : {
+            probePerformed: probes.walletSeqnoAdmission.probePerformed,
+            admitted: probes.walletSeqnoAdmission.admitted,
+            seqno: probes.walletSeqnoAdmission.seqno,
+            accountStatus: probes.walletSeqnoAdmission.accountStatus,
+            code: probes.walletSeqnoAdmission.code,
+          },
     preflightBlockers: [...input.preflight.blockers, ...(probes?.blockers ?? [])],
     preflightWarnings: [...input.preflight.warnings],
     restoreScanSummary: {

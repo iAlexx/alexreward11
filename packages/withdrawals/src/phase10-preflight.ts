@@ -68,6 +68,7 @@ export async function runPhase10Preflight(
             competing_attempt_lineage: 0,
             synthetic_unknown_isolated: 0,
             historical_isolated_baseline: 0,
+            signing_zero_attempts_recovery_required: 0,
           },
           autoResend: false as const,
           autoUnpause: false as const,
@@ -182,6 +183,13 @@ export async function runPhase10Preflight(
       if (probes.signer.walletAddressMatchesExpected !== true) {
         blockers.push('SIGNER_WALLET_ADDRESS_MISMATCH');
       }
+      if (!probes.walletSeqnoAdmission.probePerformed) {
+        blockers.push('WALLET_SEQNO_ADMISSION_PROBE_REQUIRED');
+      } else if (!probes.walletSeqnoAdmission.admitted) {
+        blockers.push(
+          `WALLET_SEQNO_ADMISSION_BLOCKED:${probes.walletSeqnoAdmission.code ?? 'unknown'}`,
+        );
+      }
     }
 
     // Still refuse if readiness reported locked even when probes somehow omitted.
@@ -221,7 +229,9 @@ export async function runPhase10Preflight(
         probes.secondary.healthy &&
         probes.primary.observedNetworkGlobalId === -3 &&
         probes.secondary.observedNetworkGlobalId === -3 &&
-        probes.providerIndependence.proven);
+        probes.providerIndependence.proven &&
+        probes.walletSeqnoAdmission.probePerformed &&
+        probes.walletSeqnoAdmission.admitted);
 
   return {
     verdict: ready ? 'READY_FOR_CONTROLLED_LIVE_TESTNET' : 'BLOCKED',

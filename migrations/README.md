@@ -35,9 +35,10 @@ provider business behaviour is implemented here.
 | `0020_signer_read_boundary.sql`                      | Phase 9: Hot Wallet payout Jetton wallet snapshot column; narrow `signer_withdrawal_attempt_signing_v`; `alex_rewards_signer_ro` read-only role                                                                                                              |
 | `0021_phase10_broadcast_evidence.sql`                | Phase 10: additive nullable `signed_external_message_boc` / `broadcast_submitted_at` / `broadcast_ambiguity_class` on `withdrawal_attempts` (intent immutability from 0017 unchanged)                                                                        |
 | `0022_external_message_identity.sql`                 | Phase 10: additive nullable signed Wallet request BOC, final External-In cell hash, and Tonkeeper-normalized message hash evidence                                                                                                                           |
+| `0023_attempt_requires_state_init.sql`               | Phase 10: additive `requires_state_init` on `withdrawal_attempts` + signer view (StateInit bound to proven uninit admission, not seqno=0 alone)                                                                                                              |
 
-Migrations `0001`–`0021` remain immutable. External-In identity evidence is added only by
-forward migration `0022`.
+Migrations `0001`–`0022` remain immutable. Proven-account StateInit requirement is added only by
+forward migration `0023`.
 
 ## Conventions
 

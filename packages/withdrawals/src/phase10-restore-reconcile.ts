@@ -12,7 +12,8 @@ export type Phase10RestoreFindingCategory =
   | 'pending_outbox_recovery'
   | 'competing_attempt_lineage'
   | 'synthetic_unknown_isolated'
-  | 'historical_isolated_baseline';
+  | 'historical_isolated_baseline'
+  | 'signing_zero_attempts_recovery_required';
 
 export interface Phase10RestoreFinding {
   readonly category: Phase10RestoreFindingCategory;
@@ -88,6 +89,7 @@ function emptyCounts(): Record<Phase10RestoreFindingCategory, number> {
     competing_attempt_lineage: 0,
     synthetic_unknown_isolated: 0,
     historical_isolated_baseline: 0,
+    signing_zero_attempts_recovery_required: 0,
   };
 }
 
@@ -192,6 +194,60 @@ export async function runPhase10RestoreReconcileScan(
         attemptId: null,
         message: 'approved/queued withdrawal lacks workflow id and dispatched outbox',
         details: { state: row.state },
+      });
+    }
+
+    // SIGNING + zero attempts + no broadcast evidence + stale/expired unreleased lease.
+    // Read-only detection only — never auto-release lease, refund, cancel, or redispatch.
+    const signingZeroAttempts = await client.query<{
+      id: string;
+      public_id: string;
+      lease_owner: string | null;
+      lease_expires_at: Date | null;
+      lease_released_at: Date | null;
+      lease_fencing_token: string | null;
+    }>(
+      `SELECT w.id, w.public_id,
+              l.owner_identity AS lease_owner,
+              l.expires_at AS lease_expires_at,
+              l.released_at AS lease_released_at,
+              l.fencing_token::text AS lease_fencing_token
+       FROM withdrawals w
+       LEFT JOIN hot_wallet_dispatch_leases l
+         ON l.hot_wallet_id = w.hot_wallet_id
+        AND l.owner_identity = ('withdrawal:' || w.id::text)
+       WHERE w.state = 'SIGNING'
+         AND NOT EXISTS (
+           SELECT 1 FROM withdrawal_attempts a WHERE a.withdrawal_id = w.id
+         )`,
+    );
+    for (const row of signingZeroAttempts.rows) {
+      const leaseUnreleased = row.lease_released_at === null && row.lease_owner !== null;
+      const leaseExpired =
+        leaseUnreleased &&
+        row.lease_expires_at !== null &&
+        row.lease_expires_at.getTime() <= Date.now();
+      const staleOrExpiredLease =
+        leaseUnreleased && (leaseExpired || row.lease_expires_at === null);
+      push({
+        category: 'signing_zero_attempts_recovery_required',
+        severity: 'DANGER',
+        withdrawalId: row.id,
+        publicId: row.public_id,
+        attemptId: null,
+        message:
+          'SIGNING with zero attempts and no broadcast evidence; recovery-required (no auto lease release)',
+        details: {
+          attemptCount: 0,
+          broadcastEvidence: false,
+          leaseOwner: row.lease_owner,
+          leaseFencingToken: row.lease_fencing_token,
+          leaseExpiresAt: row.lease_expires_at?.toISOString() ?? null,
+          leaseReleasedAt: row.lease_released_at?.toISOString() ?? null,
+          staleOrExpiredUnreleasedLease: staleOrExpiredLease,
+          autoReleaseForbidden: true,
+          autoRedispatchForbidden: true,
+        },
       });
     }
 

@@ -177,7 +177,11 @@ export async function signWithdrawalAttempt(
     throw new SignerError('SIGNATURE_VERIFY_FAILED', 'Local Ed25519 verification failed');
   }
 
-  const stateInit = walletStateInitForSeqno(intent.seqno, wallet.init);
+  const stateInit = walletStateInitForSeqno(
+    intent.seqno,
+    wallet.init,
+    row.requires_state_init === true ? 'uninit' : 'active',
+  );
   const externalMessageCell = buildExternalInMessage({
     walletAddress: wallet.address,
     signedWalletRequestBody,

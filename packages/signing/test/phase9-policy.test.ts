@@ -60,6 +60,7 @@ function baseRow(overrides: Partial<SigningViewRow> = {}): SigningViewRow {
     dispatch_lease_expires_at: new Date(Date.now() + 60_000),
     dispatch_lease_released_at: null,
     payout_dispatch_paused: false,
+    requires_state_init: false,
     ...overrides,
   };
 }

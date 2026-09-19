@@ -228,6 +228,7 @@ async function runLiveProbes(
     expectedCustodyMode: 'self_hosted_encrypted',
     expectedPublicKeyFingerprint: hotIdentity?.signerReference ?? null,
     expectedWalletAddressRaw: hotIdentity?.addressRaw ?? null,
+    approvedSignerKeyReference: hotIdentity?.signerReference ?? null,
   });
 }
 

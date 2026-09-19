@@ -37,12 +37,25 @@ export {
   type FindTransactionsByQueryIdInput,
   type JettonTransferEvidence,
   type TonAccountBalance,
+  type TonAccountState,
+  type TonAccountStatus,
   type TonChainProvider,
   type TonJettonBalance,
   type TonNetworkGlobalId,
   type TonProviderHealth,
   type TonSendBocResult,
 } from './chain-provider.js';
+export {
+  admitWalletSeqno,
+  approvedWalletV5R1CodeHash,
+  deriveWalletV5R1AddressRaw,
+  type AdmitWalletSeqnoBlockCode,
+  type AdmitWalletSeqnoBlocked,
+  type AdmitWalletSeqnoInput,
+  type AdmitWalletSeqnoResult,
+  type AdmitWalletSeqnoSuccess,
+} from './admit-wallet-seqno.js';
+export { walletStateInitForSeqno } from './wallet-v5r1-state-init.js';
 export { FakeTonChainProvider, type FakeTonChainProviderOptions } from './fake-chain-provider.js';
 export { HttpTonProvider, type HttpTonProviderConfig } from './http-ton-provider.js';
 export {
