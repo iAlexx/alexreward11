@@ -1,3 +1,6 @@
+/**
+ * Owner admin auth public exports.
+ */
 export { AuthDomainError } from './errors.js';
 export type { AuthErrorCode } from './errors.js';
 export {
@@ -8,9 +11,63 @@ export {
   hashRefreshToken,
   hashSessionSecret,
   redactSensitive,
+  safeEqualString,
   sha256Hex,
   summarizeUserAgent,
 } from './crypto.js';
+export {
+  ADMIN_REAUTH_MAX_AGE_MS,
+  ADMIN_SESSION_ABSOLUTE_TTL_MS,
+  ADMIN_SESSION_IDLE_TTL_MS,
+  generateAdminSessionToken,
+  hashAdminSessionToken,
+} from './admin-session-token.js';
+export {
+  OWNER_ADMIN_AUTH_OPERATIONAL_CONFIRM,
+  OWNER_ADMIN_AUTH_MAX_FAILURES,
+  OWNER_ADMIN_AUTH_FAILURE_WINDOW_MS,
+  OWNER_ADMIN_AUTH_LOCKOUT_MS,
+  assertNoUnsupportedActiveCredentials,
+  assertOperationalFirstEnrollmentAllowed,
+  assertOwnerAdminAuthDatabaseWritable,
+  assertOwnerAuthOperationalDefaultDeny,
+  beginOwnerAdminTotpEnrollment,
+  completeOwnerAdminTotpEnrollment,
+  generateTotpCode,
+  isAdminSessionReauthFresh,
+  isPool,
+  loginOwnerAdmin,
+  logoutOwnerAdminSession,
+  preflightOwnerAdminEnrollment,
+  reauthenticateOwnerAdminSession,
+  requireOwnerAuthPool,
+  verifyOwnerAdminPasswordAndTotp,
+  withPinnedOwnerAuthTransaction,
+  withPoolOwnedOwnerAuthTransaction,
+  withPoolOwnedReadOnlyTransaction,
+} from './admin-auth.js';
+export type {
+  EnrollOwnerAdminFactorsResult,
+  LoginOwnerAdminBundle,
+  LoginOwnerAdminInput,
+  LoginOwnerAdminResult,
+  OwnerAdminAuthDatabaseGate,
+  ReauthOwnerAdminSessionInput,
+  ReauthOwnerAdminSessionResult,
+} from './admin-auth.js';
+export {
+  ADMIN_TOTP_DIGITS,
+  ADMIN_TOTP_PERIOD_SECONDS,
+  buildOtpAuthUri,
+  totpStepAt,
+  verifyTotpCode,
+  verifyTotpCodeWithStep,
+} from './admin-totp.js';
+export {
+  assertInteractiveSecretTerminals,
+  displaySecretOnceOnInteractiveStderr,
+  readSecretFromTty,
+} from './tty-secret.js';
 export { issueAccessToken, verifyAccessToken, type AccessTokenClaims } from './access-token.js';
 export {
   assertSessionActive,

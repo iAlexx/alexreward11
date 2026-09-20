@@ -36,9 +36,10 @@ provider business behaviour is implemented here.
 | `0021_phase10_broadcast_evidence.sql`                | Phase 10: additive nullable `signed_external_message_boc` / `broadcast_submitted_at` / `broadcast_ambiguity_class` on `withdrawal_attempts` (intent immutability from 0017 unchanged)                                                                        |
 | `0022_external_message_identity.sql`                 | Phase 10: additive nullable signed Wallet request BOC, final External-In cell hash, and Tonkeeper-normalized message hash evidence                                                                                                                           |
 | `0023_attempt_requires_state_init.sql`               | Phase 10: additive `requires_state_init` on `withdrawal_attempts` + signer view (StateInit bound to proven uninit admission, not seqno=0 alone)                                                                                                              |
+| `0024_owner_admin_auth_hardening.sql`                | Owner admin auth: additive `totp_last_accepted_step` on `admin_credentials`; `admin_auth_throttle` for persistent attempt lockouts                                                                                                                           |
 
-Migrations `0001`–`0022` remain immutable. Proven-account StateInit requirement is added only by
-forward migration `0023`.
+Migrations `0001`–`0023` remain immutable. Owner-admin auth hardening is added only by
+forward migration `0024` (apply to isolated test DBs under remediation; ops requires separate approval).
 
 ## Conventions
 

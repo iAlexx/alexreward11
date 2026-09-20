@@ -14,15 +14,22 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src test",
     "test": "vitest run",
-    "test:phase3": "cross-env PHASE3_AUTH_TESTS=1 vitest run test/phase3-auth.test.ts test/phase3-throttle.test.ts"
+    "test:phase3": "cross-env PHASE3_AUTH_TESTS=1 vitest run test/phase3-auth.test.ts test/phase3-throttle.test.ts",
+    "test:owner-admin-auth": "cross-env OWNER_ADMIN_AUTH_TESTS=1 vitest run --fileParallelism=false test/owner-admin-auth.test.ts",
+    "owner-admin-auth": "node dist/cli/owner-admin-auth.js"
   },
   "dependencies": {
+    "@alex-rewards/config": "workspace:*",
     "@alex-rewards/db": "workspace:*",
     "@alex-rewards/telegram": "workspace:*",
+    "@noble/ciphers": "1.3.0",
+    "@noble/hashes": "1.8.0",
     "ioredis": "6.0.0",
     "pg": "8.23.0"
   },
   "devDependencies": {
-    "@types/pg": "8.23.1"
+    "@types/pg": "8.23.1",
+    "cross-env": "7.0.3",
+    "vitest": "4.1.11"
   }
 }

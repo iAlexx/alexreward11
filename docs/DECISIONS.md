@@ -213,3 +213,42 @@ Decisions:
 4. **No Mainnet / no AWS KMS / no plaintext keys.** Fake chain remains for Phase 7 local tests.
 5. Migration `0021` is additive only; `0001`–`0020` immutable. Phase 9 signer custody not weakened.
 6. Do not claim real Testnet 100+ payout PASS; do not start Phase 11; do not seal a Phase 10 PASS archive yet.
+
+## ADR-019 — Owner admin password+TOTP session issuer (Recovery prerequisite)
+
+Phase 10 Recovery requires an authenticated Owner `admin_sessions` row with same-session
+`reauthenticated_at` ≤ 15 minutes. Control Center sessions are not `admin_sessions`.
+
+Decisions:
+
+1. **Interim local factor set:** password (Argon2id verifier) + TOTP (RFC 6238), matching the
+   schema’s `PASSWORD` + `TOTP` credential types. Spec primary WebAuthn/Passkeys remain required
+   for production Admin Control Plane; this CLI is the Recovery-compatible issuer until that
+   Control Plane ships.
+2. **TOTP at rest:** secrets are XChaCha20-Poly1305 sealed under a password-derived Argon2id key
+   (`local-totp-seal-v1$…` in `totp_secret_reference`). Plaintext TOTP never rests in PostgreSQL.
+   Format is local-only; production KMS/HSM references are out of scope for this CLI.
+3. **Session tokens:** cryptographically random opaque tokens; only
+   `sha256Hex("admin-session:" + token)` is stored (`hashAdminSessionToken`), shared with
+   Recovery’s `hashPhase10CanaryOwnerSessionToken`.
+4. **Secrets transport:** password, TOTP codes, and session tokens are interactive TTY-only
+   (non-echoing). Forbidden on argv, env, and structured success JSON (session token may be
+   printed once to stderr for Owner paste into Recovery’s hidden TTY prompt).
+5. **DB write gate:** requires `--expected-database` / `expectedDatabase` matching
+   `current_database()`. Operational `alex_rewards` additionally requires Owner-controlled
+   `expectedClusterSystemIdentifier` matching `pg_control_system().system_identifier` and
+   `OWNER_ADMIN_AUTH_ALLOW_OPERATIONAL_DB=I_CONFIRM_OWNER_ADMIN_AUTH_ON_ALEX_REWARDS` (intent
+   only). Isolated tests use approved `*_test` / `*_phaseN` databases only.
+6. **Not sufficient alone:** Owner UUID, DB credentials, Telegram user id, Recovery
+   confirmation phrase, database name alone, or URL alone never create or authenticate an
+   admin session or prove cluster identity.
+7. **Operational first enrollment is refused** until a separately approved bootstrap
+   ceremony exists (`docs/OWNER_ADMIN_BOOTSTRAP_DESIGN.md`). Ops confirm remains
+   intent-only.
+8. **Forward migration `0024`:** additive `totp_last_accepted_step` +
+   `admin_auth_throttle` for replay protection and persistent attempt controls.
+9. **Mixed ACTIVE unsupported credentials (e.g. WEBAUTHN):** refuse enroll/replace
+   (fail-closed); do not remove or simulate WebAuthn (`docs/OWNER_ADMIN_AUTH.md`).
+10. **Auth failure accounting:** invalid-credential outcomes COMMIT throttle/audit under
+    the pool-owned transaction before throwing (AuthOutcome), closing the post-rollback
+    race.
