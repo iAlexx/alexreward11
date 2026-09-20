@@ -14,7 +14,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src",
     "test": "vitest run",
-    "test:phase2": "cross-env PHASE2_MIGRATION_TESTS=1 vitest run test/phase2-migrations.test.ts"
+    "test:phase2": "cross-env PHASE2_MIGRATION_TESTS=1 vitest run test/phase2-migrations.test.ts",
+    "test:m0-single-owner": "vitest run --fileParallelism=false test/m0-single-owner-invariant.test.ts"
   },
   "dependencies": {
     "kysely": "0.29.5",

@@ -37,9 +37,10 @@ provider business behaviour is implemented here.
 | `0022_external_message_identity.sql`                 | Phase 10: additive nullable signed Wallet request BOC, final External-In cell hash, and Tonkeeper-normalized message hash evidence                                                                                                                           |
 | `0023_attempt_requires_state_init.sql`               | Phase 10: additive `requires_state_init` on `withdrawal_attempts` + signer view (StateInit bound to proven uninit admission, not seqno=0 alone)                                                                                                              |
 | `0024_owner_admin_auth_hardening.sql`                | Owner admin auth: additive `totp_last_accepted_step` on `admin_credentials`; `admin_auth_throttle` for persistent attempt lockouts                                                                                                                           |
+| `0025_single_owner_authority.sql`                    | M0: `admin_owner_authority` singleton seat + trigger + partial unique index — at most one effective OWNER binding; vacant seat = pre-bootstrap; revoke does not enable informal transfer                                                                         |
 
-Migrations `0001`–`0023` remain immutable. Owner-admin auth hardening is added only by
-forward migration `0024` (apply to isolated test DBs under remediation; ops requires separate approval).
+Migrations `0001`–`0024` remain immutable. Single-OWNER authority is added only by
+forward migration `0025` (apply to isolated test DBs under M0; ops requires separate approval).
 
 ## Conventions
 

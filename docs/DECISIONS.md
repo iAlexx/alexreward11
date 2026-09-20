@@ -252,3 +252,61 @@ Decisions:
 10. **Auth failure accounting:** invalid-credential outcomes COMMIT throttle/audit under
     the pool-owned transaction before throwing (AuthOutcome), closing the post-rollback
     race.
+
+## ADR-020 — Single-OWNER authority invariant (M0)
+
+**Status:** Accepted for implementation on isolated test DBs; operational apply requires
+separate Owner authorization. Does **not** implement bootstrap, CO_OWNER, or ownership
+transfer.
+
+### Problem
+
+`admin_role_bindings` only enforced `UNIQUE (admin_user_id, role_id)`. Multiple distinct
+`admin_users` could each hold an unrevoked `OWNER` binding. Spec/comment intent (“exactly
+one Owner”) was not database-enforced. A partial unique index **cannot** use a JOIN to
+`admin_roles` in its predicate.
+
+### Decisions
+
+1. **Singleton seat table `admin_owner_authority`** with `PRIMARY KEY (seat)` and
+   `CHECK (seat = 1)`. Exactly one row. `holder_admin_user_id IS NULL` means
+   **pre-bootstrap** (zero Owners is valid and fail-closed for product auth that requires
+   an OWNER binding).
+2. **Trigger `app_enforce_single_owner_authority`** on `admin_role_bindings` locks the
+   seat (`FOR UPDATE`) and:
+   - allows the **first** unrevoked OWNER binding to claim a vacant seat;
+   - allows the **same** `admin_user_id` to restore (`revoked_at = NULL`) their binding;
+   - refuses any other admin claiming OWNER while the seat is held;
+   - on revoke/delete of the OWNER binding: clears `active_binding_id` but **does not**
+     clear `holder_admin_user_id` (informal transfer via revoke-then-grant-other is refused).
+3. **Partial unique index** `admin_role_bindings_one_unrevoked_owner` on `(role_id)`
+   `WHERE revoked_at IS NULL AND role_id = <OWNER uuid baked at migrate time>` — uses only
+   local table columns; OWNER id is resolved once in a `DO` block (not a subquery in the
+   index predicate).
+4. **Policy distinction:** Application “effective OWNER” remains
+   `admin_users.status = ACTIVE` **and** unrevoked OWNER binding (existing
+   `requireActiveOwner` / Recovery / Control Center). The seat may remain held if the
+   holder is later `DISABLED`/`LOCKED` — disabling does not free ownership for another
+   admin.
+5. **Migration refuse-on-conflict:** If >1 unrevoked OWNER binding **or** >1 distinct
+   `admin_user_id` with any OWNER binding history exists, migration `0025` **raises** and
+   does not pick a winner.
+6. **OWNER binding transitions (M0):** Changing `role_id` from OWNER to a non-OWNER role,
+   or changing `admin_user_id` on an OWNER binding, is **refused**. Authorized ownership
+   transfer remains a future procedure. This keeps `active_binding_id` from pointing at a
+   binding that no longer represents OWNER.
+7. **0024 bookkeeping:** Before inserting `0024_owner_admin_auth_hardening` into
+   `schema_migrations`, `0025` verifies the 0024 **schema contract** via catalog
+   introspection: TOTP `BIGINT NULL` + normalized nonnegative CHECK (rejects `OR TRUE`);
+   throttle `admin_user_id UUID NOT NULL` with `PRIMARY KEY (admin_user_id)` and FK
+   `confkey`→`admin_users.id` ON DELETE CASCADE; `failed_attempts` /
+   `window_started_at` / `locked_until` / `updated_at` types+nullability+exact
+   defaults (`0` / `now()`); exact nonnegative `failed_attempts` CHECK; trigger
+   `tgenabled IN ('O','A')`, `BEFORE UPDATE` only, `FOR EACH ROW`, unrestricted
+   (`tgqual IS NULL`, empty `tgattr`), `tgfoid = public.app_set_updated_at()`. Names,
+   arbitrary PKs, substring CHECKs, and trigger names alone are insufficient.
+   Missing/partial/incompatible → refuse; never mark unapplied 0024 as applied.
+   Migration `0024` SQL remains immutable.
+8. **Out of scope for M0:** bootstrap ceremony, CO_OWNER, Team UI, authorized ownership
+   transfer procedure, Recovery CLI execution, operational apply.
+9. **Forward migration `0025`:** additive; `0001`–`0024` immutable.
