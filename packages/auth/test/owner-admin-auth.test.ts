@@ -48,6 +48,11 @@ const optedInUrl =
   process.env.OWNER_ADMIN_AUTH_TESTS === '1' ? (process.env.DATABASE_URL ?? '') : '';
 const databaseUrl = explicitUrl !== '' ? explicitUrl : optedInUrl;
 
+if (process.env.M1_CI_SECURITY_GATE === '1' && databaseUrl === '') {
+  throw new Error(
+    'Owner Authentication suite: M1_CI_SECURITY_GATE=1 requires OWNER_ADMIN_AUTH_DATABASE_URL (or PHASE3/PHASE7) (fail-closed)',
+  );
+}
 const PASSWORD = 'Owner-Test-Password-12';
 const BAD_PASSWORD = 'Owner-Test-Password-99';
 const PERIOD_MS = ADMIN_TOTP_PERIOD_SECONDS * 1000;

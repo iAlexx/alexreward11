@@ -16,6 +16,8 @@
     "test": "vitest run",
     "test:phase3": "cross-env PHASE3_AUTH_TESTS=1 vitest run test/phase3-auth.test.ts test/phase3-throttle.test.ts",
     "test:owner-admin-auth": "cross-env OWNER_ADMIN_AUTH_TESTS=1 vitest run --fileParallelism=false test/owner-admin-auth.test.ts",
+    "test:owner-bootstrap": "cross-env OWNER_BOOTSTRAP_TESTS=1 ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1 vitest run --fileParallelism=false test/owner-bootstrap.test.ts test/owner-bootstrap-unit.test.ts test/owner-bootstrap-remediation.test.ts test/owner-bootstrap-acceptance.test.ts",
+    "test:m1-security-gate": "cross-env M1_CI_SECURITY_GATE=1 OWNER_BOOTSTRAP_TESTS=1 OWNER_ADMIN_AUTH_TESTS=1 ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1 vitest run --fileParallelism=false test/owner-admin-auth.test.ts test/owner-bootstrap.test.ts test/owner-bootstrap-unit.test.ts test/owner-bootstrap-remediation.test.ts test/owner-bootstrap-acceptance.test.ts",
     "owner-admin-auth": "node dist/cli/owner-admin-auth.js"
   },
   "dependencies": {

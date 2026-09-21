@@ -310,3 +310,83 @@ one Owner”) was not database-enforced. A partial unique index **cannot** use a
 8. **Out of scope for M0:** bootstrap ceremony, CO_OWNER, Team UI, authorized ownership
    transfer procedure, Recovery CLI execution, operational apply.
 9. **Forward migration `0025`:** additive; `0001`–`0024` immutable.
+
+## ADR-021 — M1-A.1 first-Owner trust design (Option C + endpoint trust)
+
+**Status:** Design for independent review (incl. final credential-request binding); **not implemented**.
+**Operational label:** `DESIGN READY — TRUST ESTABLISHMENT BLOCKED`.
+
+### Problem
+
+M0 enforces at most one OWNER seat but does not establish who the rightful first
+Owner is. UUID/Telegram/DB identity/confirm literals are not proof. Stage A found
+no independently established trust anchor. Grant possession alone is not claimant
+authentication.
+
+### Decisions
+
+1. **Provisional ceremony direction:** Option C — Owner-held offline, one-time,
+   expiring enrollment grant, purpose `FIRST_OWNER_ENROLLMENT` only.
+2. **Canonicalization (F2):** RFC 8785 (JCS) + strict schema; reject duplicate keys,
+   unexpected fields, invalid types, unsupported versions; hard `exp` (no positive
+   skew); `iat` early skew ≤60s only.
+3. **Stolen grant (F1):** Redeem requires Owner-bound Ed25519 proof-of-possession
+   over a verifier challenge using the ceremony-registered key; grant file alone
+   fails closed. Expiry/nonce/seat/email/labels are not claimant authentication.
+4. **Challenge lifecycle (P1):** Verifier uses **securely stored challenge state**
+   (optional authenticated challenge token for transport) bound to
+   `grant_id` / `key_id` / `endpoint_profile_id` / single `attempt_id` with exact
+   `issued_at`, plus an **ephemeral enrollment-channel Ed25519 keypair** generated
+   in the legitimate CLI/process. `channel_fp` is registered at attempt creation,
+   bound into stored state and Owner-signed `challenge_bytes`, and proven again
+   via `sig_channel_pop` (PoP submit) and `sig_channel_cred` over the **complete
+   final credential request** (JCS public header including `intended_subject` +
+   length-prefixed password/TOTP tails; domain
+   `ALEx-OwnerBootstrap-FinalCredReq-v1`). Tickets are bound to the same
+   `channel_fp`. Credential substitution fails closed. Stolen grant / PoP /
+   ticket from another channel fails closed. Interactive credentials are
+   collected **outside** any DB transaction in the same process that holds
+   `channel_sk`; a short final TX revalidates all authoritative conditions
+   (including reconstructed final-request signature) and atomically creates
+   credentials, binds the OWNER seat, and consumes the grant. Interrupted
+   enrollment requires a **new** attempt — no silent channel reassignment.
+   `channel_sk` and credential tails never enter logs or archives. First-use
+   race of a stolen **complete** PoP is attempt DoS, not activation; first-use
+   of a stolen **complete** final request remains a residual capture risk —
+   client nonce uniqueness does not prevent that race.
+5. **Endpoint trust (F3/P2):** Mandatory TLS certificate-chain verification to an
+   Owner-approved trust anchor **and** mandatory hostname verification. Optional
+   additional SPKI pinning only if securely supported — never a substitute for
+   chain or hostname. Fail closed if a selected verify feature is unavailable.
+   No downgrade. DB name / cluster id supplementary only.
+6. **Provenance (F3):** External root is the Owner ceremony seal; deploy trust stores
+   are derivatives matched via dual-channel policy; DB is not the pin authority.
+7. **Honest DBA boundary:** grants cannot stop a fully privileged DBA on an
+   uncontrolled database; privileged access is infrastructure-controlled.
+8. **Narrow redeem path:** future `redeemOwnerBootstrapGrant` is stricter than a
+   FS-01 bypass; existing Owner-auth APIs remain default-denied; no public OWNER
+   self-registration.
+9. **State machine:** `UNINITIALIZED → AUTHORIZED → CREDENTIAL_SETUP → ACTIVE`
+   with channel-bound PoP before `AUTHORIZED`, credentials outside TX on the
+   same channel key, atomic final consume, M0 seat respect, no silent transfer.
+10. **Readiness states must not be conflated:** (A) design, (B) production trust
+    anchor, (C) local implementation (ephemeral test keys OK without completing B/D),
+    (D) operational enrollment.
+11. **Documents:** `docs/OWNER_ADMIN_BOOTSTRAP_DESIGN.md`,
+    `docs/OWNER_ADMIN_DB_IDENTITY_DESIGN.md`, `docs/M1_A1_THREAT_MODEL.md`,
+    `docs/M1_A1_TRUST_ESTABLISHMENT_CHECKLIST.md`, `docs/M1_A1_IMPLEMENTATION_PLAN.md`.
+
+### Non-decisions (Owner still required)
+
+Witness set, dual-channel pair, production key ceremony, Owner CA trust-anchor
+material, optional SPKI add-on, Stage B local authorization text, operational
+go-live.
+
+### Stage B local clarification (2026-09-21)
+
+Owner authorized **local** Stage B implementation/testing only. Ephemeral
+test-only Ed25519 keys and `deployment_env=isolated_test` with explicit
+`tls.mode=isolated_test_loopback_plaintext` (loopback + approved `*_test` DB)
+are permitted for harnesses. This does **not** establish Checklist **B** or
+authorize **D**. Production/staging profiles still require verify-full TLS
+(chain + hostname + Owner CA; optional SPKI add-on only). FS-01 remains.

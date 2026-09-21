@@ -23,6 +23,11 @@ import {
 const explicitUrl = process.env.M0_DATABASE_URL ?? process.env.PHASE2_DATABASE_URL ?? '';
 const databaseUrl = explicitUrl.trim();
 
+if (process.env.M1_CI_SECURITY_GATE === '1' && databaseUrl === '') {
+  throw new Error(
+    'M0 suite: M1_CI_SECURITY_GATE=1 requires M0_DATABASE_URL or PHASE2_DATABASE_URL (fail-closed)',
+  );
+}
 const FORBIDDEN_DB_NAMES = new Set(['alex_rewards', 'alex_rewards_recovery_dryrun']);
 const migrationsDirectory = fileURLToPath(new URL('../../../migrations/', import.meta.url));
 

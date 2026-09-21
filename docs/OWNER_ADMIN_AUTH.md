@@ -1,8 +1,9 @@
 # Owner admin authentication (password + TOTP + admin_sessions)
 
 Interim **Owner-operated** authentication issuer for Phase 10 Recovery.
-See ADR-019, `docs/OWNER_ADMIN_BOOTSTRAP_DESIGN.md`, and
-`docs/OWNER_ADMIN_DB_IDENTITY_DESIGN.md`.
+See ADR-019, ADR-021, `docs/OWNER_ADMIN_BOOTSTRAP_DESIGN.md` (M1-A.1 Option C design),
+`docs/OWNER_ADMIN_DB_IDENTITY_DESIGN.md`, and
+`docs/M1_A1_TRUST_ESTABLISHMENT_CHECKLIST.md`.
 
 ## Hard rules
 
@@ -13,7 +14,15 @@ See ADR-019, `docs/OWNER_ADMIN_BOOTSTRAP_DESIGN.md`, and
 - **Operational default-deny:** all Owner-auth entry points refuse `alex_rewards`
   until an Owner-held endpoint trust ceremony is approved and implemented.
   Cluster `system_identifier` and confirmation literals are **not** operational approval.
-- Operational first enrollment remains unconditionally refused (bootstrap not implemented).
+- Operational first enrollment remains refused. M1-A.1 status:
+  `DESIGN READY — TRUST ESTABLISHMENT BLOCKED`
+  (Option C + endpoint trust + redemption PoP designed; production trust anchor
+  not independently established; no redeem implementation).
+  Challenge lifecycle with enrollment-channel binding and FinalCredReq (P1)
+  and TLS chain+hostname+Owner CA (P2) are specified in design docs; Stage B
+  not authorized.
+  Local Stage B, if later authorized, may use disposable test-only keys without
+  marking production trust establishment complete.
 - JSON stdout never contains TOTP seeds, otpauth URIs, passwords, OTPs, or session tokens.
 - Session tokens are returned only via `takeSessionTokenOnce()` for interactive stderr display.
 - ACTIVE unsupported credentials (e.g. WEBAUTHN) **block enrollment/replacement**
@@ -78,7 +87,13 @@ is not authorized by this document.
 
 ## Security limitations
 
-- Operational first enrollment **BLOCKED** until bootstrap design is approved and implemented.
+- Operational first enrollment **BLOCKED**. Design label:
+  `DESIGN READY — TRUST ESTABLISHMENT BLOCKED`
+  (F1 redemption PoP, F2 JCS/hard exp, F3 seal root, P1 challenge/ticket/channel
+  binding + FinalCredReq + final TX, P2 mandatory TLS chain+hostname+Owner CA
+  with optional SPKI add-on only documented; trust anchor not established;
+  Stage B not implemented).
+  Ephemeral test-only keys for future isolated Stage B ≠ Checklist B/D complete.
 - Mixed ACTIVE WEBAUTHN + PASSWORD/TOTP: replacement refused until WebAuthn verification exists.
 - Local TOTP seal is password-bound, not KMS.
 - Terminal screen recording remains a residual channel even with TTY checks.

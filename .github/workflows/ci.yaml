@@ -106,6 +106,16 @@ jobs:
           PHASE7_DATABASE_URL: postgresql://alex_rewards:local-alex-rewards-only@127.0.0.1:5432/alex_rewards_phase2
           PHASE7_WITHDRAWAL_TESTS: '1'
         run: pnpm test:phase10
+      - name: M1 security gates (M0 + Owner Auth + Owner Bootstrap)
+        env:
+          M1_CI_SECURITY_GATE: '1'
+          OWNER_ADMIN_AUTH_DATABASE_URL: postgresql://alex_rewards:local-alex-rewards-only@127.0.0.1:5432/alex_rewards_phase2
+          M0_DATABASE_URL: postgresql://alex_rewards:local-alex-rewards-only@127.0.0.1:5432/alex_rewards_phase2
+          PHASE2_DATABASE_URL: postgresql://alex_rewards:local-alex-rewards-only@127.0.0.1:5432/alex_rewards_phase2
+          OWNER_BOOTSTRAP_TESTS: '1'
+          OWNER_ADMIN_AUTH_TESTS: '1'
+          ALEX_OWNER_BOOTSTRAP_TEST_HOOKS: '1'
+        run: pnpm test:m1-security-gates
       - name: Dependency vulnerability gate
         run: pnpm security:audit
 
