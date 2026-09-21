@@ -59,6 +59,11 @@ export { LocalEphemeralSignPort, publicKeyFingerprint } from './local-ephemeral-
 export { assertSigningPolicy } from './policy.js';
 export { loadSigningView, type SigningViewRow } from './read-model.js';
 export {
+  assertSignerDatabaseReadBoundary,
+  inspectSignerDatabasePrivileges,
+  type SignerDbPrivilegeSnapshot,
+} from './db-privilege-boundary.js';
+export {
   reconstructCanonicalHash,
   signWithdrawalAttempt,
   type SignWithdrawalAttemptInput,

@@ -18,6 +18,7 @@ import {
 } from './attempts.js';
 import {
   assertBlindResendForbidden,
+  claimFirstBroadcastSend,
   classifySubmitError,
   markBroadcastSubmitted,
   persistPreBroadcastEvidence,
@@ -427,7 +428,10 @@ async function confirmAndSettle(
   crashAt(input, 'AFTER_CONFIRMATION_BEFORE_SETTLE');
 
   await withWithdrawalTransaction(db, async (client) => {
-    await settleWithdrawalReservation(client, { withdrawalId: context.withdrawalId });
+    await settleWithdrawalReservation(client, {
+      withdrawalId: context.withdrawalId,
+      confirmedAttemptId: attempt.id,
+    });
     const ownerIdentity = hotWalletDispatchOwnerIdentity(context.withdrawalId);
     const fence = await client.query<{ fencing_token: string }>(
       `SELECT fencing_token::text FROM hot_wallet_dispatch_leases
@@ -557,13 +561,32 @@ async function resumePersistedPipeline(
   let state = context.state;
 
   if (state === 'CONFIRMED') {
+    let settledAttemptId = attempt.id;
     await withWithdrawalTransaction(db, async (client) => {
-      await settleWithdrawalReservation(client, { withdrawalId: context.withdrawalId });
+      // Attribute from durable proof / prior settled identity — never assume latest attempt.
+      const settled = await settleWithdrawalReservation(client, {
+        withdrawalId: context.withdrawalId,
+      });
+      settledAttemptId = settled.confirmedAttemptId;
+      const ownerIdentity = hotWalletDispatchOwnerIdentity(context.withdrawalId);
+      const fence = await client.query<{ fencing_token: string }>(
+        `SELECT fencing_token::text FROM hot_wallet_dispatch_leases
+         WHERE hot_wallet_id = $1::uuid AND owner_identity = $2 AND released_at IS NULL`,
+        [context.hotWalletId, ownerIdentity],
+      );
+      if (fence.rows[0] !== undefined) {
+        await releaseHotWalletDispatchLease(client, {
+          hotWalletId: context.hotWalletId,
+          ownerIdentity,
+          fencingToken: BigInt(fence.rows[0].fencing_token),
+          reason: 'CONFIRMED_SETTLED',
+        });
+      }
     });
     stagesCompleted.push('idempotent_confirmed_finalization');
     return {
       state: 'CONFIRMED',
-      attemptId: attempt.id,
+      attemptId: settledAttemptId,
       seqno: Number(attempt.expectedSeqno),
       stagesCompleted,
     };
@@ -709,6 +732,7 @@ async function resumePersistedPipeline(
     }
     const resumeOwner = hotWalletDispatchOwnerIdentity(context.withdrawalId);
     const resumeFence = BigInt(attempt.dispatchFencingToken);
+    let resumeBroadcastClaimed = false;
     await withWithdrawalTransaction(db, async (client) => {
       // Same-withdrawal may reacquire if lease expired while still pre-broadcast.
       // Same-owner reclaim keeps fencing_token STABLE (attempt fence is immutable).
@@ -735,12 +759,24 @@ async function resumePersistedPipeline(
         fencingToken: lease.fencingToken,
         ownerIdentity: resumeOwner,
       });
-      await markBroadcastSubmitted(client, {
+      const claim = await claimFirstBroadcastSend(client, {
         attemptId: attempt.id,
+        fencingToken: resumeFence,
         ambiguityClass: null,
         broadcastResultState: 'UNKNOWN',
       });
+      resumeBroadcastClaimed = claim.claimed;
     });
+    if (!resumeBroadcastClaimed) {
+      stagesCompleted.push('broadcast_claim_lost_observe_only');
+      return {
+        state: 'RECONCILE_REQUIRED',
+        attemptId: attempt.id,
+        reason: 'broadcast_already_claimed',
+        seqno: Number(attempt.expectedSeqno),
+        stagesCompleted,
+      };
+    }
     crashAt(input, 'AFTER_SUBMIT_INTENT');
 
     let sendResult: { accepted: boolean; messageHash?: string; providerReference?: string };
@@ -832,6 +868,9 @@ async function resumePersistedPipeline(
     attempt = (await loadPersistedAttempt(db, context.withdrawalId))!;
     state = 'CONFIRMING';
   } else {
+    // Already submitted (or missing boc handled above). Never blind resend.
+    // BROADCASTING→RECONCILE_REQUIRED must be conditional: a concurrent winner may
+    // already have advanced past BROADCASTING (avoid STATE_CONFLICT races).
     await withWithdrawalTransaction(db, async (client) => {
       if (state === 'SIGNING') {
         await transitionWithdrawal(client, {
@@ -846,12 +885,24 @@ async function resumePersistedPipeline(
         });
         state = 'RECONCILE_REQUIRED';
       } else if (state === 'BROADCASTING') {
-        await transitionWithdrawal(client, {
-          id: context.withdrawalId,
-          from: 'BROADCASTING',
-          to: 'RECONCILE_REQUIRED',
-        });
-        state = 'RECONCILE_REQUIRED';
+        const moved = await client.query<{ id: string }>(
+          `UPDATE withdrawals
+           SET state = 'RECONCILE_REQUIRED'::withdrawal_state,
+               updated_at = now()
+           WHERE id = $1::uuid
+             AND state = 'BROADCASTING'::withdrawal_state
+           RETURNING id::text`,
+          [context.withdrawalId],
+        );
+        if (moved.rows[0] !== undefined) {
+          state = 'RECONCILE_REQUIRED';
+        } else {
+          const current = await client.query<{ state: WithdrawalState }>(
+            `SELECT state FROM withdrawals WHERE id = $1::uuid`,
+            [context.withdrawalId],
+          );
+          state = current.rows[0]?.state ?? state;
+        }
       } else if (state === 'BROADCASTED') {
         await transitionWithdrawal(client, {
           id: context.withdrawalId,
@@ -990,13 +1041,39 @@ export async function runRealTestnetPayoutPipeline(
   }
   const existingAttempt = await loadPersistedAttempt(db, input.withdrawalId);
   if (initialState === 'CONFIRMED') {
+    let settledAttemptId = existingAttempt?.id ?? null;
     await withWithdrawalTransaction(db, async (client) => {
-      await settleWithdrawalReservation(client, { withdrawalId: input.withdrawalId });
+      // Resolve confirmed attempt from durable proof — do not use latest attempt_number.
+      const settled = await settleWithdrawalReservation(client, {
+        withdrawalId: input.withdrawalId,
+      });
+      settledAttemptId = settled.confirmedAttemptId;
+      const hot = await client.query<{ hot_wallet_id: string | null }>(
+        `SELECT hot_wallet_id::text FROM withdrawals WHERE id = $1::uuid`,
+        [input.withdrawalId],
+      );
+      const hotWalletId = hot.rows[0]?.hot_wallet_id;
+      if (hotWalletId !== null && hotWalletId !== undefined) {
+        const ownerIdentity = hotWalletDispatchOwnerIdentity(input.withdrawalId);
+        const fence = await client.query<{ fencing_token: string }>(
+          `SELECT fencing_token::text FROM hot_wallet_dispatch_leases
+           WHERE hot_wallet_id = $1::uuid AND owner_identity = $2 AND released_at IS NULL`,
+          [hotWalletId, ownerIdentity],
+        );
+        if (fence.rows[0] !== undefined) {
+          await releaseHotWalletDispatchLease(client, {
+            hotWalletId,
+            ownerIdentity,
+            fencingToken: BigInt(fence.rows[0].fencing_token),
+            reason: 'CONFIRMED_SETTLED',
+          });
+        }
+      }
     });
     stagesCompleted.push('idempotent_confirmed_finalization');
     return {
       state: 'CONFIRMED',
-      attemptId: existingAttempt?.id ?? null,
+      attemptId: settledAttemptId,
       ...(existingAttempt === null ? {} : { seqno: Number(existingAttempt.expectedSeqno) }),
       stagesCompleted,
     };
@@ -1679,20 +1756,32 @@ export async function runRealTestnetPayoutPipeline(
   stagesCompleted.push('persist_signed_boc_before_send');
   crashAt(input, 'AFTER_BOC_PERSISTED');
 
-  // Mark submit intent immediately before sendBoc so crash/timeout cannot look like
-  // FAILED_PRE_BROADCAST (ambiguous → reconcile; never blind resend).
+  // Atomic first-broadcast claim BEFORE sendBoc. Losing contenders must not send.
+  let broadcastClaimed = false;
   await withWithdrawalTransaction(db, async (client) => {
     await assertHotWalletDispatchFence(client, {
       hotWalletId: context.hotWalletId,
       fencingToken: context.fencingToken,
       ownerIdentity,
     });
-    await markBroadcastSubmitted(client, {
+    const claim = await claimFirstBroadcastSend(client, {
       attemptId: attempt.id,
+      fencingToken: context.fencingToken,
       ambiguityClass: null,
       broadcastResultState: 'UNKNOWN',
     });
+    broadcastClaimed = claim.claimed;
   });
+  if (!broadcastClaimed) {
+    stagesCompleted.push('broadcast_claim_lost_observe_only');
+    return {
+      state: 'RECONCILE_REQUIRED',
+      attemptId: attempt.id,
+      reason: 'broadcast_already_claimed',
+      seqno,
+      stagesCompleted,
+    };
+  }
   crashAt(input, 'AFTER_SUBMIT_INTENT');
 
   let sendResult: { accepted: boolean; messageHash?: string; providerReference?: string };

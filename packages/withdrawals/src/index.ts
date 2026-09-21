@@ -179,6 +179,7 @@ export type {
 export {
   assertBlindResendForbidden,
   broadcastGate,
+  claimFirstBroadcastSend,
   classifySubmitError,
   markBroadcastSubmitted,
   persistPreBroadcastEvidence,

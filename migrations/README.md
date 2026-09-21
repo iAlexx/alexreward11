@@ -38,9 +38,12 @@ provider business behaviour is implemented here.
 | `0023_attempt_requires_state_init.sql`               | Phase 10: additive `requires_state_init` on `withdrawal_attempts` + signer view (StateInit bound to proven uninit admission, not seqno=0 alone)                                                                                                              |
 | `0024_owner_admin_auth_hardening.sql`                | Owner admin auth: additive `totp_last_accepted_step` on `admin_credentials`; `admin_auth_throttle` for persistent attempt lockouts                                                                                                                           |
 | `0025_single_owner_authority.sql`                    | M0: `admin_owner_authority` singleton seat + trigger + partial unique index — at most one effective OWNER binding; vacant seat = pre-bootstrap; revoke does not enable informal transfer                                                                         |
+| `0026_owner_bootstrap_grants.sql`                    | M1 Stage B: `owner_bootstrap_grants` / `owner_bootstrap_attempts` enrollment ledger (no secrets)                                                                                                                                                             |
+| `0027_signer_login_isolation.sql`                    | Phase 10 S-05: dedicated LOGIN `alex_rewards_signer` inheriting `alex_rewards_signer_ro`; password provisioned outside migrations                                                                                                                             |
 
-Migrations `0001`–`0024` remain immutable. Single-OWNER authority is added only by
-forward migration `0025` (apply to isolated test DBs under M0; ops requires separate approval).
+Migrations `0001`–`0026` remain immutable. Signer login isolation is added only by
+forward migration `0027` (local provision script sets password; ops credential rotation
+requires separate Owner approval — see `docs/SIGNER_DB_PRIVILEGE_ISOLATION.md`).
 
 ## Conventions
 

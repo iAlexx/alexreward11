@@ -54,7 +54,9 @@ export function redactOutboxError(error: unknown): string {
 
 export function outboxRetryBackoffSeconds(attemptsBeforeIncrement: number): number {
   const safe = Math.max(0, Math.floor(attemptsBeforeIncrement));
-  return Math.min(MAX_BACKOFF_SECONDS, Math.max(1, 2 ** safe));
+  // Cap exponent before 2**n so we never overflow Number / SQL int (2**31).
+  const cappedExp = Math.min(safe, 8);
+  return Math.min(MAX_BACKOFF_SECONDS, Math.max(1, 2 ** cappedExp));
 }
 
 function isAlreadyStarted(error: unknown): boolean {
@@ -173,12 +175,17 @@ export async function markOutboxRetry(
   errorMessage: unknown,
 ): Promise<void> {
   const redacted = redactOutboxError(errorMessage);
+  // Clamp exponent BEFORE casting to int — POWER(2, attempts)::int overflows at attempts>=31
+  // if LEAST is applied after the cast.
   await client.query(
     `UPDATE outbox_events
      SET attempts = attempts + 1,
          last_error_redacted = $2,
          available_at = now() + make_interval(
-           secs => LEAST($3::int, GREATEST(1, (POWER(2, attempts))::int))
+           secs => LEAST(
+             $3::int,
+             GREATEST(1, (POWER(2, LEAST(attempts, 8)))::int)
+           )
          )
      WHERE id = $1::uuid
        AND status = 'PENDING'`,

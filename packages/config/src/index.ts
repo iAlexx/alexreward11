@@ -326,7 +326,7 @@ const workerSchema = serviceSchema
 /** Local/test-only signer defaults. Staging/production must set keys explicitly. */
 const LOCAL_SIGNER_DEFAULTS = {
   SIGNER_DATABASE_URL:
-    'postgresql://alex_rewards:local-alex-rewards-only@localhost:55432/alex_rewards',
+    'postgresql://alex_rewards_signer:local-signer-ro-only@localhost:55432/alex_rewards',
   SIGNER_KEY_MODE: 'local_ephemeral',
   SIGNER_SPIKE_ENABLED: 'true',
   SIGNER_NETWORK_CODE: 'TON_TESTNET',
