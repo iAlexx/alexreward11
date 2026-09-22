@@ -1268,7 +1268,11 @@ describe.skipIf(databaseUrl === '')(
         `SELECT failed_attempts, locked_until FROM admin_auth_throttle WHERE admin_user_id = $1::uuid`,
         [adminUserId],
       );
-      expect((throttle.rows[0]?.failed_attempts ?? 0) >= OWNER_ADMIN_AUTH_MAX_FAILURES).toBe(true);
+      const failedAttempts = throttle.rows[0]?.failed_attempts ?? 0;
+      expect(
+        failedAttempts,
+        `expected failed_attempts >= ${OWNER_ADMIN_AUTH_MAX_FAILURES}, got ${failedAttempts}; locked_until=${String(throttle.rows[0]?.locked_until ?? null)}`,
+      ).toBeGreaterThanOrEqual(OWNER_ADMIN_AUTH_MAX_FAILURES);
       expect(throttle.rows[0]?.locked_until).not.toBeNull();
       const sessions = await pool.query<{ c: number }>(
         `SELECT count(*)::int AS c FROM admin_sessions WHERE admin_user_id = $1::uuid`,
@@ -1360,6 +1364,102 @@ describe.skipIf(databaseUrl === '')(
         [adminUserId],
       );
       expect((throttle.rows[0]?.failed_attempts ?? 0) >= 4).toBe(true);
+    });
+
+    it('R-02 success-path TOTP-replay + invalid mix: failures accounted; no lock_timeout bypass; no post-lockout session', async () => {
+      const t0 = Date.now();
+      const enrolled = await enrollFresh(pool, adminUserId, expectedDatabase, t0);
+      const t1 = nextPeriod(t0);
+      const consumedCode = generateTotpCode(enrolled.totpSecretBytes, t1);
+      // Consume the TOTP step once (valid success path).
+      await takeLoginToken(pool, {
+        adminUserId,
+        password: PASSWORD,
+        totpCode: consumedCode,
+        expectedDatabase,
+        evaluationTimeMs: t1,
+      });
+      await pool.query(`DELETE FROM admin_sessions WHERE admin_user_id = $1::uuid`, [adminUserId]);
+      await pool.query(
+        `UPDATE admin_auth_throttle
+         SET failed_attempts = 0, locked_until = NULL, window_started_at = now(), updated_at = now()
+         WHERE admin_user_id = $1::uuid`,
+        [adminUserId],
+      );
+
+      // Mix: valid-password + already-consumed TOTP (crypto-valid success path) with invalids.
+      const replayAttempts = Array.from({ length: 3 }, () =>
+        loginOwnerAdmin(pool, {
+          adminUserId,
+          password: PASSWORD,
+          totpCode: consumedCode,
+          expectedDatabase,
+          evaluationTimeMs: t1,
+        }),
+      );
+      const invalidAttempts = Array.from({ length: OWNER_ADMIN_AUTH_MAX_FAILURES }, () =>
+        loginOwnerAdmin(pool, {
+          adminUserId,
+          password: BAD_PASSWORD,
+          totpCode: '000000',
+          expectedDatabase,
+          evaluationTimeMs: t1,
+        }),
+      );
+      const results = await Promise.allSettled([...replayAttempts, ...invalidAttempts]);
+      expect(results.every((r) => r.status === 'rejected')).toBe(true);
+
+      const rejections = results.filter(
+        (r): r is PromiseRejectedResult => r.status === 'rejected',
+      );
+      const unauthCount = rejections.filter(
+        (r) => r.reason instanceof AuthDomainError && r.reason.code === 'UNAUTHENTICATED',
+      ).length;
+      const rateLimitedCount = rejections.filter(
+        (r) => r.reason instanceof AuthDomainError && r.reason.code === 'RATE_LIMITED',
+      ).length;
+      expect(unauthCount + rateLimitedCount).toBe(rejections.length);
+      for (const r of rejections) {
+        const err = r.reason;
+        expect(err).toBeInstanceOf(AuthDomainError);
+        expect(String((err as Error).message)).not.toMatch(/canceling statement|55P03/i);
+      }
+
+      const throttle = await pool.query<{ failed_attempts: number; locked_until: Date | null }>(
+        `SELECT failed_attempts, locked_until FROM admin_auth_throttle WHERE admin_user_id = $1::uuid`,
+        [adminUserId],
+      );
+      const failedAttempts = throttle.rows[0]?.failed_attempts ?? 0;
+      // Every UNAUTHENTICATED must have been durably accounted; RATE_LIMITED is post-lockout.
+      expect(
+        failedAttempts,
+        `durable failures=${failedAttempts} unauth=${unauthCount} rate_limited=${rateLimitedCount}`,
+      ).toBe(unauthCount);
+      expect(failedAttempts).toBeGreaterThanOrEqual(OWNER_ADMIN_AUTH_MAX_FAILURES);
+      expect(throttle.rows[0]?.locked_until).not.toBeNull();
+
+      const sessions = await pool.query<{ c: number }>(
+        `SELECT count(*)::int AS c FROM admin_sessions WHERE admin_user_id = $1::uuid AND revoked_at IS NULL`,
+        [adminUserId],
+      );
+      expect(sessions.rows[0]?.c).toBe(0);
+
+      // After lockout, a fresh valid TOTP must not mint a session.
+      const t2 = nextPeriod(t1);
+      await expect(
+        loginOwnerAdmin(pool, {
+          adminUserId,
+          password: PASSWORD,
+          totpCode: generateTotpCode(enrolled.totpSecretBytes, t2),
+          expectedDatabase,
+          evaluationTimeMs: t2,
+        }),
+      ).rejects.toMatchObject({ code: 'RATE_LIMITED' });
+      const sessionsAfter = await pool.query<{ c: number }>(
+        `SELECT count(*)::int AS c FROM admin_sessions WHERE admin_user_id = $1::uuid AND revoked_at IS NULL`,
+        [adminUserId],
+      );
+      expect(sessionsAfter.rows[0]?.c).toBe(0);
     });
 
     it('R-04 enroll/login results never leak secrets into JSON or error surfaces', async () => {

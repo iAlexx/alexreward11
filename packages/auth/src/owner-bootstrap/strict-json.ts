@@ -1,5 +1,7 @@
 /**
  * JSON parse that rejects duplicate object keys at any depth.
+ * Objects are created with a null prototype; properties are assigned via
+ * defineProperty so `__proto__` cannot mutate the prototype chain (PR-04).
  */
 export class DuplicateJsonKeyError extends Error {
   constructor(readonly key: string) {
@@ -98,8 +100,27 @@ export function parseStrictJson(text: string): unknown {
           case 'u': {
             const hex = s.slice(i, i + 4);
             if (!/^[0-9a-fA-F]{4}$/.test(hex)) throw new SyntaxError('bad unicode escape');
-            out += String.fromCharCode(Number.parseInt(hex, 16));
+            const code = Number.parseInt(hex, 16);
             i += 4;
+            // Pair high+low surrogates; reject unpaired (PR-03 path via JSON text).
+            if (code >= 0xd800 && code <= 0xdbff) {
+              if (s[i] !== '\\' || s[i + 1] !== 'u') {
+                throw new SyntaxError('unpaired UTF-16 surrogate in string');
+              }
+              const hex2 = s.slice(i + 2, i + 6);
+              if (!/^[0-9a-fA-F]{4}$/.test(hex2)) throw new SyntaxError('bad unicode escape');
+              const low = Number.parseInt(hex2, 16);
+              if (!(low >= 0xdc00 && low <= 0xdfff)) {
+                throw new SyntaxError('unpaired UTF-16 surrogate in string');
+              }
+              out += String.fromCharCode(code, low);
+              i += 6;
+              break;
+            }
+            if (code >= 0xdc00 && code <= 0xdfff) {
+              throw new SyntaxError('unpaired UTF-16 surrogate in string');
+            }
+            out += String.fromCharCode(code);
             break;
           }
           default:
@@ -108,6 +129,20 @@ export function parseStrictJson(text: string): unknown {
         continue;
       }
       if (ch.charCodeAt(0) < 0x20) throw new SyntaxError('unescaped control');
+      const code = ch.charCodeAt(0);
+      if (code >= 0xd800 && code <= 0xdbff) {
+        const next = s[i + 1];
+        const nextCode = next === undefined ? -1 : next.charCodeAt(0);
+        if (!(nextCode >= 0xdc00 && nextCode <= 0xdfff)) {
+          throw new SyntaxError('unpaired UTF-16 surrogate in string');
+        }
+        out += ch + next!;
+        i += 2;
+        continue;
+      }
+      if (code >= 0xdc00 && code <= 0xdfff) {
+        throw new SyntaxError('unpaired UTF-16 surrogate in string');
+      }
       out += ch;
       i += 1;
     }
@@ -140,7 +175,7 @@ export function parseStrictJson(text: string): unknown {
   function parseObject(): Record<string, unknown> {
     i += 1; // {
     skipWs();
-    const obj: Record<string, unknown> = {};
+    const obj = Object.create(null) as Record<string, unknown>;
     const seen = new Set<string>();
     if (s[i] === '}') {
       i += 1;
@@ -155,7 +190,13 @@ export function parseStrictJson(text: string): unknown {
       skipWs();
       if (s[i] !== ':') throw new SyntaxError('expected :');
       i += 1;
-      obj[key] = parseValue();
+      const value = parseValue();
+      Object.defineProperty(obj, key, {
+        value,
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
       skipWs();
       if (s[i] === ',') {
         i += 1;

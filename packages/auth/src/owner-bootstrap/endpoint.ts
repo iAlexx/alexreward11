@@ -9,6 +9,7 @@ export type BootstrapTlsMode =
       readonly mode: 'verify_full';
       readonly caPem: string;
       readonly tlsServerName: string;
+      /** Forbidden in v1 (G5=NO). If present, pool/TLS builders refuse — never strip. */
       readonly spkiSha256Hex?: string;
     }
   | {

@@ -2,6 +2,7 @@
  * Minimal RFC 8785 (JCS) canonicalization for Owner-bootstrap JSON values.
  * Supports objects, arrays, strings, booleans, null, and integers only.
  * Rejects non-integer numbers (floats / exponents) at encode time.
+ * Rejects unpaired UTF-16 surrogates in strings (keys and values) before encode.
  */
 export class JcsError extends Error {
   constructor(message: string) {
@@ -14,7 +15,26 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+/** Reject unpaired UTF-16 surrogates (PR-03). Valid surrogate pairs are allowed. */
+export function assertWellFormedUtf16(value: string, label = 'string'): void {
+  for (let i = 0; i < value.length; i += 1) {
+    const c = value.charCodeAt(i);
+    if (c >= 0xd800 && c <= 0xdbff) {
+      const next = i + 1 < value.length ? value.charCodeAt(i + 1) : -1;
+      if (!(next >= 0xdc00 && next <= 0xdfff)) {
+        throw new JcsError(`JCS rejects unpaired UTF-16 surrogate in ${label}`);
+      }
+      i += 1;
+      continue;
+    }
+    if (c >= 0xdc00 && c <= 0xdfff) {
+      throw new JcsError(`JCS rejects unpaired UTF-16 surrogate in ${label}`);
+    }
+  }
+}
+
 function encodeString(value: string): string {
+  assertWellFormedUtf16(value, 'string');
   let out = '"';
   for (const ch of value) {
     const code = ch.codePointAt(0) ?? 0;
@@ -54,6 +74,7 @@ export function canonicalizeToJcs(value: unknown): string {
     const keys = Object.keys(value).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
     const parts: string[] = [];
     for (const key of keys) {
+      assertWellFormedUtf16(key, 'object key');
       parts.push(`${encodeString(key)}:${canonicalizeToJcs(value[key])}`);
     }
     return `{${parts.join(',')}}`;

@@ -31,6 +31,41 @@ export {
   type BootstrapTlsMode,
 } from './endpoint.js';
 export {
+  CEREMONY_ENDPOINT_PROFILE_DIGEST_METHOD,
+  bootstrapEndpointProfileFromCeremonyWire,
+  ceremonyWireFromBootstrapEndpointProfile,
+  digestCeremonyEndpointProfileV1,
+  parseCeremonyEndpointProfileV1Json,
+  validateCeremonyEndpointProfileV1,
+  type CeremonyDeploymentEnvV1,
+  type CeremonyEndpointProfileTlsV1,
+  type CeremonyEndpointProfileV1,
+} from './ceremony-profile-v1.js';
+export {
+  CEREMONY_SEAL_PROVENANCE_CHANNEL_B_V1,
+  assertSealProfileDigestMatchesProfile,
+  digestCeremonySealV1,
+  parseCeremonySealV1Json,
+  validateCeremonySealV1,
+  type CeremonySealV1,
+  type CeremonySealWitnessV1,
+} from './ceremony-seal-v1.js';
+export {
+  DEPLOYMENT_TRUST_DERIVATIVE_KIND_V1,
+  assertDerivativeConsistentWithProfile,
+  assertDerivativeDigestEqualsRecordedSealDigest,
+  claimDerivativeProvenanceAuthenticated,
+  parseDeploymentTrustDerivativeV1Json,
+  refuseSameHostChecksumAsChannelB,
+  validateDeploymentTrustDerivativeV1,
+  type DeploymentTrustDerivativeV1,
+} from './ceremony-trust-derivative-v1.js';
+export {
+  G5_SPKI_V1_DECISION,
+  assertSpkiPinningUnsupportedForV1,
+  buildVerifyFullTlsSocketOptions,
+} from './tls-verify-full.js';
+export {
   assertBootstrapTlsAndEndpoint,
   assertNoConflictingSslConnectionParams,
   assertPoolBoundBootstrapTrust,

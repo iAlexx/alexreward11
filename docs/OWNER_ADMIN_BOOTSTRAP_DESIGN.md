@@ -1,6 +1,13 @@
 # Owner admin bootstrap design — M1-A.1 (Option C)
 
-**Status:** DESIGN COMPLETE for independent review — **not implemented**.
+**Status (current):** Design complete for independent review; **local Stage B
+implementation exists** (isolated tests / ephemeral test keys). **Operational
+first-Owner trust establishment remains BLOCKED** (Checklist **B** / **D**).
+**Historical note:** Earlier revisions of this document said “not implemented”
+while Stage B local work was still unauthorized; that referred to production
+trust establishment and pre-authorization code landing — **not** a claim that
+local Stage B remains absent after Owner authorization (ADR-021 Stage B
+clarification 2026-09-21; checklist §C).
 **Provisional direction:** Option C — Owner-held offline, one-time, expiring enrollment grant.
 **Operational readiness:** **DESIGN READY — TRUST ESTABLISHMENT BLOCKED**.
 **Remediation:** M1-A.1 F1–F3, P2, P1 channel-binding, and final credential-request binding addressed.
@@ -724,13 +731,20 @@ operational private keys; claiming DBA-proof security on uncontrolled DBs.
 
 | State | Meaning | Now |
 | --- | --- | --- |
-| **A. Design complete** | Docs/ADR reviewable | Pending independent review of this remediation |
+| **A. Design complete** | Docs/ADR reviewable | Largely yes; independent FinalCredReq design review still open (checklist §A) |
 | **B. Trust anchor independently established** | Witnessed seal + production pubkey pin | **NO — BLOCKED** |
-| **C. Local implementation ready** | Code+tests; **ephemeral test-only keys OK** | **NO** (Stage B not authorized) |
+| **C. Local implementation ready** | Code+tests; **ephemeral test-only keys OK** | **YES — local only** (aligns with checklist §C: Owner-authorized Stage B local code + isolated harness evidence). Independent review acceptance of Stage B local implementation still open. **Does not** establish Checklist **B** or **D**. Structural validators (incl. later G1/G2/G8 ceremony schema helpers) are **not** authentic Owner provenance. |
 | **D. Operational enrollment authorized** | Separate go-live | **NO** |
 
-**Local Stage B** (when separately authorized) MAY use disposable test-only
-Ed25519 keys inside isolated harnesses. That MUST NOT mark Checklist **B** or
-state **D** complete and MUST NOT use production seal material.
+**Status transition (G7 remediation 2026-09-22):** This table previously said
+state **C** = “**NO** (Stage B not authorized)”. That was accurate **before**
+Owner authorized local Stage B (ADR-021 clarification 2026-09-21) and before
+checklist §C marked local Stage B items complete. It is **not** accurate after
+those events. State **B** / **D** remain **NO**. Overall label unchanged:
+`DESIGN READY — TRUST ESTABLISHMENT BLOCKED`.
+
+**Local Stage B** uses disposable test-only Ed25519 keys inside isolated
+harnesses. That MUST NOT mark Checklist **B** or state **D** complete and MUST
+NOT use production seal material.
 
 **Report label:** `DESIGN READY — TRUST ESTABLISHMENT BLOCKED`

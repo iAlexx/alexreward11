@@ -1,9 +1,14 @@
-# M1-A.1 Implementation plan (Stage B — not authorized yet)
+# M1-A.1 Implementation plan (Stage B — local)
 
-**Status:** PLAN ONLY.
-**Label:** `DESIGN READY — TRUST ESTABLISHMENT BLOCKED`.
+**Status (current):** Local Stage B implementation/testing was Owner-authorized
+(ADR-021 Stage B clarification 2026-09-21) and is reflected in checklist §C.
+**Historical:** This file originated as **PLAN ONLY** while Stage B was “not
+authorized yet” and stated “no code in this phase.” That historical planning
+context is preserved here; it must not be read as the current code/status truth.
+**Label:** `DESIGN READY — TRUST ESTABLISHMENT BLOCKED` (Checklist **B**/**D**).
 **F1–F3 + P1/P2 + channel-binding + FinalCredReq:** design remediation
-incorporated; no code in this phase. **P2 unchanged** in this correction.
+incorporated; local Stage B code paths exist under isolated_test constraints.
+**P2 unchanged** in the original correction note below.
 
 ## Before Stage B
 

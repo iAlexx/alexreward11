@@ -24,6 +24,7 @@ import {
 import { AuthDomainError } from '../errors.js';
 import type { BootstrapEndpointProfile } from './endpoint.js';
 import type { DeploymentEnv } from './grant.js';
+import { buildVerifyFullTlsSocketOptions, assertSpkiPinningUnsupportedForV1 } from './tls-verify-full.js';
 
 export interface BootstrapConnectionFacts {
   readonly hostname: string;
@@ -228,12 +229,21 @@ export function buildOwnerBootstrapPoolConfig(
   if (tls.tlsServerName.trim() === '') {
     throw new AuthDomainError('FORBIDDEN', 'tls_server_name required; fail closed');
   }
-  if (tls.spkiSha256Hex !== undefined) {
+  // CV-01: pg overwrites ssl.servername with non-IP URL hosts. Allow only IP dial targets
+  // (SNI/profile name preserved) or URL host exactly equal to tls_server_name.
+  const dialHost = hostname.trim().toLowerCase().replace(/^\[|\]$/g, '');
+  const approvedName = tls.tlsServerName.trim().toLowerCase();
+  if (isIP(dialHost) === 0 && dialHost !== approvedName) {
     throw new AuthDomainError(
       'FORBIDDEN',
-      'SPKI pinning requested but secure SPKI enforcement is unavailable in this client path; fail closed',
+      'URL host must be a numeric IP or exactly equal tls_server_name (pg would overwrite TLS servername with a mismatched DNS host)',
     );
   }
+  const ssl = buildVerifyFullTlsSocketOptions({
+    caPem: tls.caPem,
+    tlsServerName: tls.tlsServerName,
+    ...(tls.spkiSha256Hex !== undefined ? { spkiSha256Hex: tls.spkiSha256Hex } : {}),
+  });
 
   return {
     hostname,
@@ -241,11 +251,7 @@ export function buildOwnerBootstrapPoolConfig(
     config: {
       ...base,
       application_name: 'alex-owner-bootstrap-verify-full',
-      ssl: {
-        rejectUnauthorized: true,
-        ca: tls.caPem,
-        servername: tls.tlsServerName,
-      },
+      ssl,
     },
   };
 }
@@ -541,10 +547,5 @@ export function assertBootstrapTlsAndEndpoint(
   if (profile.tls.tlsServerName.trim() === '') {
     throw new AuthDomainError('FORBIDDEN', 'tls_server_name required; fail closed');
   }
-  if (profile.tls.spkiSha256Hex !== undefined) {
-    throw new AuthDomainError(
-      'FORBIDDEN',
-      'SPKI pinning requested but secure SPKI enforcement is unavailable in this client path; fail closed',
-    );
-  }
+  assertSpkiPinningUnsupportedForV1(profile.tls.spkiSha256Hex, 'spkiSha256Hex');
 }

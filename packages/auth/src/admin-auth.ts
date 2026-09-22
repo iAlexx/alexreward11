@@ -84,6 +84,11 @@ type AuthOutcome<T> =
       readonly adminUserId: string;
     };
 
+function isPostgresLockTimeout(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  return Reflect.get(error, 'code') === '55P03';
+}
+
 /**
  * Pool-owned transaction with serialized auth outcomes and explicit lifecycle.
  * Invalid-credential paths COMMIT failure accounting before throwing.
@@ -94,6 +99,12 @@ type AuthOutcome<T> =
  *   2. admin_auth_throttle FOR UPDATE
  *   3. admin_credentials FOR UPDATE (ORDER BY credential_type, id)
  *   4. admin_sessions (target or ordered bulk)
+ *
+ * Argon2id password / TOTP-seal work MUST run outside steps 2–4 (see login /
+ * reauth prep phases), including the success path after a cryptographically valid
+ * password+TOTP check. Holding the throttle row during Argon2 (valid password +
+ * already-consumed TOTP replay) lets concurrent waiters hit lock_timeout and abort
+ * without recordAuthFailure (R-02).
  */
 export async function withPoolOwnedOwnerAuthTransaction<T>(
   pool: Pool,
@@ -135,6 +146,13 @@ export async function withPoolOwnedOwnerAuthTransaction<T>(
           details: {
             originalMessage: error instanceof Error ? error.message : 'unknown',
           },
+        });
+      }
+      // Fail closed on lock_timeout — do not leave callers with a raw driver error that
+      // skipped durable throttle accounting (R-02).
+      if (isPostgresLockTimeout(error)) {
+        throw new AuthDomainError('RATE_LIMITED', 'authentication lock contention', {
+          cause: error,
         });
       }
       // Fail closed on deadlocks — do not retry auth/financial mutations here.
@@ -750,6 +768,180 @@ type LockedTotpCheck =
     }
   | { readonly ok: false };
 
+type PasswordTotpMaterial = {
+  readonly passwordRowId: string;
+  readonly totpRowId: string;
+  readonly passwordVerifier: string;
+  readonly totpSecretReference: string;
+};
+
+/**
+ * Load ACTIVE PASSWORD+TOTP material without row locks.
+ * Used so Argon2id verification can run outside throttle/credential FOR UPDATE
+ * sections (R-02: concurrent invalid logins must still account failures under
+ * lock_timeout).
+ */
+async function loadPasswordTotpMaterial(
+  client: PoolClient,
+  adminUserId: string,
+): Promise<PasswordTotpMaterial | null> {
+  // Login/reauth verify PASSWORD+TOTP only. Unsupported ACTIVE factors (e.g. WEBAUTHN)
+  // block enrollment/replace via assertNoUnsupportedActiveCredentials elsewhere — not login.
+  const creds = await client.query<{
+    credential_type: string;
+    password_verifier: string | null;
+    totp_secret_reference: string | null;
+    id: string;
+  }>(
+    `SELECT id::text, credential_type::text, password_verifier, totp_secret_reference
+     FROM admin_credentials
+     WHERE admin_user_id = $1::uuid
+       AND status = 'ACTIVE'
+       AND disabled_at IS NULL
+       AND credential_type IN ('PASSWORD', 'TOTP')
+     ORDER BY credential_type ASC, id ASC`,
+    [adminUserId],
+  );
+  assertUnambiguousPasswordTotpPair(creds.rows);
+  const passwordRow = creds.rows.find((r) => r.credential_type === 'PASSWORD');
+  const totpRow = creds.rows.find((r) => r.credential_type === 'TOTP');
+  if (
+    passwordRow?.password_verifier === undefined ||
+    passwordRow.password_verifier === null ||
+    totpRow?.totp_secret_reference === undefined ||
+    totpRow.totp_secret_reference === null
+  ) {
+    return null;
+  }
+  if (!isLocalTotpSealReference(totpRow.totp_secret_reference)) {
+    throw new AuthDomainError(
+      'FORBIDDEN',
+      'TOTP secret reference format is not supported by local Owner auth CLI',
+    );
+  }
+  return {
+    passwordRowId: passwordRow.id,
+    totpRowId: totpRow.id,
+    passwordVerifier: passwordRow.password_verifier,
+    totpSecretReference: totpRow.totp_secret_reference,
+  };
+}
+
+type PasswordTotpEval =
+  | { readonly ok: false }
+  | {
+      readonly ok: true;
+      readonly material: PasswordTotpMaterial;
+      readonly totpSecret: Uint8Array;
+      readonly step: bigint;
+    };
+
+/**
+ * CPU-bound password+TOTP check (Argon2id + seal unseal). No DB locks held.
+ * On success, returns the verified step + unsealed secret so the durable TX can
+ * finalize without repeating Argon2 under throttle/credential locks (R-02).
+ */
+async function evaluatePasswordTotpFactors(
+  material: PasswordTotpMaterial,
+  password: string,
+  totpCode: string,
+  evaluationTimeMs?: number,
+): Promise<PasswordTotpEval> {
+  assertTotpCodeFormat(totpCode);
+  const passwordOk = await verifyAdminPassword(password, material.passwordVerifier);
+  if (!passwordOk) return { ok: false };
+  let secret: Uint8Array;
+  try {
+    secret = unsealTotpSecret(password, material.totpSecretReference);
+  } catch {
+    return { ok: false };
+  }
+  const atMs = evaluationTimeMs ?? Date.now();
+  const step = verifyTotpCodeWithStep(secret, totpCode, atMs);
+  if (step === null) {
+    secret.fill(0);
+    return { ok: false };
+  }
+  return { ok: true, material, totpSecret: secret, step };
+}
+
+/**
+ * Short critical section: lock credentials, confirm material unchanged, cheap
+ * TOTP re-check with the phase-2 secret. Does not consume the step (caller may
+ * still need session eligibility — FS-03 reauth ordering).
+ */
+async function resolvePreVerifiedPasswordTotp(
+  client: PoolClient,
+  adminUserId: string,
+  pre: Extract<PasswordTotpEval, { ok: true }>,
+  totpCode: string,
+  evaluationTimeMs?: number,
+): Promise<LockedTotpCheck> {
+  assertTotpCodeFormat(totpCode);
+  const creds = await client.query<{
+    credential_type: string;
+    password_verifier: string | null;
+    totp_secret_reference: string | null;
+    id: string;
+  }>(
+    `SELECT id::text, credential_type::text, password_verifier, totp_secret_reference
+     FROM admin_credentials
+     WHERE admin_user_id = $1::uuid
+       AND status = 'ACTIVE'
+       AND disabled_at IS NULL
+       AND credential_type IN ('PASSWORD', 'TOTP')
+     ORDER BY credential_type ASC, id ASC
+     FOR UPDATE`,
+    [adminUserId],
+  );
+  assertUnambiguousPasswordTotpPair(creds.rows);
+  const passwordRow = creds.rows.find((r) => r.credential_type === 'PASSWORD');
+  const totpRow = creds.rows.find((r) => r.credential_type === 'TOTP');
+  if (
+    passwordRow?.password_verifier === undefined ||
+    passwordRow.password_verifier === null ||
+    totpRow?.totp_secret_reference === undefined ||
+    totpRow.totp_secret_reference === null
+  ) {
+    return { ok: false };
+  }
+  if (
+    passwordRow.id !== pre.material.passwordRowId ||
+    totpRow.id !== pre.material.totpRowId ||
+    passwordRow.password_verifier !== pre.material.passwordVerifier ||
+    totpRow.totp_secret_reference !== pre.material.totpSecretReference
+  ) {
+    return { ok: false };
+  }
+  const atMs = evaluationTimeMs ?? Date.now();
+  const step = verifyTotpCodeWithStep(pre.totpSecret, totpCode, atMs);
+  if (step === null) return { ok: false };
+  return {
+    ok: true,
+    passwordRowId: passwordRow.id,
+    totpRowId: totpRow.id,
+    step,
+  };
+}
+
+async function finalizePreVerifiedPasswordTotp(
+  client: PoolClient,
+  adminUserId: string,
+  pre: Extract<PasswordTotpEval, { ok: true }>,
+  totpCode: string,
+  evaluationTimeMs?: number,
+): Promise<boolean> {
+  const checked = await resolvePreVerifiedPasswordTotp(
+    client,
+    adminUserId,
+    pre,
+    totpCode,
+    evaluationTimeMs,
+  );
+  if (!checked.ok) return false;
+  return consumeVerifiedPasswordTotp(client, adminUserId, checked);
+}
+
 /**
  * Lock credentials (hierarchy step 3) and verify password+TOTP without consuming the step.
  */
@@ -1030,31 +1222,66 @@ export async function verifyOwnerAdminPasswordAndTotp(
   } & GateFields,
 ): Promise<void> {
   const pool = requireOwnerAuthPool(db);
-  await withPoolOwnedOwnerAuthTransaction(pool, async (client) => {
+  const prep = await withPoolOwnedReadOnlyTransaction(pool, async (client) => {
     await assertOwnerAdminAuthDatabaseWritable(client, {
       expectedDatabase: input.expectedDatabase,
       expectedClusterSystemIdentifier: input.expectedClusterSystemIdentifier,
       operationalConfirm: input.operationalConfirm ?? null,
     });
-    await requireActiveOwner(client, input.adminUserId, { forUpdate: true });
-    await lockThrottleForUpdate(client, input.adminUserId);
-    await assertNotLocked(client, input.adminUserId);
-    const verified = await tryVerifyPasswordTotp(client, {
-      adminUserId: input.adminUserId,
-      password: input.password,
-      totpCode: input.totpCode,
-      evaluationTimeMs: input.evaluationTimeMs,
-    });
-    if (!verified.ok) {
-      await recordAuthFailure(client, input.adminUserId);
-      return {
-        status: 'auth_rejected' as const,
-        adminUserId: input.adminUserId,
-        error: new AuthDomainError('UNAUTHENTICATED', 'invalid credentials'),
-      };
-    }
-    return { status: 'ok' as const, value: undefined };
+    await requireActiveOwner(client, input.adminUserId, { forUpdate: false });
+    const material = await loadPasswordTotpMaterial(client, input.adminUserId);
+    return { material };
   });
+
+  const factors =
+    prep.material !== null
+      ? await evaluatePasswordTotpFactors(
+          prep.material,
+          input.password,
+          input.totpCode,
+          input.evaluationTimeMs,
+        )
+      : ({ ok: false } as const);
+
+  try {
+    await withPoolOwnedOwnerAuthTransaction(pool, async (client) => {
+      await assertOwnerAdminAuthDatabaseWritable(client, {
+        expectedDatabase: input.expectedDatabase,
+        expectedClusterSystemIdentifier: input.expectedClusterSystemIdentifier,
+        operationalConfirm: input.operationalConfirm ?? null,
+      });
+      await requireActiveOwner(client, input.adminUserId, { forUpdate: true });
+      await lockThrottleForUpdate(client, input.adminUserId);
+      await assertNotLocked(client, input.adminUserId);
+      if (!factors.ok) {
+        await recordAuthFailure(client, input.adminUserId);
+        return {
+          status: 'auth_rejected' as const,
+          adminUserId: input.adminUserId,
+          error: new AuthDomainError('UNAUTHENTICATED', 'invalid credentials'),
+        };
+      }
+      // Success: finalize under locks without Argon2 (defeat TOCTOU / replay).
+      const finalized = await finalizePreVerifiedPasswordTotp(
+        client,
+        input.adminUserId,
+        factors,
+        input.totpCode,
+        input.evaluationTimeMs,
+      );
+      if (!finalized) {
+        await recordAuthFailure(client, input.adminUserId);
+        return {
+          status: 'auth_rejected' as const,
+          adminUserId: input.adminUserId,
+          error: new AuthDomainError('UNAUTHENTICATED', 'invalid credentials'),
+        };
+      }
+      return { status: 'ok' as const, value: undefined };
+    });
+  } finally {
+    if (factors.ok) factors.totpSecret.fill(0);
+  }
 }
 
 export interface LoginOwnerAdminInput extends GateFields {
@@ -1105,80 +1332,120 @@ export async function loginOwnerAdmin(
   input: LoginOwnerAdminInput,
 ): Promise<LoginOwnerAdminBundle> {
   const pool = requireOwnerAuthPool(db);
-  return withPoolOwnedOwnerAuthTransaction(pool, async (client) => {
-    const gate = await assertOwnerAdminAuthDatabaseWritable(client, {
+
+  // Phase 1: unlocked reads. Argon2 must not run under throttle FOR UPDATE (R-02).
+  const prep = await withPoolOwnedReadOnlyTransaction(pool, async (client) => {
+    await assertOwnerAdminAuthDatabaseWritable(client, {
       expectedDatabase: input.expectedDatabase,
       expectedClusterSystemIdentifier: input.expectedClusterSystemIdentifier,
       operationalConfirm: input.operationalConfirm ?? null,
     });
     const adminUserId = await resolveAdminUserId(client, input);
-    const owner = await requireActiveOwner(client, adminUserId, { forUpdate: true });
-    await lockThrottleForUpdate(client, adminUserId);
-    await assertNotLocked(client, adminUserId);
+    await requireActiveOwner(client, adminUserId, { forUpdate: false });
+    const material = await loadPasswordTotpMaterial(client, adminUserId);
+    return { adminUserId, material };
+  });
 
-    const verified = await tryVerifyPasswordTotp(client, {
-      adminUserId,
-      password: input.password,
-      totpCode: input.totpCode,
-      evaluationTimeMs: input.evaluationTimeMs,
-    });
-    if (!verified.ok) {
-      await recordAuthFailure(client, adminUserId);
-      return {
-        status: 'auth_rejected',
-        adminUserId,
-        error: new AuthDomainError('UNAUTHENTICATED', 'invalid credentials'),
-      };
-    }
+  // Phase 2: CPU-bound factor check outside any transaction / row locks.
+  const factors =
+    prep.material !== null
+      ? await evaluatePasswordTotpFactors(
+          prep.material,
+          input.password,
+          input.totpCode,
+          input.evaluationTimeMs,
+        )
+      : ({ ok: false } as const);
 
-    const sessionToken = generateAdminSessionToken();
-    const tokenHash = hashAdminSessionToken(sessionToken);
-    const idle = new Date(Date.now() + ADMIN_SESSION_IDLE_TTL_MS);
-    const absolute = new Date(Date.now() + ADMIN_SESSION_ABSOLUTE_TTL_MS);
-    const inserted = await client.query<{ id: string; reauthenticated_at: Date }>(
-      `INSERT INTO admin_sessions (
-         admin_user_id, session_token_hash, idle_expires_at, absolute_expires_at, reauthenticated_at
-       ) VALUES (
-         $1::uuid, $2, $3, $4, now()
-       )
-       RETURNING id::text, reauthenticated_at`,
-      [adminUserId, tokenHash, idle.toISOString(), absolute.toISOString()],
-    );
-    const session = inserted.rows[0];
-    if (session === undefined) {
-      throw new AuthDomainError('INTERNAL', 'failed to create admin session');
-    }
-    await client.query(
-      `UPDATE admin_users SET last_login_at = now(), last_reauthenticated_at = now(), updated_at = now()
-       WHERE id = $1::uuid`,
-      [adminUserId],
-    );
-    await insertRedactedAudit(client, {
-      adminUserId,
-      actionType: 'owner_admin_auth.session_created',
-      resourceType: 'admin_session',
-      resourceId: session.id,
-      reason: 'Owner admin session created',
-      afterSnapshot: {
-        database: gate.redactedTarget,
-        cluster: gate.redactedClusterId,
+  // Phase 3: short durable TX — serialize lockout accounting / session create only.
+  // No Argon2 under locks (including TOTP-replay success path).
+  try {
+    return await withPoolOwnedOwnerAuthTransaction(pool, async (client) => {
+      const gate = await assertOwnerAdminAuthDatabaseWritable(client, {
+        expectedDatabase: input.expectedDatabase,
+        expectedClusterSystemIdentifier: input.expectedClusterSystemIdentifier,
+        operationalConfirm: input.operationalConfirm ?? null,
+      });
+      const owner = await requireActiveOwner(client, prep.adminUserId, { forUpdate: true });
+      await lockThrottleForUpdate(client, prep.adminUserId);
+      await assertNotLocked(client, prep.adminUserId);
+
+      if (!factors.ok) {
+        await recordAuthFailure(client, prep.adminUserId);
+        return {
+          status: 'auth_rejected',
+          adminUserId: prep.adminUserId,
+          error: new AuthDomainError('UNAUTHENTICATED', 'invalid credentials'),
+        };
+      }
+
+      const finalized = await finalizePreVerifiedPasswordTotp(
+        client,
+        prep.adminUserId,
+        factors,
+        input.totpCode,
+        input.evaluationTimeMs,
+      );
+      if (!finalized) {
+        await recordAuthFailure(client, prep.adminUserId);
+        return {
+          status: 'auth_rejected',
+          adminUserId: prep.adminUserId,
+          error: new AuthDomainError('UNAUTHENTICATED', 'invalid credentials'),
+        };
+      }
+
+      const sessionToken = generateAdminSessionToken();
+      const tokenHash = hashAdminSessionToken(sessionToken);
+      const idle = new Date(Date.now() + ADMIN_SESSION_IDLE_TTL_MS);
+      const absolute = new Date(Date.now() + ADMIN_SESSION_ABSOLUTE_TTL_MS);
+      const inserted = await client.query<{ id: string; reauthenticated_at: Date }>(
+        `INSERT INTO admin_sessions (
+           admin_user_id, session_token_hash, idle_expires_at, absolute_expires_at, reauthenticated_at
+         ) VALUES (
+           $1::uuid, $2, $3, $4, now()
+         )
+         RETURNING id::text, reauthenticated_at`,
+        [prep.adminUserId, tokenHash, idle.toISOString(), absolute.toISOString()],
+      );
+      const session = inserted.rows[0];
+      if (session === undefined) {
+        throw new AuthDomainError('INTERNAL', 'failed to create admin session');
+      }
+      await client.query(
+        `UPDATE admin_users SET last_login_at = now(), last_reauthenticated_at = now(), updated_at = now()
+         WHERE id = $1::uuid`,
+        [prep.adminUserId],
+      );
+      await insertRedactedAudit(client, {
+        adminUserId: prep.adminUserId,
+        actionType: 'owner_admin_auth.session_created',
+        resourceType: 'admin_session',
+        resourceId: session.id,
+        reason: 'Owner admin session created',
+        afterSnapshot: {
+          database: gate.redactedTarget,
+          cluster: gate.redactedClusterId,
+          idleExpiresAt: idle.toISOString(),
+          absoluteExpiresAt: absolute.toISOString(),
+        },
+      });
+
+      const result: LoginOwnerAdminResult = {
+        adminUserId: prep.adminUserId,
+        email: owner.email,
+        sessionId: session.id,
         idleExpiresAt: idle.toISOString(),
         absoluteExpiresAt: absolute.toISOString(),
-      },
+        reauthenticatedAt: session.reauthenticated_at.toISOString(),
+        currentDatabase: gate.currentDatabase,
+        redactedTarget: gate.redactedTarget,
+      };
+      return { status: 'ok', value: createSessionTokenBundle(result, sessionToken) };
     });
-
-    const result: LoginOwnerAdminResult = {
-      adminUserId,
-      email: owner.email,
-      sessionId: session.id,
-      idleExpiresAt: idle.toISOString(),
-      absoluteExpiresAt: absolute.toISOString(),
-      reauthenticatedAt: session.reauthenticated_at.toISOString(),
-      currentDatabase: gate.currentDatabase,
-      redactedTarget: gate.redactedTarget,
-    };
-    return { status: 'ok', value: createSessionTokenBundle(result, sessionToken) };
-  });
+  } finally {
+    if (factors.ok) factors.totpSecret.fill(0);
+  }
 }
 
 export interface ReauthOwnerAdminSessionInput extends GateFields {
@@ -1201,15 +1468,14 @@ export async function reauthenticateOwnerAdminSession(
   input: ReauthOwnerAdminSessionInput,
 ): Promise<ReauthOwnerAdminSessionResult> {
   const pool = requireOwnerAuthPool(db);
-  return withPoolOwnedOwnerAuthTransaction(pool, async (client) => {
-    const gate = await assertOwnerAdminAuthDatabaseWritable(client, {
+  const tokenHash = hashAdminSessionToken(input.sessionToken);
+
+  const prep = await withPoolOwnedReadOnlyTransaction(pool, async (client) => {
+    await assertOwnerAdminAuthDatabaseWritable(client, {
       expectedDatabase: input.expectedDatabase,
       expectedClusterSystemIdentifier: input.expectedClusterSystemIdentifier,
       operationalConfirm: input.operationalConfirm ?? null,
     });
-    const tokenHash = hashAdminSessionToken(input.sessionToken);
-
-    // Resolve ownership WITHOUT locking the session (avoids session→owner inversion).
     const peek = await client.query<{
       id: string;
       admin_user_id: string;
@@ -1224,109 +1490,143 @@ export async function reauthenticateOwnerAdminSession(
     if (peeked === undefined) {
       throw new AuthDomainError('UNAUTHENTICATED', 'session not found');
     }
-
-    // Hierarchy: Owner → throttle → credentials (check, no consume) → session → consume TOTP.
-    await requireActiveOwner(client, peeked.admin_user_id, { forUpdate: true });
-    await lockThrottleForUpdate(client, peeked.admin_user_id);
-    await assertNotLocked(client, peeked.admin_user_id);
-
-    const checked = await lockAndCheckPasswordTotp(client, {
-      adminUserId: peeked.admin_user_id,
-      password: input.password,
-      totpCode: input.totpCode,
-      evaluationTimeMs: input.evaluationTimeMs,
-    });
-    if (!checked.ok) {
-      await recordAuthFailure(client, peeked.admin_user_id);
-      return {
-        status: 'auth_rejected',
-        adminUserId: peeked.admin_user_id,
-        error: new AuthDomainError('UNAUTHENTICATED', 'invalid credentials'),
-      };
-    }
-
-    const session = await client.query<{
-      id: string;
-      admin_user_id: string;
-      session_token_hash: string;
-      idle_expires_at: Date;
-      absolute_expires_at: Date;
-      revoked_at: Date | null;
-    }>(
-      `SELECT id::text, admin_user_id::text, session_token_hash, idle_expires_at, absolute_expires_at, revoked_at
-       FROM admin_sessions
-       WHERE id = $1::uuid
-       FOR UPDATE
-       LIMIT 1`,
-      [peeked.id],
-    );
-    const row = session.rows[0];
-    if (row === undefined) {
-      throw new AuthDomainError('UNAUTHENTICATED', 'session not found');
-    }
-    // Recheck after locks: token, ownership, revocation, expiry — before TOTP consume.
-    if (row.session_token_hash !== tokenHash || row.admin_user_id !== peeked.admin_user_id) {
-      throw new AuthDomainError('UNAUTHENTICATED', 'session not found');
-    }
-    if (row.revoked_at !== null) {
-      throw new AuthDomainError('SESSION_REVOKED', 'session is revoked');
-    }
-    const now = Date.now();
-    if (row.idle_expires_at.getTime() <= now || row.absolute_expires_at.getTime() <= now) {
-      throw new AuthDomainError('SESSION_EXPIRED', 'session is expired');
-    }
-
-    const consumed = await consumeVerifiedPasswordTotp(client, row.admin_user_id, checked);
-    if (!consumed) {
-      await recordAuthFailure(client, row.admin_user_id);
-      return {
-        status: 'auth_rejected',
-        adminUserId: row.admin_user_id,
-        error: new AuthDomainError('UNAUTHENTICATED', 'invalid credentials'),
-      };
-    }
-
-    const idle = new Date(now + ADMIN_SESSION_IDLE_TTL_MS);
-    const updated = await client.query<{ reauthenticated_at: Date }>(
-      `UPDATE admin_sessions
-       SET reauthenticated_at = now(),
-           last_seen_at = now(),
-           idle_expires_at = LEAST($2::timestamptz, absolute_expires_at)
-       WHERE id = $1::uuid
-         AND revoked_at IS NULL
-         AND session_token_hash = $3
-       RETURNING reauthenticated_at`,
-      [row.id, idle.toISOString(), tokenHash],
-    );
-    const reauthAt = updated.rows[0]?.reauthenticated_at;
-    if (reauthAt === undefined) {
-      // Session revoked under locks (e.g. concurrent replace) — fail closed.
-      throw new AuthDomainError('SESSION_REVOKED', 'session is revoked');
-    }
-    await client.query(
-      `UPDATE admin_users SET last_reauthenticated_at = now(), updated_at = now() WHERE id = $1::uuid`,
-      [row.admin_user_id],
-    );
-    await insertRedactedAudit(client, {
-      adminUserId: row.admin_user_id,
-      actionType: 'owner_admin_auth.reauthenticated',
-      resourceType: 'admin_session',
-      resourceId: row.id,
-      reason: 'Owner admin session reauthenticated',
-      afterSnapshot: { database: gate.redactedTarget, cluster: gate.redactedClusterId },
-    });
-
-    return {
-      status: 'ok',
-      value: {
-        adminUserId: row.admin_user_id,
-        sessionId: row.id,
-        reauthenticatedAt: reauthAt.toISOString(),
-        reauthMaxAgeMs: ADMIN_REAUTH_MAX_AGE_MS,
-        redactedTarget: gate.redactedTarget,
-      },
-    };
+    await requireActiveOwner(client, peeked.admin_user_id, { forUpdate: false });
+    const material = await loadPasswordTotpMaterial(client, peeked.admin_user_id);
+    return { peeked, material };
   });
+
+  const factors =
+    prep.material !== null
+      ? await evaluatePasswordTotpFactors(
+          prep.material,
+          input.password,
+          input.totpCode,
+          input.evaluationTimeMs,
+        )
+      : ({ ok: false } as const);
+
+  try {
+    return await withPoolOwnedOwnerAuthTransaction(pool, async (client) => {
+      const gate = await assertOwnerAdminAuthDatabaseWritable(client, {
+        expectedDatabase: input.expectedDatabase,
+        expectedClusterSystemIdentifier: input.expectedClusterSystemIdentifier,
+        operationalConfirm: input.operationalConfirm ?? null,
+      });
+
+      // Hierarchy (FS-03): Owner → throttle → credentials resolve → session → consume.
+      // No Argon2 under locks (R-02 success-path / TOTP-replay contention).
+      await requireActiveOwner(client, prep.peeked.admin_user_id, { forUpdate: true });
+      await lockThrottleForUpdate(client, prep.peeked.admin_user_id);
+      await assertNotLocked(client, prep.peeked.admin_user_id);
+
+      if (!factors.ok) {
+        await recordAuthFailure(client, prep.peeked.admin_user_id);
+        return {
+          status: 'auth_rejected',
+          adminUserId: prep.peeked.admin_user_id,
+          error: new AuthDomainError('UNAUTHENTICATED', 'invalid credentials'),
+        };
+      }
+
+      const checked = await resolvePreVerifiedPasswordTotp(
+        client,
+        prep.peeked.admin_user_id,
+        factors,
+        input.totpCode,
+        input.evaluationTimeMs,
+      );
+      if (!checked.ok) {
+        await recordAuthFailure(client, prep.peeked.admin_user_id);
+        return {
+          status: 'auth_rejected',
+          adminUserId: prep.peeked.admin_user_id,
+          error: new AuthDomainError('UNAUTHENTICATED', 'invalid credentials'),
+        };
+      }
+
+      const session = await client.query<{
+        id: string;
+        admin_user_id: string;
+        session_token_hash: string;
+        idle_expires_at: Date;
+        absolute_expires_at: Date;
+        revoked_at: Date | null;
+      }>(
+        `SELECT id::text, admin_user_id::text, session_token_hash, idle_expires_at, absolute_expires_at, revoked_at
+         FROM admin_sessions
+         WHERE id = $1::uuid
+         FOR UPDATE
+         LIMIT 1`,
+        [prep.peeked.id],
+      );
+      const row = session.rows[0];
+      if (row === undefined) {
+        throw new AuthDomainError('UNAUTHENTICATED', 'session not found');
+      }
+      if (row.session_token_hash !== tokenHash || row.admin_user_id !== prep.peeked.admin_user_id) {
+        throw new AuthDomainError('UNAUTHENTICATED', 'session not found');
+      }
+      if (row.revoked_at !== null) {
+        throw new AuthDomainError('SESSION_REVOKED', 'session is revoked');
+      }
+      const now = Date.now();
+      if (row.idle_expires_at.getTime() <= now || row.absolute_expires_at.getTime() <= now) {
+        throw new AuthDomainError('SESSION_EXPIRED', 'session is expired');
+      }
+
+      const consumed = await consumeVerifiedPasswordTotp(client, row.admin_user_id, checked);
+      if (!consumed) {
+        await recordAuthFailure(client, row.admin_user_id);
+        return {
+          status: 'auth_rejected',
+          adminUserId: row.admin_user_id,
+          error: new AuthDomainError('UNAUTHENTICATED', 'invalid credentials'),
+        };
+      }
+
+      const idle = new Date(now + ADMIN_SESSION_IDLE_TTL_MS);
+      const updated = await client.query<{ reauthenticated_at: Date }>(
+        `UPDATE admin_sessions
+         SET reauthenticated_at = now(),
+             last_seen_at = now(),
+             idle_expires_at = LEAST($2::timestamptz, absolute_expires_at)
+         WHERE id = $1::uuid
+           AND revoked_at IS NULL
+           AND session_token_hash = $3
+         RETURNING reauthenticated_at`,
+        [row.id, idle.toISOString(), tokenHash],
+      );
+      const reauthAt = updated.rows[0]?.reauthenticated_at;
+      if (reauthAt === undefined) {
+        throw new AuthDomainError('SESSION_REVOKED', 'session is revoked');
+      }
+      await client.query(
+        `UPDATE admin_users SET last_reauthenticated_at = now(), updated_at = now() WHERE id = $1::uuid`,
+        [row.admin_user_id],
+      );
+      await insertRedactedAudit(client, {
+        adminUserId: row.admin_user_id,
+        actionType: 'owner_admin_auth.reauthenticated',
+        resourceType: 'admin_session',
+        resourceId: row.id,
+        reason: 'Owner admin session reauthenticated',
+        afterSnapshot: { database: gate.redactedTarget, cluster: gate.redactedClusterId },
+      });
+
+      return {
+        status: 'ok',
+        value: {
+          adminUserId: row.admin_user_id,
+          sessionId: row.id,
+          reauthenticatedAt: reauthAt.toISOString(),
+          reauthMaxAgeMs: ADMIN_REAUTH_MAX_AGE_MS,
+          redactedTarget: gate.redactedTarget,
+        },
+      };
+    });
+  } finally {
+    if (factors.ok) factors.totpSecret.fill(0);
+  }
 }
 
 export async function logoutOwnerAdminSession(

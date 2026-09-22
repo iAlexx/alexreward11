@@ -91,6 +91,10 @@ connection. They are **not** alternatives to each other.
    implementation supports SPKI (or equivalent public-key) pinning **securely
    and in addition to** (1)–(3). SPKI matching MUST NOT silently substitute for
    required chain or hostname verification.
+   **v1 Owner decision (2026-09-22): SPKI = NO.** Explicitly supplied
+   `spki_sha256_hex` / `spkiSha256Hex` must be **refused** (fail closed) — never
+   ignored, stripped, or treated as satisfied. Mandatory CA chain + hostname
+   verification remain required without SPKI.
 6. **Fail closed** if any selected verification feature is unavailable in the
    runtime (missing CA file, hostname verify API absent, requested SPKI pin
    unsupported by the client build, etc.). Do not continue with a weaker subset.
@@ -99,20 +103,13 @@ connection. They are **not** alternatives to each other.
 
 | Mechanism | Role |
 | --- | --- |
-| Node `pg` / `tls` (or equivalent) with **custom CA** via `ssl.rootCerts` /
-  `ca` (PEM of Owner-approved trust anchor) | **Required** — chain verify |
-| `ssl.checkServerIdentity` / default TLS servername check bound to
-  `tls_server_name` (SNI + cert hostname) | **Required** — hostname verify |
-| libpq-compatible `sslmode=verify-full` semantics when a libpq client is used | **Required** equivalent |
-| Additional SPKI pin (e.g. custom `checkServerIdentity` that also compares
-  leaf/intermediate SPKI SHA-256 to profile `tls_spki_sha256`) | **Optional** add-on only |
+| Node `pg` passes `ssl` as Node.js `tls.ConnectionOptions` (not libpq `sslmode`) with **`rejectUnauthorized: true`**, Owner CA PEM in `ca`, and `servername` = profile `tls_server_name` | **Required** — chain verify + hostname verify via Node default `checkServerIdentity` |
+| libpq-compatible `sslmode=verify-full` semantics when a libpq client is used | **Required** equivalent (bootstrap URL must not carry conflicting `sslmode`) |
+| Additional SPKI pin | **Unsupported in v1 (G5=NO)** — refuse if configured |
 
-Rejected modes / behaviors:
-
-- `sslmode=disable`, `allow`, `prefer` without full verify
-- `verify-ca` **without** hostname verification (M1 requires hostname)
-- “Pin-only” / SPKI-only acceptance that skips chain building to the Owner CA
-- Any insecure fallback or retry that relaxes verify after failure
+**Note:** Setting `servername` alone without `rejectUnauthorized: true` does **not**
+enforce hostname verification. Isolated `tls.connect` tests exercise this adapter;
+they do **not** mean operational PostgreSQL TLS is configured.
 
 ### Supplementary only
 

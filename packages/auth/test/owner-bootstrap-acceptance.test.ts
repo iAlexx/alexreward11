@@ -116,7 +116,7 @@ describe('S-03 endpoint / TLS binding (no operational DB)', () => {
     ).toThrow(/trust anchor|CA/i);
   });
 
-  it('rejects SPKI pinning as unsupported in this client path', () => {
+  it('rejects SPKI pinning (G5=NO for v1)', () => {
     expect(() =>
       buildOwnerBootstrapPoolConfig(
         'postgresql://alex_rewards:x@db.example:5432/alex_rewards_test',
@@ -132,7 +132,7 @@ describe('S-03 endpoint / TLS binding (no operational DB)', () => {
           },
         },
       ),
-    ).toThrow(/SPKI/i);
+    ).toThrow(/G5|SPKI/i);
   });
 
   it('rejects plaintext live facts when profile requires TLS', () => {
@@ -219,8 +219,45 @@ describe('S-03 endpoint / TLS binding (no operational DB)', () => {
     expect(built.config.connectionString).toBeUndefined();
     expect(built.config.host).toBe('127.0.0.1');
     expect(built.config.ssl).toEqual(
-      expect.objectContaining({ rejectUnauthorized: true, servername: 'db.example' }),
+      expect.objectContaining({
+        rejectUnauthorized: true,
+        servername: 'db.example',
+        checkServerIdentity: expect.any(Function),
+      }),
     );
+  });
+
+  it('CV-01 refuses DNS URL host that differs from tls_server_name (pg overwrite hazard)', () => {
+    expect(() =>
+      buildOwnerBootstrapPoolConfig('postgresql://alex_rewards:x@evil.example:55432/alex_rewards_test', {
+        profileId: 'cv01',
+        deploymentEnv: 'staging',
+        expectedDatabaseName: 'alex_rewards_test',
+        tls: {
+          mode: 'verify_full',
+          caPem: '-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----',
+          tlsServerName: 'db.example',
+        },
+      }),
+    ).toThrow(/tls_server_name|overwrite/i);
+  });
+
+  it('CV-01 allows URL host equal to tls_server_name', () => {
+    const built = buildOwnerBootstrapPoolConfig(
+      'postgresql://alex_rewards:x@db.example:55432/alex_rewards_test',
+      {
+        profileId: 'cv01-match',
+        deploymentEnv: 'staging',
+        expectedDatabaseName: 'alex_rewards_test',
+        tls: {
+          mode: 'verify_full',
+          caPem: '-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----',
+          tlsServerName: 'db.example',
+        },
+      },
+    );
+    expect(built.config.host).toBe('db.example');
+    expect((built.config.ssl as { servername?: string }).servername).toBe('db.example');
   });
 
   it('rejects operational alex_rewards database name', () => {
@@ -493,6 +530,72 @@ describe.skipIf(databaseUrl === '')(
         await locker.end();
 
         await expect(popPromise).rejects.toThrow(/grant expired/i);
+        await assertNoOwnerResidue(pool);
+      });
+
+      it('CV-02 rejects final enrollment when grant expires during row-lock contention', async () => {
+        const wallNow = Math.floor(Date.now() / 1000);
+        const lifetimeSec = 3;
+        const { channel, started, pop } = await popVerified(
+          'cv02-enroll-lock@local.test',
+          wallNow,
+          lifetimeSec,
+        );
+        clearTestClock(pool);
+        const locker = new Client({ connectionString: databaseUrl });
+        await locker.connect();
+        await locker.query('BEGIN');
+        await locker.query(
+          `SELECT grant_id FROM owner_bootstrap_grants WHERE grant_id = $1::uuid FOR UPDATE`,
+          [started.grantId],
+        );
+
+        const totpSecret = generateTotpSecretBytes();
+        const nonceCred = bytesToHex(randomBytes(32));
+        const clientUnixTime = wallNow;
+        const publicHeader = {
+          v: 1 as const,
+          purpose: 'FIRST_OWNER_CREDENTIAL_SETUP' as const,
+          grant_id: started.grantId,
+          attempt_id: started.attemptId,
+          challenge_id: started.challengeId,
+          ticket_id: pop.ticketId,
+          channel_fp: started.channelFp,
+          intended_subject: 'cv02-enroll-lock@local.test',
+          credential_setup: {
+            password_encoding: 'utf8' as const,
+            totp_secret_encoding: 'base32_nopad_uppercase' as const,
+            totp_digits: 6 as const,
+            totp_period_seconds: 30 as const,
+            totp_algorithm: 'SHA1' as const,
+          },
+          client_unix_time: clientUnixTime,
+          nonce32: nonceCred,
+        };
+        const enrollPromise = completeOwnerBootstrapEnrollment(pool, {
+          attemptId: started.attemptId,
+          challengeId: started.challengeId,
+          ticketId: pop.ticketId,
+          enrollmentTicket: pop.enrollmentTicket,
+          intendedSubject: 'cv02-enroll-lock@local.test',
+          password: PASSWORD,
+          totpSecretBytes: totpSecret,
+          totpConfirmCode: generateTotpCode(totpSecret),
+          clientUnixTime,
+          nonce32Hex: nonceCred,
+          sigChannelCredB64: signFinalCredReq(channel.privateKey, {
+            publicHeader,
+            passwordUtf8: Buffer.from(PASSWORD, 'utf8'),
+            totpSecretBytes: totpSecret,
+          }),
+          trust,
+        });
+
+        await sleep(lifetimeSec * 1000 + 1500);
+        await locker.query('COMMIT');
+        await locker.end();
+
+        await expect(enrollPromise).rejects.toThrow(/grant expired|freshness|ticket expired/i);
         await assertNoOwnerResidue(pool);
       });
 

@@ -313,8 +313,14 @@ one Owner”) was not database-enforced. A partial unique index **cannot** use a
 
 ## ADR-021 — M1-A.1 first-Owner trust design (Option C + endpoint trust)
 
-**Status:** Design for independent review (incl. final credential-request binding); **not implemented**.
+**Status:** Design for independent review (incl. final credential-request binding).
+**Local Stage B:** Owner-authorized and implemented for isolated tests (ephemeral
+test keys only) — see Stage B clarification below and checklist §C. **Does not**
+complete Checklist **B** or **D**.
 **Operational label:** `DESIGN READY — TRUST ESTABLISHMENT BLOCKED`.
+**Historical note:** Earlier ADR text said “not implemented” in the sense of
+production trust establishment / ops redeem go-live; that must not be conflated
+with absence of local Stage B after the 2026-09-21 clarification.
 
 ### Problem
 
@@ -378,9 +384,12 @@ authentication.
 
 ### Non-decisions (Owner still required)
 
-Witness set, dual-channel pair, production key ceremony, Owner CA trust-anchor
-material, optional SPKI add-on, Stage B local authorization text, operational
-go-live.
+Witness identities (concrete names), production key ceremony execution, Owner CA
+trust-anchor material + `tls_server_name`, operational go-live (**D**).
+**SPKI add-on:** Owner decided **NO for v1** (2026-09-22); mandatory CA+hostname
+verify-full remains. Dual-channel v1 pair and profile digest method were
+Owner-accepted at design-contract level (BD-1…BD-6). Ceremony execution still pending.
+Stage B **local** authorization was recorded 2026-09-21 (clarification below).
 
 ### Stage B local clarification (2026-09-21)
 

@@ -493,11 +493,14 @@ export async function startOwnerBootstrapAttempt(
       );
     }
 
-    const issuedAt = nowSec;
+    // CV-02: fresh authoritative time after locks / supersede, immediately before INSERT.
+    const issueNow = await readAuthoritativeNowSec(client, pool);
+    await assertPersistedGrantNotExpired(client, payload.grant_id, issueNow);
+
+    const issuedAt = issueNow;
     const expiresAt = issuedAt + CHALLENGE_TTL_SEC;
-    // Cap challenge TTL so it cannot extend past grant.exp
     const challengeExpiresAt = Math.min(expiresAt, Number(payload.exp));
-    if (nowSec >= challengeExpiresAt) {
+    if (issueNow >= challengeExpiresAt) {
       throw new AuthDomainError('FORBIDDEN', 'grant expired');
     }
 
@@ -694,9 +697,19 @@ export async function submitOwnerBootstrapPop(
       throw new AuthDomainError('FORBIDDEN', 'channel pop nonce replay');
     }
 
-    // Fresh clock again immediately before minting ticket (S-01).
+    // Fresh clock again immediately before minting ticket (S-01 / CV-02).
     const decideNow = await readAuthoritativeNowSec(client, pool);
     await assertPersistedGrantNotExpired(client, attempt.grant_id, decideNow);
+    if (decideNow > expiresAt) {
+      await client.query(
+        `UPDATE owner_bootstrap_attempts SET pop_status = 'EXPIRED' WHERE attempt_id = $1::uuid`,
+        [input.attemptId],
+      );
+      throw new AuthDomainError('FORBIDDEN', 'challenge expired');
+    }
+    if (Math.abs(decideNow - input.clientUnixTime) > CLIENT_SKEW_SEC) {
+      throw new AuthDomainError('FORBIDDEN', 'channel pop freshness failed');
+    }
     const grantRow = await client.query<{ exp: string }>(
       `SELECT exp::text FROM owner_bootstrap_grants WHERE grant_id = $1::uuid`,
       [attempt.grant_id],
@@ -843,6 +856,12 @@ export async function abortOwnerBootstrapAttempt(
       );
     } catch {
       throw new AuthDomainError('FORBIDDEN', 'abort nonce replay');
+    }
+
+    // CV-02: fresh freshness check immediately before abort state transition.
+    const decideNow = await readAuthoritativeNowSec(client, pool);
+    if (Math.abs(decideNow - input.clientUnixTime) > CLIENT_SKEW_SEC) {
+      throw new AuthDomainError('FORBIDDEN', 'abort freshness failed');
     }
 
     await client.query(
@@ -1067,9 +1086,15 @@ export async function completeOwnerBootstrapEnrollment(
       throw new AuthDomainError('FORBIDDEN', 'channel cred nonce replay');
     }
 
-    // S-01: re-read wall clock + grant expiry immediately before credential/seat mutation.
+    // S-01 / CV-02: re-read wall clock + all deadlines immediately before credential/seat mutation.
     const enrollNow = await readAuthoritativeNowSec(client, pool);
     await assertPersistedGrantNotExpired(client, attempt.grant_id, enrollNow);
+    if (enrollNow > ticketExp) {
+      throw new AuthDomainError('FORBIDDEN', 'enrollment ticket expired');
+    }
+    if (Math.abs(enrollNow - input.clientUnixTime) > CLIENT_SKEW_SEC) {
+      throw new AuthDomainError('FORBIDDEN', 'credential freshness failed');
+    }
     await assertM0SeatVacantForBootstrap(client);
 
     const email = input.intendedSubject;

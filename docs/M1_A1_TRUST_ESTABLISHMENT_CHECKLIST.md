@@ -17,13 +17,13 @@
 
 ## B — Trust anchor independently established (BLOCKED)
 
-- [ ] Owner confirms Option C
+- [x] Owner confirms Option C
 - [ ] Witnessed ceremony + offline keypair
 - [ ] Ceremony **seal** recorded (pubkey + profile digest + witnesses)
 - [ ] Dual-channel production provenance installed
 - [ ] Private key absent from git/CI/app/review ZIPs
 - [ ] Owner-approved TLS CA trust anchor + `tls_server_name` recorded
-- [ ] Optional SPKI add-on decided (yes/no); never as chain/hostname substitute
+- [x] Optional SPKI add-on decided (yes/no); never as chain/hostname substitute — **NO for v1** (Owner 2026-09-22)
 - [ ] Infra privileged-DB controls acknowledged
 - [ ] PoP redeem + channel-bound ticket procedure drilled (paper)
 

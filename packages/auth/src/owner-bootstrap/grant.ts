@@ -83,7 +83,7 @@ function assertExactKeys(obj: Record<string, unknown>, allowed: readonly string[
     }
   }
   for (const need of allowed) {
-    if (!(need in obj)) {
+    if (!Object.hasOwn(obj, need)) {
       throw new AuthDomainError('VALIDATION', `missing grant field: ${need}`);
     }
   }
@@ -101,7 +101,7 @@ function assertExactKeysAllowOptional(
     }
   }
   for (const need of required) {
-    if (!(need in obj)) {
+    if (!Object.hasOwn(obj, need)) {
       throw new AuthDomainError('VALIDATION', `missing grant field: ${need}`);
     }
   }
@@ -195,7 +195,7 @@ export function validateGrantPayload(raw: unknown): OwnerBootstrapGrantPayload {
     throw new AuthDomainError('VALIDATION', 'evidence_fingerprint must be 64 hex');
   }
   let intendedAdminEmail: string | undefined;
-  if ('intended_admin_email' in ident) {
+  if (Object.hasOwn(ident, 'intended_admin_email')) {
     intendedAdminEmail = assertString(ident.intended_admin_email, 'intended_admin_email');
   }
 

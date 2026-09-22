@@ -17,12 +17,14 @@ See ADR-019, ADR-021, `docs/OWNER_ADMIN_BOOTSTRAP_DESIGN.md` (M1-A.1 Option C de
 - Operational first enrollment remains refused. M1-A.1 status:
   `DESIGN READY — TRUST ESTABLISHMENT BLOCKED`
   (Option C + endpoint trust + redemption PoP designed; production trust anchor
-  not independently established; no redeem implementation).
+  not independently established — Checklist **B** / **D**).
   Challenge lifecycle with enrollment-channel binding and FinalCredReq (P1)
-  and TLS chain+hostname+Owner CA (P2) are specified in design docs; Stage B
-  not authorized.
-  Local Stage B, if later authorized, may use disposable test-only keys without
-  marking production trust establishment complete.
+  and TLS chain+hostname+Owner CA (P2) are specified in design docs.
+  **Local Stage B** was Owner-authorized and implemented for isolated test DBs
+  with ephemeral test-only keys (checklist §C; ADR-021 Stage B clarification).
+  That does **not** establish Checklist **B** or authorize **D**.
+  Ceremony schema validators (G1/G2/G8) are structural only — **not** authentic
+  Owner provenance.
 - JSON stdout never contains TOTP seeds, otpauth URIs, passwords, OTPs, or session tokens.
 - Session tokens are returned only via `takeSessionTokenOnce()` for interactive stderr display.
 - ACTIVE unsupported credentials (e.g. WEBAUTHN) **block enrollment/replacement**
@@ -91,9 +93,11 @@ is not authorized by this document.
   `DESIGN READY — TRUST ESTABLISHMENT BLOCKED`
   (F1 redemption PoP, F2 JCS/hard exp, F3 seal root, P1 challenge/ticket/channel
   binding + FinalCredReq + final TX, P2 mandatory TLS chain+hostname+Owner CA
-  with optional SPKI add-on only documented; trust anchor not established;
-  Stage B not implemented).
-  Ephemeral test-only keys for future isolated Stage B ≠ Checklist B/D complete.
+  with optional SPKI add-on only documented; trust anchor not established —
+  Checklist **B**; ops enrollment — Checklist **D**).
+  Local Stage B isolated implementation exists (checklist §C); ephemeral
+  test-only keys ≠ Checklist B/D complete. Structural seal/profile/derivative
+  validation ≠ authentic Owner provenance.
 - Mixed ACTIVE WEBAUTHN + PASSWORD/TOTP: replacement refused until WebAuthn verification exists.
 - Local TOTP seal is password-bound, not KMS.
 - Terminal screen recording remains a residual channel even with TTY checks.

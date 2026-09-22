@@ -7,11 +7,9 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
-const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+import { summarizeSecurityGateDatabaseTarget } from './security-gate-db-summary.mjs';
 
-function redact(url) {
-  return String(url).replace(/:([^:@/]+)@/, ':***@');
-}
+const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 const dbUrl =
   process.env.OWNER_ADMIN_AUTH_DATABASE_URL ??
@@ -31,7 +29,8 @@ const normalized = dbUrl.includes('localhost')
   ? dbUrl.replace('://localhost', '://127.0.0.1').replace('@localhost:', '@127.0.0.1:')
   : dbUrl;
 
-console.log(`[m1-security-gates] database=${redact(normalized)}`);
+const target = summarizeSecurityGateDatabaseTarget(normalized);
+console.log(`[m1-security-gates] ${target.summary}`);
 console.log('[m1-security-gates] M1_CI_SECURITY_GATE=1 (fail-closed; no silent skip)');
 
 const env = {
