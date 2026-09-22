@@ -43,8 +43,44 @@ isolated DBs. Completing C **must not** check any **B** or **D** box.
 - [ ] Production seal derivatives installed
 - [ ] Explicit Owner go-live for first redeem
 - [ ] Separate approval to lift general Owner-auth default-deny for login
+- [ ] Owner-approved operational application of migrations **0024–0028** (not
+      authorized by local Stage B or by isolated rehearsal alone)
+
+### D.1 — Mandatory preflight before operational migration **0028**
+
+Before any future **Owner-authorized** operational apply of
+`0028_owner_bootstrap_attempt_nonce_attempt_wide`, run this **read-only**
+duplicate check on the target operational database (Owner-approved connection
+only; this checklist item does **not** authorize that connection by itself):
+
+```sql
+SELECT attempt_id, nonce_hex, count(*) AS purposes
+FROM owner_bootstrap_attempt_nonces
+GROUP BY attempt_id, nonce_hex
+HAVING count(*) > 1;
+```
+
+**Decision rule (Owner must approve the outcome before migrate):**
+
+| Result | Rule |
+| --- | --- |
+| **ZERO ROWS** | Nonce-conflict preflight **passes**. This does **not** authorize migration 0028 by itself — separate Owner migrate authorization and the rest of Checklist **D** remain required. |
+| **ONE OR MORE ROWS** | **BLOCK** migration 0028. Require a **separate** Owner-approved investigation and resolution procedure. |
+
+**Forbidden:** never automatically delete, rewrite, or deduplicate existing
+`owner_bootstrap_attempt_nonces` rows to force 0028 to apply.
+
+**Isolated rehearsal evidence (non-operational; 2026-09-22):** disposable
+PostgreSQL 18 rehearsal only — **operational database was not touched.**
+
+- Clean upgrade path **0023 → 0028:** **PASS**
+- Legacy synthetic cross-purpose duplicate nonces (pre-0028 PK): **expected
+  migration failure** (`23505` / could not create unique index)
+- Failed 0028 attempt on that legacy fixture: schema remained at **0027** head
+  (transactional; no partial 0028 apply)
 
 ## Forbidden until D
 
 Operational enrollment; real ops grants; ops private keys in any archive;
-broad default-deny disable.
+broad default-deny disable; operational migrate of 0024–0028 without Owner
+authorization and (for 0028) without a passing D.1 preflight decision.
