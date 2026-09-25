@@ -160,8 +160,10 @@ above.
 
 ## M. Exact accepted commit SHA
 
-Filled by archive helper into `MANIFEST.md` from `--commit`. Packaging uses the dedicated
-Phase 10 accepted commit created for this dual-archive workflow (see MANIFEST).
+- **Full SHA:** `58d5c81c4ab898f2fd9b16545e967e47bc1ce093`
+- **Short SHA:** `58d5c81`
+- **Branch:** `feature/owner-admin-session-auth`
+- Packaging uses this commit for `git archive` (see `MANIFEST.md`).
 
 ## N. Final PASS/FAIL for every gate
 
