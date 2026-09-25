@@ -181,6 +181,25 @@ export type {
   ProviderMonetaryFacts,
 } from './admin-read.js';
 
+export {
+  assertProviderMonetaryApprovalAllowed,
+  refuseProviderMonetaryApprovalWithoutClarification,
+} from './admin-monetary-approval.js';
+export type {
+  RefuseProviderMonetaryApprovalInput,
+  RefuseProviderMonetaryApprovalResult,
+} from './admin-monetary-approval.js';
+
+export {
+  createProviderLimitRuleVersion,
+  resolveActiveHardCeiling,
+  wouldExceedProviderHardLimit,
+} from './admin-limits.js';
+export type {
+  CreateProviderLimitRuleVersionInput,
+  CreateProviderLimitRuleVersionResult,
+} from './admin-limits.js';
+
 export { getEarnSummaryForUser } from './user-read.js';
 export type {
   EarnLimitUsage,

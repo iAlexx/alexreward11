@@ -230,17 +230,17 @@ describe('FS-01 / FS-05 / policy pure + mock (no operational DB)', () => {
     expect(() => assertOperationalFirstEnrollmentAllowed('alex_rewards_test', false)).not.toThrow();
   });
 
-  it('R-01 assertNoUnsupportedActiveCredentials refuses WEBAUTHN and unknown types', () => {
+  it('R-01 assertNoUnsupportedActiveCredentials allows WEBAUTHN; refuses unknown types', () => {
     expect(() =>
       assertNoUnsupportedActiveCredentials([{ credential_type: 'WEBAUTHN' }]),
-    ).toThrow(AuthDomainError);
+    ).not.toThrow();
     expect(() =>
       assertNoUnsupportedActiveCredentials([
         { credential_type: 'PASSWORD' },
         { credential_type: 'TOTP' },
         { credential_type: 'WEBAUTHN' },
       ]),
-    ).toThrow(AuthDomainError);
+    ).not.toThrow();
     expect(() =>
       assertNoUnsupportedActiveCredentials([{ credential_type: 'HARDWARE_KEY_X' }]),
     ).toThrow(AuthDomainError);
@@ -861,7 +861,7 @@ describe.skipIf(databaseUrl === '')(
       });
     });
 
-    it('R-01 refuses replace when WEBAUTHN + PASSWORD + TOTP are ACTIVE (no mutation/session)', async () => {
+    it('R-01 Phase13 WEBAUTHN + PASSWORD + TOTP: password+TOTP replace succeeds; WebAuthn kept', async () => {
       const t0 = Date.now();
       const enrolled = await enrollFresh(pool, adminUserId, expectedDatabase, t0);
       await pool.query(
@@ -870,47 +870,35 @@ describe.skipIf(databaseUrl === '')(
          ) VALUES ($1::uuid, 'WEBAUTHN', 'passkey', 'cred-wpt', 'pk-wpt', 'ACTIVE')`,
         [adminUserId],
       );
-      const t1 = nextPeriod(t0);
-      const login = await takeLoginToken(pool, {
-        adminUserId,
-        password: PASSWORD,
-        totpCode: generateTotpCode(enrolled.totpSecretBytes, t1),
-        expectedDatabase,
-        evaluationTimeMs: t1,
-      });
-      const before = await snapshotAuthState(pool, adminUserId);
-      const sessionCountBefore = before.sessions.length;
       const begun = await beginOwnerAdminTotpEnrollment();
-      const t2 = nextPeriod(t1);
-      await expect(
-        completeOwnerAdminTotpEnrollment(pool, {
-          adminUserId,
-          password: PASSWORD + 'Z',
-          totpSecretBytes: begun.totpSecretBytes,
-          totpConfirmationCode: generateTotpCode(begun.totpSecretBytes, t2),
-          expectedDatabase,
-          replaceExisting: true,
-          currentPassword: PASSWORD,
-          currentTotpCode: generateTotpCode(enrolled.totpSecretBytes, t2),
-          evaluationTimeMs: t2,
-        }),
-      ).rejects.toMatchObject({ code: 'FORBIDDEN' });
-      const after = await snapshotAuthState(pool, adminUserId);
-      expect(after.creds).toEqual(before.creds);
-      expect(after.sessions.length).toBe(sessionCountBefore);
-      expect(after.sessions.every((s) => s.revoked_at === null || s.revoked_at !== undefined)).toBe(
-        true,
-      );
-      // Existing session still valid; no new auth session from refused replace
-      expect(await evaluateRecoveryOwnerAuthGates(pool, adminUserId, login.sessionToken)).toEqual({
-        ok: true,
+      const t2 = nextPeriod(t0);
+      const replace = await completeOwnerAdminTotpEnrollment(pool, {
+        adminUserId,
+        password: PASSWORD + 'Z',
+        totpSecretBytes: begun.totpSecretBytes,
+        totpConfirmationCode: generateTotpCode(begun.totpSecretBytes, t2),
+        expectedDatabase,
+        replaceExisting: true,
+        currentPassword: PASSWORD,
+        currentTotpCode: generateTotpCode(enrolled.totpSecretBytes, t2),
+        evaluationTimeMs: t2,
       });
+      expect(replace.replaced).toBe(true);
       const webauthn = await pool.query<{ c: number }>(
         `SELECT count(*)::int AS c FROM admin_credentials
          WHERE admin_user_id = $1::uuid AND credential_type = 'WEBAUTHN' AND status = 'ACTIVE'`,
         [adminUserId],
       );
       expect(webauthn.rows[0]?.c).toBe(1);
+      const t3 = nextPeriod(t2);
+      const login = await takeLoginToken(pool, {
+        adminUserId,
+        password: PASSWORD + 'Z',
+        totpCode: generateTotpCode(begun.totpSecretBytes, t3),
+        expectedDatabase,
+        evaluationTimeMs: t3,
+      });
+      expect(login.sessionToken.length).toBeGreaterThan(20);
     });
 
     it('R-01 PASSWORD + TOTP only: replace succeeds', async () => {

@@ -122,3 +122,12 @@ Client `REQUEST_APPROVED` is **client-observed attempt evidence only** and must 
 authoritative `ad_daily_counters.provider_requests`. Conservative REQUEST safety is enforced
 at authorize via a DB-serialized count of server-created `ad_sessions` against the versioned
 REQUEST/UTC_DAY rule. See `docs/PHASE_11_INDEPENDENT_REVIEW_REMEDIATION.md`.
+
+## Phase 13 Admin provider operations
+
+Owner Admin exposes provider registry, contracts, capabilities, versioned limits (with
+old/new diff + impact preview), certification results, country rules, and settlement
+foundations under `v1/admin/*`. Limits cannot set effective allowance above `PROVIDER_HARD`.
+Monetary status transitions to `APPROVED` are refused while clarification items remain open
+(`refuseProviderMonetaryApprovalWithoutClarification`). Admin UI existence does **not**
+authorize AdsGram production money. See `docs/ADMIN_PROVIDER_OPS.md`.

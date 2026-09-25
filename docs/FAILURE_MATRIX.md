@@ -35,3 +35,21 @@
 | Client sends a reward amount or verification field | API refuses `400` before any domain call                                  | `apps/api/src/ads/http.ts`   |
 | Webhook throttle store unavailable                 | Reward URL ingestion fails closed                                         | Webhook controller           |
 | `packages/ads` reaches the ledger directly         | Test and CI boundary check fail                                           | `phase11-boundaries.test.ts` |
+
+## Phase 13 Admin control plane
+
+| Failure | Expected behavior | Verification |
+| ------- | ----------------- | ------------ |
+| Unauthenticated Admin API | 401 / denied | `phase13-admin-auth` API |
+| Telegram user JWT on Admin | refused by `AdminSessionGuard` | auth isolation tests |
+| Password-only or TOTP-only Owner login | insufficient | `packages/auth` phase13 |
+| Used recovery code replay | refused | `packages/auth` phase13 |
+| Stale high-impact reauth | mutation refused | assertRecentReauth |
+| Second-confirmation after payload change | invalid | confirmation binding tests |
+| Arbitrary JS/SQL policy payload | impossible / refused | Policy Center matrix |
+| Provider limit above PROVIDER_HARD | refused / effective ≤ hard | ads admin-limits gate |
+| AdsGram monetary APPROVED with open clarifications | refused | admin-monetary-approval |
+| Direct balance editor field/API | absent | security matrix + admin UI scan |
+| Review Queue action without domain command | refused / no ledger write | Review Queue matrix |
+| Feature flag trying to bypass auth / hard limit | impossible | feature-flag safety tests |
+| Unconfigured exposure production number | not invented; UNAVAILABLE | economics / exposure controllers |

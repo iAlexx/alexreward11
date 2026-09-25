@@ -41,6 +41,9 @@ const remoteAuthPolicy = {
   WALLET_PROOF_MAX_FUTURE_SKEW_SECONDS: '60',
   WALLET_PROOF_RATE_LIMIT_WINDOW_SECONDS: '300',
   WALLET_PROOF_RATE_LIMIT_MAX: '10',
+  ADMIN_WEBAUTHN_RP_ID: 'admin.example.com',
+  ADMIN_WEBAUTHN_ORIGIN: 'https://admin.example.com',
+  ADMIN_WEBAUTHN_RP_NAME: 'ALEx Rewards Owner Admin',
 } as const;
 
 describe('environment validation', () => {
@@ -257,6 +260,8 @@ describe('environment validation', () => {
     expect(config.WITHDRAWAL_FAKE_CHAIN_ENABLED).toBe(false);
     expect(config.WALLET_TON_PROOF_DOMAIN).toBe('miniapp.example.com');
     expect(config.WALLET_CHALLENGE_TTL_SECONDS).toBe(300);
+    expect(config.ADMIN_WEBAUTHN_RP_ID).toBe('admin.example.com');
+    expect(config.ADMIN_WEBAUTHN_ORIGIN).toBe('https://admin.example.com');
   });
 
   it('applies local wallet ownership defaults when unset', () => {
@@ -270,6 +275,28 @@ describe('environment validation', () => {
     expect(config.WALLET_TON_PROOF_DOMAIN).toBe('alex-rewards.local.test');
     expect(config.WALLET_CHALLENGE_TTL_SECONDS).toBe(300);
     expect(config.WALLET_PROOF_MAX_AGE_SECONDS).toBe(900);
+    expect(config.ADMIN_WEBAUTHN_RP_ID).toBe('localhost');
+    expect(config.ADMIN_WEBAUTHN_ORIGIN).toBe('http://localhost:3001');
+  });
+
+  it('fails closed when production omits ADMIN_WEBAUTHN_RP_ID', () => {
+    const { ADMIN_WEBAUTHN_RP_ID: _rp, ADMIN_WEBAUTHN_ORIGIN: _origin, ...withoutWebauthn } =
+      remoteAuthPolicy;
+    expect(() =>
+      loadApiConfig({
+        DEPLOYMENT_ENV: 'production',
+        NODE_ENV: 'production',
+        OTEL_ENABLED: 'true',
+        OTEL_EXPORTER_OTLP_ENDPOINT: 'https://otel.example.com',
+        SENTRY_DSN: 'https://public@example.com/1',
+        DATABASE_URL: 'postgresql://user:pass@db.example.com:5432/db',
+        REDIS_URL: 'rediss://redis.example.com:6379',
+        TEMPORAL_ADDRESS: 'temporal.example.com:7233',
+        TELEGRAM_BOT_TOKEN: 'production-grade-telegram-bot-token-value',
+        SESSION_ACCESS_SECRET: 'production-grade-session-access-secret',
+        ...withoutWebauthn,
+      }),
+    ).toThrow(/ADMIN_WEBAUTHN/);
   });
 
   it('rejects a local ton_proof domain outside local/test', () => {

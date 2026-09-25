@@ -63,6 +63,10 @@ const LOCAL_API_AUTH_POLICY_DEFAULTS = {
   WALLET_PROOF_MAX_FUTURE_SKEW_SECONDS: '60',
   WALLET_PROOF_RATE_LIMIT_WINDOW_SECONDS: '300',
   WALLET_PROOF_RATE_LIMIT_MAX: '10',
+  // Owner Admin WebAuthn — LOCAL/test fixtures only; staging/production must set explicitly.
+  ADMIN_WEBAUTHN_RP_ID: 'localhost',
+  ADMIN_WEBAUTHN_ORIGIN: 'http://localhost:3001',
+  ADMIN_WEBAUTHN_RP_NAME: 'ALEx Rewards Owner Admin',
 } as const;
 
 const apiSchema = serviceSchema
@@ -103,6 +107,11 @@ const apiSchema = serviceSchema
     WALLET_PROOF_MAX_FUTURE_SKEW_SECONDS: z.coerce.number().int().min(0).max(300),
     WALLET_PROOF_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().min(1).max(3600),
     WALLET_PROOF_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(10_000),
+    // Owner Admin WebAuthn RP — no Zod defaults; local/test merge supplies fixtures only.
+    // Production RP ID is OWNER_DECISION_REQUIRED (fail closed when unset outside local/test).
+    ADMIN_WEBAUTHN_RP_ID: z.string().min(1).max(253),
+    ADMIN_WEBAUTHN_ORIGIN: z.url(),
+    ADMIN_WEBAUTHN_RP_NAME: z.string().min(1).max(128),
   })
   .superRefine((value, context) => {
     const outsideLocal = value.DEPLOYMENT_ENV !== 'local' && value.DEPLOYMENT_ENV !== 'test';
@@ -118,6 +127,42 @@ const apiSchema = serviceSchema
           code: 'custom',
           path: ['WALLET_TON_PROOF_DOMAIN'],
           message: 'local ton_proof domains cannot be inherited by staging/production',
+        });
+      }
+      const rpId = value.ADMIN_WEBAUTHN_RP_ID.trim().toLowerCase();
+      if (
+        rpId === '' ||
+        rpId === 'localhost' ||
+        rpId === '127.0.0.1' ||
+        rpId.endsWith('.localhost') ||
+        rpId.endsWith('.local.test')
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['ADMIN_WEBAUTHN_RP_ID'],
+          message:
+            'ADMIN_WEBAUTHN_RP_ID is OWNER_DECISION_REQUIRED outside local/test; local fixture RP IDs are forbidden',
+        });
+      }
+      try {
+        const originHost = new URL(value.ADMIN_WEBAUTHN_ORIGIN).hostname.toLowerCase();
+        if (
+          originHost === 'localhost' ||
+          originHost === '127.0.0.1' ||
+          originHost.endsWith('.localhost') ||
+          originHost.endsWith('.local.test')
+        ) {
+          context.addIssue({
+            code: 'custom',
+            path: ['ADMIN_WEBAUTHN_ORIGIN'],
+            message: 'local ADMIN_WEBAUTHN_ORIGIN fixtures cannot be inherited by staging/production',
+          });
+        }
+      } catch {
+        context.addIssue({
+          code: 'custom',
+          path: ['ADMIN_WEBAUTHN_ORIGIN'],
+          message: 'ADMIN_WEBAUTHN_ORIGIN must be a valid URL',
         });
       }
     }

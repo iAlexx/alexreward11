@@ -4,7 +4,8 @@
  *
  * Operational first enrollment is refused. Operational writes require matching
  * PostgreSQL cluster system_identifier (see docs/OWNER_ADMIN_DB_IDENTITY_DESIGN.md).
- * Mixed ACTIVE unsupported credentials (e.g. WEBAUTHN) block replace (fail-closed).
+ * Mixed ACTIVE unsupported credentials (unknown types) block replace (fail-closed).
+ * WEBAUTHN is a supported primary factor (Phase 13).
  */
 import type { Pool, PoolClient } from 'pg';
 
@@ -48,8 +49,8 @@ export const OWNER_ADMIN_AUTH_MAX_FAILURES = 5;
 export const OWNER_ADMIN_AUTH_FAILURE_WINDOW_MS = 15 * 60 * 1000;
 export const OWNER_ADMIN_AUTH_LOCKOUT_MS = 15 * 60 * 1000;
 
-/** Credential types this CLI can verify. Any other ACTIVE type blocks replace. */
-const SUPPORTED_LOCAL_FACTORS = new Set(['PASSWORD', 'TOTP']);
+/** Credential types this CLI/API can verify. Any other ACTIVE type blocks replace. */
+const SUPPORTED_LOCAL_FACTORS = new Set(['PASSWORD', 'TOTP', 'WEBAUTHN']);
 
 export interface OwnerAdminAuthDatabaseGate {
   readonly expectedDatabase: string;
@@ -409,7 +410,7 @@ function unsupportedActiveTypes(
   ];
 }
 
-/** Interim fail-closed policy: any ACTIVE unsupported factor blocks mutation. */
+/** Fail-closed policy: any ACTIVE unsupported factor blocks mutation. WEBAUTHN is supported (Phase 13). */
 export function assertNoUnsupportedActiveCredentials(
   creds: ReadonlyArray<{ credential_type: string }>,
 ): void {
@@ -417,7 +418,7 @@ export function assertNoUnsupportedActiveCredentials(
   if (unsupported.length > 0) {
     throw new AuthDomainError(
       'FORBIDDEN',
-      'ACTIVE unsupported credentials present (e.g. WEBAUTHN) — refuse enrollment/replacement until an approved verification mechanism exists; WebAuthn is not removed or simulated',
+      'ACTIVE unsupported credentials present — refuse enrollment/replacement until an approved verification mechanism exists',
       { details: { unsupportedCredentialTypes: unsupported } },
     );
   }

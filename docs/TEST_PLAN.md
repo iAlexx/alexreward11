@@ -29,3 +29,20 @@ registered for the duration of the run. It is never seeded by a migration and ne
 The certification harness itself (`runProviderCertificationCases`) is graded strictly: a skipped
 mandatory case is not a pass, and `productionMonetaryApprovalRecommended` stays false unless every
 mandatory case passed on evidence (TEST 19).
+
+## Phase 13 — Owner Admin control plane gate
+
+```bash
+# Prefer dedicated _test DB URLs from .env.phase-test
+$env:PHASE13_ADMIN_AUTH_TESTS = '1'
+$env:OWNER_ADMIN_AUTH_DATABASE_URL = 'postgresql://…/alex_rewards_test'
+pnpm test:phase13
+pnpm verify:boundaries
+```
+
+| Suite | Proves |
+| ----- | ------ |
+| `packages/auth` `phase13-admin-auth` | WebAuthn factor, RP fail-closed, password+TOTP, recovery replay, reauth, OWNER role |
+| `packages/ads` `phase13-admin-gates` | Hard-limit ceiling; clarification gate refuses APPROVED |
+| `apps/api` phase13 auth/APIs/security matrix | Unauth/Telegram denied; no balance editor; policy code refuse; Review Queue ≠ ledger; estimates ≠ settled |
+| `apps/admin` vitest | Nav completeness; money labeling; AdsGram BLOCKED UI; no balance editor strings |
