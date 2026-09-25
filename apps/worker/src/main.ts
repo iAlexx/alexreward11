@@ -10,6 +10,7 @@ import { HEALTH_CONTRACT_VERSION, type HealthResponse } from '@alex-rewards/cont
 import { createShutdownCoordinator, initializeObservability } from '@alex-rewards/observability';
 import {
   processWithdrawalApprovedOutboxBatch,
+  processWithdrawalFailedPreRetryOutboxBatch,
   buildPhase10PayoutConfig,
   withdrawalEngineConfigFromValidatedApi,
   type WithdrawalEngineConfig,
@@ -121,6 +122,14 @@ try {
       fakeChainEnabled: withdrawalConfig.fakeChainEnabled,
       realChainEnabled: phase10Config.realChainEnabled,
     })
+      .then(() =>
+        processWithdrawalFailedPreRetryOutboxBatch(dbPool!, {
+          client: temporalClient!,
+          taskQueue: config.TEMPORAL_TASK_QUEUE,
+          fakeChainEnabled: withdrawalConfig.fakeChainEnabled,
+          realChainEnabled: phase10Config.realChainEnabled,
+        }),
+      )
       .catch((error: unknown) => {
         observability.logger.warn({ err: error }, 'withdrawal outbox relay batch failed');
       })

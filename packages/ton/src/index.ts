@@ -47,15 +47,37 @@ export {
 } from './chain-provider.js';
 export {
   admitWalletSeqno,
+  admitWalletSeqnoWithRateLimitRetry,
   approvedWalletV5R1CodeHash,
   deriveWalletV5R1AddressRaw,
+  DEFAULT_SEQNO_ADMISSION_RATE_LIMIT_BASE_DELAY_MS,
+  DEFAULT_SEQNO_ADMISSION_RATE_LIMIT_MAX_ATTEMPTS,
+  DEFAULT_SEQNO_READMISSION_PACE_MS,
   type AdmitWalletSeqnoBlockCode,
   type AdmitWalletSeqnoBlocked,
   type AdmitWalletSeqnoInput,
+  type AdmitWalletSeqnoRateLimitRetryOptions,
   type AdmitWalletSeqnoResult,
   type AdmitWalletSeqnoSuccess,
 } from './admit-wallet-seqno.js';
 export { walletStateInitForSeqno } from './wallet-v5r1-state-init.js';
+export {
+  WALLET_V5R1_AUTH_SIGNED_EXTERNAL_OPCODE,
+  decodeWalletV5R1SignedExternal,
+  validateWalletV5R1SignedExternalAgainstAttempt,
+  normalizeExternalInMessageHashHex,
+  parseExternalInMessageFromBoc,
+  buildTestWalletV5R1SignedExternalBoc,
+  buildTestExternalInBoc,
+} from './wallet-v5r1-signed-external.js';
+export type {
+  DecodedWalletV5R1SignedExternal,
+  DecodeWalletV5R1SignedExternalResult,
+  WalletV5R1SignedExternalDecodeFailure,
+  WalletV5R1AttemptIdentityInput,
+  WalletV5R1AttemptIdentityFailure,
+  ValidateWalletV5R1AttemptIdentityResult,
+} from './wallet-v5r1-signed-external.js';
 export { FakeTonChainProvider, type FakeTonChainProviderOptions } from './fake-chain-provider.js';
 export { HttpTonProvider, type HttpTonProviderConfig } from './http-ton-provider.js';
 export {

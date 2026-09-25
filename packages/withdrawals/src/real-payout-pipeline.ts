@@ -1,9 +1,12 @@
 import type { Pool, PoolClient } from 'pg';
 
 import {
-  admitWalletSeqno,
+  admitWalletSeqnoWithRateLimitRetry,
   createTonChainProvider,
   FakeTonChainProvider,
+  DEFAULT_SEQNO_READMISSION_PACE_MS,
+  type AdmitWalletSeqnoBlocked,
+  type AdmitWalletSeqnoRateLimitRetryOptions,
   type TonChainProvider,
   type TonProviderKind,
 } from '@alex-rewards/ton';
@@ -129,6 +132,18 @@ export interface RunRealTestnetPayoutPipelineInput {
   readonly allowTestExecutionPath?: boolean;
   /** Test-only durable-boundary crash injection. */
   readonly crashAfter?: RealPipelineCrashPoint;
+  /**
+   * Test-only: override seqno admission rate-limit pacing/backoff sleep.
+   * Production always uses real timers. Only honored when allowTestExecutionPath
+   * or skipAssertReady is true.
+   */
+  readonly seqnoAdmissionSleepMs?: (ms: number) => Promise<void>;
+  /** Test-only: override post-lease readmission pace (default ~1100ms). */
+  readonly seqnoReadmissionPaceMs?: number;
+  /** Test-only: override RATE_LIMITED max dual-admission attempts. */
+  readonly seqnoAdmissionRateLimitMaxAttempts?: number;
+  /** Test-only: override RATE_LIMITED base backoff ms. */
+  readonly seqnoAdmissionRateLimitBaseDelayMs?: number;
 }
 
 function createProviderFromConfig(
@@ -148,6 +163,92 @@ function deriveQueryId(withdrawalId: string, attemptNumber: number, salt: string
       Math.abs([...`${withdrawalId}:${salt}`].reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 7)),
     )
   );
+}
+
+function seqnoAdmissionTestHooksActive(input: RunRealTestnetPayoutPipelineInput): boolean {
+  return input.allowTestExecutionPath === true || input.skipAssertReady === true;
+}
+
+async function readDispatchLeaseFenceHeld(
+  db: Pool,
+  input: {
+    readonly hotWalletId: string;
+    readonly ownerIdentity: string;
+    readonly fencingToken: bigint;
+  },
+): Promise<AdmitWalletSeqnoBlocked | null> {
+  const lease = await db.query<{
+    fencing_token: string;
+    expires_at: Date;
+    released_at: Date | null;
+    owner_identity: string;
+  }>(
+    `SELECT fencing_token::text, expires_at, released_at, owner_identity
+     FROM hot_wallet_dispatch_leases
+     WHERE hot_wallet_id = $1::uuid`,
+    [input.hotWalletId],
+  );
+  const row = lease.rows[0];
+  if (row === undefined) {
+    return {
+      ok: false,
+      code: 'LEASE_FENCE_INVALID',
+      message: 'dispatch lease missing during seqno rate-limit retry',
+    };
+  }
+  if (row.released_at !== null) {
+    return {
+      ok: false,
+      code: 'LEASE_FENCE_INVALID',
+      message: 'dispatch lease released during seqno rate-limit retry',
+    };
+  }
+  if (row.expires_at.getTime() <= Date.now()) {
+    return {
+      ok: false,
+      code: 'LEASE_FENCE_INVALID',
+      message: 'dispatch lease expired during seqno rate-limit retry',
+    };
+  }
+  if (row.owner_identity !== input.ownerIdentity) {
+    return {
+      ok: false,
+      code: 'LEASE_FENCE_INVALID',
+      message: 'dispatch lease owner mismatch during seqno rate-limit retry',
+    };
+  }
+  if (BigInt(row.fencing_token) !== input.fencingToken) {
+    return {
+      ok: false,
+      code: 'LEASE_FENCE_INVALID',
+      message: 'dispatch fencing token mismatch during seqno rate-limit retry',
+    };
+  }
+  return null;
+}
+
+function buildSeqnoAdmissionRetryOptions(
+  input: RunRealTestnetPayoutPipelineInput,
+  extras: {
+    readonly initialDelayMs?: number;
+    readonly beforeRetry?: () => Promise<AdmitWalletSeqnoBlocked | null>;
+  } = {},
+): AdmitWalletSeqnoRateLimitRetryOptions {
+  return {
+    ...(seqnoAdmissionTestHooksActive(input) &&
+    input.seqnoAdmissionRateLimitMaxAttempts !== undefined
+      ? { maxAttempts: input.seqnoAdmissionRateLimitMaxAttempts }
+      : {}),
+    ...(seqnoAdmissionTestHooksActive(input) &&
+    input.seqnoAdmissionRateLimitBaseDelayMs !== undefined
+      ? { baseDelayMs: input.seqnoAdmissionRateLimitBaseDelayMs }
+      : {}),
+    ...(seqnoAdmissionTestHooksActive(input) && input.seqnoAdmissionSleepMs !== undefined
+      ? { sleep: input.seqnoAdmissionSleepMs }
+      : {}),
+    ...(extras.initialDelayMs !== undefined ? { initialDelayMs: extras.initialDelayMs } : {}),
+    ...(extras.beforeRetry !== undefined ? { beforeRetry: extras.beforeRetry } : {}),
+  };
 }
 
 interface PersistedPipelineContext {
@@ -271,6 +372,10 @@ async function confirmAndSettle(
     amountAtomic: context.netAmountAtomic,
     senderJettonWallet: context.payoutJettonWallet,
     normalizedExternalMessageHash,
+    ...(attempt.externalMessageCellHash !== null &&
+    attempt.externalMessageCellHash.trim() !== ''
+      ? { externalMessageCellHash: attempt.externalMessageCellHash }
+      : {}),
   };
   const primaryEvidence = await primary.observeJettonTransfer(observeInput);
   stagesCompleted.push('watcher_reconciliation');
@@ -1181,15 +1286,28 @@ export async function runRealTestnetPayoutPipeline(
     if (publicKey.length !== 32) {
       throw new WithdrawalDomainError('VALIDATION', 'Signer public key must be 32 bytes');
     }
-    const admission = await admitWalletSeqno({
-      networkGlobalId: input.phase10.networkGlobalId,
-      hotWalletAddress: context.hotWalletAddress,
-      publicKeyHex: identity.publicKeyHex,
-      signerKeyReference: identity.publicKeyFingerprint,
-      approvedSignerKeyReference: context.signerKeyReference,
-      primary,
-      secondary,
-    });
+    const admission = await admitWalletSeqnoWithRateLimitRetry(
+      {
+        networkGlobalId: input.phase10.networkGlobalId,
+        hotWalletAddress: context.hotWalletAddress,
+        publicKeyHex: identity.publicKeyHex,
+        signerKeyReference: identity.publicKeyFingerprint,
+        approvedSignerKeyReference: context.signerKeyReference,
+        primary,
+        secondary,
+      },
+      buildSeqnoAdmissionRetryOptions(input, {
+        initialDelayMs: seqnoAdmissionTestHooksActive(input)
+          ? (input.seqnoReadmissionPaceMs ?? 0)
+          : DEFAULT_SEQNO_READMISSION_PACE_MS,
+        beforeRetry: async () =>
+          readDispatchLeaseFenceHeld(db, {
+            hotWalletId: context.hotWalletId,
+            ownerIdentity: owner,
+            fencingToken: BigInt(lease.fencing_token!),
+          }),
+      }),
+    );
     if (!admission.ok) {
       await withWithdrawalTransaction(db, async (client) => {
         await transitionWithdrawal(client, {
@@ -1463,15 +1581,18 @@ export async function runRealTestnetPayoutPipeline(
   }
 
   // --- Account-state / seqno admission BEFORE SIGNING and lease ---
-  const initialAdmission = await admitWalletSeqno({
-    networkGlobalId: input.phase10.networkGlobalId,
-    hotWalletAddress: loaded.hotWalletAddress,
-    publicKeyHex: identity.publicKeyHex,
-    signerKeyReference: identity.publicKeyFingerprint,
-    approvedSignerKeyReference: loaded.signerKeyReference,
-    primary,
-    secondary,
-  });
+  const initialAdmission = await admitWalletSeqnoWithRateLimitRetry(
+    {
+      networkGlobalId: input.phase10.networkGlobalId,
+      hotWalletAddress: loaded.hotWalletAddress,
+      publicKeyHex: identity.publicKeyHex,
+      signerKeyReference: identity.publicKeyFingerprint,
+      approvedSignerKeyReference: loaded.signerKeyReference,
+      primary,
+      secondary,
+    },
+    buildSeqnoAdmissionRetryOptions(input),
+  );
   if (!initialAdmission.ok) {
     stagesCompleted.push('wallet_seqno_admission_blocked');
     return {
@@ -1539,15 +1660,31 @@ export async function runRealTestnetPayoutPipeline(
   crashAt(input, 'AFTER_ENTER_SIGNING');
 
   // Re-validate admission before immutable attempt (state may change between reads).
-  const readmission = await admitWalletSeqno({
-    networkGlobalId: input.phase10.networkGlobalId,
-    hotWalletAddress: context.hotWalletAddress,
-    publicKeyHex: identity.publicKeyHex,
-    signerKeyReference: identity.publicKeyFingerprint,
-    approvedSignerKeyReference: context.signerKeyReference,
-    primary,
-    secondary,
-  });
+  // Pace + RATE_LIMITED retry: TonCenter free-tier often 429s on back-to-back
+  // getAddressInformation after initial dual-provider admission. Dual providers
+  // remain mandatory on every attempt; lease fence is re-checked before each retry.
+  const readmission = await admitWalletSeqnoWithRateLimitRetry(
+    {
+      networkGlobalId: input.phase10.networkGlobalId,
+      hotWalletAddress: context.hotWalletAddress,
+      publicKeyHex: identity.publicKeyHex,
+      signerKeyReference: identity.publicKeyFingerprint,
+      approvedSignerKeyReference: context.signerKeyReference,
+      primary,
+      secondary,
+    },
+    buildSeqnoAdmissionRetryOptions(input, {
+      initialDelayMs: seqnoAdmissionTestHooksActive(input)
+        ? (input.seqnoReadmissionPaceMs ?? 0)
+        : DEFAULT_SEQNO_READMISSION_PACE_MS,
+      beforeRetry: async () =>
+        readDispatchLeaseFenceHeld(db, {
+          hotWalletId: context.hotWalletId,
+          ownerIdentity: context.ownerIdentity,
+          fencingToken: context.fencingToken,
+        }),
+    }),
+  );
   if (!readmission.ok || readmission.seqno !== initialAdmission.seqno) {
     await withWithdrawalTransaction(db, async (client) => {
       await transitionWithdrawal(client, {

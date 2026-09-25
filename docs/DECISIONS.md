@@ -399,3 +399,276 @@ test-only Ed25519 keys and `deployment_env=isolated_test` with explicit
 are permitted for harnesses. This does **not** establish Checklist **B** or
 authorize **D**. Production/staging profiles still require verify-full TLS
 (chain + hostname + Owner CA; optional SPKI add-on only). FS-01 remains.
+
+## ADR-021 — Isolated Testnet aalex Phase 10 provision allowlist
+
+Date: 2026-09-22
+
+Phase 10 Testnet Available provisioning may credit **USDT** (unchanged fixture path) or
+**aalex** under an explicit allowlist. aalex requires:
+
+1. `DEPLOYMENT_ENV` local/test and `WITHDRAWAL_NETWORK_CODE=TON_TESTNET` only.
+2. Exact Jetton master `0:e6e40e4e445c86c07df96a3129b67a74a411abbf1cd476607860978b7d5f1831`
+   and decimals `9` on the ACTIVE assets row.
+3. `PHASE10_TESTNET_PROVISION_REQUIRED_DATABASE_NAME` matching `current_database()`, never
+   operational `alex_rewards` / `alex_rewards@55432`.
+4. Configured max ≤ absolute ceiling of `10000000000` (10 aalex); isolated prep uses
+   `1000000000` (1 aalex).
+
+Proposed isolated fee/limit rules for a future 1 aalex withdrawal live in
+`PROPOSED_ISOLATED_AALEX_WITHDRAWAL` (min 1 aalex, fixed fee 0.01 aalex,
+`max_auto_payout_atomic` NULL per schema CHECK — matches locked USDT fixture).
+They are not activated on operational or isolated DBs without a separate Owner authorization.
+Owner admin enrollment remains the Option C bootstrap ceremony; no SQL/admin forge path.
+Settlement uses asset-aware Hot Wallet inventory: USDT → `HOT_WALLET_USDT_ASSET`;
+allowlisted aalex → `HOT_WALLET_JETTON_ASSET` (migration `0029`). USDT production path unchanged.
+
+### Isolated Option C ceremony CLI (2026-09-22)
+
+Owner authorized a local Owner-operated Option C ceremony CLI for **ephemeral
+TEST trust keys only** on isolated `*_test` databases. The CLI prepares
+keypair / endpoint profile / seal / Channel B Owner TTY digest recording and
+gates enrollment on concrete witnesses + dual-channel evidence. Completing
+this CLI does **not** complete Checklist **B** or **D**, does not authorize
+operational enrollment, and must never reuse ephemeral keys for production.
+
+## ADR-022 — Phase 10 isolated Telegram first-Owner bootstrap (practical)
+
+Date: 2026-09-22
+
+**Supersedes (isolated Testnet only):** Option C witness/paper ceremony as the
+required first-Owner path for `alex_rewards_isolated_payout_test` @ `127.0.0.1:55440`.
+
+**Does not change:** product roadmap, multi-provider architecture, Founder /
+membership / referral / mission rules, withdrawal financial protections, or
+self-hosted encrypted signer custody (AWS KMS remains rejected).
+
+**Isolated trust model (explicit):**
+
+1. Configured Owner Telegram numeric user id
+2. Verified Telegram Mini App `initData` (bot-token HMAC)
+3. Password + TOTP Owner admin factors
+4. Single M0 Owner seat + audit log + replay refuse when seat held
+
+Telegram username is display-only and never authorizes. Independent witnesses
+and paper Channel B are not part of this isolated path. Operational
+`alex_rewards` / port `55432` / `DEPLOYMENT_ENV=production` remain refused.
+Option C library/CLI remains available but is not required to activate the
+isolated Testnet Owner.
+
+**Isolated activation status (2026-09-23):** first Owner enrolled and TOTP rotated after
+compromise; NEW TOTP login verified and OLD TOTP rejected. Owner authentication is
+**complete** for this isolated DB. Remaining Phase 10 live work is ledger provision,
+fee/limit activation, isolated signer unlock, and controlled 1 aalex payout — not a new
+Owner bootstrap.
+
+## Clarification — Phase 10 payout activity diagnostics + FAILED_PRE reuse (2026-09-23)
+
+Implementation clarification (does not change financial rules):
+
+1. Temporal withdrawal payout activities/workflows **must preserve** pipeline
+   `reason` and `stagesCompleted` on the activity result (previously dropped).
+2. `FAILED_PRE_BROADCAST` with **zero** attempts **or** only clean
+   `FAILED_PRE_BROADCAST` attempts (no signature Boc/hashes, no
+   `broadcast_submitted_at`, no `chain_reference`, no ambiguous states),
+   released dispatch lease, held reservation, and null release/settlement is
+   **domain-safe to reuse** the same withdrawal id (no second mint). Evaluation
+   is read-only via `evaluateFailedPreBroadcastReuse`; enqueue via
+   `enqueueFailedPreBroadcastRetry`. Attempt #N+1 is created only by the
+   payout pipeline after redispatch — prior clean attempts are never mutated
+   or re-signed.
+3. First-start Outbox `withdrawal.approved` keeps `workflowIdReusePolicy:
+   REJECT_DUPLICATE` (ADR-017).
+4. Owner-gated redispatch uses Outbox event `withdrawal.failed_pre_retry` and
+   starts the **same** `withdrawal/{id}` with `ALLOW_DUPLICATE` +
+   `workflowIdConflictPolicy: FAIL`, only after re-verifying reuse safety and
+   refusing a still-RUNNING prior execution. Unsafe events go to `DEAD_LETTER`.
+   Idempotent while a PENDING retry outbox already exists.
+
+## Clarification — Phase 10 seqno readmission RATE_LIMITED recovery (2026-09-23)
+
+Implementation clarification (does not change dual-provider or financial rules):
+
+1. Proven WD-000002 failure: post-lease `admitWalletSeqno` hit TonCenter
+   `getAddressInformation` HTTP 429 immediately after a successful initial
+   dual-provider admission. No attempt/signing/broadcast occurred.
+2. Remedy: `admitWalletSeqnoWithRateLimitRetry` — bounded backoff retries **only**
+   for `RATE_LIMITED`, always re-running full dual TonAPI+TonCenter admission.
+   Post-lease readmission adds ~1.1s pace and re-validates dispatch lease
+   fencing before each retry; lease expiry/mismatch fail-closes as
+   `LEASE_FENCE_INVALID` with attempt still null.
+3. Does **not** bypass TonCenter, substitute TonAPI twice, suppress 429, or
+   assume seqno unchanged. Empty TonCenter API key remains a capacity risk;
+   code retry is configuration-independent mitigation within lease TTL.
+
+## Clarification — Phase 10 isolated USDT Z hot-wallet ledger funding (2026-09-23)
+
+Owner-authorized isolated Testnet reconciliation only:
+
+1. On-chain 25.000000 USDT Z was deposited to the hot JW without a ledger
+   inventory post. Settlement of WD-000002 credited `HOT_WALLET_USDT_ASSET`
+   190000 → ledger inventory `-190000` while on-chain JW remained `24810000`.
+2. Owner acknowledged one `HOT_WALLET_FUNDING` of **25000000** atomic via
+   `postOwnerAcknowledgedHotWalletUsdtFunding` (`ownerAcknowledgesUnresolvedTreasuryClearing=true`):
+   DEBIT `HOT_WALLET_USDT_ASSET` / CREDIT `TREASURY_FUNDING_CLEARING`.
+   Resulting inventory `24810000` matches on-chain JW. Duplicate funding for
+   the same hot wallet+asset is refused.
+3. Does not move chain funds, raise limits, or provision user Available.
+
+## Clarification — Real-chain DEFINITIVE_NONPAYMENT via V5R1 expired unconsumed seqno (2026-09-24)
+
+Phase 10 real-chain reconcile-only (`reconcileRealWithdrawalAttemptOnly`) now supports one
+narrow durable nonpayment criterion:
+
+- Reason code: `WALLET_V5R1_EXPIRED_UNCONSUMED_SEQNO`
+- Requires verified Wallet V5R1 signed-external identity + dual-provider seqno agreement that
+  the attempt’s expected seqno remains unconsumed after the request’s own `valid_until`.
+- Provider absence / HTTP 404 alone remains insufficient.
+- Classification persists reconciliation evidence only — no Reserved release, REJECTED,
+  QUEUED retry, sign, or broadcast in this path.
+
+## Clarification — Real-chain DNP hold bridge (2026-09-24)
+
+Authoritative command `holdReconciledWithdrawalAfterDefinitiveNonpayment` is the only
+real-chain path that transitions `RECONCILE_REQUIRED → HELD` with `held_from_reconcile=true`,
+and only when durable `DEFINITIVE_NONPAYMENT` evidence for the current attempt carries reason
+`WALLET_V5R1_EXPIRED_UNCONSUMED_SEQNO`. The bridge does not release Reserved or REJECT;
+those remain a separate Owner `decideWithdrawal(REJECT, definitiveNonpayment:true)` step
+via `releaseWithdrawalReservation`. Fake-chain `applyObservation` auto-HOLD must not be
+reused against real-chain withdrawals.
+
+## Clarification — Phase 10 USDT-Z pre-manifest canary binding (B3 Option C, 2026-09-25)
+
+Owner-authorized narrow exemption only. Campaign tooling initialized
+`phase10-usdt-z-acceptance` **after** the already-CONFIRMED USDT-Z canary
+`01a0cc13-cdec-77ea-8561-2a79690e2a47` (WD-000002) and attached it as ordinal 1.
+`campaign.createdAt` remains the independently recorded manifest bootstrap time and must
+**not** be backdated.
+
+Shared predicate `isAuthorizedPhase10PreManifestCanary` (constant
+`PHASE10_USDT_Z_CANARY_WITHDRAWAL_ID`) may bypass solely
+`requested_at >= campaign.createdAt` in:
+
+1. `evaluatePhase10AcceptanceFromEvidence` campaign temporal binding
+2. `loadPhase10ExpectedCampaignPayouts` expected-payout inclusion
+
+and only when UUID match + campaign membership + ordinal 1 + CONFIRMED + settlement +
+IPP + final attempt ∈ `baselineIsolatedHistoricalAttemptIds` + evidence invariant PASS
+all hold. Fail closed otherwise. Not keyed by publicId. Does not flip chain-history
+collector availability (B1) or capture live readiness (B2).
+
+## Clarification — Phase 10 chain-history collector availability (B1, 2026-09-25)
+
+Owner authorized flipping `PHASE10_CHAIN_HISTORY_PROVIDER_COLLECTOR_AVAILABLE` from
+`false` to `true` because `collectPhase10LiveProviderBackedChainHistory` is implemented
+and wired (TonCenter primary + TonAPI secondary, independent fingerprints, Testnet
+health, DB-loaded expected payouts, `toPhase10ChainHistoryEvidenceArtifact`).
+
+Acceptance still fail-closes unless evidence is `PROVIDER_BACKED`,
+`independenceProven=true`, `ZERO_UNEXPECTED`, schema-valid, and Hot Wallet / Jetton /
+fingerprint / window bindings hold. No env override. No FAKE/SIMULATED history as
+PROVIDER_BACKED. No chain or financial mutation. B2 schema-v2 live readiness remains
+separate and unresolved.
+
+## Clarification — Phase 10 acceptance provider-role + acceptanceCutoff contract (2026-09-25)
+
+Owner authorized a narrow acceptance-contract fix only:
+
+1. **One authoritative provider-role source:** `resolvePhase10LiveProviderRoles` (in
+   `phase10-live-probes.ts`, re-exported via `phase10-provider-roles.ts`). Live readiness
+   probes, the provider-backed chain-history collector, and acceptance fingerprint binding
+   derive primary/secondary kind + endpoint + fingerprint from the same configured
+   `TON_PRIMARY_*` / `TON_SECONDARY_*` mapping. Isolated env canonical roles remain
+   primary=TonAPI, secondary=TonCenter. Role order must not be hardcoded independently in
+   orchestration scripts. Unordered fingerprint-set matching is not used — explicit
+   primary/secondary semantics are preserved. Independence, distinct fingerprints, and
+   Testnet `networkGlobalId` checks remain fail-closed.
+
+2. **Stable `acceptanceCutoff`:** Captured once (UTC ISO) **before** fresh full-campaign
+   chain-history collection. `evaluatePhase10AcceptanceFromEvidence` requires it and uses
+   it as `campaignWindowEnd` for observation-window coverage. It must not call evaluator-time
+   `new Date()` for that coverage check. Missing/malformed cutoff fails closed. No clock
+   tolerance/skew. Canonical B2 readiness artifact is not edited. No economic mutation,
+   archive, or Phase 10 close under this authorization.
+
+## Clarification — Phase 10 Owner review approval recorded (2026-09-25)
+
+Owner explicitly approved the current technical evidence package and authorized recording
+`ownerReviewApproved=true` only, via the authoritative
+`evidence/acceptance/owner-review-package.json` (`schemaVersion: 1`,
+`packageKind: PHASE10_OWNER_REVIEW_SUMMARY`). Approval binds to the exact evidence SHA-256
+hashes / chain-history `evidenceDigest` / `acceptanceCutoff` of that package. Owner accepted
+21 known unrelated failures in `phase10-canary-signing-recovery.test.ts` without marking
+them PASS or claiming the full repository suite is green. Final archive creation and Phase
+10 close remain **not** authorized by this decision.
+
+## Clarification — Phase 10 final evidence archive created without closure (2026-09-25)
+
+Owner authorized creation of the Phase 10 **final evidence archive** only
+(`PHASE10_FINAL_EVIDENCE_ARCHIVE` under `phase-archives/PHASE_10_TON_TESTNET_PAYOUT/`),
+bound to the exact SHA-256 hashes / chain `evidenceDigest` recorded in
+`owner-review-package.json` `ownerApproval.evidenceBinding`. Archive packaging reuses
+`scripts/create-phase-archive.mjs` ZIP/checksum primitives and does **not** set
+`phase10Closed` or campaign `CLOSED`. Repository dual git-archive of an accepted commit
+remains a separate gate if/when Owner authorizes Phase 10 closure with a sealed tip.
+
+## Clarification — Phase 10 closure gate missing (2026-09-25)
+
+Owner authorized Phase 10 closure **only if** an authoritative closure gate independently
+becomes eligible. Inspection found:
+
+1. `evaluatePhase10AcceptanceFromEvidence` hard-codes `mayMarkPhase10Closed=false` on every
+   path (including PASS). Owner review / final archive are not inputs to that boolean.
+2. No exported `closePhase10` / `markPhase10Closed` / equivalent exists in
+   `@alex-rewards/withdrawals`.
+3. Campaign `generateFinalCampaignEvidence` cannot promote to `COMPLETED` while
+   `status=AWAITING_OWNER_APPROVAL` or `realModeCheckpoint` is set; there is no official
+   checkpoint-clearance API after technical Owner review.
+4. Sealed `git archive` packaging cannot safely proceed from the current dirty working tree
+   without inventing a tip commit.
+
+Therefore closure was **not** executed. Force-setting `PHASE10_CLOSED` remains forbidden.
+
+## Clarification — Phase 10 closure eligibility gate implemented (2026-09-25)
+
+Owner authorized **implementation + read-only evaluation** of a separate Phase 10 closure
+stage (not closure mutation). Technical acceptance continues to hard-code
+`mayMarkPhase10Closed=false`. Closure eligibility is now
+`evaluatePhase10ClosureEligibility` in `packages/withdrawals/src/phase10-closure-gate.ts`:
+
+1. Historical live readiness = approved schema-v2 B2 readiness artifact (UNLOCKED/REAL
+   during the controlled window). Campaign `realExecutionGates` remain historical and
+   are not rewritten for closure.
+2. Post-run closure safety = current pause=true, signer LOCKED, signingReady=false,
+   REAL=false, FAKE=false, unresolved=0, leases=0, duplicates=0, reserved=0.
+3. Only the closure gate may return `mayMarkPhase10Closed=true` when blockers are empty.
+4. Canonical campaign final status remains `COMPLETED` (existing enum). Transition helper
+   `transitionCampaignToPhase10FinalState` clears `realModeCheckpoint` only; it was not
+   executed against the live campaign under this authorization.
+5. `closePhase10` requires `executeMutation=true` and revalidates eligibility; default is
+   refuse-to-mutate. Live Phase 10 remains OPEN until a separate Owner closure
+   authorization.
+6. Known 21 failures in `phase10-canary-signing-recovery.test.ts` remain a documented
+   Owner-accepted non-blocking condition; the gate never claims full-suite green.
+
+## Clarification — Phase 10 officially CLOSED (2026-09-25)
+
+Owner authorized the actual final closure mutation via
+`closePhase10({ executeMutation: true })` only after a fresh
+`evaluatePhase10ClosureEligibility` PASS (`eligible=true`,
+`mayMarkPhase10Closed=true`, `blockers=[]`).
+
+Executed at `closedAt=2026-09-25T04:11:55.237Z` against campaign
+`2fdf9a3b-dee5-46e6-a2a4-4a0a10236093`:
+
+1. Campaign `AWAITING_OWNER_APPROVAL` → `COMPLETED`; `realModeCheckpoint` cleared to
+   `null`; historical `realExecutionGates` preserved unchanged.
+2. Owner package `phase10Closed=true` with closure audit at
+   `evidence/acceptance/phase10-closure-audit.json`.
+3. Final evidence archive ZIP / MANIFEST SHA-256 unchanged
+   (`b3f269e0…0354` / `bf7d631e…62da`). Non-campaign approved evidence hashes unchanged.
+   Campaign file hash changed only as authorized control-metadata transition.
+4. No economic ledger / chain / signature / broadcast / payout #101 mutation. Safety
+   remained pause=true, signer LOCKED, REAL=false, FAKE=false.
+5. Second `closePhase10({ executeMutation: true })` returned `ALREADY_CLOSED` (no-op).
+6. Known 21 canary-signing-recovery failures remain documented; full suite not green.

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { matchIntendedJettonPayout } from '../src/confirmation.js';
+import { matchIntendedJettonPayout, primarySecondaryEvidenceAgree } from '../src/confirmation.js';
 
 describe('phase10 confirmation matchIntendedJettonPayout', () => {
   const expected = {
@@ -131,5 +131,82 @@ describe('phase10 confirmation matchIntendedJettonPayout', () => {
         expected,
       ),
     ).toBe(true);
+  });
+});
+
+describe('phase10 confirmation primarySecondaryEvidenceAgree', () => {
+  const expected = {
+    hotWallet: '0:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    jettonMaster: '0:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+    recipient: '0:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+    amountAtomic: '190000',
+    queryId: '6336607349',
+  };
+  const completePrimary = {
+    ...expected,
+    success: true as const,
+    bounced: false as const,
+    providerKind: 'tonapi' as const,
+    proofStage: 'COMPLETE' as const,
+    hotWalletTxHash: 'hot-tx-a',
+    jettonWalletTxHash: 'jw-tx-a',
+    recipientEvidence: 'recv-tx-a',
+  };
+  const completeSecondary = {
+    ...expected,
+    success: true as const,
+    bounced: false as const,
+    providerKind: 'toncenter' as const,
+    proofStage: 'COMPLETE' as const,
+    hotWalletTxHash: 'hot-tx-b',
+    jettonWalletTxHash: 'jw-tx-b',
+    recipientEvidence: 'recv-tx-b',
+  };
+
+  it('agrees when both match intended payout fields', () => {
+    expect(primarySecondaryEvidenceAgree(completePrimary, completeSecondary, expected)).toBe(true);
+  });
+
+  it('disagrees when secondary amount conflicts (primary MATCH alone insufficient)', () => {
+    expect(
+      primarySecondaryEvidenceAgree(
+        completePrimary,
+        { ...completeSecondary, amountAtomic: '180000' },
+        expected,
+      ),
+    ).toBe(false);
+  });
+
+  it('disagrees when primary amount conflicts (secondary MATCH alone insufficient)', () => {
+    expect(
+      primarySecondaryEvidenceAgree(
+        { ...completePrimary, amountAtomic: '180000' },
+        completeSecondary,
+        expected,
+      ),
+    ).toBe(false);
+  });
+
+  it('disagrees when success/bounce conflict', () => {
+    expect(
+      primarySecondaryEvidenceAgree(
+        completePrimary,
+        { ...completeSecondary, success: false, bounced: true },
+        expected,
+      ),
+    ).toBe(false);
+  });
+
+  it('disagrees when recipient conflicts', () => {
+    expect(
+      primarySecondaryEvidenceAgree(
+        completePrimary,
+        {
+          ...completeSecondary,
+          recipient: '0:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
+        },
+        expected,
+      ),
+    ).toBe(false);
   });
 });

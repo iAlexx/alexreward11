@@ -4,6 +4,7 @@ import {
   getOrCreateLedgerAccount,
   LedgerDomainError,
   postLedgerTransaction,
+  resolveHotWalletAssetAccountType,
 } from '@alex-rewards/ledger';
 
 import { WithdrawalDomainError } from './errors.js';
@@ -19,7 +20,11 @@ export interface SettleWithdrawalReservationInput {
 
 /**
  * CONFIRMED settlement:
- * DR USER_RESERVED gross / CR HOT_WALLET_USDT_ASSET net / CR WITHDRAWAL_FEE_REVENUE fee
+ * DR USER_RESERVED gross / CR Hot Wallet asset inventory net / CR WITHDRAWAL_FEE_REVENUE fee
+ *
+ * Hot Wallet inventory account type is asset-aware:
+ *   USDT  → HOT_WALLET_USDT_ASSET
+ *   aalex → HOT_WALLET_JETTON_ASSET (allowlisted Testnet Jetton)
  *
  * Stamps settled_at ONLY on the evidence-backed confirmed attempt — never on every
  * broadcast_submitted_at row for the withdrawal.
@@ -88,13 +93,14 @@ export async function settleWithdrawalReservation(
     });
   }
 
+  const hotWalletAccountType = await resolveHotWalletAssetAccountType(client, w.asset_id);
   const reserved = await getOrCreateLedgerAccount(client, {
     accountType: 'USER_RESERVED_LIABILITY',
     assetId: w.asset_id,
     ownerId: w.user_id,
   });
   const hot = await getOrCreateLedgerAccount(client, {
-    accountType: 'HOT_WALLET_USDT_ASSET',
+    accountType: hotWalletAccountType,
     assetId: w.asset_id,
     ownerId: w.hot_wallet_id,
   });

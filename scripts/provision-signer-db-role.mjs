@@ -31,7 +31,7 @@ async function main() {
   const client = new pg.Client({ connectionString: databaseUrl });
   await client.connect();
   try {
-    const db = await client.query<{ current_database: string }>(
+    const db = await client.query(
       `SELECT current_database()::text AS current_database`,
     );
     const dbName = db.rows[0]?.current_database;

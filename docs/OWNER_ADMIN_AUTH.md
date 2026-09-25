@@ -1,9 +1,48 @@
 # Owner admin authentication (password + TOTP + admin_sessions)
 
 Interim **Owner-operated** authentication issuer for Phase 10 Recovery.
-See ADR-019, ADR-021, `docs/OWNER_ADMIN_BOOTSTRAP_DESIGN.md` (M1-A.1 Option C design),
+See ADR-019, ADR-021, ADR-022 (isolated Telegram first-Owner bootstrap),
+`docs/OWNER_ADMIN_BOOTSTRAP_DESIGN.md` (M1-A.1 Option C design — retained for ops),
 `docs/OWNER_ADMIN_DB_IDENTITY_DESIGN.md`, and
 `docs/M1_A1_TRUST_ESTABLISHMENT_CHECKLIST.md`.
+
+## Phase 10 isolated first-Owner (practical path)
+
+For **isolated Testnet only** (`alex_rewards_isolated_payout_test` @ `127.0.0.1:55440`),
+first-Owner creation uses:
+
+1. Explicitly configured Owner Telegram user id (`ISOLATED_OWNER_BOOTSTRAP_TELEGRAM_USER_ID`)
+2. Verified Telegram Mini App `initData` (HMAC with bot token)
+3. Password + TOTP (same factors as Owner admin auth)
+
+Telegram **username is display-only** and never grants permissions.
+Independent witnesses and paper Channel B are **not** required on this path.
+Option C ceremony tooling remains in-repo for historical/ops design work and is
+**not** the Phase 10 isolated activation path.
+
+```powershell
+pnpm --filter @alex-rewards/auth run build
+# Load URL from local config file (preferred — avoids shell-history passwords):
+$env:OWNER_ISOLATED_BOOTSTRAP_DATABASE_URL_FILE = "$env:USERPROFILE\ALExRewards\isolated-payout-testnet\config\database.url"
+$env:ISOLATED_OWNER_BOOTSTRAP_TELEGRAM_USER_ID = '<your Telegram numeric id>'
+$env:TELEGRAM_BOT_TOKEN = '<bot token>'  # set ephemerally; do not commit
+pnpm --filter @alex-rewards/auth run owner-isolated-telegram-bootstrap -- preflight `
+  --expected-database alex_rewards_isolated_payout_test
+# enroll is Owner-interactive (TTY initData + password) — run only when authorized
+```
+
+### Mini App initData (isolated enroll)
+
+Deploy `apps/miniapp` over HTTPS and set BotFather Web App URL to that host.
+For isolated Telegram bootstrap, paste genuine Mini App `initData` only into the local
+enroll TTY (never into chat, logs, or files). The temporary Mini App copy helper has been
+removed after enrollment; do not re-enable it.
+
+**Isolated status (2026-09-23):** Owner on `alex_rewards_isolated_payout_test` is enrolled;
+TOTP was rotated after exposure; NEW login PASS / OLD reject PASS. Do not re-enroll.
+Use `enroll --replace` only for future authenticated factor rotation.
+Disable the flag and redeploy immediately after enrollment. Displayed Telegram
+user fields are untrusted until the CLI validates initData.
 
 ## Hard rules
 

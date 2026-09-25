@@ -122,6 +122,14 @@ const CATALOGUE: Record<LedgerAccountType, ResolvedAccountSemantics> = {
     requiresOwnerId: true,
     requiresOwnerAccountingDecision: false,
   },
+  HOT_WALLET_JETTON_ASSET: {
+    accountType: 'HOT_WALLET_JETTON_ASSET',
+    ownerType: 'WALLET',
+    accountClass: 'ASSET',
+    normalSide: 'DEBIT',
+    requiresOwnerId: true,
+    requiresOwnerAccountingDecision: false,
+  },
   HOT_WALLET_TON_ASSET: {
     accountType: 'HOT_WALLET_TON_ASSET',
     ownerType: 'WALLET',

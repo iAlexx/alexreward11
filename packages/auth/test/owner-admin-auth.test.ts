@@ -932,6 +932,51 @@ describe.skipIf(databaseUrl === '')(
       expect(replace.replaced).toBe(true);
     });
 
+    it('R-01b after replace: new TOTP accepts and old TOTP is rejected', async () => {
+      const t0 = Date.now();
+      const enrolled = await enrollFresh(pool, adminUserId, expectedDatabase, t0);
+      const oldSecret = enrolled.totpSecretBytes;
+      const begun = await beginOwnerAdminTotpEnrollment();
+      const newSecret = begun.totpSecretBytes;
+      const t1 = nextPeriod(t0);
+      const replace = await completeOwnerAdminTotpEnrollment(pool, {
+        adminUserId,
+        password: PASSWORD + 'R',
+        totpSecretBytes: newSecret,
+        totpConfirmationCode: generateTotpCode(newSecret, t1),
+        expectedDatabase,
+        replaceExisting: true,
+        currentPassword: PASSWORD,
+        currentTotpCode: generateTotpCode(oldSecret, t1),
+        evaluationTimeMs: t1,
+      });
+      expect(replace.replaced).toBe(true);
+
+      const t2 = nextPeriod(t1);
+      await expect(
+        loginOwnerAdmin(pool, {
+          adminUserId,
+          password: PASSWORD + 'R',
+          totpCode: generateTotpCode(oldSecret, t2),
+          expectedDatabase,
+          evaluationTimeMs: t2,
+        }),
+      ).rejects.toMatchObject({ code: 'UNAUTHENTICATED' });
+
+      const t3 = nextPeriod(t2);
+      const login = await takeLoginToken(pool, {
+        adminUserId,
+        password: PASSWORD + 'R',
+        totpCode: generateTotpCode(newSecret, t3),
+        expectedDatabase,
+        evaluationTimeMs: t3,
+      });
+      expect(login.sessionToken.length).toBeGreaterThan(20);
+      expect(await evaluateRecoveryOwnerAuthGates(pool, adminUserId, login.sessionToken)).toEqual({
+        ok: true,
+      });
+    });
+
     it('R-01 inactive/revoked WEBAUTHN does not block PASSWORD+TOTP replace', async () => {
       const t0 = Date.now();
       const enrolled = await enrollFresh(pool, adminUserId, expectedDatabase, t0);

@@ -182,8 +182,8 @@ function baseInput(
 }
 
 describe('Phase 10 chain history readonly validate', () => {
-  it('keeps PHASE10_CHAIN_HISTORY_PROVIDER_COLLECTOR_AVAILABLE false', () => {
-    expect(PHASE10_CHAIN_HISTORY_PROVIDER_COLLECTOR_AVAILABLE).toBe(false);
+  it('keeps PHASE10_CHAIN_HISTORY_PROVIDER_COLLECTOR_AVAILABLE true (Owner B1)', () => {
+    expect(PHASE10_CHAIN_HISTORY_PROVIDER_COLLECTOR_AVAILABLE).toBe(true);
     expect(typeof publicIndex.runPhase10ChainHistoryReadonlyValidate).toBe('function');
     expect('runPhase10ChainHistoryReadonlyValidateForTests' in publicIndex).toBe(false);
   });
@@ -215,7 +215,7 @@ describe('Phase 10 chain history readonly validate', () => {
   it('wrong primary kind → FAIL_BINDING', async () => {
     const report = await runPhase10ChainHistoryReadonlyValidateForTests(
       baseInput({
-        primary: { kind: 'tonapi', baseUrl: PRIMARY_URL },
+        primary: { kind: 'fake', baseUrl: PRIMARY_URL },
         primaryProvider: new StubEnumerateProvider(completeEmptyResult('toncenter')),
         secondaryProvider: new StubEnumerateProvider(completeEmptyResult('tonapi')),
       }),
@@ -223,19 +223,36 @@ describe('Phase 10 chain history readonly validate', () => {
     expect(report.verdict).toBe('FAIL_BINDING');
     expect(report.validationOnly).toBe(true);
     expect(report.acceptanceEnabled).toBe(false);
-    expect(report.notes.some((n) => n.includes("primary.kind must be 'toncenter'"))).toBe(true);
+    expect(report.notes.some((n) => n.includes('primary.kind must be toncenter|tonapi'))).toBe(
+      true,
+    );
   });
 
   it('wrong secondary kind → FAIL_BINDING', async () => {
     const report = await runPhase10ChainHistoryReadonlyValidateForTests(
       baseInput({
-        secondary: { kind: 'toncenter', baseUrl: SECONDARY_URL },
+        secondary: { kind: 'fake', baseUrl: SECONDARY_URL },
         primaryProvider: new StubEnumerateProvider(completeEmptyResult('toncenter')),
         secondaryProvider: new StubEnumerateProvider(completeEmptyResult('tonapi')),
       }),
     );
     expect(report.verdict).toBe('FAIL_BINDING');
-    expect(report.notes.some((n) => n.includes("secondary.kind must be 'tonapi'"))).toBe(true);
+    expect(report.notes.some((n) => n.includes('secondary.kind must be toncenter|tonapi'))).toBe(
+      true,
+    );
+  });
+
+  it('identical primary/secondary kinds → FAIL_BINDING', async () => {
+    const report = await runPhase10ChainHistoryReadonlyValidateForTests(
+      baseInput({
+        primary: { kind: 'tonapi', baseUrl: PRIMARY_URL },
+        secondary: { kind: 'tonapi', baseUrl: SECONDARY_URL },
+        primaryProvider: new StubEnumerateProvider(completeEmptyResult('tonapi')),
+        secondaryProvider: new StubEnumerateProvider(completeEmptyResult('tonapi')),
+      }),
+    );
+    expect(report.verdict).toBe('FAIL_BINDING');
+    expect(report.notes.some((n) => n.includes('must differ'))).toBe(true);
   });
 
   it('provider health failure → FAIL_PROVIDER_HEALTH', async () => {

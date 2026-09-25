@@ -35,8 +35,8 @@ function runHarness(verdict: string): {
 }
 
 describe('phase10-ops chain-history-readonly-validate exit semantics', () => {
-  it('keeps PHASE10_CHAIN_HISTORY_PROVIDER_COLLECTOR_AVAILABLE false', () => {
-    expect(PHASE10_CHAIN_HISTORY_PROVIDER_COLLECTOR_AVAILABLE).toBe(false);
+  it('keeps PHASE10_CHAIN_HISTORY_PROVIDER_COLLECTOR_AVAILABLE true (Owner B1)', () => {
+    expect(PHASE10_CHAIN_HISTORY_PROVIDER_COLLECTOR_AVAILABLE).toBe(true);
   });
 
   it('CLI source commits process.exitCode before early return (not process.exit)', () => {

@@ -63,6 +63,18 @@ describe.skipIf(phase4DatabaseUrl === '')('Phase 4 account-type / asset compatib
     ).rejects.toMatchObject({ code: 'ASSET_INCOMPATIBLE' });
   });
 
+  it('rejects HOT_WALLET_JETTON_ASSET with USDT (must use HOT_WALLET_USDT_ASSET)', async () => {
+    await expect(
+      withLedgerTransaction(pool, (client) =>
+        getOrCreateLedgerAccount(client, {
+          accountType: 'HOT_WALLET_JETTON_ASSET',
+          assetId: usdtId,
+          ownerId: randomUUID(),
+        }),
+      ),
+    ).rejects.toMatchObject({ code: 'ASSET_INCOMPATIBLE' });
+  });
+
   it('rejects HOT_WALLET_TON_ASSET with USDT asset', async () => {
     await expect(
       withLedgerTransaction(pool, (client) =>
@@ -103,6 +115,47 @@ describe.skipIf(phase4DatabaseUrl === '')('Phase 4 account-type / asset compatib
     );
     expect(usdtHot.assetId).toBe(usdtId);
     expect(tonHot.assetId).toBe(tonId);
+  });
+
+  it('provisions HOT_WALLET_JETTON_ASSET for allowlisted aalex only', async () => {
+    const network = await pool.query<{ id: string }>(
+      `SELECT id FROM networks WHERE code = 'TON_TESTNET'`,
+    );
+    const networkId = network.rows[0]!.id;
+    await pool.query(`DELETE FROM assets WHERE symbol = 'aalex' AND network_id = $1::uuid`, [
+      networkId,
+    ]);
+    const inserted = await pool.query<{ id: string }>(
+      `INSERT INTO assets (
+         network_id, symbol, name, decimals, is_native, contract_identity, status
+       ) VALUES (
+         $1::uuid, 'aalex', 'aalex', 9, false,
+         '0:e6e40e4e445c86c07df96a3129b67a74a411abbf1cd476607860978b7d5f1831',
+         'ACTIVE'
+       )
+       RETURNING id`,
+      [networkId],
+    );
+    const aalexId = inserted.rows[0]!.id;
+    const jettonHot = await withLedgerTransaction(pool, (client) =>
+      getOrCreateLedgerAccount(client, {
+        accountType: 'HOT_WALLET_JETTON_ASSET',
+        assetId: aalexId,
+        ownerId: randomUUID(),
+      }),
+    );
+    expect(jettonHot.assetId).toBe(aalexId);
+    expect(jettonHot.accountType).toBe('HOT_WALLET_JETTON_ASSET');
+
+    await expect(
+      withLedgerTransaction(pool, (client) =>
+        getOrCreateLedgerAccount(client, {
+          accountType: 'HOT_WALLET_USDT_ASSET',
+          assetId: aalexId,
+          ownerId: randomUUID(),
+        }),
+      ),
+    ).rejects.toMatchObject({ code: 'ASSET_INCOMPATIBLE' });
   });
 
   it('rejects provisioning and posting against a DISABLED asset', async () => {

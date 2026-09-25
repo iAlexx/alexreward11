@@ -61,6 +61,50 @@ export {
   type DeploymentTrustDerivativeV1,
 } from './ceremony-trust-derivative-v1.js';
 export {
+  ISOLATED_OWNER_CEREMONY_TARGET,
+  assertIsolatedSealProfileDigestMatches,
+  bootstrapEndpointProfileFromIsolatedCeremonyWire,
+  buildIsolatedCeremonyEndpointProfileV1,
+  digestIsolatedCeremonyEndpointProfileV1,
+  parseIsolatedCeremonyEndpointProfileV1Json,
+  validateIsolatedCeremonyEndpointProfileV1,
+  type IsolatedCeremonyEndpointProfileV1,
+} from './isolated-ceremony-profile-v1.js';
+export {
+  assertCeremonyDirOutsideRepo,
+  assertConnectionUrlAllowedForIsolatedCeremony,
+  assertIsolatedCeremonyAllowsEnrollment,
+  assertWitnessesAreConcrete,
+  draftCeremonySeal,
+  generateEphemeralCeremonyKeypairFiles,
+  loadCeremonyAuthorityFromDir,
+  loadCeremonyPublicKey,
+  loadCeremonySeal,
+  loadChannelBRecord,
+  loadIsolatedCeremonyProfile,
+  recordChannelBDigestFromOwner,
+  writeCeremonyPublicManifest,
+  writeIsolatedCeremonyProfile,
+  type CeremonyPublicKeyRecord,
+  type CeremonyPublicManifest,
+  type ChannelBOwnerDigestRecord,
+} from './isolated-ceremony-gate.js';
+export {
+  buildIsolatedCeremonyGrantPayload,
+  openIsolatedCeremonyBootstrap,
+  runIsolatedOptionCEnrollment,
+} from './isolated-ceremony-enroll.js';
+export {
+  ISOLATED_TELEGRAM_OWNER_BOOTSTRAP_TARGET,
+  assertConfiguredOwnerTelegramUserId,
+  assertIsolatedTelegramOwnerBootstrapTarget,
+  enrollIsolatedTelegramOwner,
+  parseIsolatedOwnerBootstrapUrl,
+  verifyOwnerTelegramIdentityForBootstrap,
+  type IsolatedTelegramOwnerBootstrapResult,
+  type IsolatedTelegramOwnerBootstrapUrlFacts,
+} from './isolated-telegram-owner-bootstrap.js';
+export {
   G5_SPKI_V1_DECISION,
   assertSpkiPinningUnsupportedForV1,
   buildVerifyFullTlsSocketOptions,

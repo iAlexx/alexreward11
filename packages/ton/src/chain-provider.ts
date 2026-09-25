@@ -83,6 +83,11 @@ export interface FindTransactionsByQueryIdInput {
   readonly recipient?: string;
   /** Hash of the final normalized External-In message cell. */
   readonly normalizedExternalMessageHash?: string;
+  /**
+   * Optional External-In cell hash (distinct from Tonkeeper-normalized hash).
+   * TonCenter getTransactions often indexes the cell hash; providers may match either.
+   */
+  readonly externalMessageCellHash?: string;
   /** Expected sender-side Jetton wallet owned by hotWallet. */
   readonly senderJettonWallet?: string;
   /** Exact expected atomic Jetton amount. */

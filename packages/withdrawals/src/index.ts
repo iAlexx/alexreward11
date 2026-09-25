@@ -26,22 +26,35 @@ export type { WithdrawalDb } from './db.js';
 
 export { insertWithdrawalAuditLog, insertWithdrawalOutboxEvent } from './audit.js';
 
+export { evaluateFailedPreBroadcastReuse, enqueueFailedPreBroadcastRetry } from './failed-pre-reuse.js';
+export type {
+  EnqueueFailedPreBroadcastRetryResult,
+  FailedPreBroadcastReuseEvaluation,
+  FailedPreBroadcastReuseSnapshot,
+} from './failed-pre-reuse.js';
+
 export {
   WITHDRAWAL_APPROVED_OUTBOX_EVENT,
+  WITHDRAWAL_FAILED_PRE_RETRY_OUTBOX_EVENT,
   WITHDRAWAL_OWNER_REVIEW_REQUIRED_OUTBOX_EVENT,
   withdrawalApprovedDedupeKey,
+  withdrawalFailedPreRetryDedupeKey,
   withdrawalOwnerReviewRequiredDedupeKey,
   withdrawalWorkflowId,
 } from './outbox.js';
 
 export {
   WITHDRAWAL_PAYOUT_WORKFLOW_TYPE,
+  assertNoRunningWithdrawalWorkflow,
   claimPendingWithdrawalApprovedEvents,
+  claimPendingFailedPreRetryEvents,
   claimPendingOwnerReviewRequiredEvents,
+  markOutboxDeadLetter,
   markOutboxDispatched,
   markOutboxRetry,
   startWithdrawalWorkflowFromOutbox,
   processWithdrawalApprovedOutboxBatch,
+  processWithdrawalFailedPreRetryOutboxBatch,
   redactOutboxError,
   outboxRetryBackoffSeconds,
 } from './outbox-relay.js';
@@ -50,6 +63,7 @@ export type {
   StartWithdrawalWorkflowResult,
   ProcessWithdrawalApprovedOutboxBatchOptions,
   ProcessWithdrawalApprovedOutboxBatchResult,
+  TemporalWorkflowIdReusePolicy,
   TemporalWorkflowStarter,
 } from './outbox-relay.js';
 
@@ -63,8 +77,15 @@ export {
   resolveActiveFeeRule,
   resolveActiveLimitRule,
   seedLockedInitialWithdrawalRules,
+  seedProposedIsolatedAalexWithdrawalRules,
 } from './rules.js';
 export type { FeeRuleRow, LimitRuleRow } from './rules.js';
+
+export {
+  PROPOSED_ISOLATED_AALEX_WITHDRAWAL,
+  validateOneAalexUnderProposedRules,
+} from './proposed-isolated-aalex-rules.js';
+export type { OneAalexQuoteValidation } from './proposed-isolated-aalex-rules.js';
 
 export { resolvePlatformFeeDiscount, resolvePriorityReview } from './entitlements.js';
 export type { FeeDiscountEntitlement, PriorityEntitlement } from './entitlements.js';
@@ -208,6 +229,28 @@ export type {
   RunRealTestnetPayoutPipelineInput,
 } from './real-payout-pipeline.js';
 
+export { reconcileRealWithdrawalAttemptOnly } from './real-chain-reconcile-only.js';
+export {
+  DEFINITIVE_NONPAYMENT_REASON_V5R1_EXPIRED_UNCONSUMED_SEQNO,
+} from './real-chain-reconcile-only.js';
+export type {
+  DefinitiveNonpaymentReasonCode,
+  RealChainReconcileOnlyClassification,
+  RealChainReconcileOnlyResolution,
+  RealChainReconcileProviderObservation,
+  ReconcileRealWithdrawalAttemptOnlyInput,
+  ReconcileRealWithdrawalAttemptOnlyResult,
+} from './real-chain-reconcile-only.js';
+
+export {
+  HOLD_AFTER_DEFINITIVE_NONPAYMENT_ACTION,
+  holdReconciledWithdrawalAfterDefinitiveNonpayment,
+} from './hold-after-definitive-nonpayment.js';
+export type {
+  HoldReconciledWithdrawalAfterDefinitiveNonpaymentInput,
+  HoldReconciledWithdrawalAfterDefinitiveNonpaymentResult,
+} from './hold-after-definitive-nonpayment.js';
+
 export { runPhase10Readiness } from './phase10-readiness.js';
 export type {
   Phase10ReadinessClassification,
@@ -290,6 +333,34 @@ export {
   resumeCampaignById,
   writeEvidenceFile,
 } from './phase10-campaign.js';
+export {
+  PHASE10_SUCCESS_BATCH_FEE_ATOMIC,
+  PHASE10_SUCCESS_BATCH_GROSS_ATOMIC,
+  PHASE10_SUCCESS_BATCH_MAX_ADDITIONAL_UTC_DAY,
+  PHASE10_SUCCESS_BATCH_MAX_PER_HOUR,
+  PHASE10_SUCCESS_BATCH_NET_ATOMIC,
+  assertPhase10BatchPreStart,
+  classifyTerminalPayoutState,
+  nextBatchStopAfterSuccess,
+  planPhase10SuccessBatch,
+  shouldStopForHourlyCap,
+} from './phase10-success-batch-runner.js';
+export type {
+  Phase10BatchCapacitySnapshot,
+  Phase10BatchPlan,
+  Phase10BatchPayoutOutcome,
+  Phase10BatchSafetyPreconditions,
+  Phase10BatchStopReason,
+} from './phase10-success-batch-runner.js';
+export {
+  evaluatePhase10FinalSlotOccupancy,
+  isBaselineIsolatedHistoricalAttemptId,
+  isHiddenReadyFinalSlotOccupancyBlocker,
+} from './phase10-final-slot-gate.js';
+export type {
+  Phase10FinalSlotOccupancyResult,
+  Phase10HiddenReadyCandidate,
+} from './phase10-final-slot-gate.js';
 export type {
   AttachPhase10CampaignWithdrawalInput,
   InitPhase10CampaignManifestInput,
@@ -321,13 +392,20 @@ export {
   SECONDARY_PROVIDER_WRONG_NETWORK,
   evaluateProviderIndependence,
   fingerprintProviderEndpoint,
+  parsePhase10AcceptanceCutoff,
+  resolvePhase10LiveProviderRoles,
   runPhase10LiveExternalProbes,
   signerLockedFromProbe,
 } from './phase10-live-probes.js';
 export type {
   Phase10LiveExternalProbeEvidence,
   Phase10LiveExternalProbeInput,
+  Phase10LiveProviderKind,
+  Phase10LiveProviderRoleEndpointInput,
+  Phase10LiveProviderRolesResolveResult,
   Phase10ProviderProbeObservation,
+  Phase10ResolvedLiveProviderRole,
+  Phase10ResolvedLiveProviderRoles,
   Phase10SignerProbeObservation,
   Phase10WalletSeqnoAdmissionObservation,
 } from './phase10-live-probes.js';
@@ -422,6 +500,12 @@ export { loadPhase10AuthoritativeHotWalletIdentity } from './phase10-hot-wallet-
 export type { Phase10AuthoritativeHotWalletIdentity } from './phase10-hot-wallet-identity.js';
 
 export {
+  PHASE10_USDT_Z_CANARY_WITHDRAWAL_ID,
+  isAuthorizedPhase10PreManifestCanary,
+} from './phase10-usdt-z-canary.js';
+export type { Phase10PreManifestCanaryAuthorizationInput } from './phase10-usdt-z-canary.js';
+
+export {
   PHASE10_REQUIRED_REAL_FAILURE_SCENARIO_IDS,
   evaluatePhase10AcceptanceGate,
   evaluatePhase10AcceptanceFromEvidence,
@@ -437,3 +521,31 @@ export type {
   Phase10AcceptanceGateVerdict,
   Phase10LiveEvidencePresence,
 } from './phase10-acceptance-gate.js';
+
+export {
+  PHASE10_CLOSURE_GATE_SCHEMA_VERSION,
+  PHASE10_REQUIRED_ACCEPTANCE_PAYOUTS,
+  buildPhase10ClosureAuditRecord,
+  closePhase10,
+  evaluatePhase10ClosureEligibility,
+  loadPhase10ClosureEconomicSnapshot,
+  phase10ClosureSha256Hex,
+  transitionCampaignToPhase10FinalState,
+} from './phase10-closure-gate.js';
+export type {
+  ClosePhase10Input,
+  ClosePhase10OutcomeCode,
+  ClosePhase10Result,
+  Phase10CampaignClosureTransitionResult,
+  Phase10CampaignFinalStatus,
+  Phase10ClosureAuditRecord,
+  Phase10ClosureBlocker,
+  Phase10ClosureBlockerCode,
+  Phase10ClosureCheckResult,
+  Phase10ClosureCheckStatus,
+  Phase10ClosureCurrentSafetyInput,
+  Phase10ClosureEconomicSnapshot,
+  Phase10ClosureEligibilityInput,
+  Phase10ClosureEligibilityResult,
+  Phase10ClosureEvidenceBindingSummary,
+} from './phase10-closure-gate.js';

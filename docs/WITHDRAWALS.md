@@ -202,6 +202,61 @@ Before `INTENDED_PAYOUT_PROVEN` or `DEFINITIVE_NONPAYMENT`, the observation must
 exact attempt (withdrawalId, attemptId, queryId, recipient, net atomic, asset, correlation,
 canonical message hash). Mismatch → `AMBIGUOUS` (never definitive proof).
 
+### Real-chain reconcile-only (`reconcileRealWithdrawalAttemptOnly`)
+
+Safety classifier only: never signs, broadcasts, settles, rejects, releases Reserved, or
+creates attempts. Allowed while `PAYOUT_DISPATCH_PAUSE=true`.
+
+Supported durable outcomes:
+
+| Resolution | When |
+| --- | --- |
+| `INTENDED_PAYOUT_PROVEN` | Dual-provider COMPLETE TEP-74 match (no confirm/settle in this path) |
+| `AMBIGUOUS` | Fail-closed default (including provider disagreement / incomplete evidence) |
+| `DEFINITIVE_NONPAYMENT` | **Only** reason `WALLET_V5R1_EXPIRED_UNCONSUMED_SEQNO` (below) |
+
+#### `WALLET_V5R1_EXPIRED_UNCONSUMED_SEQNO`
+
+Narrowly scoped to verified Wallet V5R1 `auth_signed_external` (`0x7369676e`) requests
+built via `@ton/ton` `WalletContractV5R1`. **All** of the following must hold:
+
+1. Exact persisted signed request identity validates (canonical hash, seqno, `valid_until`,
+   hashes / Hot Wallet destination where present).
+2. Decoded `valid_until` is strictly before the observation clock (`observedAt > valid_until`).
+   No invented grace period.
+3. TonAPI and TonCenter independently return the same current wallet seqno, and that seqno
+   equals the attempt `expected_seqno` (slot unconsumed).
+4. No positive payout proof already exists (`INTENDED_PAYOUT_PROVEN`, settlement, confirmation).
+5. Dual-provider TEP-74 observation does **not** COMPLETE-match the intended transfer
+   (defense-in-depth / conflict detection — **provider “not found” alone is never sufficient**).
+
+If `currentSeqno > expectedSeqno`, this rule **must not** classify nonpayment (forensics
+required). If `observedAt <= valid_until`, result stays `AMBIGUOUS`.
+
+Persisting `DEFINITIVE_NONPAYMENT` here does **not** transition the withdrawal, release
+Reserved, or queue retry — a separate Owner-authorized domain command is required for any
+post-proof financial action.
+
+#### Real-chain DNP hold bridge (`holdReconciledWithdrawalAfterDefinitiveNonpayment`)
+
+Purpose-specific Owner/domain command. Atomic, fail-closed:
+
+```
+RECONCILE_REQUIRED
+  ↓  durable DEFINITIVE_NONPAYMENT (WALLET_V5R1_EXPIRED_UNCONSUMED_SEQNO)
+Owner/domain bridge
+  ↓
+HELD + held_from_reconcile=true
+  ↓  separate Owner decideWithdrawal(REJECT, definitiveNonpayment:true)
+REJECTED + WITHDRAWAL_RELEASE
+```
+
+The bridge itself performs **zero** ledger posting: Available and Reserved are unchanged.
+It does not REJECT, release, approve, queue, sign, broadcast, settle, or create attempts.
+Safe while `PAYOUT_DISPATCH_PAUSE=true` / REAL=false / FAKE=false / signer LOCKED.
+Idempotent replay of an already-applied successful bridge returns `alreadyApplied` without
+a second mutation. Normal Owner `HOLD` (non-reconcile) must not set `held_from_reconcile`.
+
 ## Settlement (CONFIRMED)
 
 At `CONFIRMED`, one `WITHDRAWAL_SETTLEMENT`:
