@@ -672,3 +672,100 @@ Executed at `closedAt=2026-09-25T04:11:55.237Z` against campaign
    remained pause=true, signer LOCKED, REAL=false, FAKE=false.
 5. Second `closePhase10({ executeMutation: true })` returned `ALREADY_CLOSED` (no-op).
 6. Known 21 canary-signing-recovery failures remain documented; full suite not green.
+
+## Clarification — Phase 10 dual-archive packaging (2026-09-25)
+
+Owner authorized mandatory dual-archive packaging only (no Phase 11). Accepted packaging
+commit `7c57ce2000ca0e0c8abcc9761a7ba2af61974b3a` (implementation seal
+`58d5c81c4ab898f2fd9b16545e967e47bc1ce093` + acceptance-report SHA record). Helper
+`scripts/create-phase-archive.mjs` v2.1.0 produced:
+
+- Source: `ALEx_Rewards_PHASE_10_TON_TESTNET_PAYOUT_20260925-042556_7c57ce2.zip`
+  SHA-256 `4e6785db107a5fd6db7f9e55b3da2242201c4a9ef9d2ff4b397c9cf27fc69814`
+- Package: `PHASE_10_TON_TESTNET_PAYOUT_PACKAGE_20260925-042556_7c57ce2.zip`
+  SHA-256 `cd9b3c4a159ea288efc2d9068a7ecc3f93cdf78a7212b3ee1bb47f59a65ea722`
+  (external `PACKAGE_SHA256.txt`)
+
+Prior final evidence archive preserved under
+`phase-archives/PHASE_10_TON_TESTNET_PAYOUT/evidence-archive-preserved-20260925-034434/`
+(SHA-256 unchanged `b3f269e0…0354`). Phase 11 not started.
+
+## Clarification - Phase 11 packages/ads implementation (2026-09-25)
+
+Implementation clarifications recorded while building `packages/ads` (no approved product or
+financial rule was changed):
+
+1. `packages/ads` composes transactions through `@alex-rewards/rewards` only. It never
+   imports `@alex-rewards/ledger` and never posts a ledger transaction; `src/db.ts`
+   re-exports `withLedgerTransaction` from the Reward Engine for that reason.
+2. Effective provider limits are resolved PER DIMENSION (`limit_metric` + `limit_window`)
+   by taking the MINIMUM `max_count` across every applicable ACTIVE rule version, so a
+   platform/user/country rule can only be stricter than a provider or contract hard limit.
+   No numeric limit (30 / 25) exists as a code constant; both come from
+   `provider_limit_rules` data seeded by migration 0030.
+3. A provider with no `provider_health_snapshots` observation is treated as UNAVAILABLE for
+   NEW session authorization, not as implicitly healthy.
+4. `ad_sessions.correlation_nonce_hash` is left NULL for AdsGram because the provider does
+   not support a custom nonce echo (`custom_nonce_supported = false`). A stored nonce that
+   the provider cannot return would be correlation theatre.
+5. The monetary gate `evaluateProviderMonetaryEligibility` is provider-neutral and reads
+   only data (production monetary status, cash-reward policy approval, server signal
+   authentication, session correlation capability, health, open clarification count, hard
+   limit flags, plus per-signal authenticity/correlation). AdsGram is refused today because
+   its seeded data says BLOCKED with six OPEN clarification items, not because any AdsGram
+   name is branched on in code.
+6. Terminal non-reward outcomes (NO_FILL / FAILED / SKIPPED / EXPIRED) release the quote's
+   budget, membership-bonus and exposure reservations through Reward Engine primitives and
+   set the quote to CANCELLED, but only while the quote is still OPEN and
+   `reward_quotes.source_started_at IS NULL` (protected start is left untouched).
+7. `verifyServerSignal` for AdsGram reports `authenticity: UNVERIFIED`,
+   `authenticationMethod: NONE`, `authenticationStrength: NONE` and
+   `monetaryAuthority: false`. The Reward URL ingestion path stores evidence and correlates
+   best-effort (more than one candidate session yields AMBIGUOUS) and can never credit money.
+8. The official `@adsgram/react` 1.0.2 SDK stays in `apps/miniapp`. `packages/ads` declares
+   no React dependency and exports only the `ClientCompletionSignalPayload` data contract
+   (`src/providers/adsgram/client-boundary.ts`).
+9. `attemptVerifyAndIssueAdReward` calls `issueAdReward` from `@alex-rewards/rewards`; that
+   export is delivered by the Reward Engine work item and is the only path that posts money.
+
+## Clarification - Phase 11 wiring, correction and certification (2026-09-25)
+
+10. **Quote/session FK direction correction.** Earlier Phase 11 drafts described retaining
+    `ad_sessions.reward_quote_id` as authority. Spec V1.3 requires the opposite and that is
+    what is implemented: `reward_quotes.ad_session_id` is the single authoritative pointer, it
+    is unique (`reward_quotes_ad_session_uidx`), and for `source_type = 'AD'` the database
+    requires `source_id = ad_session_id`. `ad_sessions.reward_quote_id` remains only as a
+    **compatibility mirror** dual-written on authorize/issue; Phase 11 domain reads must use
+    `reward_quotes.ad_session_id`. Authorization creates both rows in one transaction using
+    pre-generated UUIDs.
+11. **Migration 0030 UUID defect fixed before first apply.** The drafted seed rows used
+    identifiers containing non-hexadecimal characters (`…00000000ads1`, `…mf01`, `…mf02`,
+    `…unit`, `…lim1`, `…lim2`), which PostgreSQL rejects outright, so the migration could never
+    have applied. They were replaced with valid hex identifiers (provider `…00000000ad51`,
+    manifests `…000000000f01` / `…000000000f02`, ad unit `…000000000a11`, limit rules
+    `…0000000011a1` / `…0000000011a2`) and `ADSGRAM_PROVIDER_ID` in `packages/ads/src/constants.ts`
+    was updated to match. No seeded value, limit, status or clarification count changed.
+12. **Session state persistence bound parameters positionally.** `persistSessionState` passed
+    four parameters regardless of which assignments were built, so any state without a
+    timestamp column (or with no failure code) left a placeholder unused and PostgreSQL could
+    not infer its type. Parameters are now numbered as they are bound. This was a defect, not a
+    rule change.
+13. **API surface.** `v1/ads/*` requires an active Phase 3 access session; the ad session id is
+    a path locator and every request is re-checked against the authenticated user server-side.
+    Requests carrying reward-authority fields (any amount, bonus, verification or ledger field)
+    are refused with `400` before any domain call. The AdsGram Reward URL endpoint
+    (`GET /webhooks/adsgram/reward`) is unauthenticated by provider design, returns one uniform
+    `{ accepted: true, rewardCredited: false }` body for every outcome so it cannot be used as
+    an oracle, and fails closed if its Redis throttle is unavailable. It reuses
+    `AUTH_RATE_LIMIT_WINDOW_SECONDS` / `AUTH_RATE_LIMIT_MAX`; a dedicated webhook limit remains
+    OWNER_DECISION_REQUIRED.
+14. **Certification uses a test-only approved provider.** Proving that the monetary gate is
+    provider-neutral requires at least one provider that passes it, but AdsGram must stay
+    BLOCKED in all production data. The `HARNESS_CERT` provider therefore exists only inside
+    `packages/ads/test/harness.ts` and is registered in the compile-time registry only for the
+    duration of a test run. No migration, seed or runtime path ships it.
+15. **AMBIGUOUS correlation is tested directly.** The partial unique index
+    `ad_sessions_one_active_per_user_provider_idx` covers exactly the live states that
+    correlation candidate lookup searches, so ingestion can never find two candidates. The
+    ambiguity refusal is therefore asserted at the gate itself: an `AMBIGUOUS` provider signal
+    against the APPROVED `HARNESS_CERT` provider still refuses money.
