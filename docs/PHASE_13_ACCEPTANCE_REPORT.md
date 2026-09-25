@@ -174,7 +174,7 @@ mutation. No automatic change to `PAYOUT_DISPATCH_PAUSE` or AdsGram monetary sta
 
 ## M. Exact accepted commit SHA
 
-`PENDING_COMMIT`
+`56900dbd840ee918d76735f24b13d7d3edbc0197`
 
 ---
 
