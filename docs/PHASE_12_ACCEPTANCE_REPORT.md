@@ -143,7 +143,7 @@ safe to leave or disable via routing. No Phase 10/11 archive mutation.
 
 ## M. Exact accepted commit SHA
 
-`PENDING_PACKAGING`
+`7bfcab978ec39ae474b2d622dac4310d55fdee04`
 
 ---
 
