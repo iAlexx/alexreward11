@@ -56,6 +56,56 @@ export type {
   ReauthOwnerAdminSessionResult,
 } from './admin-auth.js';
 export {
+  ADMIN_WEBAUTHN_CHALLENGE_TTL_MS,
+  beginWebAuthnAuthentication,
+  beginWebAuthnReauth,
+  beginWebAuthnRegistration,
+  finishWebAuthnAuthentication,
+  finishWebAuthnReauth,
+  finishWebAuthnRegistration,
+  peekWebAuthnChallengeForTests,
+  resolveAdminWebAuthnRpConfig,
+} from './admin-webauthn.js';
+export type {
+  AdminWebAuthnChallengePurpose,
+  AdminWebAuthnCredentialRow,
+  AdminWebAuthnRpConfig,
+  BeginWebAuthnAuthenticationResult,
+  BeginWebAuthnRegistrationResult,
+  FinishWebAuthnAuthenticationBundle,
+  FinishWebAuthnAuthenticationResult,
+  FinishWebAuthnRegistrationResult,
+} from './admin-webauthn.js';
+export {
+  ADMIN_RECOVERY_CODE_BYTE_LENGTH,
+  ADMIN_RECOVERY_CODE_COUNT,
+  consumeRecoveryCode,
+  formatRecoveryCodeForDisplay,
+  generateRecoveryCodes,
+  hashAdminRecoveryCode,
+  normalizeRecoveryCode,
+  rotateRecoveryCodes,
+} from './admin-recovery.js';
+export type {
+  ConsumeRecoveryCodeBundle,
+  ConsumeRecoveryCodeResult,
+  GenerateRecoveryCodesResult,
+} from './admin-recovery.js';
+export {
+  assertAdminOwnerRole,
+  assertRecentReauth,
+  beginLoginViaWebAuthn,
+  beginReauthViaWebAuthn,
+  loginViaPasswordTotp,
+  loginViaRecoveryCode,
+  loginViaWebAuthn,
+  looksLikeTelegramUserAccessToken,
+  reauthViaPasswordTotp,
+  reauthViaWebAuthn,
+  verifyAdminSessionToken,
+} from './admin-http.js';
+export type { VerifiedAdminSession } from './admin-http.js';
+export {
   ADMIN_TOTP_DIGITS,
   ADMIN_TOTP_PERIOD_SECONDS,
   buildOtpAuthUri,

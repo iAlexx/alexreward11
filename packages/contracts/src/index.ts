@@ -75,3 +75,58 @@ export type {
   AdSessionStateUserLabelMap,
   UserLabelForAdSessionState,
 } from './ad-session-labels.js';
+
+// ---------------------------------------------------------------------------
+// Phase 13 — Admin API contracts
+// ---------------------------------------------------------------------------
+
+export {
+  ADMIN_API_CONTRACT_VERSION,
+  assertHighImpactConfirmationValid,
+  createHighImpactConfirmation,
+} from './admin.js';
+export type {
+  AdminAvailabilityLabel,
+  AdminAuditLogsResponse,
+  AdminCreateRewardRuleVersionRequest,
+  AdminDomainSlot,
+  AdminEconomicsAmountDto,
+  AdminEconomicsResponse,
+  AdminExposureLimitsResponse,
+  AdminFeatureFlagDto,
+  AdminFeatureFlagMutateRequest,
+  AdminFeatureFlagsListResponse,
+  AdminFounderGrantRequest,
+  AdminFounderGrantResponse,
+  AdminFraudReadResponse,
+  AdminHotWalletResponse,
+  AdminLedgerLookupResponse,
+  AdminMissionsFoundationResponse,
+  AdminNotificationCampaignDraftRequest,
+  AdminOverviewDomainDto,
+  AdminOverviewResponse,
+  AdminPolicyArbitraryPayloadRequest,
+  AdminPolicyFamiliesResponse,
+  AdminPolicyRuleFamily,
+  AdminProviderLimitChangeRequest,
+  AdminProviderLimitChangeResponse,
+  AdminProviderListItemDto,
+  AdminProviderMonetaryApprovalRequest,
+  AdminProvidersListResponse,
+  AdminReferralFoundationResponse,
+  AdminReviewQueueActionRequest,
+  AdminReviewQueueListResponse,
+  AdminRewardRulesListResponse,
+  AdminRoleCode,
+  AdminSettingsFamiliesResponse,
+  AdminSystemHealthResponse,
+  AdminUserDetailResponse,
+  AdminUserListItemDto,
+  AdminUsersListResponse,
+  AdminWithdrawalDecisionRequest,
+  AdminWithdrawalListItemDto,
+  AdminWithdrawalsListResponse,
+  HighImpactConfirmationBinding,
+  HighImpactConfirmationFailure,
+  HighImpactConfirmationInput,
+} from './admin.js';

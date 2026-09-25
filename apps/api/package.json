@@ -10,13 +10,15 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src test",
     "test": "vitest run",
-    "test:phase12": "cross-env PHASE12_API_TESTS=1 vitest run --fileParallelism=false test/phase12-read-models.test.ts test/phase12-read-apis-db.test.ts"
+    "test:phase12": "cross-env PHASE12_API_TESTS=1 vitest run --fileParallelism=false test/phase12-read-models.test.ts test/phase12-read-apis-db.test.ts",
+    "test:phase13": "vitest run --fileParallelism=false test/phase13-admin-auth.test.ts test/phase13-admin-apis.test.ts test/phase13-admin-security-matrix.test.ts"
   },
   "dependencies": {
     "@alex-rewards/ads": "workspace:*",
     "@alex-rewards/auth": "workspace:*",
     "@alex-rewards/config": "workspace:*",
     "@alex-rewards/contracts": "workspace:*",
+    "@alex-rewards/control-center": "workspace:*",
     "@alex-rewards/db": "workspace:*",
     "@alex-rewards/ledger": "workspace:*",
     "@alex-rewards/observability": "workspace:*",

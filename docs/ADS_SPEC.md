@@ -115,3 +115,12 @@ Real PostgreSQL via `resetAndMigrate`; no mock data. See `docs/TEST_PLAN.md`.
 - The Earn UI (Phase 12)
 - Ad revenue recognition (`AD_NETWORK_RECEIVABLE` / `AD_REVENUE`) posts
 - Any provider loaded at runtime rather than at compile time
+
+## Phase 13 Admin provider operations
+
+Owner Admin exposes provider registry, contracts, capabilities, versioned limits (with
+old/new diff + impact preview), certification results, country rules, and settlement
+foundations under `v1/admin/*`. Limits cannot set effective allowance above `PROVIDER_HARD`.
+Monetary status transitions to `APPROVED` are refused while clarification items remain open
+(`refuseProviderMonetaryApprovalWithoutClarification`). Admin UI existence does **not**
+authorize AdsGram production money. See `docs/ADMIN_PROVIDER_OPS.md`.

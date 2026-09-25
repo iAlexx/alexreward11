@@ -247,8 +247,9 @@ Decisions:
    intent-only.
 8. **Forward migration `0024`:** additive `totp_last_accepted_step` +
    `admin_auth_throttle` for replay protection and persistent attempt controls.
-9. **Mixed ACTIVE unsupported credentials (e.g. WEBAUTHN):** refuse enroll/replace
-   (fail-closed); do not remove or simulate WebAuthn (`docs/OWNER_ADMIN_AUTH.md`).
+9. **Mixed ACTIVE unsupported credentials:** refuse enroll/replace for unknown types
+   (fail-closed). **Superseded for WEBAUTHN by ADR-023** — WebAuthn is a supported primary
+   factor as of Phase 13 (`docs/OWNER_ADMIN_AUTH.md`).
 10. **Auth failure accounting:** invalid-credential outcomes COMMIT throttle/audit under
     the pool-owned transaction before throwing (AuthOutcome), closing the post-rollback
     race.
@@ -814,4 +815,46 @@ financial rule was changed):
     projection and the settings row cannot disagree. Payout privacy and notification
     preferences are read-only in this phase, and `security_notifications_enabled` is reported
     as always true because the schema forbids disabling it.
+
+## ADR-023 — Phase 13 Owner Admin WebAuthn primary + recovery + Admin API
+
+**Status:** Implemented on packages/auth + packages/contracts + packages/ads + apps/api
+Admin HTTP surface under `v1/admin/*`. Operational WebAuthn RP ID remains
+`OWNER_DECISION_REQUIRED`. Does not unlock AdsGram monetary APPROVED while clarifications
+are open, does not silently flip `PAYOUT_DISPATCH_PAUSE`, and does not start Phase 14.
+
+### Decisions
+
+1. **Factor hierarchy:** WebAuthn/Passkey is primary; password+TOTP is fallback (both
+   factors required together); recovery codes are single-use emergency login. TOTP alone
+   never authenticates.
+2. **Independence:** Owner Admin sessions (`admin_sessions`) are independent of Telegram
+   Mini App user `AccessSession` / access JWTs. `AdminSessionGuard` refuses Telegram-shaped
+   tokens.
+3. **WEBAUTHN is supported:** `assertNoUnsupportedActiveCredentials` no longer treats
+   `WEBAUTHN` as blocking. Unknown ACTIVE types still fail closed.
+4. **Challenges:** Migration `0031_phase13_admin_webauthn_challenges.sql` stores one-time,
+   expiring challenges (REGISTRATION / AUTHENTICATION / REAUTH). No production RP ID is
+   seeded in SQL.
+5. **RP config:** `ADMIN_WEBAUTHN_RP_ID` / `ADMIN_WEBAUTHN_ORIGIN` / `ADMIN_WEBAUTHN_RP_NAME`
+   have LOCAL/test fixture defaults only; staging/production fail closed when unset or when
+   local fixture hosts are inherited.
+6. **CSRF:** Cookie mode (`admin_session`, HttpOnly, SameSite=Strict) requires Origin match
+   against configured admin/CORS origins. Bearer Authorization is allowed for tests and
+   skips cookie CSRF.
+7. **Recovery:** codes are cryptographic, hashed (`sha256Hex("admin-recovery:" + normalized)`),
+   never logged in plaintext; rotate soft-consumes unused rows with `consumed_source=SYSTEM`.
+8. **Libraries:** `@simplewebauthn/server@13.2.2` in `@alex-rewards/auth`;
+   `@simplewebauthn/browser@13.2.2` pinned for `@alex-rewards/admin` (Phase 13 Admin Web UI).
+9. **Admin HTTP APIs (Phase 13):** Control/read surface under `v1/admin/*` (OWNER-only via
+   `AdminSessionGuard`). No direct balance editor. Review Queue actions call control-center /
+   domain wrappers and never ledger-write alone. Policy Center accepts typed families only
+   (arbitrary JS/SQL/eval refused). Provider limit changes are versioned and cannot set
+   non-hard scopes above `PROVIDER_HARD`. AdsGram monetary `APPROVED` requires closed
+   clarification register (`refuseProviderMonetaryApprovalWithoutClarification`). Founder
+   grant remains membership-only (zero money). Economics separates ESTIMATED vs SETTLED;
+   unconfigured exposure is `UNAVAILABLE`. High-impact mutations require reason +
+   `expectedVersion` + recent reauth; confirmation bindings invalidate on payload change.
+   `PAYOUT_DISPATCH_PAUSE` may be displayed and Owner-changed with full ceremony, but silent
+   flip is refused; Phase 10 baseline is not auto-changed.
 

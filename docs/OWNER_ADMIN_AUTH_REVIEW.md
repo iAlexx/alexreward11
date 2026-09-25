@@ -16,7 +16,7 @@ the Owner remediation prompt.
 
 - **Factors:** password (Argon2id) + TOTP into `admin_credentials`.
 - **Sessions:** opaque tokens; `sha256Hex("admin-session:" + token)`; 15-minute same-session reauth.
-- **R-01:** ACTIVE unsupported credentials (WEBAUTHN / unknown) refuse enroll/replace; no silent WebAuthn removal.
+- **R-01:** ACTIVE unknown credential types refuse enroll/replace; **WEBAUTHN is supported** (Phase 13 / ADR-023).
 - **R-02:** `withPoolOwnedOwnerAuthTransaction` commits auth failure accounting before throwing; concurrent lockout tests.
 - **R-03:** operational path requires Owner-controlled `expectedClusterSystemIdentifier` vs `pg_control_system().system_identifier` (see `OWNER_ADMIN_DB_IDENTITY_DESIGN.md`).
 - **R-04:** no secret-bearing serializable enroll/login JSON; `LoginOwnerAdminBundle.takeSessionTokenOnce()`; TTY-only CLI.
@@ -62,7 +62,7 @@ real Owner credentials, Windows Terminal smoke with real secrets.
 ## Security limitations
 
 1. Operational first enrollment **BLOCKED** (bootstrap design not implemented).
-2. WebAuthn verification/replacement not implemented — mixed ACTIVE WEBAUTHN refuses replace.
+2. WebAuthn primary + recovery implemented in Phase 13 (`admin-webauthn.ts`, `admin-recovery.ts`, `v1/admin/auth`). Production RP ID remains OWNER_DECISION_REQUIRED.
 3. Local TOTP seal is password-bound, not KMS/HSM.
 4. Terminal screen recording remains a residual exposure.
 5. Cluster `system_identifier` requires Owner out-of-band custody for ops.

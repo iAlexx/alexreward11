@@ -3,7 +3,12 @@ import type { NextConfig } from 'next';
 const config: NextConfig = {
   poweredByHeader: false,
   reactStrictMode: true,
-  transpilePackages: ['@alex-rewards/config', '@alex-rewards/contracts'],
+  transpilePackages: [
+    '@alex-rewards/config',
+    '@alex-rewards/contracts',
+    '@alex-rewards/i18n',
+    '@alex-rewards/ui',
+  ],
   async headers() {
     return [
       {
@@ -12,7 +17,10 @@ const config: NextConfig = {
           { key: 'Referrer-Policy', value: 'no-referrer' },
           { key: 'X-Content-Type-Options', value: 'nosniff' },
           { key: 'X-Frame-Options', value: 'DENY' },
-          { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+          {
+            key: 'Permissions-Policy',
+            value: 'camera=(), microphone=(), geolocation=()',
+          },
         ],
       },
     ];

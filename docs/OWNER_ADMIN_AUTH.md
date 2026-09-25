@@ -1,10 +1,23 @@
-# Owner admin authentication (password + TOTP + admin_sessions)
+# Owner admin authentication (password + TOTP + WebAuthn + recovery + admin_sessions)
 
-Interim **Owner-operated** authentication issuer for Phase 10 Recovery.
+Owner-operated authentication for Phase 10 Recovery and Phase 13 Admin API.
 See ADR-019, ADR-021, ADR-022 (isolated Telegram first-Owner bootstrap),
+ADR-023 (Phase 13 WebAuthn primary + recovery),
 `docs/OWNER_ADMIN_BOOTSTRAP_DESIGN.md` (M1-A.1 Option C design — retained for ops),
 `docs/OWNER_ADMIN_DB_IDENTITY_DESIGN.md`, and
 `docs/M1_A1_TRUST_ESTABLISHMENT_CHECKLIST.md`.
+
+## Factor model (Phase 13)
+
+| Factor | Role |
+| --- | --- |
+| **WebAuthn / Passkey** | **Primary** Owner authentication |
+| **Password + TOTP** | Fallback (both required; TOTP alone never authenticates) |
+| **Recovery codes** | Single-use emergency login; hashed at rest; plaintext shown once |
+
+Admin auth is **fully independent** of Telegram Mini App user `AccessSession` tokens.
+`AdminSessionGuard` rejects Telegram-shaped JWTs and only accepts `admin_sessions`
+opaque tokens (Bearer or `admin_session` cookie).
 
 ## Phase 10 isolated first-Owner (practical path)
 
@@ -46,8 +59,8 @@ user fields are untrusted until the CLI validates initData.
 
 ## Hard rules
 
-- Secrets: interactive TTY only (stdin **and** stdout/stderr must be TTYs).
-- Never pass password / TOTP / session token via argv, env, files, clipboard automation, or logs.
+- Secrets: interactive TTY only for CLI (stdin **and** stdout/stderr must be TTYs).
+- Never pass password / TOTP / session token / recovery plaintext via argv, env, files, clipboard automation, or logs.
 - `--expected-database <name>` is **required** and must match live `current_database()`.
 - Prefer `OWNER_ADMIN_AUTH_DATABASE_URL` over ambient `DATABASE_URL`.
 - **Operational default-deny:** all Owner-auth entry points refuse `alex_rewards`
@@ -57,23 +70,39 @@ user fields are untrusted until the CLI validates initData.
   `DESIGN READY — TRUST ESTABLISHMENT BLOCKED`
   (Option C + endpoint trust + redemption PoP designed; production trust anchor
   not independently established — Checklist **B** / **D**).
-  Challenge lifecycle with enrollment-channel binding and FinalCredReq (P1)
-  and TLS chain+hostname+Owner CA (P2) are specified in design docs.
-  **Local Stage B** was Owner-authorized and implemented for isolated test DBs
-  with ephemeral test-only keys (checklist §C; ADR-021 Stage B clarification).
-  That does **not** establish Checklist **B** or authorize **D**.
-  Ceremony schema validators (G1/G2/G8) are structural only — **not** authentic
-  Owner provenance.
-- JSON stdout never contains TOTP seeds, otpauth URIs, passwords, OTPs, or session tokens.
-- Session tokens are returned only via `takeSessionTokenOnce()` for interactive stderr display.
-- ACTIVE unsupported credentials (e.g. WEBAUTHN) **block enrollment/replacement**
-  (fail-closed interim policy). WebAuthn is never removed or simulated.
+- JSON stdout never contains TOTP seeds, otpauth URIs, passwords, OTPs, recovery codes, or session tokens.
+- Session tokens are returned only via `takeSessionTokenOnce()` for interactive stderr display / API response handoff.
+- ACTIVE **unknown** credential types **block enrollment/replacement** (fail-closed).
+  **WEBAUTHN is supported** (Phase 13) and no longer blocks password+TOTP replace.
+- WebAuthn RP ID / origin: `ADMIN_WEBAUTHN_RP_ID` / `ADMIN_WEBAUTHN_ORIGIN` —
+  LOCAL/test fixtures only by default; **staging/production fail closed** when unset
+  or set to local fixture hosts (`OWNER_DECISION_REQUIRED` for production RP ID).
 - Failed authentications are durably counted under per-Owner serialization before the
   failure is returned (lockout is enforced).
 - Lock hierarchy: Owner → throttle → credentials → sessions. Reauth checks factors under
   credential locks, then locks the session and revalidates **before** consuming TOTP.
 - CLI enroll: read-only preflight (no INSERT/FOR UPDATE) → interactive secrets → final TX.
 - Windows Terminal interactive smoke: **NOT TESTED** in automated closure (document only).
+
+## API surface (`apps/api` — Phase 13)
+
+Routes under `v1/admin/auth` (rate-limited; independent of `v1/auth`):
+
+| Method | Path | Auth |
+| --- | --- | --- |
+| POST | `webauthn/register/options` | Admin session |
+| POST | `webauthn/register/verify` | Admin session |
+| POST | `webauthn/login/options` | Public |
+| POST | `webauthn/login/verify` | Public → issues session |
+| POST | `login/password-totp` | Public → issues session |
+| POST | `recovery/consume` | Public → issues session |
+| POST | `reauth/password-totp` | Admin session |
+| POST | `reauth/webauthn` | Admin session (`phase=options\|verify`) |
+| POST | `logout` | Admin session |
+| GET | `session` | Admin session |
+
+Cookie mode uses `admin_session` (HttpOnly, SameSite=Strict) plus Origin check.
+Bearer `Authorization` is supported for tests/automation (skips cookie CSRF).
 
 ## Build
 
@@ -108,14 +137,17 @@ pnpm --filter @alex-rewards/auth run owner-admin-auth -- login `
 ```powershell
 $env:OWNER_ADMIN_AUTH_DATABASE_URL = 'postgresql://…@127.0.0.1:55432/alex_rewards_test'
 pnpm --filter @alex-rewards/auth run test:owner-admin-auth
+pnpm --filter @alex-rewards/auth run test:phase13-admin-auth
 ```
 
-## Migration
+## Migrations
 
-`0024_owner_admin_auth_hardening.sql` adds `totp_last_accepted_step` and
-`admin_auth_throttle`. Apply to isolated test DBs for local remediation only.
-**Operational application of 0024 requires separate Owner migration approval** and
-is not authorized by this document.
+- `0024_owner_admin_auth_hardening.sql` — `totp_last_accepted_step` + `admin_auth_throttle`
+- `0031_phase13_admin_webauthn_challenges.sql` — one-time WebAuthn challenge rows
+
+Apply to isolated test DBs for local remediation only.
+**Operational application requires separate Owner migration approval** and
+is not authorized by this document. Migration 0031 does **not** invent production RP IDs.
 
 ## Manual Windows Terminal smoke test (isolated; no real Owner credentials)
 
@@ -137,7 +169,8 @@ is not authorized by this document.
   Local Stage B isolated implementation exists (checklist §C); ephemeral
   test-only keys ≠ Checklist B/D complete. Structural seal/profile/derivative
   validation ≠ authentic Owner provenance.
-- Mixed ACTIVE WEBAUTHN + PASSWORD/TOTP: replacement refused until WebAuthn verification exists.
 - Local TOTP seal is password-bound, not KMS.
 - Terminal screen recording remains a residual channel even with TTY checks.
 - Operational cluster identity requires Owner custody of `system_identifier` out-of-band.
+- Full browser WebAuthn end-to-end against a hardware authenticator is outside the
+  automated Phase 13 unit suite (challenge/sign_count/replay paths are covered).

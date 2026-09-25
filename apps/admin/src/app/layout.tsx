@@ -1,17 +1,21 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 
+import { AppProviders } from '../providers/AppProviders';
+
 import './globals.css';
 
 export const metadata: Metadata = {
   title: 'ALEx Rewards Admin',
-  description: 'ALEx Rewards Owner administration boundary',
+  description: 'ALEx Rewards Owner administration Control Plane',
 };
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <AppProviders>{children}</AppProviders>
+      </body>
     </html>
   );
 }
