@@ -174,7 +174,7 @@ Local Phase 11 gate: `pnpm test:phase11` → 29 passed. Full-repo green is **not
 
 ## M. Exact accepted commit SHA
 
-`PENDING_PACKAGING` — replaced with the packaging commit SHA immediately before archive.
+`85fc49190c186743498512861cc62f708debd056`
 
 ---
 
