@@ -1,9 +1,17 @@
+import createNextIntlPlugin from 'next-intl/plugin';
 import type { NextConfig } from 'next';
+
+const withNextIntl = createNextIntlPlugin('./src/i18n/request.ts');
 
 const config: NextConfig = {
   poweredByHeader: false,
   reactStrictMode: true,
-  transpilePackages: ['@alex-rewards/config', '@alex-rewards/contracts'],
+  transpilePackages: [
+    '@alex-rewards/config',
+    '@alex-rewards/contracts',
+    '@alex-rewards/i18n',
+    '@alex-rewards/ui',
+  ],
   async headers() {
     return [
       {
@@ -18,4 +26,4 @@ const config: NextConfig = {
   },
 };
 
-export default config;
+export default withNextIntl(config);

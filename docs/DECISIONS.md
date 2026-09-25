@@ -769,3 +769,49 @@ financial rule was changed):
     correlation candidate lookup searches, so ingestion can never find two candidates. The
     ambiguity refusal is therefore asserted at the gate itself: an `AMBIGUOUS` provider signal
     against the APPROVED `HARNESS_CERT` provider still refuses money.
+
+## Clarification - Phase 12 Mini App read APIs (2026-09-25)
+
+16. **A missing ledger account is an authoritative zero, not an unknown.** `GET /v1/me/balances`
+    reads `ledger_accounts` / `ledger_account_balances` with SELECT only and never calls
+    `getOrCreateLedgerAccount`: asking for a balance is not a financial event. A user with no
+    account for a bucket is reported as `READY` with `amountAtomic: '0'`, because the ledger has
+    genuinely never credited it. A bucket that could not be read is `UNAVAILABLE`, which is a
+    different statement the client must not render as a balance.
+17. **Lifetime earned comes from matured reward events.** `readUserLifetimeEarned` sums
+    `reward_events.amount_atomic` where `state = 'AVAILABLE'` for the asset, so CREATED/PENDING
+    and REVERSED rewards are excluded. It is read separately from the three spendable buckets
+    and may be `UNAVAILABLE` on its own; an unreadable history never degrades a readable balance.
+18. **Home is partially statused.** Every `GET /v1/me/home` domain carries its own
+    `{ status, data, errorCode }`. A domain that throws becomes `UNAVAILABLE` / `READ_FAILED`,
+    a domain that legitimately has nothing becomes `EMPTY` / `NO_DATA`, and the response still
+    returns 200 with the domains that could be read honestly.
+19. **Tasks and referrals report `ENGINE_NOT_ENABLED`.** `packages/tasks` and
+    `packages/referrals` remain Phase 1 boundary shells, and no approved phase writes
+    `user_task_progress`, `referral_codes` or `referral_edges`. `GET /v1/tasks` and
+    `GET /v1/referrals/summary` therefore answer `UNAVAILABLE` with `ENGINE_NOT_ENABLED` rather
+    than an empty `READY` list, which would assert that a working engine simply has nothing to
+    offer. No mission engine behaviour is implemented in this phase.
+20. **AdsGram stays BLOCKED on the user-facing surface.** `GET /v1/ads/earn-summary` reuses the
+    provider-neutral monetary gate and reports `productionMonetaryStatus` and the refusal reason
+    codes unchanged. The card is assembled field by field from
+    `getEarnSummaryForUser`, exposes only `ad_units.client_config.blockId` (never
+    `server_config`, credentials, revenue or clarification detail), and reading it never
+    authorizes a session or moves money. Remaining opportunities are computed from the
+    authoritative `ad_daily_counters` against ACTIVE `provider_limit_rules` versions; a
+    dimension with no ACTIVE rule is reported as `configured: false` rather than given an
+    invented cap.
+21. **Wallet ownership config keys added to the API.** `WALLET_TON_PROOF_DOMAIN`,
+    `WALLET_CHALLENGE_TTL_SECONDS`, `WALLET_PROOF_MAX_AGE_SECONDS`,
+    `WALLET_PROOF_MAX_FUTURE_SKEW_SECONDS`, `WALLET_PROOF_RATE_LIMIT_WINDOW_SECONDS` and
+    `WALLET_PROOF_RATE_LIMIT_MAX` have local/test fixture defaults only and must be set
+    explicitly outside local/test; local ton_proof domains are rejected for staging/production.
+    The accepted wallet network is `WITHDRAWAL_NETWORK_CODE` — a wallet may only be bound on the
+    chain payouts use — and the 24h post-change withdrawal cooldown stays the fixed V1.2 value
+    rather than becoming configurable.
+22. **Locale is written to both projections.** `PATCH /v1/me/settings` updates
+    `users.preferred_locale` and `user_settings.locale` in one transaction so the login-time
+    projection and the settings row cannot disagree. Payout privacy and notification
+    preferences are read-only in this phase, and `security_notifications_enabled` is reported
+    as always true because the schema forbids disabling it.
+

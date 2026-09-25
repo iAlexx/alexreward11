@@ -8,7 +8,18 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 
-import { AdsDomainError } from '@alex-rewards/ads';
+import { AdsDomainError, type EnvironmentName } from '@alex-rewards/ads';
+import type { ApiConfig } from '@alex-rewards/config';
+
+/** Deployment environment names as the ad/reward domain spells them. */
+export const ENVIRONMENT_BY_DEPLOYMENT: Readonly<
+  Record<ApiConfig['DEPLOYMENT_ENV'], EnvironmentName>
+> = {
+  local: 'LOCAL',
+  test: 'LOCAL',
+  staging: 'STAGING',
+  production: 'PRODUCTION',
+};
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const PROVIDER_CODE_PATTERN = /^[A-Z][A-Z0-9_]{1,31}$/;

@@ -181,6 +181,13 @@ export type {
   ProviderMonetaryFacts,
 } from './admin-read.js';
 
+export { getEarnSummaryForUser } from './user-read.js';
+export type {
+  EarnLimitUsage,
+  EarnSummaryForUser,
+  GetEarnSummaryForUserInput,
+} from './user-read.js';
+
 export {
   ADSGRAM_ADAPTER_VERSION,
   ADSGRAM_CAPABILITIES,

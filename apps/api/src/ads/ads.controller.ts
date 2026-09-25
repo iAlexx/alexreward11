@@ -1,15 +1,27 @@
-import { Body, Controller, Get, HttpCode, Inject, Param, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Inject,
+  Param,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 
 import {
   adRewardIdempotencyKey,
   attemptVerifyAndIssueAdReward,
   authorizeRewardedAdSession,
+  getEarnSummaryForUser,
   getProviderAdminView,
   recordAdSessionOutcome,
   recordClientSignal,
   type AdSessionFailureOutcome,
 } from '@alex-rewards/ads';
 import type { ApiConfig } from '@alex-rewards/config';
+import type { EarnSummaryResponse } from '@alex-rewards/contracts';
 import type { Pool } from '@alex-rewards/db';
 
 import {
@@ -20,8 +32,10 @@ import {
 } from '../auth/access-session.guard.js';
 import { API_CONFIG, DATABASE_POOL } from '../tokens.js';
 
+import { toEarnProviderCard } from './earn-summary.js';
 import {
   assertNoClientAuthorityFields,
+  ENVIRONMENT_BY_DEPLOYMENT,
   mapAdsError,
   optionalCountryCode,
   optionalSafePayload,
@@ -30,16 +44,6 @@ import {
   requireShortString,
   requireUuid,
 } from './http.js';
-
-/** Deployment environment names as the ad/reward domain spells them. */
-const ENVIRONMENT_BY_DEPLOYMENT: Readonly<
-  Record<ApiConfig['DEPLOYMENT_ENV'], 'LOCAL' | 'STAGING' | 'PRODUCTION'>
-> = {
-  local: 'LOCAL',
-  test: 'LOCAL',
-  staging: 'STAGING',
-  production: 'PRODUCTION',
-};
 
 /** Terminal non-reward outcomes the mini app may report directly. */
 const OUTCOME_EVENTS: Readonly<Record<string, AdSessionFailureOutcome>> = {
@@ -178,6 +182,39 @@ export class AdsController {
         baseAmountAtomic: result.reward?.baseAmountAtomic ?? null,
         membershipBonusAmountAtomic: result.reward?.membershipBonusAmountAtomic ?? null,
         pendingUntil: result.reward?.pendingUntil ?? null,
+      };
+    } catch (error) {
+      throw mapAdsError(error);
+    }
+  }
+
+  /**
+   * User-facing earn summary for one provider.
+   *
+   * Reports the monetary gate decision and today's remaining opportunities against the
+   * ACTIVE versioned limit rules. AdsGram is BLOCKED for production money and this endpoint
+   * says so instead of advertising an earning opportunity the gate would refuse.
+   */
+  @Get('earn-summary')
+  async earnSummary(
+    @CurrentAuthUser() auth: AuthenticatedRequestUser,
+    @Query('provider') provider: string,
+  ): Promise<EarnSummaryResponse> {
+    const providerCode = requireProviderCode(provider);
+    const asOf = new Date();
+    try {
+      const summary = await getEarnSummaryForUser(this.pool, {
+        providerCode,
+        userId: auth.userId,
+        environment: ENVIRONMENT_BY_DEPLOYMENT[this.config.DEPLOYMENT_ENV],
+        asOf,
+        networkCode: this.config.WITHDRAWAL_NETWORK_CODE,
+        assetSymbol: this.config.WITHDRAWAL_ASSET_SYMBOL,
+      });
+      return {
+        status: 'READY',
+        asOf: summary.asOf,
+        providers: [toEarnProviderCard(summary)],
       };
     } catch (error) {
       throw mapAdsError(error);

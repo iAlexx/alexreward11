@@ -8,7 +8,11 @@ import { AuthController } from './auth/auth.controller.js';
 import { AccessSessionGuard } from './auth/access-session.guard.js';
 import { DependenciesService } from './dependencies.service.js';
 import { HealthController } from './health.controller.js';
+import { MeController } from './me/me.controller.js';
 import { MembershipController } from './membership/membership.controller.js';
+import { ReferralsController } from './referrals/referrals.controller.js';
+import { TasksController } from './tasks/tasks.controller.js';
+import { WalletsController } from './wallets/wallets.controller.js';
 import { WithdrawalsController } from './withdrawals/withdrawals.controller.js';
 import { API_CONFIG, DATABASE_POOL, REDIS_CLIENT } from './tokens.js';
 
@@ -24,6 +28,10 @@ export class AppModule {
         WithdrawalsController,
         AdsController,
         AdsGramWebhookController,
+        MeController,
+        WalletsController,
+        TasksController,
+        ReferralsController,
       ],
       providers: [
         DependenciesService,

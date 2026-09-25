@@ -20,6 +20,14 @@ export type { ResolvedAccountSemantics } from './catalogue.js';
 
 export { getLedgerAccountById, getOrCreateLedgerAccount } from './accounts.js';
 
+export { readUserLedgerBalances, USER_BALANCE_BUCKET_TYPES } from './user-balances.js';
+export type {
+  ReadUserLedgerBalancesInput,
+  UserBalanceBucketType,
+  UserLedgerBalanceBucket,
+  UserLedgerBalances,
+} from './user-balances.js';
+
 export {
   assertAccountTypeAssetCompatibility,
   assertAssetActive,

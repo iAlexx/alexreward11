@@ -9,7 +9,8 @@
     "start": "node dist/main.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src test",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:phase12": "cross-env PHASE12_API_TESTS=1 vitest run --fileParallelism=false test/phase12-read-models.test.ts test/phase12-read-apis-db.test.ts"
   },
   "dependencies": {
     "@alex-rewards/ads": "workspace:*",
@@ -17,8 +18,12 @@
     "@alex-rewards/config": "workspace:*",
     "@alex-rewards/contracts": "workspace:*",
     "@alex-rewards/db": "workspace:*",
+    "@alex-rewards/ledger": "workspace:*",
     "@alex-rewards/observability": "workspace:*",
+    "@alex-rewards/rewards": "workspace:*",
     "@alex-rewards/telegram": "workspace:*",
+    "@alex-rewards/ton": "workspace:*",
+    "@alex-rewards/wallets": "workspace:*",
     "@alex-rewards/withdrawals": "workspace:*",
     "@fastify/static": "10.1.3",
     "@nestjs/common": "12.0.1",
@@ -32,6 +37,9 @@
     "rxjs": "7.8.2"
   },
   "devDependencies": {
+    "@types/pg": "8.23.1",
+    "cross-env": "10.1.0",
+    "pg": "8.23.0",
     "tsx": "4.23.13"
   }
 }

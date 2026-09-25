@@ -18,8 +18,8 @@ import { useCallback, useRef, useState } from 'react';
  *    monetary gate, which today refuses AdsGram production money.
  *
  * Phase 12 owns the Earn UI: the placement, copy, session lifecycle orchestration, balance
- * display and error surfaces all belong there. This file deliberately renders no chrome and
- * is exported without being mounted anywhere.
+ * display and error surfaces all belong there. This bridge is mounted only from the Earn
+ * Watch flow and still carries zero financial authority.
  */
 
 /** Client-observed lifecycle events, mirroring `ClientCompletionSignalEvent` in packages/ads. */
@@ -38,7 +38,7 @@ export interface AdsGramRewardedBridgeProps {
   /** Server-issued ad session id from `POST /v1/ads/sessions/authorize`. */
   readonly adSessionId: string;
   /** Owner-configured AdsGram block id for the placement. Never a secret. */
-  readonly blockId: AdsgramInitParams['blockId'];
+  readonly blockId: string;
   /** Bearer access token for the authenticated mini-app session. */
   readonly accessToken: string;
   /** API origin. Falls back to the public build-time value. */
@@ -116,7 +116,7 @@ export function AdsGramRewardedBridge({
   }, [reportSignal]);
 
   const { show } = useAdsgram({
-    blockId,
+    blockId: blockId as AdsgramInitParams['blockId'],
     onReward: handleReward,
     onError: handleError,
   });

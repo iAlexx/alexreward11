@@ -57,6 +57,12 @@ const LOCAL_API_AUTH_POLICY_DEFAULTS = {
   WITHDRAWAL_NETWORK_CODE: 'TON_TESTNET',
   WITHDRAWAL_ASSET_SYMBOL: 'USDT',
   WITHDRAWAL_FAKE_CHAIN_ENABLED: 'true',
+  WALLET_TON_PROOF_DOMAIN: 'alex-rewards.local.test',
+  WALLET_CHALLENGE_TTL_SECONDS: '300',
+  WALLET_PROOF_MAX_AGE_SECONDS: '900',
+  WALLET_PROOF_MAX_FUTURE_SKEW_SECONDS: '60',
+  WALLET_PROOF_RATE_LIMIT_WINDOW_SECONDS: '300',
+  WALLET_PROOF_RATE_LIMIT_MAX: '10',
 } as const;
 
 const apiSchema = serviceSchema
@@ -88,9 +94,33 @@ const apiSchema = serviceSchema
     WITHDRAWAL_NETWORK_CODE: z.string().min(1).max(64),
     WITHDRAWAL_ASSET_SYMBOL: z.string().min(1).max(32),
     WITHDRAWAL_FAKE_CHAIN_ENABLED: booleanFromString,
+    // Wallet ownership (ton_proof). The proof domain is server authority and is never
+    // derived from Host/Origin/Telegram URL; the accepted network is WITHDRAWAL_NETWORK_CODE
+    // so a wallet can only be bound on the network payouts actually use.
+    WALLET_TON_PROOF_DOMAIN: z.string().min(1).max(253),
+    WALLET_CHALLENGE_TTL_SECONDS: z.coerce.number().int().min(30).max(900),
+    WALLET_PROOF_MAX_AGE_SECONDS: z.coerce.number().int().min(60).max(3600),
+    WALLET_PROOF_MAX_FUTURE_SKEW_SECONDS: z.coerce.number().int().min(0).max(300),
+    WALLET_PROOF_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().min(1).max(3600),
+    WALLET_PROOF_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(10_000),
   })
   .superRefine((value, context) => {
     const outsideLocal = value.DEPLOYMENT_ENV !== 'local' && value.DEPLOYMENT_ENV !== 'test';
+    if (outsideLocal) {
+      const domain = value.WALLET_TON_PROOF_DOMAIN.trim().toLowerCase();
+      if (
+        domain === 'localhost' ||
+        domain === '127.0.0.1' ||
+        domain.endsWith('.localhost') ||
+        domain.endsWith('.local.test')
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['WALLET_TON_PROOF_DOMAIN'],
+          message: 'local ton_proof domains cannot be inherited by staging/production',
+        });
+      }
+    }
     if (
       outsideLocal &&
       (value.TELEGRAM_BOT_TOKEN.includes('local-only') ||
@@ -602,10 +632,7 @@ const phase10TestnetProvisionSchema = commonSchema
           message: 'must be exactly TON_TESTNET when provisioning is enabled',
         });
       }
-      if (
-        value.WITHDRAWAL_ASSET_SYMBOL !== 'USDT' &&
-        value.WITHDRAWAL_ASSET_SYMBOL !== 'aalex'
-      ) {
+      if (value.WITHDRAWAL_ASSET_SYMBOL !== 'USDT' && value.WITHDRAWAL_ASSET_SYMBOL !== 'aalex') {
         context.addIssue({
           code: 'custom',
           path: ['WITHDRAWAL_ASSET_SYMBOL'],
@@ -656,7 +683,8 @@ const phase10TestnetProvisionSchema = commonSchema
               context.addIssue({
                 code: 'custom',
                 path: ['PHASE10_TESTNET_PROVISION_MAX_ATOMIC'],
-                message: 'aalex provision max cannot exceed 10000000000 (10 aalex absolute ceiling)',
+                message:
+                  'aalex provision max cannot exceed 10000000000 (10 aalex absolute ceiling)',
               });
             }
           } catch {

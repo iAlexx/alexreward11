@@ -68,6 +68,9 @@ export {
 
 export { insertOutboxEvent } from './outbox.js';
 
+export { readUserLifetimeEarned } from './user-read.js';
+export type { ReadUserLifetimeEarnedInput, UserLifetimeEarned } from './user-read.js';
+
 export type {
   MembershipBonusUnavailablePolicy,
   RewardSourceType,

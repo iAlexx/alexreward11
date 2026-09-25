@@ -35,6 +35,12 @@ const remoteAuthPolicy = {
   WITHDRAWAL_NETWORK_CODE: 'TON',
   WITHDRAWAL_ASSET_SYMBOL: 'USDT',
   WITHDRAWAL_FAKE_CHAIN_ENABLED: 'false',
+  WALLET_TON_PROOF_DOMAIN: 'miniapp.example.com',
+  WALLET_CHALLENGE_TTL_SECONDS: '300',
+  WALLET_PROOF_MAX_AGE_SECONDS: '900',
+  WALLET_PROOF_MAX_FUTURE_SKEW_SECONDS: '60',
+  WALLET_PROOF_RATE_LIMIT_WINDOW_SECONDS: '300',
+  WALLET_PROOF_RATE_LIMIT_MAX: '10',
 } as const;
 
 describe('environment validation', () => {
@@ -249,6 +255,41 @@ describe('environment validation', () => {
     expect(config.WITHDRAWAL_NETWORK_CODE).toBe('TON');
     expect(config.WITHDRAWAL_QUOTE_TTL_SECONDS).toBe(600);
     expect(config.WITHDRAWAL_FAKE_CHAIN_ENABLED).toBe(false);
+    expect(config.WALLET_TON_PROOF_DOMAIN).toBe('miniapp.example.com');
+    expect(config.WALLET_CHALLENGE_TTL_SECONDS).toBe(300);
+  });
+
+  it('applies local wallet ownership defaults when unset', () => {
+    const config = loadApiConfig({
+      ...common,
+      ...apiAuth,
+      DATABASE_URL: 'postgresql://alex:local@localhost:5432/db',
+      REDIS_URL: 'redis://localhost:6379',
+      TEMPORAL_ADDRESS: 'localhost:7233',
+    });
+    expect(config.WALLET_TON_PROOF_DOMAIN).toBe('alex-rewards.local.test');
+    expect(config.WALLET_CHALLENGE_TTL_SECONDS).toBe(300);
+    expect(config.WALLET_PROOF_MAX_AGE_SECONDS).toBe(900);
+  });
+
+  it('rejects a local ton_proof domain outside local/test', () => {
+    expect(() =>
+      loadApiConfig({
+        DEPLOYMENT_ENV: 'production',
+        NODE_ENV: 'production',
+        OTEL_ENABLED: 'true',
+        OTEL_EXPORTER_OTLP_ENDPOINT: 'https://otel.example.com',
+        SENTRY_DSN: 'https://public@example.com/1',
+        DATABASE_URL: 'postgresql://user:pass@db.example.com:5432/db',
+        REDIS_URL: 'rediss://redis.example.com:6379',
+        TEMPORAL_ADDRESS: 'temporal.example.com:7233',
+        TELEGRAM_BOT_TOKEN: 'production-grade-telegram-bot-token',
+        SESSION_ACCESS_SECRET: 'production-grade-session-access-secret',
+        ...remoteAuthPolicy,
+        WITHDRAWAL_NETWORK_CODE: 'TON',
+        WALLET_TON_PROOF_DOMAIN: 'alex-rewards.local.test',
+      }),
+    ).toThrow(/WALLET_TON_PROOF_DOMAIN|local ton_proof domains/);
   });
 
   it('fails closed when staging omits withdrawal keys', () => {

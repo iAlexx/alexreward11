@@ -42,7 +42,7 @@ try {
   app.enableCors({
     origin: origins.length === 0 ? false : origins,
     credentials: false,
-    methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Authorization', 'Content-Type', 'X-Request-Id'],
   });
 
