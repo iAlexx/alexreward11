@@ -298,13 +298,11 @@ export async function recordClientSignal(
       signalType,
       occurredAt: input.occurredAt ?? asOf,
       // Session-bound by id, but client-asserted and therefore never authenticated.
+      // REQUEST_APPROVED is client-observed attempt evidence only (P11-01) — it must NOT
+      // increment authoritative ad_daily_counters.provider_requests.
       correlation: 'CORRELATED',
       safePayload,
     });
-
-    if (signalType === 'REQUEST_APPROVED' && !row.provider_request_counted) {
-      await countProviderRequest(client, row, asOf);
-    }
 
     const signals = await listAdSessionSignals(client, row.id);
     const derived = await deriveAndPersist(client, row, signals, asOf, {
@@ -327,59 +325,17 @@ export async function recordClientSignal(
 }
 
 /**
- * Increment the authoritative daily request counter exactly once per session.
- * The versioned effective limit is re-checked here so a hard limit can never be
- * bypassed by a session that was authorized earlier in the day.
+ * Authoritative `provider_requests` may only increment when an approved provider
+ * counting policy proves an actual provider request (P11-01). AdsGram has no such
+ * proof path while PROVIDER_SIDE_REQUEST_LIMIT remains open — client signals and
+ * UI/SDK assertions must never call into this path.
+ *
+ * Kept as an explicit no-op gate so accidental reintroduction is refuse-closed.
  */
-async function countProviderRequest(
-  client: PoolClient,
-  row: SessionRow,
-  asOf: Date,
-): Promise<void> {
-  const limits = await resolveEffectiveProviderLimits(client, {
-    providerId: row.provider_id,
-    asOf,
-    countryCode: row.country_code,
-  });
-  const requestDimension = limits.byDimension.find(
-    (dimension) => dimension.metric === 'REQUEST' && dimension.window === 'UTC_DAY',
-  );
-  if (requestDimension === undefined) {
-    throw new AdsDomainError(
-      'LIMIT_RULE_MISSING',
-      'no ACTIVE REQUEST/UTC_DAY limit rule for provider',
-      { details: { providerId: row.provider_id } },
-    );
-  }
-
-  const counter = await client.query<{ provider_requests: number }>(
-    `INSERT INTO ad_daily_counters (user_id, provider_id, utc_day, provider_requests)
-     VALUES ($1::uuid, $2::uuid, $3::date, 0)
-     ON CONFLICT (user_id, provider_id, utc_day) DO UPDATE SET updated_at = now()
-     RETURNING provider_requests`,
-    [row.user_id, row.provider_id, row.utc_day],
-  );
-  const current = counter.rows[0]?.provider_requests ?? 0;
-  if (current >= requestDimension.maxCount) {
-    throw new AdsDomainError('REQUEST_LIMIT_REACHED', 'daily provider request limit reached', {
-      details: {
-        utcDay: row.utc_day,
-        providerRequests: current,
-        maxCount: requestDimension.maxCount,
-      },
-    });
-  }
-
-  await client.query(
-    `UPDATE ad_daily_counters
-     SET provider_requests = provider_requests + 1, updated_at = now()
-     WHERE user_id = $1::uuid AND provider_id = $2::uuid AND utc_day = $3::date`,
-    [row.user_id, row.provider_id, row.utc_day],
-  );
-  await client.query(
-    `UPDATE ad_sessions SET provider_request_counted = true, updated_at = now()
-     WHERE id = $1::uuid`,
-    [row.id],
+export function refuseClientAuthoritativeProviderRequestCount(): never {
+  throw new AdsDomainError(
+    'SIGNAL_REJECTED',
+    'client signals cannot increment authoritative provider_requests (P11-01)',
   );
 }
 

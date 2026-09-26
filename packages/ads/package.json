@@ -14,7 +14,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src test",
     "test": "vitest run --fileParallelism=false --passWithNoTests",
-    "test:phase11": "cross-env PHASE11_ADS_TESTS=1 vitest run --fileParallelism=false test/phase11-boundaries.test.ts test/phase11-certification.test.ts test/phase11-limits-version.test.ts"
+    "test:phase11": "cross-env PHASE11_ADS_TESTS=1 vitest run --fileParallelism=false test/phase11-boundaries.test.ts test/phase11-certification.test.ts test/phase11-limits-version.test.ts test/phase11-p11-01-request-counting.test.ts"
   },
   "dependencies": {
     "@alex-rewards/db": "workspace:*",

@@ -48,6 +48,7 @@ import {
   seedHarnessCertProvider,
   seedProviderLimitRule,
   setDailyCounters,
+  seedTerminalAuthorizedSessions,
   setProviderHealthSnapshot,
   telegramUserIdOf,
   usdtAssetId,
@@ -588,12 +589,13 @@ describe.skipIf(phase11DatabaseUrl === '')('Phase 11 certification gate (Owner T
   it('TEST 15: REQUEST and SUCCESS daily caps are enforced from the approved rule versions', async () => {
     const utcDay = utcDayString();
 
+    // Conservative REQUEST safety uses server-created session count, not provider_requests.
     const requestUser = await createTestUser(pool);
-    await setDailyCounters(pool, {
+    await seedTerminalAuthorizedSessions(pool, {
       userId: requestUser,
       providerId: ADSGRAM_PROVIDER_ID,
       utcDay,
-      providerRequests: 30,
+      count: 30,
     });
     await expect(authorize(ADSGRAM_CODE, requestUser)).rejects.toMatchObject({
       code: 'REQUEST_LIMIT_REACHED',
@@ -612,13 +614,18 @@ describe.skipIf(phase11DatabaseUrl === '')('Phase 11 certification gate (Owner T
       details: { maxCount: 25, decidingRuleId: ADSGRAM_SUCCESS_RULE_ID },
     });
 
-    // One below the cap is still allowed — the boundary is the approved number, not a guess.
+    // One below the conservative session cap is still allowed.
     const okUser = await createTestUser(pool);
+    await seedTerminalAuthorizedSessions(pool, {
+      userId: okUser,
+      providerId: ADSGRAM_PROVIDER_ID,
+      utcDay,
+      count: 29,
+    });
     await setDailyCounters(pool, {
       userId: okUser,
       providerId: ADSGRAM_PROVIDER_ID,
       utcDay,
-      providerRequests: 29,
       successfulRewards: 24,
     });
     await expect(authorize(ADSGRAM_CODE, okUser)).resolves.toMatchObject({ state: 'AUTHORIZED' });

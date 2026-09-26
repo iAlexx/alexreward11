@@ -146,6 +146,18 @@ async function authorizeOnClient(
   const successLimit = requireDimension(limits, 'SUCCESS', 'UTC_DAY');
 
   const utcDay = utcDayString(asOf);
+
+  // Serialization point for conservative authorize safety (P11-01).
+  // A bare SELECT … FOR UPDATE locks nothing when the row is missing — insert first.
+  // provider_requests stays 0 here: it is authoritative actual-provider-request count only,
+  // not server-authorized session usage. AdsGram has no approved request-proof path yet.
+  await client.query(
+    `INSERT INTO ad_daily_counters (
+       user_id, provider_id, utc_day, provider_requests, successful_rewards
+     ) VALUES ($1::uuid, $2::uuid, $3::date, 0, 0)
+     ON CONFLICT (user_id, provider_id, utc_day) DO NOTHING`,
+    [input.userId, providerRow.id, utcDay],
+  );
   const counters = await client.query<{ provider_requests: number; successful_rewards: number }>(
     `SELECT provider_requests, successful_rewards
      FROM ad_daily_counters
@@ -153,16 +165,27 @@ async function authorizeOnClient(
      FOR UPDATE`,
     [input.userId, providerRow.id, utcDay],
   );
-  const providerRequests = counters.rows[0]?.provider_requests ?? 0;
   const successfulRewards = counters.rows[0]?.successful_rewards ?? 0;
 
-  if (providerRequests >= requestLimit.maxCount) {
+  // Conservative REQUEST safety: count server-created sessions for this UTC day.
+  // Distinct from authoritative provider_requests (must not be incremented here).
+  const sessionCountResult = await client.query<{ session_count: string }>(
+    `SELECT COUNT(*)::text AS session_count
+     FROM ad_sessions
+     WHERE user_id = $1::uuid
+       AND provider_id = $2::uuid
+       AND utc_day = $3::date`,
+    [input.userId, providerRow.id, utcDay],
+  );
+  const authorizedSessionCount = Number(sessionCountResult.rows[0]?.session_count ?? 0);
+  if (authorizedSessionCount >= requestLimit.maxCount) {
     throw new AdsDomainError('REQUEST_LIMIT_REACHED', 'daily provider request limit reached', {
       details: {
         utcDay,
-        providerRequests,
+        authorizedSessionCount,
         maxCount: requestLimit.maxCount,
         decidingRuleId: requestLimit.decidingRule.ruleId,
+        metric: 'CONSERVATIVE_AUTHORIZED_SESSIONS',
       },
     });
   }
@@ -289,11 +312,21 @@ async function authorizeOnClient(
     signalType: 'AUTHORIZATION_PASSED',
     occurredAt: asOf,
     correlation: 'CORRELATED',
+    // Immutable historical policy evidence — do not recompute from later ACTIVE rules.
     safePayload: {
       effectiveRequestLimit: requestLimit.maxCount,
       effectiveSuccessLimit: successLimit.maxCount,
       requestLimitRuleId: requestLimit.decidingRule.ruleId,
+      requestLimitRuleVersion: requestLimit.decidingRule.ruleVersion,
+      requestLimitMetric: requestLimit.metric,
+      requestLimitWindow: requestLimit.window,
+      requestLimitScope: requestLimit.decidingRule.limitScope,
       successLimitRuleId: successLimit.decidingRule.ruleId,
+      successLimitRuleVersion: successLimit.decidingRule.ruleVersion,
+      successLimitMetric: successLimit.metric,
+      successLimitWindow: successLimit.window,
+      successLimitScope: successLimit.decidingRule.limitScope,
+      conservativeAuthorizedSessionCountBefore: authorizedSessionCount,
     },
   });
 
