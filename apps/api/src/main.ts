@@ -39,11 +39,16 @@ try {
   });
 
   const origins = config.CORS_ORIGINS;
+  const adminOrigin = config.ADMIN_WEBAUTHN_ORIGIN.trim();
+  const corsOriginList =
+    origins.length === 0 && adminOrigin === ''
+      ? []
+      : [...new Set([...origins, ...(adminOrigin !== '' ? [adminOrigin] : [])])];
   app.enableCors({
-    origin: origins.length === 0 ? false : origins,
-    credentials: false,
+    origin: corsOriginList.length === 0 ? false : corsOriginList,
+    credentials: corsOriginList.length > 0,
     methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Authorization', 'Content-Type', 'X-Request-Id'],
+    allowedHeaders: ['Authorization', 'Content-Type', 'X-Request-Id', 'X-Admin-Webauthn-Phase'],
   });
 
   const fastify = app.getHttpAdapter().getInstance() as {

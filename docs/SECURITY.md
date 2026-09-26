@@ -89,3 +89,25 @@ See `docs/TON_SIGNER.md`.
   in tests (`HARNESS_CERT`) lives in the test harness and is never seeded or shipped.
 
 See `docs/ADS_SPEC.md` and `docs/ADSGRAM_CLARIFICATION_REGISTER.md`.
+
+## Phase 13 — Owner Admin control plane
+
+- Admin auth is **independent** of Telegram Mini App sessions (`AdminSessionGuard` refuses
+  Telegram-shaped JWTs).
+- **Primary:** WebAuthn/passkey (typed challenges: unpredictable, expiring, one-time; RP ID /
+  origin fail closed when unset outside local/test). Production RP ID remains
+  `OWNER_DECISION_REQUIRED`.
+- **Fallback:** password **and** TOTP together. Password-only and TOTP-only are refused.
+- **Recovery:** single-use hashed recovery codes; plaintext shown once; never logged.
+- Sessions support idle/absolute timeout, revocation, rotation, and recent-reauth for
+  high-impact mutations. Second-confirmation tokens bind action/resource/version/payload.
+- V1 RBAC: only **OWNER** is enabled server-side; client role claims are not authority.
+- Audit mutations append to append-only `audit_logs` with secrets redacted.
+- Admin browser never receives signer keys, mnemonics, provider API secrets, password hashes,
+  TOTP seeds after enrollment, raw recovery codes after generation, or DB credentials.
+- No direct balance editor; no Admin path that posts ledger entries outside approved domain
+  commands; Policy Center refuses arbitrary JS/SQL/eval; provider hard limits cannot be
+  exceeded; AdsGram monetary APPROVED refused while clarification gate is open;
+  `PAYOUT_DISPATCH_PAUSE` is not silently flipped.
+
+See `docs/OWNER_ADMIN_AUTH.md`, `docs/ADMIN_POLICY_CENTER.md`, ADR-023.

@@ -48,6 +48,7 @@ Real signer/KMS/TON broadcast remain out of scope until later Owner-approved pha
 | `0022_external_message_identity.sql`                 | Phase 10: additive signed Wallet request BOC, exact External-In cell hash, and Tonkeeper-normalized External-In hash evidence                                                                                |
 | `0023_attempt_requires_state_init.sql`               | Phase 10: additive `requires_state_init` on `withdrawal_attempts` + signer view (StateInit bound to proven uninit admission)                                                                                 |
 | `0030_phase11_adsgram_foundation.sql`                | Phase 11: authoritative `reward_quotes.ad_session_id` FK + AD source CHECK; `provider_health_snapshots`; `provider_clarification_items`; AdsGram provider/manifest/unit/limit seed (BLOCKED)                 |
+| `0031_phase13_admin_webauthn_challenges.sql`         | Phase 13: `admin_webauthn_challenges` one-time WebAuthn ceremony rows (REGISTRATION / AUTHENTICATION / REAUTH); no production RP ID defaults                                                                 |
 
 Migrations `0001`–`0022` remain immutable. Migration `0023` adds only the proven-account
 StateInit requirement column and appends it to the signer view.

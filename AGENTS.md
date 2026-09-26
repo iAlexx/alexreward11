@@ -1,9 +1,9 @@
 # ALEx Rewards engineering rules
 
 The authoritative product, financial, security, and engineering requirements are in
-`docs/ALEx_Rewards_Master_Product_Financial_Security_Engineering_Specification_v1.2.md`
-(Version 1.2). Version 1.2 supersedes conflicting Version 1.1 language. Requirements not
-expressly changed by Version 1.2 remain in force.
+`docs/ALEx_Rewards_Master_Product_Financial_Security_Engineering_Specification_v1.3.md`
+(Version 1.3). Version 1.3 supersedes conflicting Version 1.2 / 1.1 language. Requirements not
+expressly changed by Version 1.3 remain in force.
 
 - Work only in the phase explicitly approved by the Owner.
 - After every accepted phase, create under `phase-archives/` (ignored by Git) both:
