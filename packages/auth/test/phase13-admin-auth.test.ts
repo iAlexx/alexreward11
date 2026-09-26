@@ -215,6 +215,7 @@ describe.skipIf(databaseUrl === '')('Phase 13 Owner Admin auth — isolated DB',
 
   beforeEach(async () => {
     // audit_logs is append-only — never DELETE (migration trigger rejects it).
+    await pool.query(`DELETE FROM admin_web_confirmations`);
     await pool.query(`DELETE FROM admin_webauthn_challenges`);
     await pool.query(`DELETE FROM admin_recovery_codes`);
     await pool.query(`DELETE FROM admin_sessions`);
@@ -396,12 +397,35 @@ describe.skipIf(databaseUrl === '')('Phase 13 Owner Admin auth — isolated DB',
   );
 
   it(
-    'TEST 10: WebAuthn registration challenge is one-time with expiry row',
+    'TEST 10: WebAuthn registration challenge is session-bound and one-time',
     async () => {
-    await enrollPasswordTotp();
+    const enrolled = await enrollPasswordTotp();
+    const t1 = nextPeriod(enrolled.enrolledAtMs);
+    const bundle = await loginViaPasswordTotp(pool, {
+      adminUserId,
+      password: PASSWORD,
+      totpCode: generateTotpCode(enrolled.totpSecretBytes, t1),
+      expectedDatabase,
+      evaluationTimeMs: t1,
+    });
+    const token = bundle.takeSessionTokenOnce();
+    const session = await verifyAdminSessionToken(pool, token);
     const rp = resolveAdminWebAuthnRpConfig({ deploymentEnv: 'local' });
+
+    await expect(
+      beginWebAuthnRegistration(pool, {
+        adminUserId,
+        adminSessionId: session.sessionId,
+        reauthenticatedAt: new Date(Date.now() - ADMIN_REAUTH_MAX_AGE_MS - 1000).toISOString(),
+        rp,
+        expectedDatabase,
+      }),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+
     const begun = await beginWebAuthnRegistration(pool, {
       adminUserId,
+      adminSessionId: session.sessionId,
+      reauthenticatedAt: session.reauthenticatedAt,
       rp,
       expectedDatabase,
     });
@@ -409,6 +433,11 @@ describe.skipIf(databaseUrl === '')('Phase 13 Owner Admin auth — isolated DB',
     const peeked = await peekWebAuthnChallengeForTests(pool, begun.challengeId);
     expect(peeked?.challenge).toBe(begun.options.challenge);
     expect(peeked?.consumedAt).toBeNull();
+    const bound = await pool.query<{ admin_session_id: string | null }>(
+      `SELECT admin_session_id::text FROM admin_webauthn_challenges WHERE id = $1::uuid`,
+      [begun.challengeId],
+    );
+    expect(bound.rows[0]?.admin_session_id).toBe(session.sessionId);
 
     await pool.query(
       `UPDATE admin_webauthn_challenges SET consumed_at = now() WHERE id = $1::uuid`,

@@ -23,12 +23,14 @@ import {
   OWNER_ADMIN_AUTH_LOCKOUT_MS,
   OWNER_ADMIN_AUTH_MAX_FAILURES,
   assertOwnerAdminAuthDatabaseWritable,
+  isAdminSessionReauthFresh,
   requireOwnerAuthPool,
   withPoolOwnedOwnerAuthTransaction,
   withPoolOwnedReadOnlyTransaction,
   type OwnerAdminAuthDatabaseGate,
 } from './admin-auth.js';
 import {
+  ADMIN_REAUTH_MAX_AGE_MS,
   ADMIN_SESSION_ABSOLUTE_TTL_MS,
   ADMIN_SESSION_IDLE_TTL_MS,
   generateAdminSessionToken,
@@ -327,16 +329,26 @@ async function storeChallenge(
     readonly adminUserId: string | null;
     readonly purpose: AdminWebAuthnChallengePurpose;
     readonly challenge: string;
+    readonly adminSessionId?: string | null;
     readonly ttlMs?: number;
   },
 ): Promise<{ readonly challengeId: string; readonly expiresAt: string }> {
   const ttl = input.ttlMs ?? ADMIN_WEBAUTHN_CHALLENGE_TTL_MS;
   const expires = new Date(Date.now() + ttl);
   const inserted = await client.query<{ id: string }>(
-    `INSERT INTO admin_webauthn_challenges (admin_user_id, purpose, challenge, expires_at)
-     VALUES ($1::uuid, $2, $3, $4::timestamptz)
+    `INSERT INTO admin_webauthn_challenges (
+       admin_user_id, purpose, challenge, expires_at, admin_session_id
+     ) VALUES (
+       $1::uuid, $2, $3, $4::timestamptz, $5::uuid
+     )
      RETURNING id::text`,
-    [input.adminUserId, input.purpose, input.challenge, expires.toISOString()],
+    [
+      input.adminUserId,
+      input.purpose,
+      input.challenge,
+      expires.toISOString(),
+      input.adminSessionId ?? null,
+    ],
   );
   const id = inserted.rows[0]?.id;
   if (id === undefined) {
@@ -354,15 +366,17 @@ async function consumeChallenge(
     readonly challenge: string;
     readonly purpose: AdminWebAuthnChallengePurpose;
     readonly adminUserId?: string | null;
+    readonly adminSessionId?: string | null;
   },
 ): Promise<{ readonly challengeId: string; readonly adminUserId: string | null }> {
   const locked = await client.query<{
     id: string;
     admin_user_id: string | null;
+    admin_session_id: string | null;
     expires_at: Date;
     consumed_at: Date | null;
   }>(
-    `SELECT id::text, admin_user_id::text, expires_at, consumed_at
+    `SELECT id::text, admin_user_id::text, admin_session_id::text, expires_at, consumed_at
      FROM admin_webauthn_challenges
      WHERE challenge = $1
        AND purpose = $2
@@ -387,6 +401,13 @@ async function consumeChallenge(
   ) {
     throw new AuthDomainError('UNAUTHENTICATED', 'WebAuthn challenge admin mismatch');
   }
+  if (
+    input.adminSessionId !== undefined &&
+    input.adminSessionId !== null &&
+    (row.admin_session_id === null || row.admin_session_id !== input.adminSessionId)
+  ) {
+    throw new AuthDomainError('UNAUTHENTICATED', 'WebAuthn challenge session mismatch');
+  }
   const updated = await client.query<{ id: string }>(
     `UPDATE admin_webauthn_challenges
      SET consumed_at = now()
@@ -401,6 +422,12 @@ async function consumeChallenge(
   return { challengeId: row.id, adminUserId: row.admin_user_id };
 }
 
+function assertWebAuthnEnrollmentReauth(reauthenticatedAt: string | null): void {
+  if (!isAdminSessionReauthFresh(reauthenticatedAt, Date.now(), ADMIN_REAUTH_MAX_AGE_MS)) {
+    throw new AuthDomainError('FORBIDDEN', 'recent reauthentication required');
+  }
+}
+
 export interface BeginWebAuthnRegistrationResult {
   readonly adminUserId: string;
   readonly options: PublicKeyCredentialCreationOptionsJSON;
@@ -412,9 +439,12 @@ export async function beginWebAuthnRegistration(
   db: Db,
   input: {
     readonly adminUserId: string;
+    readonly adminSessionId: string;
+    readonly reauthenticatedAt: string | null;
     readonly rp: AdminWebAuthnRpConfig;
   } & GateFields,
 ): Promise<BeginWebAuthnRegistrationResult> {
+  assertWebAuthnEnrollmentReauth(input.reauthenticatedAt);
   const pool = requireOwnerAuthPool(db);
   return withPoolOwnedOwnerAuthTransaction(pool, async (client) => {
     await assertOwnerAdminAuthDatabaseWritable(client, {
@@ -425,6 +455,20 @@ export async function beginWebAuthnRegistration(
     const owner = await requireActiveOwner(client, input.adminUserId, { forUpdate: true });
     await lockThrottleForUpdate(client, input.adminUserId);
     await assertNotLocked(client, input.adminUserId);
+
+    const sessionOk = await client.query<{ id: string }>(
+      `SELECT id::text FROM admin_sessions
+       WHERE id = $1::uuid
+         AND admin_user_id = $2::uuid
+         AND revoked_at IS NULL
+         AND idle_expires_at > now()
+         AND absolute_expires_at > now()
+       LIMIT 1`,
+      [input.adminSessionId, owner.id],
+    );
+    if (sessionOk.rows[0] === undefined) {
+      throw new AuthDomainError('UNAUTHENTICATED', 'admin session required for WebAuthn registration');
+    }
 
     const existing = await listActiveWebAuthnCredentials(client, input.adminUserId);
     const options = await generateRegistrationOptions({
@@ -448,6 +492,7 @@ export async function beginWebAuthnRegistration(
       adminUserId: owner.id,
       purpose: 'REGISTRATION',
       challenge: options.challenge,
+      adminSessionId: input.adminSessionId,
     });
 
     await insertRedactedAudit(client, {
@@ -456,7 +501,11 @@ export async function beginWebAuthnRegistration(
       resourceType: 'admin_user',
       resourceId: owner.id,
       reason: 'WebAuthn registration options issued',
-      afterSnapshot: { challengeId: stored.challengeId, rpId: input.rp.rpId },
+      afterSnapshot: {
+        challengeId: stored.challengeId,
+        rpId: input.rp.rpId,
+        adminSessionId: input.adminSessionId,
+      },
     });
 
     return {
@@ -482,11 +531,14 @@ export async function finishWebAuthnRegistration(
   db: Db,
   input: {
     readonly adminUserId: string;
+    readonly adminSessionId: string;
+    readonly reauthenticatedAt: string | null;
     readonly response: RegistrationResponseJSON;
     readonly rp: AdminWebAuthnRpConfig;
     readonly label?: string | null;
   } & GateFields,
 ): Promise<FinishWebAuthnRegistrationResult> {
+  assertWebAuthnEnrollmentReauth(input.reauthenticatedAt);
   const pool = requireOwnerAuthPool(db);
   return withPoolOwnedOwnerAuthTransaction(pool, async (client) => {
     await assertOwnerAdminAuthDatabaseWritable(client, {
@@ -527,6 +579,7 @@ export async function finishWebAuthnRegistration(
         challenge: expectedChallenge,
         purpose: 'REGISTRATION',
         adminUserId: input.adminUserId,
+        adminSessionId: input.adminSessionId,
       });
     } catch (error) {
       await recordAuthFailure(client, input.adminUserId);
@@ -640,6 +693,7 @@ async function beginWebAuthnCeremony(
     readonly adminUserId?: string | null;
     readonly email?: string | null;
     readonly purpose: 'AUTHENTICATION' | 'REAUTH';
+    readonly adminSessionId?: string | null;
     readonly rp: AdminWebAuthnRpConfig;
   } & GateFields,
 ): Promise<BeginWebAuthnAuthenticationResult> {
@@ -654,6 +708,26 @@ async function beginWebAuthnCeremony(
     await requireActiveOwner(client, adminUserId, { forUpdate: true });
     await lockThrottleForUpdate(client, adminUserId);
     await assertNotLocked(client, adminUserId);
+
+    if (input.purpose === 'REAUTH') {
+      const sessionId = input.adminSessionId?.trim() ?? '';
+      if (sessionId === '') {
+        throw new AuthDomainError('VALIDATION', 'adminSessionId required for WebAuthn reauth');
+      }
+      const sessionOk = await client.query<{ id: string }>(
+        `SELECT id::text FROM admin_sessions
+         WHERE id = $1::uuid
+           AND admin_user_id = $2::uuid
+           AND revoked_at IS NULL
+           AND idle_expires_at > now()
+           AND absolute_expires_at > now()
+         LIMIT 1`,
+        [sessionId, adminUserId],
+      );
+      if (sessionOk.rows[0] === undefined) {
+        throw new AuthDomainError('UNAUTHENTICATED', 'admin session required for WebAuthn reauth');
+      }
+    }
 
     const creds = await listActiveWebAuthnCredentials(client, adminUserId);
     if (creds.length === 0) {
@@ -678,6 +752,7 @@ async function beginWebAuthnCeremony(
       adminUserId,
       purpose: input.purpose,
       challenge: options.challenge,
+      adminSessionId: input.purpose === 'REAUTH' ? (input.adminSessionId ?? null) : null,
     });
 
     await insertRedactedAudit(client, {
@@ -689,7 +764,11 @@ async function beginWebAuthnCeremony(
       resourceType: 'admin_user',
       resourceId: adminUserId,
       reason: `WebAuthn ${input.purpose.toLowerCase()} options issued`,
-      afterSnapshot: { challengeId: stored.challengeId, rpId: input.rp.rpId },
+      afterSnapshot: {
+        challengeId: stored.challengeId,
+        rpId: input.rp.rpId,
+        ...(input.purpose === 'REAUTH' ? { adminSessionId: input.adminSessionId } : {}),
+      },
     });
 
     return {
@@ -719,12 +798,14 @@ export async function beginWebAuthnReauth(
   db: Db,
   input: {
     readonly adminUserId: string;
+    readonly adminSessionId: string;
     readonly rp: AdminWebAuthnRpConfig;
   } & GateFields,
 ): Promise<BeginWebAuthnAuthenticationResult> {
   return beginWebAuthnCeremony(db, {
     ...input,
     adminUserId: input.adminUserId,
+    adminSessionId: input.adminSessionId,
     purpose: 'REAUTH',
   });
 }
@@ -837,10 +918,31 @@ async function finishWebAuthnAssertion(
     await assertNotLocked(client, adminUserId);
 
     try {
+      let reauthSessionId: string | null = null;
+      if (input.purpose === 'REAUTH') {
+        const sessionToken = input.existingSessionToken?.trim() ?? '';
+        if (sessionToken === '') {
+          throw new AuthDomainError('VALIDATION', 'sessionToken required for WebAuthn reauth');
+        }
+        const tokenHash = hashAdminSessionToken(sessionToken);
+        const sessionRow = await client.query<{ id: string }>(
+          `SELECT id::text FROM admin_sessions
+           WHERE session_token_hash = $1
+             AND admin_user_id = $2::uuid
+             AND revoked_at IS NULL
+           LIMIT 1`,
+          [tokenHash, adminUserId],
+        );
+        reauthSessionId = sessionRow.rows[0]?.id ?? null;
+        if (reauthSessionId === null) {
+          throw new AuthDomainError('UNAUTHENTICATED', 'admin session required for WebAuthn reauth');
+        }
+      }
       await consumeChallenge(client, {
         challenge: challengeFromClient,
         purpose: input.purpose,
         adminUserId,
+        ...(reauthSessionId !== null ? { adminSessionId: reauthSessionId } : {}),
       });
     } catch (error) {
       await recordAuthFailure(client, adminUserId);

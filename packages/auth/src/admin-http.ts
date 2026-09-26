@@ -250,6 +250,7 @@ export async function beginReauthViaWebAuthn(
   pool: Pool,
   input: {
     readonly adminUserId: string;
+    readonly adminSessionId: string;
     readonly rp: AdminWebAuthnRpConfig;
   } & GateFields,
 ): Promise<BeginWebAuthnAuthenticationResult> {
