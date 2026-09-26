@@ -8,14 +8,16 @@ import { strings } from '../../lib/strings';
 import { useAdminDomainQuery } from '../../lib/hooks/useAdminDomainQuery';
 
 /**
- * Economics — label ESTIMATED vs SETTLED distinctly.
- * Never call estimate "profit".
+ * Economics — Spec §156M typed metrics.
+ * Never label confirmed withdrawal principal as settled margin/profit.
  */
 export function EconomicsPage() {
   const { uiState, data, reasonCode, refetch } = useAdminDomainQuery(
     ['admin', 'economics'],
     (api) => api.getEconomics(),
   );
+
+  const metrics = data?.metrics ?? [];
 
   return (
     <div className="admin-stack">
@@ -26,35 +28,34 @@ export function EconomicsPage() {
       <DomainStateView state={uiState} reasonCode={reasonCode} onRetry={() => void refetch()}>
         {data !== null ? (
           <div className="admin-metric-grid">
-            <div className="admin-metric">
-              <p className="admin-meta">
-                <StateBadge state={strings.estimated} tone="warning" /> Margin
-              </p>
-              <p className="admin-metric__value admin-mono">
-                {formatOptionalAtomic(data.estimatedMarginAtomic)}
-              </p>
-              <p className="admin-meta">{strings.estimatedNotProfit}</p>
-            </div>
-            <div className="admin-metric">
-              <p className="admin-meta">
-                <StateBadge state={strings.settled} tone="success" /> Margin
-              </p>
-              <p className="admin-metric__value admin-mono">
-                {formatOptionalAtomic(data.settledMarginAtomic)}
-              </p>
-            </div>
-            <div className="admin-metric">
-              <p className="admin-meta">Pending receivables</p>
-              <p className="admin-metric__value admin-mono">
-                {formatOptionalAtomic(data.pendingReceivablesAtomic)}
-              </p>
-            </div>
-            <div className="admin-metric">
-              <p className="admin-meta">Fee revenue ({strings.settled})</p>
-              <p className="admin-metric__value admin-mono">
-                {formatOptionalAtomic(data.feeRevenueAtomic)}
-              </p>
-            </div>
+            {metrics.map((metric) => (
+              <div className="admin-metric" key={metric.metric}>
+                <p className="admin-meta">
+                  <StateBadge
+                    state={metric.basis}
+                    tone={metric.status === 'READY' ? 'success' : 'warning'}
+                  />{' '}
+                  {metric.metric}
+                </p>
+                <p className="admin-metric__value admin-mono">
+                  {metric.status === 'READY'
+                    ? formatOptionalAtomic(metric.amountAtomic)
+                    : 'UNAVAILABLE'}
+                </p>
+                {metric.reasonCode !== undefined ? (
+                  <p className="admin-meta">{metric.reasonCode}</p>
+                ) : null}
+                {metric.metric === 'CONFIRMED_WITHDRAWAL_PRINCIPAL_OPERATIONAL' ? (
+                  <p className="admin-meta">
+                    Operational payout principal only — not settled margin or revenue.
+                  </p>
+                ) : null}
+                {metric.metric === 'NET_CONTRIBUTION_MARGIN_ESTIMATE' ? (
+                  <p className="admin-meta">{strings.estimatedNotProfit}</p>
+                ) : null}
+              </div>
+            ))}
+            {data.note !== undefined ? <p className="admin-meta">{data.note}</p> : null}
           </div>
         ) : null}
       </DomainStateView>
