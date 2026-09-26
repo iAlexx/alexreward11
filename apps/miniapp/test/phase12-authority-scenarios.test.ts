@@ -1,7 +1,9 @@
 /**
- * Phase 12 UI authority + E2E-facing contract tests.
- * Proves the Mini App cannot fabricate financial/membership state and maps
- * Owner-required scenarios onto source + pure helpers (no mock balances).
+ * Phase 12 UI authority + contract / source-boundary tests (Vitest).
+ *
+ * These are NOT browser E2E. They map Owner-required scenarios onto pure helpers and
+ * source scans (no mock balances, no Playwright). Browser E2E lives in
+ * `apps/miniapp-e2e` (`pnpm test:phase12:e2e`).
  */
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
