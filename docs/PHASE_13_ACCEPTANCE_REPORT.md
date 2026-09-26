@@ -2,7 +2,8 @@
 
 **Status:** **PASS** _(original packaging — superseded in part by independent remediation)_
 
-> **Supersession:** Independent remediation findings P13-01–P13-04 and fixes are recorded in
+> **Supersession:** Independent remediation findings P13-01–P13-04, Admin browser E2E, and CI
+> jobs are recorded in
 > [`docs/PHASE_13_INDEPENDENT_REVIEW_REMEDIATION.md`](./PHASE_13_INDEPENDENT_REVIEW_REMEDIATION.md).
 > This historical acceptance report remains provenance for the original Phase 13 package and
 > must not be rewritten as the remediation tip.

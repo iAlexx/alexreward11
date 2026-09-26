@@ -3,7 +3,7 @@ import type {
   AdminAuthSessionIssued,
   AdminDomainEnvelope,
   AdminEconomicsSnapshot,
-  AdminFeatureFlagItem,
+  AdminFeatureFlagsListData,
   AdminHotWalletPublicView,
   AdminListPage,
   AdminListQuery,
@@ -447,8 +447,27 @@ export function createAdminApiClient(options: AdminApiClientOptions) {
       return fetchDomain(`/v1/admin/review-queue${toQuery(query)}`);
     },
 
-    getFeatureFlags(): Promise<AdminDomainEnvelope<{ flags: readonly AdminFeatureFlagItem[] }>> {
+    getFeatureFlags(): Promise<AdminDomainEnvelope<AdminFeatureFlagsListData>> {
       return fetchDomain('/v1/admin/feature-flags');
+    },
+
+    mutateFeatureFlag(body: {
+      readonly flagKey: string;
+      readonly environment: string;
+      readonly enabled: boolean;
+      readonly reason: string;
+      readonly expectedVersion: string;
+      readonly confirmationId: string;
+    }): Promise<{
+      readonly flagKey: string;
+      readonly environment: string;
+      readonly enabled: boolean;
+      readonly version: number;
+    }> {
+      return request('/v1/admin/feature-flags', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
     },
 
     getMissions(query: AdminListQuery = {}): Promise<AdminDomainEnvelope<AdminListPage<Record<string, unknown>>>> {

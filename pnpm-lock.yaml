@@ -97,6 +97,30 @@ importers:
         specifier: 4.3.3
         version: 4.3.3
 
+  apps/admin-e2e:
+    devDependencies:
+      '@alex-rewards/auth':
+        specifier: workspace:*
+        version: link:../../packages/auth
+      '@alex-rewards/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@playwright/test':
+        specifier: 1.55.1
+        version: 1.55.1
+      '@types/node':
+        specifier: 24.13.3
+        version: 24.13.3
+      '@types/pg':
+        specifier: 8.23.1
+        version: 8.23.1
+      pg:
+        specifier: 8.23.0
+        version: 8.23.0
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+
   apps/api:
     dependencies:
       '@alex-rewards/ads':

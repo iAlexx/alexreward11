@@ -142,11 +142,18 @@ export interface AdminEconomicsSnapshot {
 }
 
 export interface AdminFeatureFlagItem {
-  readonly code: string;
-  readonly enabled: boolean | null;
+  readonly flagKey: string;
+  readonly environment: string;
+  readonly enabled: boolean;
   readonly description: string | null;
-  readonly requiresCeremony: boolean;
-  readonly highImpact: boolean;
+  readonly version: number;
+  readonly requiresExplicitCeremony: boolean;
+}
+
+export interface AdminFeatureFlagsListData {
+  readonly items: readonly AdminFeatureFlagItem[];
+  readonly phase10BaselineNote?: string;
+  readonly contractVersion?: string;
 }
 
 export interface AdminSystemHealthItem {

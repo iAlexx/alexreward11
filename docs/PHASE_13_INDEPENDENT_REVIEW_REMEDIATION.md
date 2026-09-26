@@ -64,6 +64,46 @@ are `UNAVAILABLE`. Docs: `docs/ADMIN_ECONOMICS.md`.
 
 ---
 
+## Admin browser E2E (Playwright)
+
+Package: `apps/admin-e2e` (`@alex-rewards/admin-e2e`), Playwright **1.55.1**.
+
+Gate: `PHASE13_ADMIN_E2E=1`. Isolated DB default `alex_rewards_phase13_e2e` via
+`PHASE13_DATABASE_URL` / `PHASE13_ADMIN_E2E_DATABASE_URL`. Redis:
+`PHASE13_ADMIN_E2E_REDIS_URL`. Ports: Admin **3031**, API **3032**.
+
+Runner: `pnpm test:phase13:admin-e2e` → builds `@alex-rewards/api` + `@alex-rewards/admin`,
+installs Chromium, runs Playwright with `globalSetup` that seeds Owner password+TOTP
+(public meta only on disk; no session tokens in sessionStorage).
+
+Covered suites (real Chromium):
+
+- **A** Cookie-only password+TOTP login (no `sessionToken` JSON; HttpOnly cookie; no
+  credential storage; Overview loads via cookie)
+- **B** WebAuthn enroll (virtual authenticator / CDP) → logout → WebAuthn login cookie-only
+- **C** Stale reauth blocks high-impact prepare; password+TOTP reauth refreshes freshness
+- **D** Server confirmation prepare → confirm → mutate once; replay + altered payload fail
+- **E** Attacker Origin cannot mutate with cookie (CSRF)
+- **F** Economics truthful categories; no “settled margin” from confirmed payout principal;
+  `UNAVAILABLE` when provider settlement is absent
+- **G** Client tampering cannot grant Founder / raise provider hard limit / approve AdsGram /
+  edit balances / mint confirmation
+
+---
+
+## CI jobs
+
+Independent of historical `quality` (same pattern as Phase 11/12 remediation):
+
+1. **`phase13-remediation`** — frozen install; non-empty
+   `docs/PHASE_13_INDEPENDENT_REVIEW_REMEDIATION.md`; scoped Prettier on remediation-touched
+   paths; turbo build api+admin+auth+contracts; `verify:boundaries`; `pnpm test:phase11`,
+   `pnpm test:phase12`, `pnpm test:phase13`.
+2. **`phase13-admin-e2e`** — postgres `alex_rewards_phase13_e2e` + redis; Playwright Chromium
+   with deps; `PHASE13_ADMIN_E2E=1`; `pnpm test:phase13:admin-e2e`.
+
+---
+
 ## Explicit non-claims
 
 - AdsGram remains **BLOCKED**
