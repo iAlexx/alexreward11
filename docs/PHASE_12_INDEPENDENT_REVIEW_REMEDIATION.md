@@ -5,14 +5,19 @@ accepted until Owner review. Original Phase 12 package is preserved unchanged.
 
 **Specification:** Master Spec V1.3  
 **Remediation branch:** `phase12-independent-remediation`  
-**Remediation tip SHA:** `73300fdf070a699d7d2f7fb2025e569d25cf5ab3`  
+**Last code-changing remediation tip SHA:**  
+`67399eabfc00803e2ea901d8916ffe918db58e41`  
 **GitHub draft PR:** https://github.com/iAlexx/alexreward11/pull/8 (Draft — **not merged**; base `main`)  
-**GitHub Actions run:** https://github.com/iAlexx/alexreward11/actions/runs/36254709740
+**Last code-changing GitHub Actions run:**  
+https://github.com/iAlexx/alexreward11/actions/runs/36259592134
 
 - `phase11-remediation`: **PASS**
 - `phase12-remediation`: **PASS**
 - `phase12-e2e`: **PASS**
 - `quality`: **FAIL** — historical Prettier debt (kept visible; not weakened)
+
+The final archive source commit is authoritatively recorded by `MANIFEST.md` and the canonical
+git-archive ZIP comment. This report intentionally does not self-embed its own commit SHA.
 
 **Original Phase 12 implementation:** `7bfcab978ec39ae474b2d622dac4310d55fdee04`  
 **Original Phase 12 packaging:** `6ef7a839f3085e4fb55bbdd77897b853b23f459b`  
@@ -117,7 +122,7 @@ when configuration exists.
 | unit / contract / source-boundary | existing Vitest (`test:phase12`, `test:phase11`) — **not** E2E                     |
 | integration                       | API DB tests for earn usageBasis, privacy, support ownership, deletion idempotence |
 | browser E2E                       | `apps/miniapp-e2e` Playwright (standard / Founder / tamper)                        |
-| live Telegram smoke               | **not run** — configuration unavailable (see below)                                |
+| live Telegram smoke               | **PASS** — see Live Telegram smoke section below                                   |
 
 ---
 
@@ -131,7 +136,7 @@ Independent jobs (no `needs: quality`):
 
 `quality` historical Prettier failure remains visible and is **not** weakened.
 
-Report separately (run `36254709740`):
+Report separately (last code-changing run `36259592134`):
 
 - `PHASE11_REGRESSION_CI_PASS=YES`
 - `PHASE12_GITHUB_CI_PASS=YES` (`phase12-remediation`)
@@ -155,35 +160,35 @@ Report separately (run `36254709740`):
 
 ### Auth / embedding evidence (no secrets / no raw initData)
 
-| Gate | Result |
-| ---- | ------ |
-| Real Telegram open (Owner) | Home rendered with server-driven data inside Telegram WebView |
-| `users` count | **1** (`telegram_user_id` present; positive) |
-| Active `user_sessions` | **≥1** (session created at first open; UA matches Telegram Desktop Edge WebView) |
+| Gate                        | Result                                                                                                                                                                                             |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Real Telegram open (Owner)  | Home rendered with server-driven data inside Telegram WebView                                                                                                                                      |
+| `users` count               | **1** (`telegram_user_id` present; positive)                                                                                                                                                       |
+| Active `user_sessions`      | **≥1** (session created at first open; UA matches Telegram Desktop Edge WebView)                                                                                                                   |
 | initData HMAC + `auth_date` | **PASS** — `POST /v1/auth/telegram` is the only user-create path; invalid signature probe returned **400**; valid signed re-auth for same Telegram id returned **200** without duplicating `users` |
-| Mini App CSP / frame | **PASS** — Mini App response has **no** `Content-Security-Policy` / `X-Frame-Options` blocking embed (`frame-ancestors 'none'` absent). API correctly keeps `frame-ancestors 'none'` |
-| Embedding outcome | Owner open succeeded (not blocked by Mini App headers) |
+| Mini App CSP / frame        | **PASS** — Mini App response has **no** `Content-Security-Policy` / `X-Frame-Options` blocking embed (`frame-ancestors 'none'` absent). API correctly keeps `frame-ancestors 'none'`               |
+| Embedding outcome           | Owner open succeeded (not blocked by Mini App headers)                                                                                                                                             |
 
 ### Non-production deployment used for smoke
 
-| Item | Value |
-| ---- | ----- |
-| Isolated DB | `alex_rewards_phase12_smoke` |
-| Local API / Mini App | `:3012` / `:3010` health 200 |
-| Public tunnels | Cloudflare quick tunnels (URLs in outside-repo `phase12-smoke-*-public.url`) |
-| AdsGram monetary | **BLOCKED** (`productionMonetaryStatus=BLOCKED`, `monetaryEligible=false`; `ad_sessions=0`, `reward_events=0`) |
+| Item                 | Value                                                                                                          |
+| -------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Isolated DB          | `alex_rewards_phase12_smoke`                                                                                   |
+| Local API / Mini App | `:3012` / `:3010` health 200                                                                                   |
+| Public tunnels       | Cloudflare quick tunnels (URLs in outside-repo `phase12-smoke-*-public.url`)                                   |
+| AdsGram monetary     | **BLOCKED** (`productionMonetaryStatus=BLOCKED`, `monetaryEligible=false`; `ad_sessions=0`, `reward_events=0`) |
 
 ### Continued live-smoke checks
 
-| Check | Result |
-| ---- | ------ |
+| Check                                                | Result                                                                                                         |
+| ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
 | Home / Earn / Tasks / Friends / Wallet / Profile nav | **PASS** (API 200 for home, earn-summary, tasks, referrals, wallets, withdrawals, settings; UI nav shell PASS) |
-| AR RTL | **PASS** (`lang=ar`, `dir=rtl`; DB `preferred_locale=ar`) |
-| EN LTR | **PASS** (`lang=en`, `dir=ltr`) |
-| RU LTR | **PASS** (`lang=ru`, `dir=ltr`) |
-| Server balances | **PASS** (`GET /v1/me/balances` 200; Home `balances.status=READY`) |
-| Support test ticket | **PASS** (`SUP-000001` / `SUP-000002` OPEN; deletion **not** submitted) |
-| Runtime / console fatals | **PASS** (0 page errors; 0 fatal console errors in UI smoke) |
+| AR RTL                                               | **PASS** (`lang=ar`, `dir=rtl`; DB `preferred_locale=ar`)                                                      |
+| EN LTR                                               | **PASS** (`lang=en`, `dir=ltr`)                                                                                |
+| RU LTR                                               | **PASS** (`lang=ru`, `dir=ltr`)                                                                                |
+| Server balances                                      | **PASS** (`GET /v1/me/balances` 200; Home `balances.status=READY`)                                             |
+| Support test ticket                                  | **PASS** (`SUP-000001` / `SUP-000002` OPEN; deletion **not** submitted)                                        |
+| Runtime / console fatals                             | **PASS** (0 page errors; 0 fatal console errors in UI smoke)                                                   |
 
 Evidence artifacts (outside repo, no secrets):  
 `ALExRewards\phase12-live-smoke-continue-results.json`,  
@@ -199,8 +204,11 @@ Archive may proceed for this independent remediation package (original Phase 12 
 
 - Original Phase 12 package preserved byte-identical:  
   `e1f498cc0f1c8f1f8ad9c442b167b4e5da3006c0fafba2955584c9ac14aa912f`
-- New remediation archive: created after live Telegram smoke PASS + Phase 12 CI jobs PASS
-  (see `phase-archives/PHASE_12_INDEPENDENT_REVIEW_REMEDIATION/` and external `PACKAGE_SHA256.txt`).
+- Superseded metadata-defective remediation attempt (preserved, not overwritten):  
+  `PHASE_12_INDEPENDENT_REVIEW_REMEDIATION_PACKAGE_20260926-180604_a62b473.zip`  
+  outer SHA-256 `88002aa61f532ee5b1970a5a542ec8bcdea63a4c2addcc2b5101cdc6116470d3`
+- Final remediation archive identity is recorded only in `MANIFEST.md` / canonical ZIP comment
+  for the packaging commit (this report does not self-embed that SHA).
 
 ---
 
