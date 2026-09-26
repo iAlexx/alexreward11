@@ -188,6 +188,8 @@ export class MeController {
       monetaryEligible: summary.monetary.eligible,
       successRemaining: summary.success.remaining,
       requestRemaining: summary.request.remaining,
+      requestUsageBasis: summary.request.usageBasis,
+      successUsageBasis: summary.success.usageBasis,
     };
   }
 

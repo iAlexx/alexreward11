@@ -19,6 +19,18 @@ import type {
   RiskTier,
 } from './types.js';
 
+/**
+ * What `usedCount` / `remaining` are measured against.
+ *
+ * - SERVER_AUTHORIZED_SESSION_CONSERVATIVE — COUNT(ad_sessions) for the UTC day;
+ *   matches authorize REQUEST safety (P11-01). Not proven actual provider requests.
+ * - AUTHORITATIVE_PROVIDER_REQUEST — ad_daily_counters.provider_requests when an
+ *   approved provider-proof write path exists (AdsGram currently has none).
+ * - SUCCESSFUL_REWARD — ad_daily_counters.successful_rewards.
+ */
+export type EarnUsageBasis =
+  'SERVER_AUTHORIZED_SESSION_CONSERVATIVE' | 'AUTHORITATIVE_PROVIDER_REQUEST' | 'SUCCESSFUL_REWARD';
+
 export interface EarnLimitUsage {
   readonly metric: ProviderLimitMetric;
   /** False when no ACTIVE versioned rule covers this dimension — no cap is ever invented. */
@@ -28,6 +40,7 @@ export interface EarnLimitUsage {
   readonly remaining: number | null;
   readonly decidingRuleId: string | null;
   readonly decidingRuleVersion: number | null;
+  readonly usageBasis: EarnUsageBasis;
 }
 
 export interface EarnSummaryForUser {
@@ -140,19 +153,35 @@ async function getEarnSummaryOnClient(
 
   const utcDay = utcDayString(asOf);
   const counters = await client.query<{
-    provider_requests: number;
     successful_rewards: number;
   }>(
-    `SELECT provider_requests, successful_rewards
+    `SELECT successful_rewards
      FROM ad_daily_counters
      WHERE user_id = $1::uuid AND provider_id = $2::uuid AND utc_day = $3::date`,
     [input.userId, provider.id, utcDay],
   );
-  const providerRequests = counters.rows[0]?.provider_requests ?? 0;
   const successfulRewards = counters.rows[0]?.successful_rewards ?? 0;
 
-  const request = toLimitUsage('REQUEST', limits, providerRequests);
-  const success = toLimitUsage('SUCCESS', limits, successfulRewards);
+  // P11-01: REQUEST remaining must match authorize's conservative session cap.
+  // AdsGram has no approved authoritative provider_requests write path; do not
+  // present provider_requests as user-facing request usage.
+  const sessionCountResult = await client.query<{ session_count: string }>(
+    `SELECT COUNT(*)::text AS session_count
+     FROM ad_sessions
+     WHERE user_id = $1::uuid
+       AND provider_id = $2::uuid
+       AND utc_day = $3::date`,
+    [input.userId, provider.id, utcDay],
+  );
+  const authorizedSessionCount = Number(sessionCountResult.rows[0]?.session_count ?? 0);
+
+  const request = toLimitUsage(
+    'REQUEST',
+    limits,
+    authorizedSessionCount,
+    'SERVER_AUTHORIZED_SESSION_CONSERVATIVE',
+  );
+  const success = toLimitUsage('SUCCESS', limits, successfulRewards, 'SUCCESSFUL_REWARD');
 
   const requestCeiling = hardCeilingFor(limits, 'REQUEST');
   const successCeiling = hardCeilingFor(limits, 'SUCCESS');
@@ -166,7 +195,7 @@ async function getEarnSummaryOnClient(
     sessionOrImpressionCorrelation: capabilities.sessionOrImpressionCorrelation,
     health: health.status,
     openClarificationCount,
-    requestHardLimitExceeded: requestCeiling !== null && providerRequests >= requestCeiling,
+    requestHardLimitExceeded: requestCeiling !== null && authorizedSessionCount >= requestCeiling,
     successHardLimitExceeded: successCeiling !== null && successfulRewards >= successCeiling,
   });
 
@@ -200,6 +229,7 @@ function toLimitUsage(
   metric: ProviderLimitMetric,
   limits: Awaited<ReturnType<typeof resolveEffectiveProviderLimits>>,
   usedCount: number,
+  usageBasis: EarnUsageBasis,
 ): EarnLimitUsage {
   const dimension = findDimension(limits.byDimension, metric, 'UTC_DAY');
   if (dimension === null) {
@@ -211,6 +241,7 @@ function toLimitUsage(
       remaining: null,
       decidingRuleId: null,
       decidingRuleVersion: null,
+      usageBasis,
     };
   }
   return {
@@ -221,6 +252,7 @@ function toLimitUsage(
     remaining: Math.max(0, dimension.maxCount - usedCount),
     decidingRuleId: dimension.decidingRule.ruleId,
     decidingRuleVersion: dimension.decidingRule.ruleVersion,
+    usageBasis,
   };
 }
 

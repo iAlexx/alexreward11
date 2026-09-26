@@ -1,5 +1,11 @@
 # Phase 11 Independent Review Remediation — P11-01
 
+> **Historical evidence only.** This document describes the independently accepted
+> Phase 11 remediation on branch `phase11-independent-remediation` and the Phase 11
+> remediation package. It is carried forward onto `phase12-independent-remediation`
+> solely as provenance for the P11-01 code/test/CI forward-port. It is **not** a
+> Phase 12 acceptance or remediation report.
+
 **Status:** Remediation commit / package supersedes prior Owner approval state for
 Phase 11 request-counting semantics. The original Phase 11 package is preserved unchanged.
 

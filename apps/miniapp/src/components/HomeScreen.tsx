@@ -63,7 +63,10 @@ export function HomeScreen() {
                 <MoneyAmount bucket={data.balances.data.available} label={t('balanceAvailable')} />
                 <MoneyAmount bucket={data.balances.data.pending} label={t('balancePending')} />
                 <MoneyAmount bucket={data.balances.data.reserved} label={t('balanceReserved')} />
-                <MoneyAmount bucket={data.balances.data.lifetimeEarned} label={t('balanceLifetime')} />
+                <MoneyAmount
+                  bucket={data.balances.data.lifetimeEarned}
+                  label={t('balanceLifetime')}
+                />
                 <p className="alex-meta">{common('baseUnitsNote')}</p>
               </div>
             ) : null}
@@ -84,10 +87,11 @@ export function HomeScreen() {
                 </div>
                 <div>
                   <dt>{t('todayOpportunitiesRemaining')}</dt>
-                  <dd>
-                    {data.todayAds.data.successRemaining ?? '—'} /{' '}
-                    {data.todayAds.data.requestRemaining ?? '—'}
-                  </dd>
+                  <dd>{data.todayAds.data.successRemaining ?? '—'}</dd>
+                </div>
+                <div>
+                  <dt>{t('todayRequestAttemptsRemaining')}</dt>
+                  <dd>{data.todayAds.data.requestRemaining ?? '—'}</dd>
                 </div>
                 {!data.todayAds.data.monetaryEligible ? (
                   <div>

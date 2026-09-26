@@ -38,6 +38,7 @@ function blockedAdsGramCard(): EarnProviderCardDto {
         remaining: 30,
         decidingRuleId: null,
         decidingRuleVersion: 1,
+        usageBasis: 'SERVER_AUTHORIZED_SESSION_CONSERVATIVE',
       },
       success: {
         metric: 'SUCCESS',
@@ -47,6 +48,7 @@ function blockedAdsGramCard(): EarnProviderCardDto {
         remaining: 25,
         decidingRuleId: null,
         decidingRuleVersion: 1,
+        usageBasis: 'SUCCESSFUL_REWARD',
       },
     },
     blockIdPublic: null,
@@ -125,8 +127,7 @@ describe('Phase 12 Owner authority scenarios', () => {
     const card = blockedAdsGramCard();
     expect(card.productionMonetaryStatus).toBe('BLOCKED');
     expect(card.monetaryEligible).toBe(false);
-    const blocked =
-      card.productionMonetaryStatus === 'BLOCKED' || card.monetaryEligible === false;
+    const blocked = card.productionMonetaryStatus === 'BLOCKED' || card.monetaryEligible === false;
     expect(blocked).toBe(true);
   });
 
@@ -148,7 +149,10 @@ describe('Phase 12 Owner authority scenarios', () => {
       referrals: { status: 'UNAVAILABLE', data: null, errorCode: 'ENGINE_NOT_ENABLED' },
       latestWithdrawal: { status: 'EMPTY', data: null },
       announcement: { status: 'EMPTY', data: null },
-      membershipBrief: { status: 'READY', data: { active: false, planCode: null, isFounder: false, founderNumber: null } },
+      membershipBrief: {
+        status: 'READY',
+        data: { active: false, planCode: null, isFounder: false, founderNumber: null },
+      },
     } satisfies HomeSummaryResponse;
     expect(home.balances.status).toBe('READY');
     expect(home.balances.data?.available.amountAtomic).toBe('5');

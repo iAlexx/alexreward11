@@ -15,6 +15,14 @@ export type ProviderHealthStatusDto = 'HEALTHY' | 'DEGRADED' | 'UNAVAILABLE' | '
 
 export type EarnLimitMetric = 'REQUEST' | 'SUCCESS';
 
+/**
+ * Measurement basis for used/remaining counts (provider-neutral).
+ * AdsGram REQUEST uses SERVER_AUTHORIZED_SESSION_CONSERVATIVE while clarification
+ * PROVIDER_SIDE_REQUEST_LIMIT remains open (P11-01).
+ */
+export type EarnUsageBasisDto =
+  'SERVER_AUTHORIZED_SESSION_CONSERVATIVE' | 'AUTHORITATIVE_PROVIDER_REQUEST' | 'SUCCESSFUL_REWARD';
+
 export interface ProviderHealthDto {
   readonly status: ProviderHealthStatusDto;
   readonly observedAt: string;
@@ -25,6 +33,8 @@ export interface ProviderHealthDto {
  *
  * `maxCount` always comes from an ACTIVE `provider_limit_rules` version; the platform never
  * invents a default cap, so a missing rule is reported as `configured: false`.
+ * `usageBasis` tells the client what `usedCount`/`remaining` measure — never invent a label
+ * that claims proven provider requests when the basis is conservative sessions.
  */
 export interface EarnOpportunityLimitDto {
   readonly metric: EarnLimitMetric;
@@ -34,6 +44,7 @@ export interface EarnOpportunityLimitDto {
   readonly remaining: number | null;
   readonly decidingRuleId: string | null;
   readonly decidingRuleVersion: number | null;
+  readonly usageBasis: EarnUsageBasisDto;
 }
 
 export interface EarnProviderCardDto {

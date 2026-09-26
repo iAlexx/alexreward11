@@ -8,6 +8,7 @@
 
 import type { UserBalancesResponse } from './balances.js';
 import type { DomainEnvelope } from './common.js';
+import type { EarnUsageBasisDto } from './earn.js';
 import type { ReferralsSummaryData } from './referrals.js';
 
 export interface HomeTodayAdsData {
@@ -16,6 +17,8 @@ export interface HomeTodayAdsData {
   readonly monetaryEligible: boolean;
   readonly successRemaining: number | null;
   readonly requestRemaining: number | null;
+  readonly requestUsageBasis: EarnUsageBasisDto;
+  readonly successUsageBasis: EarnUsageBasisDto;
 }
 
 export interface HomeMissionsData {

@@ -5,10 +5,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useState } from 'react';
 import { useTranslations } from 'next-intl';
 
-import {
-  AdsGramRewardedBridge,
-  type AdsGramBridgeEvent,
-} from '../ads/AdsGramRewardedBridge';
+import { AdsGramRewardedBridge, type AdsGramBridgeEvent } from '../ads/AdsGramRewardedBridge';
 import { ApiError } from '../lib/api/client';
 import { formatAtomicAmount, isAtomicAmountString } from '../lib/money/format';
 import { queryKeys } from '../lib/query/keys';
@@ -82,9 +79,13 @@ export function WatchEarnCard({ provider }: { readonly provider: EarnProviderCar
   const requestRemaining = provider.opportunitiesRemaining.request;
   const successRemaining = provider.opportunitiesRemaining.success;
   const atRequestLimit =
-    requestRemaining.configured && requestRemaining.remaining !== null && requestRemaining.remaining <= 0;
+    requestRemaining.configured &&
+    requestRemaining.remaining !== null &&
+    requestRemaining.remaining <= 0;
   const atSuccessLimit =
-    successRemaining.configured && successRemaining.remaining !== null && successRemaining.remaining <= 0;
+    successRemaining.configured &&
+    successRemaining.remaining !== null &&
+    successRemaining.remaining <= 0;
 
   const invalidateEarn = useCallback(async () => {
     await queryClient.invalidateQueries({ queryKey: queryKeys.earnSummary(provider.providerCode) });
@@ -102,16 +103,10 @@ export function WatchEarnCard({ provider }: { readonly provider: EarnProviderCar
           // Never optimistic: only the server `issued` flag may claim a credit.
           if (result.issued || result.alreadyRewarded) {
             setVerifyMessage(t('rewardAdded'));
-            if (
-              result.baseAmountAtomic !== null &&
-              isAtomicAmountString(result.baseAmountAtomic)
-            ) {
+            if (result.baseAmountAtomic !== null && isAtomicAmountString(result.baseAmountAtomic)) {
               setQuotedAtomic(formatAtomicAmount(result.baseAmountAtomic));
             }
-          } else if (
-            result.monetary !== null &&
-            result.monetary.eligible === false
-          ) {
+          } else if (result.monetary !== null && result.monetary.eligible === false) {
             setVerifyMessage(t('productionRewardUnavailable'));
           } else {
             setVerifyMessage(t('rewardNotVerified'));
@@ -120,9 +115,7 @@ export function WatchEarnCard({ provider }: { readonly provider: EarnProviderCar
           await invalidateEarn();
         } catch (error) {
           setPhase('error');
-          setErrorMessage(
-            error instanceof ApiError ? error.message : t('rewardNotVerified'),
-          );
+          setErrorMessage(error instanceof ApiError ? error.message : t('rewardNotVerified'));
         }
       } else if (
         event === 'NO_FILL' ||
@@ -163,10 +156,7 @@ export function WatchEarnCard({ provider }: { readonly provider: EarnProviderCar
       setVerifyMessage(t('noPlacement'));
       return;
     }
-    if (
-      provider.authorizeAssetId === null ||
-      provider.authorizeBudgetPeriodId === null
-    ) {
+    if (provider.authorizeAssetId === null || provider.authorizeBudgetPeriodId === null) {
       setPhase('unavailable');
       setVerifyMessage(t('notConfiguredBody'));
       return;
@@ -263,6 +253,16 @@ export function WatchEarnCard({ provider }: { readonly provider: EarnProviderCar
               ? (requestRemaining.remaining ?? '—')
               : t('limitNotConfigured')}
           </dd>
+        </div>
+        <div>
+          <dt className="alex-meta">
+            {requestRemaining.usageBasis === 'SERVER_AUTHORIZED_SESSION_CONSERVATIVE'
+              ? t('usageBasisConservative')
+              : requestRemaining.usageBasis === 'AUTHORITATIVE_PROVIDER_REQUEST'
+                ? t('usageBasisAuthoritativeRequest')
+                : t('usageBasisSuccessfulReward')}
+          </dt>
+          <dd />
         </div>
         <div>
           <dt>{t('limitRemainingSuccess')}</dt>

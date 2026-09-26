@@ -102,13 +102,17 @@ describe.skipIf(databaseUrl === '')('Phase 12 read APIs', () => {
     // Versioned rules from migration 0030: REQUEST=30, SUCCESS=25, nothing used yet.
     expect(card.opportunitiesRemaining.request.maxCount).toBe(30);
     expect(card.opportunitiesRemaining.request.remaining).toBe(30);
+    expect(card.opportunitiesRemaining.request.usageBasis).toBe(
+      'SERVER_AUTHORIZED_SESSION_CONSERVATIVE',
+    );
     expect(card.opportunitiesRemaining.success.maxCount).toBe(25);
     expect(card.opportunitiesRemaining.success.remaining).toBe(25);
+    expect(card.opportunitiesRemaining.success.usageBasis).toBe('SUCCESSFUL_REWARD');
     // The seeded unit carries a placeholder, not a public block id.
     expect(card.blockIdPublic).toBeNull();
   });
 
-  it('counts consumed opportunities from the authoritative daily counters', async () => {
+  it('counts REQUEST usage from authorized sessions, not provider_requests (P11-01)', async () => {
     const provider = await pool.query<{ id: string }>(
       `SELECT id FROM ad_providers WHERE code = $1`,
       [ADSGRAM_CODE],
@@ -116,14 +120,30 @@ describe.skipIf(databaseUrl === '')('Phase 12 read APIs', () => {
     const providerId = provider.rows[0]?.id;
     expect(providerId).toBeDefined();
 
+    // provider_requests deliberately set high — must NOT drive REQUEST usedCount.
     await pool.query(
       `INSERT INTO ad_daily_counters (user_id, provider_id, utc_day, provider_requests, successful_rewards)
-       VALUES ($1::uuid, $2::uuid, (now() AT TIME ZONE 'utc')::date, 3, 2)
+       VALUES ($1::uuid, $2::uuid, (now() AT TIME ZONE 'utc')::date, 99, 2)
        ON CONFLICT (user_id, provider_id, utc_day) DO UPDATE
          SET provider_requests = EXCLUDED.provider_requests,
              successful_rewards = EXCLUDED.successful_rewards`,
       [userId, providerId],
     );
+
+    for (let i = 0; i < 3; i += 1) {
+      await pool.query(
+        `INSERT INTO ad_sessions (
+           id, user_id, provider_id, state, utc_day, expires_at, created_at,
+           provider_request_counted, successful_reward_counted, failure_code
+         ) VALUES (
+           gen_random_uuid(), $1::uuid, $2::uuid, 'NO_FILL',
+           (now() AT TIME ZONE 'utc')::date,
+           now() + interval '1 hour', now(),
+           false, false, 'TEST_SEED'
+         )`,
+        [userId, providerId],
+      );
+    }
 
     const card = toEarnProviderCard(
       await getEarnSummaryForUser(pool, {
@@ -132,8 +152,12 @@ describe.skipIf(databaseUrl === '')('Phase 12 read APIs', () => {
         environment: 'STAGING',
       }),
     );
+    expect(card.opportunitiesRemaining.request.usageBasis).toBe(
+      'SERVER_AUTHORIZED_SESSION_CONSERVATIVE',
+    );
     expect(card.opportunitiesRemaining.request.usedCount).toBe(3);
     expect(card.opportunitiesRemaining.request.remaining).toBe(27);
+    expect(card.opportunitiesRemaining.success.usageBasis).toBe('SUCCESSFUL_REWARD');
     expect(card.opportunitiesRemaining.success.usedCount).toBe(2);
     expect(card.opportunitiesRemaining.success.remaining).toBe(23);
     expect(card.monetaryEligible).toBe(false);

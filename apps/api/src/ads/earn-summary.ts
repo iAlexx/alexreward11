@@ -10,6 +10,7 @@ function toLimitDto(usage: EarnLimitUsage): EarnOpportunityLimitDto {
     remaining: usage.remaining,
     decidingRuleId: usage.decidingRuleId,
     decidingRuleVersion: usage.decidingRuleVersion,
+    usageBasis: usage.usageBasis,
   };
 }
 

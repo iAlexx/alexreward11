@@ -36,6 +36,7 @@ export type {
   EarnOpportunityLimitDto,
   EarnProviderCardDto,
   EarnSummaryResponse,
+  EarnUsageBasisDto,
   ProviderHealthDto,
   ProviderHealthStatusDto,
   ProviderMonetaryStatusDto,

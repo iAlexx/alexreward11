@@ -146,6 +146,7 @@ describe('earn summary reports AdsGram as BLOCKED', () => {
       remaining: 26,
       decidingRuleId: 'a11a11a1-0000-4000-8000-0000000011a1',
       decidingRuleVersion: 1,
+      usageBasis: 'SERVER_AUTHORIZED_SESSION_CONSERVATIVE',
     },
     success: {
       metric: 'SUCCESS',
@@ -155,6 +156,7 @@ describe('earn summary reports AdsGram as BLOCKED', () => {
       remaining: 0,
       decidingRuleId: 'a11a11a1-0000-4000-8000-0000000011a2',
       decidingRuleVersion: 1,
+      usageBasis: 'SUCCESSFUL_REWARD',
     },
     blockIdPublic: null,
     authorizeAssetId: null,
@@ -172,7 +174,11 @@ describe('earn summary reports AdsGram as BLOCKED', () => {
   it('exposes versioned limit remainders and no server-side configuration', () => {
     const card = toEarnProviderCard(summary);
     expect(card.opportunitiesRemaining.request.remaining).toBe(26);
+    expect(card.opportunitiesRemaining.request.usageBasis).toBe(
+      'SERVER_AUTHORIZED_SESSION_CONSERVATIVE',
+    );
     expect(card.opportunitiesRemaining.success.remaining).toBe(0);
+    expect(card.opportunitiesRemaining.success.usageBasis).toBe('SUCCESSFUL_REWARD');
     expect(card.opportunitiesRemaining.success.decidingRuleId).not.toBeNull();
 
     const serialized = JSON.stringify(card);

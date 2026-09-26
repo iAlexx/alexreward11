@@ -185,6 +185,7 @@ export { getEarnSummaryForUser } from './user-read.js';
 export type {
   EarnLimitUsage,
   EarnSummaryForUser,
+  EarnUsageBasis,
   GetEarnSummaryForUserInput,
 } from './user-read.js';
 
