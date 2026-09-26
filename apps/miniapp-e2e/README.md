@@ -38,3 +38,8 @@ pnpm test:phase12:e2e
 ```
 
 Root script builds API + Mini App dependency graphs, installs Chromium once, then runs Playwright.
+
+## Local Docker ports
+
+If host Redis is published on 56379 (see LOCAL_DEVELOPMENT.md), set:
+`PHASE12_E2E_REDIS_URL=redis://127.0.0.1:56379/12`n
