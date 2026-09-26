@@ -285,6 +285,39 @@ export function createAdminApiClient(options: AdminApiClientOptions) {
       });
     },
 
+    prepareConfirmation(body: {
+      readonly actionType: string;
+      readonly resourceType: string;
+      readonly resourceId: string;
+      readonly expectedVersion: string;
+      readonly payload: unknown;
+    }): Promise<{
+      confirmationId: string;
+      expiresAt: string;
+      payloadDigest: string;
+      confirmationPhrase: string;
+    }> {
+      return request('/v1/admin/confirmations/prepare', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+    },
+
+    confirmConfirmation(
+      confirmationId: string,
+      body: { readonly confirmationPhrase: string },
+    ): Promise<{
+      confirmationId: string;
+      confirmedAt: string;
+      expiresAt: string;
+      payloadDigest: string;
+    }> {
+      return request(`/v1/admin/confirmations/${encodeURIComponent(confirmationId)}/confirm`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+    },
+
     // —— Parallel Admin domains (graceful UNAVAILABLE) ——
     getOverview(): Promise<AdminDomainEnvelope<AdminOverviewSnapshot>> {
       return fetchDomain<AdminOverviewSnapshot>('/v1/admin/overview');

@@ -25,7 +25,7 @@ import {
 } from '../admin-auth/admin-session.guard.js';
 import { API_CONFIG, DATABASE_POOL } from '../tokens.js';
 import {
-  assertOptionalConfirmation,
+  requireConsumedConfirmation,
   enforceAdminMutationCsrf,
   gateHighImpactMutation,
   mapAdminDomainError,
@@ -77,14 +77,14 @@ export class EntitlementsAdminController {
       readonly valueEnum?: string | null;
       readonly assetId?: string | null;
       readonly activate?: boolean;
-      readonly confirmation?: import('@alex-rewards/contracts').HighImpactConfirmationBinding;
+      readonly confirmationId?: string;
     },
   ) {
     try {
       enforceAdminMutationCsrf(request, this.config);
       const gated = gateHighImpactMutation(session, body);
       const entitlementId = requireNonEmptyString(body.entitlementId, 'entitlementId');
-      await assertOptionalConfirmation(body.confirmation, {
+      await requireConsumedConfirmation(this.pool, session, body.confirmationId, {
         action: 'entitlements.benefit_rule_version',
         resourceType: 'entitlement',
         resourceId: entitlementId,

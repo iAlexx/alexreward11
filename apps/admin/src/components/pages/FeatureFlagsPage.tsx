@@ -28,14 +28,15 @@ export function FeatureFlagsPage() {
   const [proposedEnabled, setProposedEnabled] = useState(true);
 
   const currentEnabled = pauseFlag?.enabled ?? null;
-  const confirmationPhrase = useMemo(() => {
-    const next = proposedEnabled ? 'PAUSE' : 'RESUME';
-    return `CONFIRM PAYOUT_DISPATCH_${next}`;
-  }, [proposedEnabled]);
-
-  const payloadDigest = useMemo(() => {
-    return `PAYOUT_DISPATCH_PAUSE:${String(currentEnabled)}->${String(proposedEnabled)}`;
-  }, [currentEnabled, proposedEnabled]);
+  const ceremonyPayload = useMemo(
+    () => ({
+      flagKey: 'PAYOUT_DISPATCH_PAUSE',
+      environment: 'LOCAL',
+      enabled: proposedEnabled,
+      reason: 'ceremony-pending',
+    }),
+    [proposedEnabled],
+  );
 
   return (
     <div className="admin-stack">
@@ -111,8 +112,11 @@ export function FeatureFlagsPage() {
               newValue: proposedEnabled,
             },
           ]}
-          payloadDigest={payloadDigest}
-          confirmationPhrase={confirmationPhrase}
+          actionType="feature_flags.mutate"
+          resourceType="feature_flag"
+          resourceId="PAYOUT_DISPATCH_PAUSE:LOCAL"
+          expectedVersion="0"
+          payload={ceremonyPayload}
           requiresReauth
           onConfirm={async () => {
             // Write path lands with parallel Admin APIs — ceremony UI is mandatory now.

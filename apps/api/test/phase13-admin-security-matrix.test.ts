@@ -264,7 +264,7 @@ describe('Phase 13 Admin security matrix 12–52', () => {
   });
 
   // --- M31–M38: economics / exposure / hot wallet ---
-  it('M31 economics separates estimated vs settled labels', async () => {
+  it('M31 economics never labels withdrawal principal as settled margin', async () => {
     const pool = {
       query: async (sql: string) => {
         if (sql.includes('economic_exposure_limits')) {
@@ -278,12 +278,16 @@ describe('Phase 13 Admin security matrix 12–52', () => {
     };
     const controller = new EconomicsController(pool as never);
     const body = await controller.economics();
-    expect(body.estimated.kind).toBe('ESTIMATED');
-    expect(body.settled.kind).toBe('SETTLED');
-    expect(body.note).toBe('estimates_are_not_settled');
-    expect(body.estimated.status).toBe('UNAVAILABLE');
-    expect(body.estimated.amountAtomic).toBeNull();
-    expect(body.settled.amountAtomic).toBe('12345');
+    expect(body.note).toBe('estimates_are_not_settled_and_withdrawal_principal_is_not_margin');
+    const principal = body.metrics.find(
+      (m) => m.metric === 'CONFIRMED_WITHDRAWAL_PRINCIPAL_OPERATIONAL',
+    );
+    expect(principal?.basis).toBe('OPERATIONAL');
+    expect(principal?.amountAtomic).toBe('12345');
+    const margin = body.metrics.find((m) => m.metric === 'NET_CONTRIBUTION_MARGIN_ESTIMATE');
+    expect(margin?.status).toBe('UNAVAILABLE');
+    expect(JSON.stringify(body)).not.toMatch(/settled margin/i);
+    expect(body).not.toHaveProperty('settled');
   });
 
   it('M32 unconfigured exposure does not invent estimated numbers', async () => {
@@ -295,8 +299,9 @@ describe('Phase 13 Admin security matrix 12–52', () => {
       },
     };
     const body = await new EconomicsController(pool as never).economics();
-    expect(body.estimated.status).toBe('UNAVAILABLE');
-    expect(body.estimated.amountAtomic).toBeNull();
+    const margin = body.metrics.find((m) => m.metric === 'NET_CONTRIBUTION_MARGIN_ESTIMATE');
+    expect(margin?.status).toBe('UNAVAILABLE');
+    expect(margin?.amountAtomic).toBeNull();
   });
 
   it('M33 hot wallet controller source never returns secrets', () => {
@@ -415,11 +420,13 @@ describe('Phase 13 Admin security matrix 12–52', () => {
     }
   });
 
-  it('M48 high-impact helper gates reason + expectedVersion + reauth', () => {
+  it('M48 high-impact helper gates reason + expectedVersion + reauth + mandatory confirmation consume', () => {
     const source = readFileSync(join(adminSrc, 'http.ts'), 'utf8');
     expect(source).toContain('assertRecentReauth');
     expect(source).toContain('requireReason');
     expect(source).toContain('requireExpectedVersion');
+    expect(source).toContain('requireConsumedConfirmation');
+    expect(source).not.toContain('assertOptionalConfirmation');
   });
 
   it('M49 PROVIDER_HARD scope replacements are not blocked by ceiling helper', () => {
@@ -464,5 +471,60 @@ describe('Phase 13 Admin security matrix 12–52', () => {
     const moneyKeys = overview.domains.flatMap((d) => Object.keys(d));
     expect(moneyKeys).not.toContain('balance');
     expect(moneyKeys).not.toContain('availableAtomic');
+  });
+
+  it('P13-01 high-impact controllers require confirmationId consume (not optional client binding)', () => {
+    const files = [
+      'ads-admin.controller.ts',
+      'providers-admin.controller.ts',
+      'policy-center.controller.ts',
+      'feature-flags.controller.ts',
+      'memberships-admin.controller.ts',
+      'entitlements-admin.controller.ts',
+      'reward-engine-admin.controller.ts',
+      'withdrawals-admin.controller.ts',
+      'review-queue.controller.ts',
+    ];
+    for (const file of files) {
+      const text = readFileSync(join(adminSrc, file), 'utf8');
+      expect(text).toContain('requireConsumedConfirmation');
+      expect(text).not.toContain('assertOptionalConfirmation');
+      expect(text).not.toContain('assertHighImpactConfirmationValid');
+    }
+    const confirmations = readFileSync(join(adminSrc, 'confirmations.controller.ts'), 'utf8');
+    expect(confirmations).toContain("Post('prepare')");
+    expect(confirmations).toContain('prepareAdminWebConfirmation');
+    expect(confirmations).toContain('confirmAdminWebConfirmation');
+  });
+
+  it('P13-02 admin auth login JSON must not return sessionToken', () => {
+    const source = readFileSync(
+      join(apiRoot, 'src', 'admin-auth', 'admin-auth.controller.ts'),
+      'utf8',
+    );
+    expect(source).toContain('setAdminSessionCookie');
+    const loginBlocks = source.split('@Post(').filter((block) =>
+      /webauthn\/login\/verify|login\/password-totp|recovery\/consume/.test(block),
+    );
+    expect(loginBlocks.length).toBeGreaterThanOrEqual(3);
+    for (const block of loginBlocks) {
+      const returnMatch = block.match(/return \{[\s\S]*?\};/);
+      expect(returnMatch?.[0] ?? '').not.toContain('sessionToken');
+    }
+  });
+
+  it('P13-03 WebAuthn register routes require recent reauth + session-bound challenge fields', () => {
+    const source = readFileSync(
+      join(apiRoot, 'src', 'admin-auth', 'admin-auth.controller.ts'),
+      'utf8',
+    );
+    expect(source).toContain('adminSessionId: session.sessionId');
+    expect(source).toContain('reauthenticatedAt: session.reauthenticatedAt');
+    const authPkg = readFileSync(
+      join(apiRoot, '..', '..', 'packages', 'auth', 'src', 'admin-webauthn.ts'),
+      'utf8',
+    );
+    expect(authPkg).toContain('assertWebAuthnEnrollmentReauth');
+    expect(authPkg).toContain('admin_session_id');
   });
 });

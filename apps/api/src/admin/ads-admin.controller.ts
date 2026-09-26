@@ -31,7 +31,7 @@ import {
 } from '../admin-auth/admin-session.guard.js';
 import { API_CONFIG, DATABASE_POOL } from '../tokens.js';
 import {
-  assertOptionalConfirmation,
+  requireConsumedConfirmation,
   enforceAdminMutationCsrf,
   gateHighImpactMutation,
   mapAdminDomainError,
@@ -129,7 +129,7 @@ export class AdsAdminController {
         client.release();
       }
 
-      await assertOptionalConfirmation(body.confirmation, {
+      await requireConsumedConfirmation(this.pool, session, body.confirmationId, {
         action: 'ads.monetary_status',
         resourceType: 'ad_provider',
         resourceId: code,

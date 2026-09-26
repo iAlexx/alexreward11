@@ -34,7 +34,7 @@ import {
 import { ParseUuidPipe } from '../auth/access-session.guard.js';
 import { API_CONFIG, DATABASE_POOL } from '../tokens.js';
 import {
-  assertOptionalConfirmation,
+  requireConsumedConfirmation,
   enforceAdminMutationCsrf,
   gateHighImpactMutation,
   mapAdminDomainError,
@@ -118,7 +118,7 @@ export class ReviewQueueController {
     try {
       enforceAdminMutationCsrf(request, this.config);
       const gated = gateHighImpactMutation(session, body);
-      await assertOptionalConfirmation(body.confirmation, {
+      await requireConsumedConfirmation(this.pool, session, body.confirmationId, {
         action: `review_queue.${body.action}`,
         resourceType: 'review_case',
         resourceId: id,

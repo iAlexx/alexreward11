@@ -34,7 +34,7 @@ import {
 import { ParseUuidPipe } from '../auth/access-session.guard.js';
 import { API_CONFIG, DATABASE_POOL } from '../tokens.js';
 import {
-  assertOptionalConfirmation,
+  requireConsumedConfirmation,
   enforceAdminMutationCsrf,
   gateHighImpactMutation,
   mapAdminDomainError,
@@ -163,7 +163,7 @@ export class WithdrawalsAdminController {
       const gated = gateHighImpactMutation(session, body);
       const expectedState = requireNonEmptyString(body.expectedState, 'expectedState');
       const idempotencyKey = requireNonEmptyString(body.idempotencyKey, 'idempotencyKey');
-      await assertOptionalConfirmation(body.confirmation, {
+      await requireConsumedConfirmation(this.pool, session, body.confirmationId, {
         action: `withdrawal.${body.decision.toLowerCase()}`,
         resourceType: 'withdrawal',
         resourceId: id,

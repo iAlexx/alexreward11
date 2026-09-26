@@ -106,6 +106,24 @@ export {
 } from './admin-http.js';
 export type { VerifiedAdminSession } from './admin-http.js';
 export {
+  ADMIN_WEB_CONFIRMATION_ACTION_PREFIXES,
+  ADMIN_WEB_CONFIRMATION_TTL_MS,
+  canonicalizeAdminWebPayload,
+  confirmAdminWebConfirmation,
+  consumeAdminWebConfirmation,
+  digestAdminWebPayload,
+  isAllowedAdminWebConfirmationAction,
+  prepareAdminWebConfirmation,
+} from './admin-web-confirmations.js';
+export type {
+  ConfirmAdminWebConfirmationInput,
+  ConfirmAdminWebConfirmationResult,
+  ConsumeAdminWebConfirmationInput,
+  ConsumeAdminWebConfirmationResult,
+  PrepareAdminWebConfirmationInput,
+  PrepareAdminWebConfirmationResult,
+} from './admin-web-confirmations.js';
+export {
   ADMIN_TOTP_DIGITS,
   ADMIN_TOTP_PERIOD_SECONDS,
   buildOtpAuthUri,

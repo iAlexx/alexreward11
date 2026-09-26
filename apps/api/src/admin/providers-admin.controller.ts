@@ -33,7 +33,7 @@ import {
 } from '../admin-auth/admin-session.guard.js';
 import { API_CONFIG, DATABASE_POOL } from '../tokens.js';
 import {
-  assertOptionalConfirmation,
+  requireConsumedConfirmation,
   enforceAdminMutationCsrf,
   gateHighImpactMutation,
   mapAdminDomainError,
@@ -103,7 +103,7 @@ export class ProvidersAdminController {
     try {
       enforceAdminMutationCsrf(request, this.config);
       const gated = gateHighImpactMutation(session, body);
-      await assertOptionalConfirmation(body.confirmation, {
+      await requireConsumedConfirmation(this.pool, session, body.confirmationId, {
         action: 'providers.limit_change',
         resourceType: 'ad_provider',
         resourceId: code,

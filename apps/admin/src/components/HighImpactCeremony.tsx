@@ -1,20 +1,24 @@
 'use client';
 
-import { useId, useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 
 import type { AdminDiffField } from '../lib/admin-api/types';
 import { strings } from '../lib/strings';
+import { useAdminSession } from '../providers/AdminSessionProvider';
 import { useReauth } from '../providers/ReauthProvider';
 
 /**
- * High-impact ceremony: old/new diff, required reason, reauth, second confirmation
- * binding the exact payload digest — not a generic "Are you sure?".
+ * High-impact ceremony: old/new diff, required reason, reauth, and server-issued
+ * second confirmation. Client phrase matching alone does NOT authorize (P13-01).
  */
 export function HighImpactCeremony({
   title,
   diffs,
-  payloadDigest,
-  confirmationPhrase,
+  actionType,
+  resourceType,
+  resourceId,
+  expectedVersion,
+  payload,
   requiresReauth = true,
   submitLabel,
   onConfirm,
@@ -22,13 +26,21 @@ export function HighImpactCeremony({
 }: {
   readonly title: string;
   readonly diffs: readonly AdminDiffField[];
-  readonly payloadDigest: string;
-  readonly confirmationPhrase: string;
+  readonly actionType: string;
+  readonly resourceType: string;
+  readonly resourceId: string;
+  readonly expectedVersion: string;
+  readonly payload: unknown;
   readonly requiresReauth?: boolean;
   readonly submitLabel?: string;
-  readonly onConfirm: (input: { reason: string; payloadDigest: string }) => Promise<void>;
+  readonly onConfirm: (input: {
+    reason: string;
+    confirmationId: string;
+    payloadDigest: string;
+  }) => Promise<void>;
   readonly children?: ReactNode;
 }) {
+  const { api } = useAdminSession();
   const { requestReauth } = useReauth();
   const reasonId = useId();
   const confirmId = useId();
@@ -36,15 +48,68 @@ export function HighImpactCeremony({
   const [confirmText, setConfirmText] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [prepared, setPrepared] = useState<{
+    confirmationId: string;
+    confirmationPhrase: string;
+    payloadDigest: string;
+  } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        if (requiresReauth) {
+          await requestReauth();
+        }
+        const next = await api.prepareConfirmation({
+          actionType,
+          resourceType,
+          resourceId,
+          expectedVersion,
+          payload,
+        });
+        if (!cancelled) {
+          setPrepared({
+            confirmationId: next.confirmationId,
+            confirmationPhrase: next.confirmationPhrase,
+            payloadDigest: next.payloadDigest,
+          });
+          setError(null);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setPrepared(null);
+          setError(err instanceof Error ? err.message : 'Failed to prepare confirmation');
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    api,
+    actionType,
+    resourceType,
+    resourceId,
+    expectedVersion,
+    payload,
+    requiresReauth,
+    requestReauth,
+  ]);
 
   const exactMatch = useMemo(
-    () => confirmText.trim() === confirmationPhrase,
-    [confirmText, confirmationPhrase],
+    () =>
+      prepared !== null && confirmText.trim() === prepared.confirmationPhrase,
+    [confirmText, prepared],
   );
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
     setError(null);
+    if (prepared === null) {
+      setError('Server confirmation is not ready.');
+      return;
+    }
     if (reason.trim() === '') {
       setError('Reason is required.');
       return;
@@ -58,7 +123,14 @@ export function HighImpactCeremony({
       if (requiresReauth) {
         await requestReauth();
       }
-      await onConfirm({ reason: reason.trim(), payloadDigest });
+      await api.confirmConfirmation(prepared.confirmationId, {
+        confirmationPhrase: confirmText.trim(),
+      });
+      await onConfirm({
+        reason: reason.trim(),
+        confirmationId: prepared.confirmationId,
+        payloadDigest: prepared.payloadDigest,
+      });
       setReason('');
       setConfirmText('');
     } catch (err) {
@@ -95,7 +167,8 @@ export function HighImpactCeremony({
         ))}
       </div>
       <p className="admin-meta">
-        Payload digest: <code className="admin-mono">{payloadDigest}</code>
+        Payload digest:{' '}
+        <code className="admin-mono">{prepared?.payloadDigest ?? 'preparing…'}</code>
       </p>
       <form className="admin-stack" onSubmit={(e) => void handleSubmit(e)}>
         <label className="admin-field" htmlFor={reasonId}>
@@ -110,7 +183,8 @@ export function HighImpactCeremony({
         </label>
         <label className="admin-field" htmlFor={confirmId}>
           <span>
-            {strings.secondConfirmLabel}: <code className="admin-mono">{confirmationPhrase}</code>
+            {strings.secondConfirmLabel}:{' '}
+            <code className="admin-mono">{prepared?.confirmationPhrase ?? '…'}</code>
           </span>
           <input
             id={confirmId}
@@ -120,6 +194,7 @@ export function HighImpactCeremony({
             autoComplete="off"
             spellCheck={false}
             required
+            disabled={prepared === null}
           />
         </label>
         {error !== null ? (

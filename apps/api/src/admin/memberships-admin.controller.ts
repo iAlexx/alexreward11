@@ -31,7 +31,7 @@ import {
 } from '../admin-auth/admin-session.guard.js';
 import { API_CONFIG, DATABASE_POOL } from '../tokens.js';
 import {
-  assertOptionalConfirmation,
+  requireConsumedConfirmation,
   enforceAdminMutationCsrf,
   gateHighImpactMutation,
   mapAdminDomainError,
@@ -115,7 +115,7 @@ export class MembershipsAdminController {
         body.paymentReferenceRedacted,
         'paymentReferenceRedacted',
       );
-      await assertOptionalConfirmation(body.confirmation, {
+      await requireConsumedConfirmation(this.pool, session, body.confirmationId, {
         action: 'memberships.founder_grant',
         resourceType: 'user',
         resourceId: targetUserId,

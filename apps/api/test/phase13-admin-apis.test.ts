@@ -46,6 +46,7 @@ describe('Phase 13 Admin APIs', () => {
       'AuditController',
       'SystemController',
       'SettingsController',
+      'ConfirmationsController',
       'AdminAuthController',
     ];
     for (const name of required) {

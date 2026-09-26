@@ -6,6 +6,7 @@ import { AdminAuthController } from './admin-auth/admin-auth.controller.js';
 import { AdminSessionGuard } from './admin-auth/admin-session.guard.js';
 import { AdsAdminController } from './admin/ads-admin.controller.js';
 import { AuditController } from './admin/audit.controller.js';
+import { ConfirmationsController } from './admin/confirmations.controller.js';
 import { EconomicsController } from './admin/economics.controller.js';
 import { EntitlementsAdminController } from './admin/entitlements-admin.controller.js';
 import { ExposureController } from './admin/exposure.controller.js';
@@ -52,6 +53,7 @@ export class AppModule {
         AuthController,
         AdminAuthController,
         OverviewController,
+        ConfirmationsController,
         UsersController,
         WithdrawalsAdminController,
         HotWalletController,

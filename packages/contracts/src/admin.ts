@@ -31,9 +31,8 @@ export interface AdminDomainSlot<TData> {
 // ---------------------------------------------------------------------------
 
 /**
- * Confirmation binding for high-impact Admin mutations.
- * Binds action + resource + expectedVersion + expiry. Any change to the bound
- * payload invalidates the confirmation (hash mismatch).
+ * Display-only confirmation binding helper material.
+ * MUST NOT authorize Admin mutations — server confirmationId consume is mandatory (P13-01).
  */
 export interface HighImpactConfirmationBinding {
   readonly action: string;
@@ -43,7 +42,7 @@ export interface HighImpactConfirmationBinding {
   readonly expiresAt: string;
   /** Canonical JSON of the mutation payload that was confirmed. */
   readonly payloadCanonical: string;
-  /** SHA-256 hex of the confirmation material. */
+  /** SHA-256 hex of the confirmation material — display/digest aid only. */
   readonly confirmationHash: string;
 }
 
@@ -96,7 +95,7 @@ function confirmationMaterial(input: {
   ].join('\n');
 }
 
-/** Build a high-impact confirmation binding. Call at confirmation time. */
+/** Build display-only confirmation digest material. Does not authorize mutations. */
 export async function createHighImpactConfirmation(
   input: HighImpactConfirmationInput,
 ): Promise<HighImpactConfirmationBinding> {
@@ -133,8 +132,8 @@ export type HighImpactConfirmationFailure =
   | 'HASH_MISMATCH';
 
 /**
- * Validate a previously issued confirmation against the mutation about to execute.
- * Invalidates when the payload changes, version drifts, action/resource mismatch, or expiry.
+ * Validate display-only confirmation digest material.
+ * Does not authorize mutations — use server confirmationId consume instead.
  */
 export async function assertHighImpactConfirmationValid(
   binding: HighImpactConfirmationBinding,
@@ -269,7 +268,7 @@ export interface AdminWithdrawalDecisionRequest {
   readonly expectedVersion: string;
   readonly expectedState: string;
   readonly idempotencyKey: string;
-  readonly confirmation?: HighImpactConfirmationBinding;
+  readonly confirmationId: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -340,7 +339,7 @@ export interface AdminProviderLimitChangeRequest {
   readonly activate?: boolean;
   readonly countryCode?: string | null;
   readonly riskTier?: string | null;
-  readonly confirmation?: HighImpactConfirmationBinding;
+  readonly confirmationId: string;
 }
 
 export interface AdminProviderLimitChangeResponse {
@@ -360,7 +359,7 @@ export interface AdminProviderMonetaryApprovalRequest {
   readonly targetStatus: 'APPROVED' | 'BLOCKED' | 'TEST_ONLY' | 'SUSPENDED';
   readonly reason: string;
   readonly expectedVersion: string;
-  readonly confirmation?: HighImpactConfirmationBinding;
+  readonly confirmationId: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -389,7 +388,7 @@ export interface AdminCreateRewardRuleVersionRequest {
   readonly providerId?: string | null;
   readonly countryGroup?: string | null;
   readonly activate?: boolean;
-  readonly confirmation?: HighImpactConfirmationBinding;
+  readonly confirmationId: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -402,7 +401,7 @@ export interface AdminFounderGrantRequest {
   readonly paymentReferenceRedacted: string;
   readonly expectedVersion: string;
   readonly idempotencyKey?: string;
-  readonly confirmation?: HighImpactConfirmationBinding;
+  readonly confirmationId: string;
 }
 
 export interface AdminFounderGrantResponse {
@@ -446,9 +445,43 @@ export interface AdminPolicyArbitraryPayloadRequest {
 }
 
 // ---------------------------------------------------------------------------
-// Economics / Exposure
+// Economics / Exposure (P13-04 — honest metric contract)
 // ---------------------------------------------------------------------------
 
+export type AdminEconomicsMetricCode =
+  | 'PROVIDER_ESTIMATED_REVENUE'
+  | 'PROVIDER_SETTLED_CONFIRMED_REVENUE'
+  | 'PROVIDER_RECEIVABLES'
+  | 'BASE_USER_REWARD_EXPENSE'
+  | 'MEMBERSHIP_FOUNDER_BONUS_EXPENSE'
+  | 'REFERRAL_BONUS_EXPENSE'
+  | 'MISSION_TASK_REWARD_EXPENSE'
+  | 'WITHDRAWAL_FEE_REVENUE'
+  | 'TON_NETWORK_FEE_EXPENSE'
+  | 'INVALID_TRAFFIC_ADJUSTMENTS_LOSS'
+  | 'NET_CONTRIBUTION_MARGIN_ESTIMATE'
+  | 'HOT_WALLET_COVERAGE'
+  | 'OUTSTANDING_USER_LIABILITIES'
+  /** Operational payout principal only — never labeled margin/revenue. */
+  | 'CONFIRMED_WITHDRAWAL_PRINCIPAL_OPERATIONAL';
+
+export type AdminEconomicsMetricBasis =
+  | 'ESTIMATED'
+  | 'ACCRUED'
+  | 'SETTLED'
+  | 'ACTUAL'
+  | 'OPERATIONAL';
+
+export interface AdminEconomicsMetricDto {
+  readonly metric: AdminEconomicsMetricCode;
+  readonly basis: AdminEconomicsMetricBasis;
+  readonly amountAtomic: string | null;
+  readonly status: AdminAvailabilityLabel;
+  readonly reasonCode?: string;
+  readonly asOf?: string;
+}
+
+/** @deprecated Prefer AdminEconomicsMetricDto — kept only for transitional display helpers. */
 export interface AdminEconomicsAmountDto {
   readonly kind: 'ESTIMATED' | 'SETTLED';
   readonly amountAtomic: string | null;
@@ -458,10 +491,41 @@ export interface AdminEconomicsAmountDto {
 
 export interface AdminEconomicsResponse {
   readonly contractVersion: typeof ADMIN_API_CONTRACT_VERSION;
-  readonly estimated: AdminEconomicsAmountDto;
-  readonly settled: AdminEconomicsAmountDto;
-  readonly note: 'estimates_are_not_settled';
+  readonly metrics: readonly AdminEconomicsMetricDto[];
+  readonly note: 'estimates_are_not_settled_and_withdrawal_principal_is_not_margin';
 }
+
+export interface AdminWebConfirmationPrepareRequest {
+  readonly actionType: string;
+  readonly resourceType: string;
+  readonly resourceId: string;
+  readonly expectedVersion: string;
+  readonly payload: unknown;
+}
+
+export interface AdminWebConfirmationPrepareResponse {
+  readonly contractVersion: typeof ADMIN_API_CONTRACT_VERSION;
+  readonly confirmationId: string;
+  readonly expiresAt: string;
+  readonly payloadDigest: string;
+  readonly confirmationPhrase: string;
+  readonly actionType: string;
+  readonly resourceType: string;
+  readonly resourceId: string;
+  readonly expectedVersion: string;
+}
+
+export interface AdminWebConfirmationConfirmResponse {
+  readonly contractVersion: typeof ADMIN_API_CONTRACT_VERSION;
+  readonly confirmationId: string;
+  readonly confirmedAt: string;
+  readonly expiresAt: string;
+  readonly payloadDigest: string;
+}
+
+// ---------------------------------------------------------------------------
+// Exposure
+// ---------------------------------------------------------------------------
 
 export interface AdminExposureLimitsResponse {
   readonly contractVersion: typeof ADMIN_API_CONTRACT_VERSION;
@@ -503,7 +567,7 @@ export interface AdminFeatureFlagMutateRequest {
   readonly enabled: boolean;
   readonly reason: string;
   readonly expectedVersion: string;
-  readonly confirmation?: HighImpactConfirmationBinding;
+  readonly confirmationId: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -520,7 +584,7 @@ export interface AdminReviewQueueActionRequest {
   readonly reason: string;
   readonly expectedVersion: string;
   readonly note?: string;
-  readonly confirmation?: HighImpactConfirmationBinding;
+  readonly confirmationId: string;
 }
 
 export interface AdminAuditLogsResponse {

@@ -26,7 +26,7 @@ import {
 } from '../admin-auth/admin-session.guard.js';
 import { API_CONFIG, DATABASE_POOL } from '../tokens.js';
 import {
-  assertOptionalConfirmation,
+  requireConsumedConfirmation,
   enforceAdminMutationCsrf,
   gateHighImpactMutation,
   mapAdminDomainError,
@@ -87,18 +87,13 @@ export class PolicyCenterController {
         );
       }
 
-      await assertOptionalConfirmation(
-        body.confirmation as
-          | import('@alex-rewards/contracts').HighImpactConfirmationBinding
-          | undefined,
-        {
-          action: `policy.${family}`,
-          resourceType: 'policy_family',
-          resourceId: family,
-          expectedVersion: gated.expectedVersion,
-          payload: { family, reason: gated.reason, typed: body.typed },
-        },
-      );
+      await requireConsumedConfirmation(this.pool, session, body.confirmationId, {
+        action: `policy.${family}`,
+        resourceType: 'policy_family',
+        resourceId: family,
+        expectedVersion: gated.expectedVersion,
+        payload: { family, reason: gated.reason, typed: body.typed },
+      });
 
       if (family === 'FEATURE_FLAGS') {
         const typed = body.typed as

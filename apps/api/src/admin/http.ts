@@ -13,13 +13,11 @@ import type { FastifyRequest } from 'fastify';
 import {
   AuthDomainError,
   assertRecentReauth,
+  consumeAdminWebConfirmation,
   type VerifiedAdminSession,
 } from '@alex-rewards/auth';
 import type { ApiConfig } from '@alex-rewards/config';
-import {
-  assertHighImpactConfirmationValid,
-  type HighImpactConfirmationBinding,
-} from '@alex-rewards/contracts';
+import type { Pool } from '@alex-rewards/db';
 import { AdsDomainError } from '@alex-rewards/ads';
 import { ControlCenterError } from '@alex-rewards/control-center';
 import { RewardDomainError } from '@alex-rewards/rewards';
@@ -77,8 +75,14 @@ export function gateHighImpactMutation(
   };
 }
 
-export async function assertOptionalConfirmation(
-  confirmation: HighImpactConfirmationBinding | undefined,
+/**
+ * Mandatory one-time consume of a server-issued confirmationId.
+ * Client HighImpactConfirmationBinding must never authorize.
+ */
+export async function requireConsumedConfirmation(
+  pool: Pool,
+  session: VerifiedAdminSession,
+  confirmationId: unknown,
   attempt: {
     readonly action: string;
     readonly resourceType: string;
@@ -87,14 +91,31 @@ export async function assertOptionalConfirmation(
     readonly payload: unknown;
   },
 ): Promise<void> {
-  if (confirmation === undefined) return;
-  const result = await assertHighImpactConfirmationValid(confirmation, attempt);
-  if (!result.ok) {
+  if (typeof confirmationId !== 'string' || confirmationId.trim() === '') {
     throw new ForbiddenException({
-      error: 'CONFIRMATION_INVALID',
-      message: `high-impact confirmation invalid: ${result.reason}`,
-      reason: result.reason,
+      error: 'CONFIRMATION_REQUIRED',
+      message: 'server confirmationId is required for high-impact mutations',
     });
+  }
+  try {
+    await consumeAdminWebConfirmation(pool, {
+      session,
+      confirmationId: confirmationId.trim(),
+      actionType: attempt.action,
+      resourceType: attempt.resourceType,
+      resourceId: attempt.resourceId,
+      expectedVersion: attempt.expectedVersion,
+      payload: attempt.payload,
+    });
+  } catch (error) {
+    if (error instanceof AuthDomainError) {
+      throw new ForbiddenException({
+        error: 'CONFIRMATION_INVALID',
+        message: error.publicMessage,
+        code: error.code,
+      });
+    }
+    throw error;
   }
 }
 

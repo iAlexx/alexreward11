@@ -30,7 +30,7 @@ import {
 } from '../admin-auth/admin-session.guard.js';
 import { API_CONFIG, DATABASE_POOL } from '../tokens.js';
 import {
-  assertOptionalConfirmation,
+  requireConsumedConfirmation,
   enforceAdminMutationCsrf,
   gateHighImpactMutation,
   mapAdminDomainError,
@@ -80,7 +80,7 @@ export class RewardEngineAdminController {
       const gated = gateHighImpactMutation(session, body);
       const code = requireNonEmptyString(body.code, 'code');
       const assetId = requireNonEmptyString(body.assetId, 'assetId');
-      await assertOptionalConfirmation(body.confirmation, {
+      await requireConsumedConfirmation(this.pool, session, body.confirmationId, {
         action: 'reward_rules.create_version',
         resourceType: 'reward_rule',
         resourceId: code,
