@@ -1,12 +1,6 @@
 import { adminPost } from '../src/helpers/api.js';
-import {
-  getAdminSessionCookie,
-  loginViaPasswordTotpUi,
-} from '../src/helpers/auth-ui.js';
-import {
-  createPasskeyCredential,
-  enableVirtualAuthenticator,
-} from '../src/helpers/webauthn.js';
+import { getAdminSessionCookie, loginViaPasswordTotpUi } from '../src/helpers/auth-ui.js';
+import { createPasskeyCredential, enableVirtualAuthenticator } from '../src/helpers/webauthn.js';
 import { expect, test } from './fixtures.js';
 
 test.describe('B. WebAuthn enrollment + login', () => {

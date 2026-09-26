@@ -60,8 +60,7 @@ export function HighImpactCeremony({
   } | null>(null);
 
   const exactMatch = useMemo(
-    () =>
-      prepared !== null && confirmText.trim() === prepared.confirmationPhrase,
+    () => prepared !== null && confirmText.trim() === prepared.confirmationPhrase,
     [confirmText, prepared],
   );
 

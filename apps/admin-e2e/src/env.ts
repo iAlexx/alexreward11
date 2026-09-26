@@ -24,8 +24,7 @@ export const E2E_API_BASE_URL =
 export const E2E_ADMIN_BASE_URL =
   process.env.PHASE13_ADMIN_E2E_ADMIN_BASE_URL ?? `http://localhost:${E2E_ADMIN_PORT}`;
 
-export const E2E_REDIS_URL =
-  process.env.PHASE13_ADMIN_E2E_REDIS_URL ?? 'redis://127.0.0.1:6379/13';
+export const E2E_REDIS_URL = process.env.PHASE13_ADMIN_E2E_REDIS_URL ?? 'redis://127.0.0.1:6379/13';
 
 export const E2E_OWNER_EMAIL = 'owner-phase13-e2e@local.test';
 export const E2E_OWNER_PASSWORD = 'Owner-E2E-Password-13';

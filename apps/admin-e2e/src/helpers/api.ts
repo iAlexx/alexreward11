@@ -3,9 +3,7 @@ import type { APIRequestContext, Page } from '@playwright/test';
 import { E2E_ADMIN_BASE_URL, E2E_API_BASE_URL } from '../env.js';
 
 /** Cookie-mode admin mutations require Origin to match the Admin allowlist. */
-export function adminOriginHeaders(
-  extra: Record<string, string> = {},
-): Record<string, string> {
+export function adminOriginHeaders(extra: Record<string, string> = {}): Record<string, string> {
   return {
     Origin: E2E_ADMIN_BASE_URL,
     Referer: `${E2E_ADMIN_BASE_URL}/`,

@@ -14,16 +14,13 @@ test.describe('D. Server confirmation ceremony', () => {
     await page.goto('/feature-flags');
     await expect(page.getByTestId('payout-pause-warning')).toBeVisible();
 
-    const flagsRes = await page.context().request.get(
-      `${seed.apiBaseUrl}/v1/admin/feature-flags`,
-      {
-        headers: {
-          Origin: seed.adminBaseUrl,
-          Referer: `${seed.adminBaseUrl}/`,
-          Accept: 'application/json',
-        },
+    const flagsRes = await page.context().request.get(`${seed.apiBaseUrl}/v1/admin/feature-flags`, {
+      headers: {
+        Origin: seed.adminBaseUrl,
+        Referer: `${seed.adminBaseUrl}/`,
+        Accept: 'application/json',
       },
-    );
+    });
     expect(flagsRes.ok()).toBeTruthy();
     const flagsBody = (await flagsRes.json()) as {
       items?: Array<{
@@ -56,16 +53,15 @@ test.describe('D. Server confirmation ceremony', () => {
 
     await expect(page.getByTestId('ceremony-reason')).toHaveCount(0, { timeout: 60_000 });
 
-    const afterFlags = await page.context().request.get(
-      `${seed.apiBaseUrl}/v1/admin/feature-flags`,
-      {
+    const afterFlags = await page
+      .context()
+      .request.get(`${seed.apiBaseUrl}/v1/admin/feature-flags`, {
         headers: {
           Origin: seed.adminBaseUrl,
           Referer: `${seed.adminBaseUrl}/`,
           Accept: 'application/json',
         },
-      },
-    );
+      });
     const afterBody = (await afterFlags.json()) as {
       items?: Array<{
         flagKey: string;

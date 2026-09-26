@@ -20,7 +20,9 @@ test.describe('F. Economics honesty', () => {
     expect(pageText).not.toMatch(/settled margin\/profit/i);
     expect(pageText).toMatch(/not settled margin/i);
 
-    await expect(page.getByText('PROVIDER_SETTLED_CONFIRMED_REVENUE', { exact: false })).toBeVisible();
+    await expect(
+      page.getByText('PROVIDER_SETTLED_CONFIRMED_REVENUE', { exact: false }),
+    ).toBeVisible();
     await expect(page.getByText('UNAVAILABLE').first()).toBeVisible();
     await expect(
       page.getByText('PROVIDER_SETTLEMENT_NOT_CONFIGURED', { exact: false }),

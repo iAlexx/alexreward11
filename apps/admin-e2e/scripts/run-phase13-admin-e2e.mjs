@@ -30,8 +30,7 @@ if (process.env.PHASE13_ADMIN_E2E !== '1') {
 const adminPort = process.env.PHASE13_ADMIN_E2E_ADMIN_PORT ?? '3031';
 const apiPort = process.env.PHASE13_ADMIN_E2E_API_PORT ?? '3032';
 const apiBase = process.env.PHASE13_ADMIN_E2E_API_BASE_URL ?? `http://localhost:${apiPort}`;
-const adminBase =
-  process.env.PHASE13_ADMIN_E2E_ADMIN_BASE_URL ?? `http://localhost:${adminPort}`;
+const adminBase = process.env.PHASE13_ADMIN_E2E_ADMIN_BASE_URL ?? `http://localhost:${adminPort}`;
 
 run(
   'pnpm',

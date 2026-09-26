@@ -198,10 +198,12 @@ export function createAdminApiClient(options: AdminApiClientOptions) {
 
   return {
     // —— Auth (implemented) ——
-    webauthnLoginOptions(body: {
-      readonly email?: string | undefined;
-      readonly adminUserId?: string | undefined;
-    } = {}): Promise<AdminWebAuthnOptionsResponse> {
+    webauthnLoginOptions(
+      body: {
+        readonly email?: string | undefined;
+        readonly adminUserId?: string | undefined;
+      } = {},
+    ): Promise<AdminWebAuthnOptionsResponse> {
       return request<AdminWebAuthnOptionsResponse>('/v1/admin/auth/webauthn/login/options', {
         method: 'POST',
         auth: false,
@@ -323,7 +325,9 @@ export function createAdminApiClient(options: AdminApiClientOptions) {
       return fetchDomain<AdminOverviewSnapshot>('/v1/admin/overview');
     },
 
-    listUsers(query: AdminListQuery = {}): Promise<AdminDomainEnvelope<AdminListPage<AdminUserListItem>>> {
+    listUsers(
+      query: AdminListQuery = {},
+    ): Promise<AdminDomainEnvelope<AdminListPage<AdminUserListItem>>> {
       return fetchDomain<AdminListPage<AdminUserListItem>>(`/v1/admin/users${toQuery(query)}`);
     },
 
@@ -343,7 +347,9 @@ export function createAdminApiClient(options: AdminApiClientOptions) {
       return fetchDomain<AdminHotWalletPublicView>('/v1/admin/hot-wallet');
     },
 
-    listLedger(query: AdminListQuery = {}): Promise<AdminDomainEnvelope<AdminListPage<Record<string, unknown>>>> {
+    listLedger(
+      query: AdminListQuery = {},
+    ): Promise<AdminDomainEnvelope<AdminListPage<Record<string, unknown>>>> {
       return fetchDomain(`/v1/admin/ledger${toQuery(query)}`);
     },
 
@@ -351,19 +357,27 @@ export function createAdminApiClient(options: AdminApiClientOptions) {
       return fetchDomain('/v1/admin/ads');
     },
 
-    getRewardEngine(query: AdminListQuery = {}): Promise<AdminDomainEnvelope<AdminListPage<Record<string, unknown>>>> {
+    getRewardEngine(
+      query: AdminListQuery = {},
+    ): Promise<AdminDomainEnvelope<AdminListPage<Record<string, unknown>>>> {
       return fetchDomain(`/v1/admin/reward-engine${toQuery(query)}`);
     },
 
-    getFraud(query: AdminListQuery = {}): Promise<AdminDomainEnvelope<AdminListPage<Record<string, unknown>>>> {
+    getFraud(
+      query: AdminListQuery = {},
+    ): Promise<AdminDomainEnvelope<AdminListPage<Record<string, unknown>>>> {
       return fetchDomain(`/v1/admin/fraud${toQuery(query)}`);
     },
 
-    getReferral(query: AdminListQuery = {}): Promise<AdminDomainEnvelope<AdminListPage<Record<string, unknown>>>> {
+    getReferral(
+      query: AdminListQuery = {},
+    ): Promise<AdminDomainEnvelope<AdminListPage<Record<string, unknown>>>> {
       return fetchDomain(`/v1/admin/referral${toQuery(query)}`);
     },
 
-    getSupport(query: AdminListQuery = {}): Promise<AdminDomainEnvelope<AdminListPage<Record<string, unknown>>>> {
+    getSupport(
+      query: AdminListQuery = {},
+    ): Promise<AdminDomainEnvelope<AdminListPage<Record<string, unknown>>>> {
       return fetchDomain(`/v1/admin/support${toQuery(query)}`);
     },
 
@@ -373,11 +387,15 @@ export function createAdminApiClient(options: AdminApiClientOptions) {
       return fetchDomain(`/v1/admin/notifications${toQuery(query)}`);
     },
 
-    getAudit(query: AdminListQuery = {}): Promise<AdminDomainEnvelope<AdminListPage<Record<string, unknown>>>> {
+    getAudit(
+      query: AdminListQuery = {},
+    ): Promise<AdminDomainEnvelope<AdminListPage<Record<string, unknown>>>> {
       return fetchDomain(`/v1/admin/audit${toQuery(query)}`);
     },
 
-    getSystemHealth(): Promise<AdminDomainEnvelope<{ components: readonly AdminSystemHealthItem[] }>> {
+    getSystemHealth(): Promise<
+      AdminDomainEnvelope<{ components: readonly AdminSystemHealthItem[] }>
+    > {
       return fetchDomain('/v1/admin/system');
     },
 
@@ -395,7 +413,9 @@ export function createAdminApiClient(options: AdminApiClientOptions) {
       return fetchDomain('/v1/admin/policy');
     },
 
-    getProviders(query: AdminListQuery = {}): Promise<AdminDomainEnvelope<AdminListPage<Record<string, unknown>>>> {
+    getProviders(
+      query: AdminListQuery = {},
+    ): Promise<AdminDomainEnvelope<AdminListPage<Record<string, unknown>>>> {
       return fetchDomain(`/v1/admin/providers${toQuery(query)}`);
     },
 
@@ -411,7 +431,9 @@ export function createAdminApiClient(options: AdminApiClientOptions) {
       return fetchDomain(`/v1/admin/capabilities${toQuery(query)}`);
     },
 
-    getLimits(query: AdminListQuery = {}): Promise<AdminDomainEnvelope<AdminListPage<Record<string, unknown>>>> {
+    getLimits(
+      query: AdminListQuery = {},
+    ): Promise<AdminDomainEnvelope<AdminListPage<Record<string, unknown>>>> {
       return fetchDomain(`/v1/admin/limits${toQuery(query)}`);
     },
 
@@ -470,7 +492,9 @@ export function createAdminApiClient(options: AdminApiClientOptions) {
       });
     },
 
-    getMissions(query: AdminListQuery = {}): Promise<AdminDomainEnvelope<AdminListPage<Record<string, unknown>>>> {
+    getMissions(
+      query: AdminListQuery = {},
+    ): Promise<AdminDomainEnvelope<AdminListPage<Record<string, unknown>>>> {
       return fetchDomain(`/v1/admin/missions${toQuery(query)}`);
     },
 

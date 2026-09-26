@@ -30,16 +30,13 @@ test.describe('A. Cookie-only login', () => {
     expect(storage.localKeys.some((k) => /admin|bearer|session|token/i.test(k))).toBe(false);
 
     // Login helper already asserted Overview; confirm cookie still authenticates via API.
-    const session = await page.context().request.get(
-      `${seed.apiBaseUrl}/v1/admin/auth/session`,
-      {
-        headers: {
-          Origin: seed.adminBaseUrl,
-          Referer: `${seed.adminBaseUrl}/`,
-          Accept: 'application/json',
-        },
+    const session = await page.context().request.get(`${seed.apiBaseUrl}/v1/admin/auth/session`, {
+      headers: {
+        Origin: seed.adminBaseUrl,
+        Referer: `${seed.adminBaseUrl}/`,
+        Accept: 'application/json',
       },
-    );
+    });
     expect(session.ok()).toBeTruthy();
     const body = (await session.json()) as { authSource?: string; email?: string };
     expect(body.authSource).toBe('cookie');

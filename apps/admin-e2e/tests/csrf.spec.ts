@@ -7,9 +7,9 @@ test.describe('E. CSRF Origin enforcement', () => {
   test('attacker Origin cannot mutate with cookie credentials', async ({ page, seed }) => {
     await loginViaPasswordTotpUi(page, seed.email);
 
-    const res = await page.context().request.post(
-      `${E2E_API_BASE_URL}/v1/admin/confirmations/prepare`,
-      {
+    const res = await page
+      .context()
+      .request.post(`${E2E_API_BASE_URL}/v1/admin/confirmations/prepare`, {
         headers: {
           Origin: 'https://evil.example',
           Referer: 'https://evil.example/attack',
@@ -23,8 +23,7 @@ test.describe('E. CSRF Origin enforcement', () => {
           expectedVersion: '0',
           payload: { attack: true },
         },
-      },
-    );
+      });
     expect(res.status()).toBeGreaterThanOrEqual(400);
     const body = (await res.json()) as unknown;
     expect(errorCode(body)).toBe('FORBIDDEN');

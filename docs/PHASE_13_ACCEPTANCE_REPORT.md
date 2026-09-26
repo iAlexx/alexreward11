@@ -10,7 +10,7 @@
 
 **Phase slug:** `PHASE_13_ADMIN_POLICY_ECONOMICS`  
 **Master specification:** Version 1.3  
-**Accepted commit:** _(see Section M)_  
+**Accepted commit:** _(see Section M)_
 
 **AdsGram production monetary status:** **BLOCKED**  
 **AdsGram clarification gate:** **NO** (unchanged; Admin cannot flip without gate)  
@@ -72,8 +72,8 @@ Representative:
 
 ## D. Database migrations
 
-| Migration | Purpose |
-| --------- | ------- |
+| Migration                                    | Purpose                               |
+| -------------------------------------------- | ------------------------------------- |
 | `0031_phase13_admin_webauthn_challenges.sql` | One-time WebAuthn ceremony challenges |
 
 No duplicate of existing admin_users / sessions / recovery / audit tables. Historical data
@@ -102,13 +102,13 @@ pnpm archive:phase -- --phase 13 --slug ADMIN_POLICY_ECONOMICS --commit <sha> \
 
 ## F. Unit / integration / E2E / security tests
 
-| Suite | Result |
-| ----- | ------ |
-| `packages/auth` phase13-admin-auth | **11 PASS** |
-| `packages/ads` phase13-admin-gates | **3 PASS** |
+| Suite                                              | Result      |
+| -------------------------------------------------- | ----------- |
+| `packages/auth` phase13-admin-auth                 | **11 PASS** |
+| `packages/ads` phase13-admin-gates                 | **3 PASS**  |
 | `apps/api` phase13 (auth + APIs + security matrix) | **49 PASS** |
-| `apps/admin` vitest | **12 PASS** |
-| `verify:boundaries` | **PASS** |
+| `apps/admin` vitest                                | **12 PASS** |
+| `verify:boundaries`                                | **PASS**    |
 
 Owner matrix coverage includes unauth/Telegram denial, password-only/TOTP-only refuse,
 password+TOTP + recovery replay, reauth freshness, WebAuthn factor + RP fail-closed,
@@ -186,24 +186,24 @@ mutation. No automatic change to `PAYOUT_DISPATCH_PAUSE` or AdsGram monetary sta
 
 ## N. Gate PASS/FAIL
 
-| Gate | Result |
-| ---- | ------ |
+| Gate                                             | Result   |
+| ------------------------------------------------ | -------- |
 | Owner auth (WebAuthn / password+TOTP / recovery) | **PASS** |
-| RBAC OWNER-only V1 | **PASS** |
-| Sensitive reauth + second confirmation | **PASS** |
-| Admin areas delivered | **PASS** |
-| No direct balance editor | **PASS** |
-| Provider hard limits not exceedable by Admin | **PASS** |
-| Founder grant/benefits audited/versioned | **PASS** |
+| RBAC OWNER-only V1                               | **PASS** |
+| Sensitive reauth + second confirmation           | **PASS** |
+| Admin areas delivered                            | **PASS** |
+| No direct balance editor                         | **PASS** |
+| Provider hard limits not exceedable by Admin     | **PASS** |
+| Founder grant/benefits audited/versioned         | **PASS** |
 | Policy Center typed/versioned; no arbitrary code | **PASS** |
-| Provider operations | **PASS** |
-| Economics estimates ≠ settled | **PASS** |
-| Review Queue not source of truth | **PASS** |
-| Feature flags cannot bypass invariants | **PASS** |
-| AdsGram remains BLOCKED | **PASS** |
-| Historical phase archives unchanged | **PASS** |
-| Phase 14 not started | **PASS** |
-| **PHASE13_GATE** | **PASS** |
+| Provider operations                              | **PASS** |
+| Economics estimates ≠ settled                    | **PASS** |
+| Review Queue not source of truth                 | **PASS** |
+| Feature flags cannot bypass invariants           | **PASS** |
+| AdsGram remains BLOCKED                          | **PASS** |
+| Historical phase archives unchanged              | **PASS** |
+| Phase 14 not started                             | **PASS** |
+| **PHASE13_GATE**                                 | **PASS** |
 
 ---
 

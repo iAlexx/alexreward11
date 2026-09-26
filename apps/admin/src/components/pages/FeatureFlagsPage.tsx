@@ -47,7 +47,11 @@ export function FeatureFlagsPage() {
         description="Granular kill switches. High-impact flags require ceremony, not silent toggles."
       />
 
-      <div className="admin-banner admin-banner--warn" role="status" data-testid="payout-pause-warning">
+      <div
+        className="admin-banner admin-banner--warn"
+        role="status"
+        data-testid="payout-pause-warning"
+      >
         <p>
           <strong>PAYOUT_DISPATCH_PAUSE</strong>
         </p>
@@ -66,8 +70,7 @@ export function FeatureFlagsPage() {
                 <div className="admin-panel__head">
                   <div>
                     <p className="admin-title-sm">
-                      {flag.flagKey}{' '}
-                      <span className="admin-meta">({flag.environment})</span>
+                      {flag.flagKey} <span className="admin-meta">({flag.environment})</span>
                     </p>
                     {flag.description !== null ? (
                       <p className="admin-muted">{flag.description}</p>

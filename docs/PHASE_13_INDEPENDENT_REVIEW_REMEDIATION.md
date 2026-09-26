@@ -56,11 +56,11 @@ are `UNAVAILABLE`. Docs: `docs/ADMIN_ECONOMICS.md`.
 
 ## Tests
 
-| Area | Location |
-| ---- | -------- |
-| Confirmation refuse/success/replay | `packages/auth/test/phase13-admin-web-confirmations.test.ts` |
-| Auth matrix + P13 source gates | `apps/api/test/phase13-admin-security-matrix.test.ts` |
-| WebAuthn enroll reauth / session bind | `packages/auth/test/phase13-admin-auth.test.ts` |
+| Area                                  | Location                                                     |
+| ------------------------------------- | ------------------------------------------------------------ |
+| Confirmation refuse/success/replay    | `packages/auth/test/phase13-admin-web-confirmations.test.ts` |
+| Auth matrix + P13 source gates        | `apps/api/test/phase13-admin-security-matrix.test.ts`        |
+| WebAuthn enroll reauth / session bind | `packages/auth/test/phase13-admin-auth.test.ts`              |
 
 ---
 

@@ -57,8 +57,8 @@ export async function createPasskeyCredential(
       pubKeyCredParams: options.pubKeyCredParams as PublicKeyCredentialParameters[],
       timeout: options.timeout as number | undefined,
       attestation: options.attestation as AttestationConveyancePreference | undefined,
-      authenticatorSelection:
-        options.authenticatorSelection as AuthenticatorSelectionCriteria | undefined,
+      authenticatorSelection: options.authenticatorSelection as
+        AuthenticatorSelectionCriteria | undefined,
       excludeCredentials: exclude.map((c) => ({
         id: base64UrlToBuffer(c.id),
         type: c.type as PublicKeyCredentialType,
