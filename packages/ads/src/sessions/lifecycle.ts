@@ -325,21 +325,6 @@ export async function recordClientSignal(
 }
 
 /**
- * Authoritative `provider_requests` may only increment when an approved provider
- * counting policy proves an actual provider request (P11-01). AdsGram has no such
- * proof path while PROVIDER_SIDE_REQUEST_LIMIT remains open — client signals and
- * UI/SDK assertions must never call into this path.
- *
- * Kept as an explicit no-op gate so accidental reintroduction is refuse-closed.
- */
-export function refuseClientAuthoritativeProviderRequestCount(): never {
-  throw new AdsDomainError(
-    'SIGNAL_REJECTED',
-    'client signals cannot increment authoritative provider_requests (P11-01)',
-  );
-}
-
-/**
  * Record one provider server signal against a known session.
  *
  * The caller supplies the authenticity and correlation it could actually prove. This
