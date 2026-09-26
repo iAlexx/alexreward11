@@ -83,7 +83,7 @@ Local result: **44 PASS** (`test:phase11`), `verify:boundaries` PASS, ads typech
 
 ## Remediation commit SHA
 
-_(filled after commit)_
+`e855c091c0bad68b231c685d6c2610e504dcc50a`
 
 ---
 
