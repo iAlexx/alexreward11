@@ -1,4 +1,4 @@
-ï»¿# Phase 11 Independent Review Remediation â€” P11-01
+# Phase 11 Independent Review Remediation — P11-01
 
 **Status:** Remediation commit / package supersedes prior Owner approval state for
 Phase 11 request-counting semantics. The original Phase 11 package is preserved unchanged.
@@ -11,14 +11,14 @@ Phase 11 request-counting semantics. The original Phase 11 package is preserved 
 `82b52bc1dacc93aa6ca046ff1d41282b68ad4e4431f3eed01c7d206ee410e7ef`
 
 **Remediation implementation SHA:** `e855c091c0bad68b231c685d6c2610e504dcc50a`  
-**Latest remediation tip SHA:** `8c65118343ef8e8b0c889eb54868683d6fcd7141`  
-**(Phase 11 job CI-green tip:** `c6be44d3c495f3dffa49f6512b22a6b55e40fae4` â€” subsequent tips are docs/packaging only)**
+**Latest remediation tip SHA:** `5015fa80d1d1cb2ba7dc357d190da5e4e971537e`  
+**(Packaging tip for final ZIP:** `8c65118343ef8e8b0c889eb54868683d6fcd7141`)**
 
-**GitHub draft PR:** https://github.com/iAlexx/alexreward11/pull/7 (Draft â€” **not merged**)  
-**GitHub Actions run (Phase 11 job PASS):** https://github.com/iAlexx/alexreward11/actions/runs/36242298807
+**GitHub draft PR:** https://github.com/iAlexx/alexreward11/pull/7 (Draft — **not merged**)  
+**GitHub Actions run (Phase 11 job PASS on tip `c78b362`):** https://github.com/iAlexx/alexreward11/actions/runs/36242482765
 
 - `phase11-remediation` job: **PASS** (report non-empty, scoped Prettier, turbo build, typecheck, boundaries, `test:phase11`)
-- `quality` job: **FAIL** â€” historical Prettier debt in Phase 11 ancestry (Foundation validation); kept visible, not weakened
+- `quality` job: **FAIL** — historical Prettier debt in Phase 11 ancestry (Foundation validation); kept visible, not weakened
 - `docker-smoke`: skipped (needs quality)
 
 **AdsGram production monetary status:** **BLOCKED** (unchanged)  
@@ -48,8 +48,8 @@ request counts carry no authority).
 
 ### Integrity problems
 
-1. **False counting** â€” a client could report `REQUEST_APPROVED` without any AdsGram request.
-2. **Undercount / bypass of safety** â€” a modified client could omit the signal and avoid
+1. **False counting** — a client could report `REQUEST_APPROVED` without any AdsGram request.
+2. **Undercount / bypass of safety** — a modified client could omit the signal and avoid
    incrementing the counter that authorize previously read for REQUEST limits.
 
 Production money was already blocked (`BLOCKED`), but the counting model was still wrong.
@@ -60,14 +60,14 @@ Production money was already blocked (`BLOCKED`), but the counting model was sti
 
 | Concept                             | Behavior                                                                                                                                                                                                                     |
 | ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Client `REQUEST_APPROVED`           | Append-only CLIENT/UNVERIFIED evidence only â€” **does not** increment `provider_requests`                                                                                                                                     |
+| Client `REQUEST_APPROVED`           | Append-only CLIENT/UNVERIFIED evidence only — **does not** increment `provider_requests`                                                                                                                                     |
 | Client `NO_FILL` / FAILED / SKIPPED | Terminal outcome; no reward; no success count; no `provider_requests` from client claim                                                                                                                                      |
 | Authoritative `provider_requests`   | Reserved for future approved provider counting proof; AdsGram has **no** such write path today                                                                                                                               |
-| Conservative REQUEST safety         | At authorize: `INSERT` counter row `ON CONFLICT DO NOTHING`, then `SELECT â€¦ FOR UPDATE`, then `COUNT(ad_sessions)` for user/provider/UTC day vs versioned REQUEST/UTC_DAY limit. Does **not** increment `provider_requests`. |
+| Conservative REQUEST safety         | At authorize: `INSERT` counter row `ON CONFLICT DO NOTHING`, then `SELECT … FOR UPDATE`, then `COUNT(ad_sessions)` for user/provider/UTC day vs versioned REQUEST/UTC_DAY limit. Does **not** increment `provider_requests`. |
 | Historical policy                   | `AUTHORIZATION_PASSED` safe_payload records effective limits + rule id/version/scope/window                                                                                                                                  |
 
 Concurrent authorize attempts serialize on the daily counter row so two transactions cannot
-both observe Nâˆ’1 and create sessions N and N+1. P11-R13 proves the `FOR UPDATE` serialization
+both observe N-1 and create sessions N and N+1. P11-R13 proves the `FOR UPDATE` serialization
 point independently of one-live-session uniqueness.
 
 ---
@@ -81,7 +81,7 @@ derived from `ad_sessions` count. Avoids colliding with later-phase migration nu
 
 ## Regression tests
 
-`packages/ads/test/phase11-p11-01-request-counting.test.ts` â€” P11-R1 through P11-R15
+`packages/ads/test/phase11-p11-01-request-counting.test.ts` — P11-R1 through P11-R15
 (with R5 = source-boundary / no AdsGram write path; R13 = lock-contention serialization).
 
 Also updated:
@@ -105,7 +105,7 @@ PASS, ads typecheck PASS, Prettier check on remediation-touched files PASS.
 | Gate                                | Result                                                                                   |
 | ----------------------------------- | ---------------------------------------------------------------------------------------- |
 | Draft PR                            | #7 (not merged)                                                                          |
-| Overall repository `quality` job    | **FAIL** â€” historical Prettier debt (Foundation validation). Kept visible; not weakened. |
+| Overall repository `quality` job    | **FAIL** — historical Prettier debt (Foundation validation). Kept visible; not weakened. |
 | Dedicated `phase11-remediation` job | **PASS** on run `36242298807` (PR HEAD checkout; independent of `quality`)               |
 
 `PHASE11_GITHUB_CI_JOB_PASS=YES`. `OVERALL_REPOSITORY_CI_PASS=NO`.
