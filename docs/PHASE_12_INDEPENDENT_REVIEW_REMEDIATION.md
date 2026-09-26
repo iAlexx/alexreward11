@@ -142,44 +142,56 @@ Report separately (run `36254709740`):
 
 ## Live Telegram smoke
 
-**LIVE_TELEGRAM_SMOKE_PASS=NO**
+**LIVE_TELEGRAM_SMOKE_PASS=YES**
 
-**Inspection date (UTC):** 2026-09-26T16:54Z  
-**Remediation tip at inspection:** `1f2869f93410c34b1629cc1b3b3164e1cef29aeb`
+**Verified (UTC):** 2026-09-26T18:04Z  
+**Remediation tip:** `67399eabfc00803e2ea901d8916ffe918db58e41`  
+**Bot:** `@AlexRewardBot` (menu button `Open ALEx` → Mini App tunnel)
 
-### Existing deployment / config (inspected only)
+### Runtime secret source
 
-| Item                                                | Finding                                                                                                                                   |
-| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| Vercel Mini App project                             | `alex-rewards-miniapp` (team `y720183p-2353s-projects`); linked from primary worktree `.vercel`                                           |
-| Public Mini App URL                                 | `https://alex-rewards-miniapp.vercel.app` — `/api/health/live` returned **200**                                                           |
-| Public API URL                                      | **NONE** usable for Telegram. Local `NEXT_PUBLIC_API_BASE_URL` host is `http://localhost:3002` only                                       |
-| Local API                                           | Docker/local `127.0.0.1:3002` health **200** (not reachable from Telegram clients)                                                        |
-| Telegram test bot                                   | **No real BotFather bot.** Local `TELEGRAM_BOT_TOKEN` is a **local-only test placeholder** shape for Vitest/E2E HMAC — not a live bot     |
-| `NEXT_PUBLIC_TONCONNECT_MANIFEST_URL`               | **NOT SET**                                                                                                                               |
-| `NEXT_PUBLIC_TERMS_URL` / `NEXT_PUBLIC_PRIVACY_URL` | **NOT SET** (honest Profile degrade)                                                                                                      |
-| Mini App CSP                                        | No `frame-ancestors 'none'` on Mini App (Referrer-Policy / nosniff / Permissions-Policy only) — embedding not blocked by Mini App headers |
-| API CSP                                             | API uses `frame-ancestors 'none'` (correct for API; not the Mini App document)                                                            |
-| Phase 12 worktree `.env`                            | **ABSENT** (no secrets in remediation worktree)                                                                                           |
+- Outside-repo file: `C:\Users\Master aLEX\ALExRewards\phase12-smoke.env`
+- `TELEGRAM_BOT_TOKEN=SET` (runtime load only; never printed, committed, or copied into the repo)
 
-Secret presence (values never recorded):
+### Auth / embedding evidence (no secrets / no raw initData)
 
-- `TELEGRAM_BOT_TOKEN`: SET in primary `.env` but **LOCAL_TEST_PLACEHOLDER** (not live BotFather)
-- `NEXT_PUBLIC_API_BASE_URL`: SET → localhost only
-- `NEXT_PUBLIC_TONCONNECT_MANIFEST_URL`: NOT SET
-- `SESSION_ACCESS_SECRET`: SET (local)
-- `DATABASE_URL` / `REDIS_URL`: SET (local docker hosts)
+| Gate | Result |
+| ---- | ------ |
+| Real Telegram open (Owner) | Home rendered with server-driven data inside Telegram WebView |
+| `users` count | **1** (`telegram_user_id` present; positive) |
+| Active `user_sessions` | **≥1** (session created at first open; UA matches Telegram Desktop Edge WebView) |
+| initData HMAC + `auth_date` | **PASS** — `POST /v1/auth/telegram` is the only user-create path; invalid signature probe returned **400**; valid signed re-auth for same Telegram id returned **200** without duplicating `users` |
+| Mini App CSP / frame | **PASS** — Mini App response has **no** `Content-Security-Policy` / `X-Frame-Options` blocking embed (`frame-ancestors 'none'` absent). API correctly keeps `frame-ancestors 'none'` |
+| Embedding outcome | Owner open succeeded (not blocked by Mini App headers) |
 
-### Blockers (Owner rule §4 — STOP before creating/changing a bot)
+### Non-production deployment used for smoke
 
-1. **`LIVE_TELEGRAM_BLOCKER=TEST_BOT_REQUIRED`** — no non-production Telegram bot is configured for live Mini App smoke. Owner may create/configure a test bot via BotFather and place the token into local/Vercel secret storage (not into chat).
-2. **`LIVE_TELEGRAM_BLOCKER=PUBLIC_TEST_API_REQUIRED`** — Telegram clients cannot call `http://localhost:3002`. A non-production HTTPS API deployment (isolated DB/Redis) is required and must be wired as Mini App `NEXT_PUBLIC_API_BASE_URL`.
-3. After bot + public API exist: register Mini App/Web App URL in BotFather to `https://alex-rewards-miniapp.vercel.app` (or the chosen test Mini App HTTPS URL) — never production money.
+| Item | Value |
+| ---- | ----- |
+| Isolated DB | `alex_rewards_phase12_smoke` |
+| Local API / Mini App | `:3012` / `:3010` health 200 |
+| Public tunnels | Cloudflare quick tunnels (URLs in outside-repo `phase12-smoke-*-public.url`) |
+| AdsGram monetary | **BLOCKED** (`productionMonetaryStatus=BLOCKED`, `monetaryEligible=false`; `ad_sessions=0`, `reward_events=0`) |
 
-Isolated Playwright HMAC fixture remains **not** a substitute for Telegram WebView CSP/frame / genuine `initData` smoke.
+### Continued live-smoke checks
 
-Phase 12 independent closure remains **pending** live smoke + Owner archive acceptance.
-Archive creation remains **deferred** until `LIVE_TELEGRAM_SMOKE_PASS=YES`.
+| Check | Result |
+| ---- | ------ |
+| Home / Earn / Tasks / Friends / Wallet / Profile nav | **PASS** (API 200 for home, earn-summary, tasks, referrals, wallets, withdrawals, settings; UI nav shell PASS) |
+| AR RTL | **PASS** (`lang=ar`, `dir=rtl`; DB `preferred_locale=ar`) |
+| EN LTR | **PASS** (`lang=en`, `dir=ltr`) |
+| RU LTR | **PASS** (`lang=ru`, `dir=ltr`) |
+| Server balances | **PASS** (`GET /v1/me/balances` 200; Home `balances.status=READY`) |
+| Support test ticket | **PASS** (`SUP-000001` / `SUP-000002` OPEN; deletion **not** submitted) |
+| Runtime / console fatals | **PASS** (0 page errors; 0 fatal console errors in UI smoke) |
+
+Evidence artifacts (outside repo, no secrets):  
+`ALExRewards\phase12-live-smoke-continue-results.json`,  
+`ALExRewards\phase12-live-ui-smoke-results.json`
+
+Phase 12 GitHub jobs on tip: `phase12-remediation=SUCCESS`, `phase12-e2e=SUCCESS` (historical repo `quality` Prettier debt remains unrelated).
+
+Archive may proceed for this independent remediation package (original Phase 12 package hash preserved).
 
 ---
 
@@ -187,18 +199,17 @@ Archive creation remains **deferred** until `LIVE_TELEGRAM_SMOKE_PASS=YES`.
 
 - Original Phase 12 package preserved byte-identical:  
   `e1f498cc0f1c8f1f8ad9c442b167b4e5da3006c0fafba2955584c9ac14aa912f`
-- New remediation archive: **deferred** until GitHub Phase 12 CI PASS **and** live Telegram
-  smoke PASS (Owner rule). Do not overwrite the original package.
+- New remediation archive: created after live Telegram smoke PASS + Phase 12 CI jobs PASS
+  (see `phase-archives/PHASE_12_INDEPENDENT_REVIEW_REMEDIATION/` and external `PACKAGE_SHA256.txt`).
 
 ---
 
 ## Explicit non-claims
 
-- AdsGram is **not** APPROVED for production monetary rewards
+- AdsGram is **not** APPROVED for production monetary rewards (remains **BLOCKED**)
 - Clarification gate is **not** passed
 - This is **not** Phase 13/14 work
 - Forward integration into `feature/owner-admin-session-auth` is **not** done
 - Overall repository CI green is **not** claimed while historical Prettier debt remains
-- Live Telegram Mini App smoke is **not** claimed PASS
-- Independent archive verification is **not** claimed
+- Live Telegram Mini App smoke **PASS** is claimed for this isolated non-prod smoke only
 - Final production cookie auth topology is **not** solved
