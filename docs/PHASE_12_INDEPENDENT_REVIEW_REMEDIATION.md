@@ -144,13 +144,42 @@ Report separately (run `36254709740`):
 
 **LIVE_TELEGRAM_SMOKE_PASS=NO**
 
-**BLOCKER:** No live non-production Telegram Mini App deployment configuration available in
-this remediation environment (`TELEGRAM_BOT_TOKEN` / registered Mini App URL unset; Owner
-must supply secrets via existing local secret/config mechanism — not pasted into chat).
-Isolated Playwright HMAC fixture is **not** a substitute for Telegram WebView CSP/frame /
-genuine `initData` smoke.
+**Inspection date (UTC):** 2026-09-26T16:54Z  
+**Remediation tip at inspection:** `1f2869f93410c34b1629cc1b3b3164e1cef29aeb`
+
+### Existing deployment / config (inspected only)
+
+| Item                                                | Finding                                                                                                                                   |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Vercel Mini App project                             | `alex-rewards-miniapp` (team `y720183p-2353s-projects`); linked from primary worktree `.vercel`                                           |
+| Public Mini App URL                                 | `https://alex-rewards-miniapp.vercel.app` — `/api/health/live` returned **200**                                                           |
+| Public API URL                                      | **NONE** usable for Telegram. Local `NEXT_PUBLIC_API_BASE_URL` host is `http://localhost:3002` only                                       |
+| Local API                                           | Docker/local `127.0.0.1:3002` health **200** (not reachable from Telegram clients)                                                        |
+| Telegram test bot                                   | **No real BotFather bot.** Local `TELEGRAM_BOT_TOKEN` is a **local-only test placeholder** shape for Vitest/E2E HMAC — not a live bot     |
+| `NEXT_PUBLIC_TONCONNECT_MANIFEST_URL`               | **NOT SET**                                                                                                                               |
+| `NEXT_PUBLIC_TERMS_URL` / `NEXT_PUBLIC_PRIVACY_URL` | **NOT SET** (honest Profile degrade)                                                                                                      |
+| Mini App CSP                                        | No `frame-ancestors 'none'` on Mini App (Referrer-Policy / nosniff / Permissions-Policy only) — embedding not blocked by Mini App headers |
+| API CSP                                             | API uses `frame-ancestors 'none'` (correct for API; not the Mini App document)                                                            |
+| Phase 12 worktree `.env`                            | **ABSENT** (no secrets in remediation worktree)                                                                                           |
+
+Secret presence (values never recorded):
+
+- `TELEGRAM_BOT_TOKEN`: SET in primary `.env` but **LOCAL_TEST_PLACEHOLDER** (not live BotFather)
+- `NEXT_PUBLIC_API_BASE_URL`: SET → localhost only
+- `NEXT_PUBLIC_TONCONNECT_MANIFEST_URL`: NOT SET
+- `SESSION_ACCESS_SECRET`: SET (local)
+- `DATABASE_URL` / `REDIS_URL`: SET (local docker hosts)
+
+### Blockers (Owner rule §4 — STOP before creating/changing a bot)
+
+1. **`LIVE_TELEGRAM_BLOCKER=TEST_BOT_REQUIRED`** — no non-production Telegram bot is configured for live Mini App smoke. Owner may create/configure a test bot via BotFather and place the token into local/Vercel secret storage (not into chat).
+2. **`LIVE_TELEGRAM_BLOCKER=PUBLIC_TEST_API_REQUIRED`** — Telegram clients cannot call `http://localhost:3002`. A non-production HTTPS API deployment (isolated DB/Redis) is required and must be wired as Mini App `NEXT_PUBLIC_API_BASE_URL`.
+3. After bot + public API exist: register Mini App/Web App URL in BotFather to `https://alex-rewards-miniapp.vercel.app` (or the chosen test Mini App HTTPS URL) — never production money.
+
+Isolated Playwright HMAC fixture remains **not** a substitute for Telegram WebView CSP/frame / genuine `initData` smoke.
 
 Phase 12 independent closure remains **pending** live smoke + Owner archive acceptance.
+Archive creation remains **deferred** until `LIVE_TELEGRAM_SMOKE_PASS=YES`.
 
 ---
 
