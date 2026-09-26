@@ -10,7 +10,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src test",
     "test": "vitest run",
-    "test:phase12": "cross-env PHASE12_API_TESTS=1 vitest run --fileParallelism=false test/phase12-read-models.test.ts test/phase12-read-apis-db.test.ts"
+    "test:phase12": "cross-env PHASE12_API_TESTS=1 vitest run --fileParallelism=false test/phase12-read-models.test.ts test/phase12-read-apis-db.test.ts test/phase12-settings-privacy.test.ts"
   },
   "dependencies": {
     "@alex-rewards/ads": "workspace:*",
@@ -21,6 +21,7 @@
     "@alex-rewards/ledger": "workspace:*",
     "@alex-rewards/observability": "workspace:*",
     "@alex-rewards/rewards": "workspace:*",
+    "@alex-rewards/support": "workspace:*",
     "@alex-rewards/telegram": "workspace:*",
     "@alex-rewards/ton": "workspace:*",
     "@alex-rewards/wallets": "workspace:*",

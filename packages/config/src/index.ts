@@ -485,6 +485,14 @@ const webSchema = z.object({
    * When absent, the Wallet screen degrades honestly (no invented production URL).
    */
   NEXT_PUBLIC_TONCONNECT_MANIFEST_URL: optionalUrl,
+  /**
+   * Public Terms of Service URL. When absent, Profile degrades honestly (no invented legal URL).
+   */
+  NEXT_PUBLIC_TERMS_URL: optionalUrl,
+  /**
+   * Public Privacy Policy URL. When absent, Profile degrades honestly (no invented legal URL).
+   */
+  NEXT_PUBLIC_PRIVACY_URL: optionalUrl,
 });
 
 export type ApiConfig = z.infer<typeof apiSchema>;

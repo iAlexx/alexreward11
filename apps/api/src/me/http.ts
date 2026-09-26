@@ -2,13 +2,21 @@ import {
   BadRequestException,
   HttpException,
   HttpStatus,
+  NotFoundException,
   ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 
 import { AuthDomainError } from '@alex-rewards/auth';
-import { isLocaleCode, type LocaleCode } from '@alex-rewards/contracts';
+import {
+  isLocaleCode,
+  isPublicPayoutIdentityMode,
+  type LocaleCode,
+  type PublicPayoutIdentityMode,
+} from '@alex-rewards/contracts';
 import { LedgerDomainError } from '@alex-rewards/ledger';
+
+import { SettingsWriteError, type UserSettingsPatch } from './settings-write.js';
 
 /**
  * Map a read-model failure onto HTTP.
@@ -18,6 +26,19 @@ import { LedgerDomainError } from '@alex-rewards/ledger';
  */
 export function mapMeError(error: unknown): HttpException {
   if (error instanceof HttpException) return error;
+  if (error instanceof SettingsWriteError) {
+    const body = { error: error.code, message: error.message };
+    switch (error.code) {
+      case 'UNAUTHORIZED':
+        return new UnauthorizedException(body);
+      case 'VALIDATION':
+        return new BadRequestException(body);
+      case 'NOT_FOUND':
+        return new NotFoundException(body);
+      default:
+        return new HttpException(body, HttpStatus.INTERNAL_SERVER_ERROR);
+    }
+  }
   if (error instanceof AuthDomainError) {
     if (error.code === 'UNAUTHENTICATED' || error.code === 'FORBIDDEN') {
       return new UnauthorizedException({ error: error.code, message: error.publicMessage });
@@ -35,14 +56,55 @@ export function mapMeError(error: unknown): HttpException {
   );
 }
 
-/** Parse the only setting this phase lets a user change. */
-export function parsePatchSettingsBody(body: unknown): { readonly preferredLocale: LocaleCode } {
+/**
+ * Parse PATCH /v1/me/settings.
+ *
+ * Accepts preferredLocale and/or publicPayoutIdentityMode. Security notifications are never
+ * accepted as a writable field.
+ */
+export function parsePatchSettingsBody(body: unknown): UserSettingsPatch {
   if (body === null || typeof body !== 'object' || Array.isArray(body)) {
     throw new BadRequestException({ error: 'VALIDATION', message: 'Invalid request body' });
   }
-  const preferredLocale = (body as Record<string, unknown>)['preferredLocale'];
-  if (!isLocaleCode(preferredLocale)) {
-    throw new BadRequestException({ error: 'VALIDATION', message: 'Invalid preferredLocale' });
+  const source = body as Record<string, unknown>;
+
+  if ('securityNotificationsEnabled' in source) {
+    throw new BadRequestException({
+      error: 'VALIDATION',
+      message: 'Security notifications cannot be disabled',
+    });
   }
-  return { preferredLocale };
+
+  const patch: {
+    preferredLocale?: LocaleCode;
+    publicPayoutIdentityMode?: PublicPayoutIdentityMode;
+  } = {};
+
+  if ('preferredLocale' in source) {
+    const preferredLocale = source['preferredLocale'];
+    if (!isLocaleCode(preferredLocale)) {
+      throw new BadRequestException({ error: 'VALIDATION', message: 'Invalid preferredLocale' });
+    }
+    patch.preferredLocale = preferredLocale;
+  }
+
+  if ('publicPayoutIdentityMode' in source) {
+    const mode = source['publicPayoutIdentityMode'];
+    if (!isPublicPayoutIdentityMode(mode)) {
+      throw new BadRequestException({
+        error: 'VALIDATION',
+        message: 'Invalid publicPayoutIdentityMode',
+      });
+    }
+    patch.publicPayoutIdentityMode = mode;
+  }
+
+  if (patch.preferredLocale === undefined && patch.publicPayoutIdentityMode === undefined) {
+    throw new BadRequestException({
+      error: 'VALIDATION',
+      message: 'No settings fields to update',
+    });
+  }
+
+  return patch;
 }

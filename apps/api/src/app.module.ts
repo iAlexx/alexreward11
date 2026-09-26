@@ -11,6 +11,7 @@ import { HealthController } from './health.controller.js';
 import { MeController } from './me/me.controller.js';
 import { MembershipController } from './membership/membership.controller.js';
 import { ReferralsController } from './referrals/referrals.controller.js';
+import { SupportController } from './support/support.controller.js';
 import { TasksController } from './tasks/tasks.controller.js';
 import { WalletsController } from './wallets/wallets.controller.js';
 import { WithdrawalsController } from './withdrawals/withdrawals.controller.js';
@@ -32,6 +33,7 @@ export class AppModule {
         WalletsController,
         TasksController,
         ReferralsController,
+        SupportController,
       ],
       providers: [
         DependenciesService,

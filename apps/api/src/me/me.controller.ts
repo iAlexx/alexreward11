@@ -10,8 +10,6 @@ import type {
   HomeMissionsData,
   HomeSummaryResponse,
   HomeTodayAdsData,
-  LocaleCode,
-  PublicPayoutIdentityMode,
   ReferralsSummaryData,
   UserBalancesResponse,
   UserSettingsResponse,
@@ -31,6 +29,7 @@ import { API_CONFIG, DATABASE_POOL } from '../tokens.js';
 import { toUserBalancesResponse } from './balances.js';
 import { mapMeError, parsePatchSettingsBody } from './http.js';
 import { settleDomain, unavailableDomain } from './read-models.js';
+import { patchUserSettings, readUserSettings } from './settings-write.js';
 
 /**
  * Phase 12 per-user read surface.
@@ -103,44 +102,20 @@ export class MeController {
   }
 
   /**
-   * Update the user's locale.
+   * Update user settings.
    *
-   * `users.preferred_locale` and `user_settings.locale` are both written in one transaction
-   * so the login-time projection and the settings row can never disagree. Payout privacy and
-   * notification preferences are read-only in this phase.
+   * Writable: preferredLocale and/or publicPayoutIdentityMode (SHOW_USERNAME | HIDE_IDENTITY).
+   * Locale is written to both `users.preferred_locale` and `user_settings.locale` in one
+   * transaction. Security notifications cannot be disabled.
    */
   @Patch('settings')
   async patchSettings(
     @CurrentAuthUser() auth: AuthenticatedRequestUser,
     @Body() body: unknown,
   ): Promise<UserSettingsResponse> {
-    const { preferredLocale } = parsePatchSettingsBody(body);
-    const client = await this.pool.connect();
     try {
-      await client.query('BEGIN');
-      const updated = await client.query(
-        `UPDATE users SET preferred_locale = $2 WHERE id = $1::uuid`,
-        [auth.userId, preferredLocale],
-      );
-      if (updated.rowCount === 0) {
-        throw new Error('user not found');
-      }
-      await client.query(
-        `INSERT INTO user_settings (user_id, locale)
-         VALUES ($1::uuid, $2)
-         ON CONFLICT (user_id) DO UPDATE SET locale = EXCLUDED.locale, updated_at = now()`,
-        [auth.userId, preferredLocale],
-      );
-      await client.query('COMMIT');
-    } catch (error) {
-      await client.query('ROLLBACK').catch(() => undefined);
-      throw mapMeError(error);
-    } finally {
-      client.release();
-    }
-
-    try {
-      return await this.readSettings(auth.userId);
+      const patch = parsePatchSettingsBody(body);
+      return await patchUserSettings(this.pool, { userId: auth.userId, patch });
     } catch (error) {
       throw mapMeError(error);
     }
@@ -273,31 +248,6 @@ export class MeController {
   }
 
   private async readSettings(userId: string): Promise<UserSettingsResponse> {
-    const result = await this.pool.query<{
-      locale: LocaleCode;
-      public_payout_identity_mode: PublicPayoutIdentityMode;
-      marketing_notifications_enabled: boolean;
-    }>(
-      `SELECT COALESCE(s.locale, u.preferred_locale) AS locale,
-              COALESCE(s.public_payout_identity_mode::text, 'HIDE_IDENTITY')
-                AS public_payout_identity_mode,
-              COALESCE(s.marketing_notifications_enabled, true)
-                AS marketing_notifications_enabled
-       FROM users u
-       LEFT JOIN user_settings s ON s.user_id = u.id
-       WHERE u.id = $1::uuid`,
-      [userId],
-    );
-    const row = result.rows[0];
-    if (row === undefined) {
-      throw new Error('user not found');
-    }
-    return {
-      preferredLocale: row.locale,
-      publicPayoutIdentityMode: row.public_payout_identity_mode,
-      marketingNotificationsEnabled: row.marketing_notifications_enabled,
-      // Schema-enforced: security notifications cannot be switched off.
-      securityNotificationsEnabled: true,
-    };
+    return readUserSettings(this.pool, userId);
   }
 }

@@ -114,6 +114,9 @@ importers:
       '@alex-rewards/rewards':
         specifier: workspace:*
         version: link:../../packages/rewards
+      '@alex-rewards/support':
+        specifier: workspace:*
+        version: link:../../packages/support
       '@alex-rewards/telegram':
         specifier: workspace:*
         version: link:../../packages/telegram
@@ -563,7 +566,27 @@ importers:
         specifier: 4.1.11
         version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(vite@8.2.2(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.13)(yaml@2.9.0))
 
-  packages/support: {}
+  packages/support:
+    dependencies:
+      '@alex-rewards/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@alex-rewards/db':
+        specifier: workspace:*
+        version: link:../db
+      pg:
+        specifier: 8.23.0
+        version: 8.23.0
+    devDependencies:
+      '@types/pg':
+        specifier: 8.23.1
+        version: 8.23.1
+      cross-env:
+        specifier: 7.0.3
+        version: 7.0.3
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(vite@8.2.2(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.13)(yaml@2.9.0))
 
   packages/tasks: {}
 

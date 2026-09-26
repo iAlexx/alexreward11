@@ -87,7 +87,8 @@ input {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
   gap: 0.15rem;
-  padding: var(--alex-space-2) var(--alex-space-2) calc(var(--alex-space-2) + env(safe-area-inset-bottom, 0px));
+  padding: var(--alex-space-2) var(--alex-space-2)
+    calc(var(--alex-space-2) + env(safe-area-inset-bottom, 0px));
   border-top: 1px solid var(--alex-border);
   background: color-mix(in srgb, var(--alex-surface) 94%, transparent);
   backdrop-filter: blur(12px);
@@ -286,13 +287,25 @@ input {
   gap: var(--alex-space-2);
 }
 
-.alex-field input {
+.alex-field--row {
+  flex-direction: row;
+  align-items: flex-start;
+}
+
+.alex-field input,
+.alex-field textarea {
   min-height: 2.75rem;
   border-radius: var(--alex-radius-md);
   border: 1px solid var(--alex-border);
   background: var(--alex-surface);
   color: var(--alex-text);
-  padding: 0 var(--alex-space-3);
+  padding: var(--alex-space-2) var(--alex-space-3);
+  font: inherit;
+}
+
+.alex-field textarea {
+  min-height: 5rem;
+  resize: vertical;
 }
 
 .alex-locale-row {

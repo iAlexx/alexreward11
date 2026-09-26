@@ -64,11 +64,28 @@ export type {
   WalletVerificationMethodDto,
 } from './wallets.js';
 
-export type {
-  PatchUserSettingsRequest,
-  PublicPayoutIdentityMode,
-  UserSettingsResponse,
+export {
+  isPublicPayoutIdentityMode,
+  type PatchUserSettingsRequest,
+  type PublicPayoutIdentityMode,
+  type UserSettingsResponse,
 } from './settings.js';
+
+export {
+  ACCOUNT_DELETION_REQUEST_CATEGORY,
+  type AccountDeletionRequestBody,
+  type AccountDeletionRequestResponse,
+  type CreateSupportTicketRequest,
+  type CreateSupportTicketResponse,
+  type PostSupportMessageRequest,
+  type PostSupportMessageResponse,
+  type SupportMessageAuthorTypeDto,
+  type SupportMessageDto,
+  type SupportTicketDetailDto,
+  type SupportTicketStateDto,
+  type SupportTicketSummaryDto,
+  type SupportTicketsListResponse,
+} from './support.js';
 
 export type {
   AdSessionStateDto,

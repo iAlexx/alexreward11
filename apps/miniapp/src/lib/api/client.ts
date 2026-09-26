@@ -1,8 +1,15 @@
 import type {
+  AccountDeletionRequestResponse,
+  CreateSupportTicketRequest,
+  CreateSupportTicketResponse,
   EarnSummaryResponse,
   HomeSummaryResponse,
   PatchUserSettingsRequest,
+  PostSupportMessageRequest,
+  PostSupportMessageResponse,
   ReferralsSummaryResponse,
+  SupportTicketDetailDto,
+  SupportTicketsListResponse,
   TasksListResponse,
   TonProofBindRequest,
   TonProofBindResponse,
@@ -365,6 +372,38 @@ export function createApiClient(options: ApiClientOptions) {
       return request<WithdrawalListItem>('/v1/withdrawals', {
         method: 'POST',
         body: JSON.stringify(body),
+      });
+    },
+
+    listSupportTickets(): Promise<SupportTicketsListResponse> {
+      return request<SupportTicketsListResponse>('/v1/support/tickets');
+    },
+
+    createSupportTicket(body: CreateSupportTicketRequest): Promise<CreateSupportTicketResponse> {
+      return request<CreateSupportTicketResponse>('/v1/support/tickets', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+    },
+
+    getSupportTicket(ticketId: string): Promise<SupportTicketDetailDto> {
+      return request<SupportTicketDetailDto>(`/v1/support/tickets/${ticketId}`);
+    },
+
+    postSupportMessage(
+      ticketId: string,
+      body: PostSupportMessageRequest,
+    ): Promise<PostSupportMessageResponse> {
+      return request<PostSupportMessageResponse>(`/v1/support/tickets/${ticketId}/messages`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+    },
+
+    requestAccountDeletion(): Promise<AccountDeletionRequestResponse> {
+      return request<AccountDeletionRequestResponse>('/v1/support/account-deletion-requests', {
+        method: 'POST',
+        body: JSON.stringify({ confirmed: true }),
       });
     },
   };

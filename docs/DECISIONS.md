@@ -478,7 +478,7 @@ Implementation clarification (does not change financial rules):
    payout pipeline after redispatch — prior clean attempts are never mutated
    or re-signed.
 3. First-start Outbox `withdrawal.approved` keeps `workflowIdReusePolicy:
-   REJECT_DUPLICATE` (ADR-017).
+REJECT_DUPLICATE` (ADR-017).
 4. Owner-gated redispatch uses Outbox event `withdrawal.failed_pre_retry` and
    starts the **same** `withdrawal/{id}` with `ALLOW_DUPLICATE` +
    `workflowIdConflictPolicy: FAIL`, only after re-verifying reuse safety and
@@ -809,9 +809,13 @@ financial rule was changed):
     The accepted wallet network is `WITHDRAWAL_NETWORK_CODE` — a wallet may only be bound on the
     chain payouts use — and the 24h post-change withdrawal cooldown stays the fixed V1.2 value
     rather than becoming configurable.
-22. **Locale is written to both projections.** `PATCH /v1/me/settings` updates
+22. **Locale and payout privacy are written through PATCH /v1/me/settings.** Locale updates
     `users.preferred_locale` and `user_settings.locale` in one transaction so the login-time
-    projection and the settings row cannot disagree. Payout privacy and notification
-    preferences are read-only in this phase, and `security_notifications_enabled` is reported
-    as always true because the schema forbids disabling it.
-
+    projection and the settings row cannot disagree. `publicPayoutIdentityMode` accepts only
+    `SHOW_USERNAME` | `HIDE_IDENTITY`. Marketing notification preferences remain read-only on
+    this surface in Phase 12, and `security_notifications_enabled` is reported as always true
+    because the schema forbids disabling it. Terms/Privacy links are optional public config
+    (`NEXT_PUBLIC_TERMS_URL` / `NEXT_PUBLIC_PRIVACY_URL`) and degrade honestly when unset.
+    Support tickets and account deletion requests use migration 0010 tables with ownership
+    isolation; deletion is a review request (ticket + append-only event) only — never immediate
+    anonymization, balance mutation, or ledger/audit deletion.

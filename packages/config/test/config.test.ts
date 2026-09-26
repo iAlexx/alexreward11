@@ -406,6 +406,25 @@ describe('environment validation', () => {
     expect(empty.NEXT_PUBLIC_TONCONNECT_MANIFEST_URL).toBeUndefined();
   });
 
+  it('accepts optional Terms/Privacy URLs without inventing legal destinations', () => {
+    const config = loadWebConfig({
+      NODE_ENV: 'test',
+      NEXT_PUBLIC_API_BASE_URL: 'https://api.example.com',
+      NEXT_PUBLIC_TERMS_URL: 'https://legal.test/terms',
+      NEXT_PUBLIC_PRIVACY_URL: 'https://legal.test/privacy',
+    });
+    expect(config.NEXT_PUBLIC_TERMS_URL).toBe('https://legal.test/terms');
+    expect(config.NEXT_PUBLIC_PRIVACY_URL).toBe('https://legal.test/privacy');
+    const empty = loadWebConfig({
+      NODE_ENV: 'test',
+      NEXT_PUBLIC_API_BASE_URL: 'https://api.example.com',
+      NEXT_PUBLIC_TERMS_URL: '',
+      NEXT_PUBLIC_PRIVACY_URL: '',
+    });
+    expect(empty.NEXT_PUBLIC_TERMS_URL).toBeUndefined();
+    expect(empty.NEXT_PUBLIC_PRIVACY_URL).toBeUndefined();
+  });
+
   it('worker local defaults keep real chain off', () => {
     const config = loadWorkerConfig({
       ...common,
