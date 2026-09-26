@@ -16,6 +16,15 @@ import { LedgerDomainError } from './errors.js';
 import { postLedgerTransaction } from './posting.js';
 import { reverseLedgerTransaction } from './reverse.js';
 import type { PostedLedgerTransaction } from './types.js';
+import {
+  PHASE10_OPERATIONAL_DATABASE_NAME,
+  PHASE10_TESTNET_AALEX_CONTRACT_IDENTITY,
+  PHASE10_TESTNET_AALEX_DECIMALS,
+  PHASE10_TESTNET_AALEX_PROVISION_ABSOLUTE_CEILING_ATOMIC,
+  PHASE10_TESTNET_PROVISION_AALEX_SYMBOL,
+  PHASE10_TESTNET_PROVISION_USDT_SYMBOL,
+  isPhase10TestnetProvisionAssetSymbol,
+} from './phase10-testnet-provision-assets.js';
 
 export const PHASE10_PROVISION_BUSINESS_REF_TYPE = 'phase10-testnet-available-provision';
 export const PHASE10_PROVISION_IDEMPOTENCY_SCOPE = 'phase10.testnet.available.provision';
@@ -23,7 +32,7 @@ export const PHASE10_REVERSE_BUSINESS_REF_TYPE = 'phase10-testnet-available-prov
 export const PHASE10_REVERSE_IDEMPOTENCY_SCOPE = 'phase10.testnet.available.provision.reverse';
 export const PHASE10_PROVISION_AUDIT_ACTION = 'OWNER_TESTNET_AVAILABLE_PROVISION';
 export const PHASE10_REVERSE_AUDIT_ACTION = 'OWNER_TESTNET_AVAILABLE_PROVISION_REVERSE';
-export const PHASE10_PROVISION_TOOL_VERSION = '1.0.0-phase10';
+export const PHASE10_PROVISION_TOOL_VERSION = '1.1.0-phase10';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -35,6 +44,11 @@ export interface Phase10TestnetProvisionRuntimeConfig {
   readonly allowedUserId: string;
   readonly maxAmountAtomic: string;
   readonly ownerAdminUserId: string;
+  /**
+   * Required when withdrawalAssetSymbol is aalex.
+   * Must equal PostgreSQL current_database(); never alex_rewards (ops).
+   */
+  readonly requiredDatabaseName: string;
 }
 
 export interface Phase10ProvisionIntent {
@@ -118,18 +132,100 @@ function assertFeatureAndEnv(config: Phase10TestnetProvisionRuntimeConfig): void
       },
     });
   }
-  if (config.withdrawalAssetSymbol !== 'USDT') {
-    throw new LedgerDomainError('VALIDATION', 'withdrawal asset must be exactly USDT', {
-      details: {
-        reason: 'ASSET_SYMBOL_MISMATCH',
-        configured: config.withdrawalAssetSymbol,
+  if (!isPhase10TestnetProvisionAssetSymbol(config.withdrawalAssetSymbol)) {
+    throw new LedgerDomainError(
+      'VALIDATION',
+      'withdrawal asset must be an allowlisted Phase 10 Testnet provision asset',
+      {
+        details: {
+          reason: 'ASSET_SYMBOL_NOT_ALLOWLISTED',
+          configured: config.withdrawalAssetSymbol,
+          allowlist: [PHASE10_TESTNET_PROVISION_USDT_SYMBOL, PHASE10_TESTNET_PROVISION_AALEX_SYMBOL],
+        },
       },
-    });
+    );
   }
   if (config.withdrawalNetworkCode.toUpperCase().includes('MAINNET')) {
     throw new LedgerDomainError('VALIDATION', 'MAINNET network codes are forbidden', {
       details: { reason: 'MAINNET_FORBIDDEN' },
     });
+  }
+  if (config.withdrawalAssetSymbol === PHASE10_TESTNET_PROVISION_AALEX_SYMBOL) {
+    const required = config.requiredDatabaseName.trim();
+    if (required.length === 0) {
+      throw new LedgerDomainError(
+        'VALIDATION',
+        'aalex provision requires PHASE10_TESTNET_PROVISION_REQUIRED_DATABASE_NAME',
+        { details: { reason: 'REQUIRED_DATABASE_NAME_MISSING' } },
+      );
+    }
+    if (required === PHASE10_OPERATIONAL_DATABASE_NAME) {
+      throw new LedgerDomainError(
+        'VALIDATION',
+        'aalex provision cannot target the operational database name',
+        { details: { reason: 'OPERATIONAL_DATABASE_FORBIDDEN', database: required } },
+      );
+    }
+    const maxAmount = parsePositiveAtomicAmount(config.maxAmountAtomic);
+    if (maxAmount > PHASE10_TESTNET_AALEX_PROVISION_ABSOLUTE_CEILING_ATOMIC) {
+      throw new LedgerDomainError(
+        'VALIDATION',
+        'aalex provision max exceeds absolute Testnet ceiling',
+        {
+          details: {
+            reason: 'AALEX_PROVISION_CEILING_EXCEEDED',
+            maxAmountAtomic: amountAtomicToString(maxAmount),
+            ceilingAtomic: amountAtomicToString(
+              PHASE10_TESTNET_AALEX_PROVISION_ABSOLUTE_CEILING_ATOMIC,
+            ),
+          },
+        },
+      );
+    }
+  }
+}
+
+async function assertRequiredDatabaseIdentity(
+  client: PoolClient,
+  requiredDatabaseName: string,
+): Promise<void> {
+  const required = requiredDatabaseName.trim();
+  if (required.length === 0) {
+    throw new LedgerDomainError('VALIDATION', 'required database name is empty', {
+      details: { reason: 'REQUIRED_DATABASE_NAME_MISSING' },
+    });
+  }
+  if (required === PHASE10_OPERATIONAL_DATABASE_NAME) {
+    throw new LedgerDomainError(
+      'VALIDATION',
+      'aalex provision cannot target the operational database name',
+      { details: { reason: 'OPERATIONAL_DATABASE_FORBIDDEN', database: required } },
+    );
+  }
+  const result = await client.query<{ name: string }>(`SELECT current_database() AS name`);
+  const current = result.rows[0]?.name;
+  if (current === undefined) {
+    throw new LedgerDomainError('INTERNAL', 'current_database() returned no row');
+  }
+  if (current === PHASE10_OPERATIONAL_DATABASE_NAME) {
+    throw new LedgerDomainError(
+      'VALIDATION',
+      'connected database is the operational alex_rewards database',
+      { details: { reason: 'OPERATIONAL_DATABASE_CONNECTED', database: current } },
+    );
+  }
+  if (current !== required) {
+    throw new LedgerDomainError(
+      'VALIDATION',
+      'connected database does not match required isolated database identity',
+      {
+        details: {
+          reason: 'DATABASE_IDENTITY_MISMATCH',
+          required,
+          current,
+        },
+      },
+    );
   }
 }
 
@@ -173,10 +269,22 @@ async function resolveOwnerAdmin(
   return { adminUserId: row.id };
 }
 
-async function resolveTestnetUsdt(
+async function resolveTestnetProvisionAsset(
   client: PoolClient,
-  networkCode: string,
-): Promise<{ networkId: string; assetId: string }> {
+  config: Phase10TestnetProvisionRuntimeConfig,
+): Promise<{ networkId: string; assetId: string; symbol: string }> {
+  const networkCode = config.withdrawalNetworkCode;
+  const symbol = config.withdrawalAssetSymbol;
+  if (!isPhase10TestnetProvisionAssetSymbol(symbol)) {
+    throw new LedgerDomainError('VALIDATION', 'asset symbol is not allowlisted', {
+      details: { reason: 'ASSET_SYMBOL_NOT_ALLOWLISTED', symbol },
+    });
+  }
+
+  if (symbol === PHASE10_TESTNET_PROVISION_AALEX_SYMBOL) {
+    await assertRequiredDatabaseIdentity(client, config.requiredDatabaseName);
+  }
+
   const network = await client.query<{
     id: string;
     code: string;
@@ -222,32 +330,74 @@ async function resolveTestnetUsdt(
     symbol: string;
     status: string;
     network_id: string;
+    decimals: number;
+    is_native: boolean;
+    contract_identity: string | null;
   }>(
-    `SELECT id, symbol, status::text AS status, network_id::text AS network_id
+    `SELECT id, symbol, status::text AS status, network_id::text AS network_id,
+            decimals::int AS decimals, is_native,
+            contract_identity
      FROM assets
      WHERE network_id = $1::uuid
-       AND symbol = 'USDT'
+       AND symbol = $2
      LIMIT 1`,
-    [net.id],
+    [net.id, symbol],
   );
   const a = asset.rows[0];
   if (a === undefined) {
-    throw new LedgerDomainError('VALIDATION', 'USDT asset not found on Testnet network', {
-      details: { reason: 'ASSET_NOT_FOUND', networkId: net.id },
-    });
+    throw new LedgerDomainError(
+      'VALIDATION',
+      `${symbol} asset not found on Testnet network`,
+      { details: { reason: 'ASSET_NOT_FOUND', networkId: net.id, symbol } },
+    );
   }
   if (a.status !== 'ACTIVE') {
-    throw new LedgerDomainError('VALIDATION', 'USDT asset is not ACTIVE', {
-      details: { reason: 'ASSET_INACTIVE', assetId: a.id },
+    throw new LedgerDomainError('VALIDATION', `${symbol} asset is not ACTIVE`, {
+      details: { reason: 'ASSET_INACTIVE', assetId: a.id, symbol },
     });
   }
-  if (a.symbol !== 'USDT' || a.network_id !== net.id) {
+  if (a.symbol !== symbol || a.network_id !== net.id) {
     throw new LedgerDomainError('VALIDATION', 'asset/network mismatch', {
       details: { reason: 'ASSET_NETWORK_MISMATCH' },
     });
   }
 
-  return { networkId: net.id, assetId: a.id };
+  if (symbol === PHASE10_TESTNET_PROVISION_USDT_SYMBOL) {
+    // Historical USDT path: ACTIVE Testnet USDT only (fixture placeholder master allowed).
+    if (a.is_native) {
+      throw new LedgerDomainError('VALIDATION', 'USDT asset must be non-native', {
+        details: { reason: 'ASSET_MUST_BE_NON_NATIVE', assetId: a.id },
+      });
+    }
+  } else {
+    // aalex: exact master + decimals; no placeholder masters.
+    if (a.is_native) {
+      throw new LedgerDomainError('VALIDATION', 'aalex asset must be non-native', {
+        details: { reason: 'ASSET_MUST_BE_NON_NATIVE', assetId: a.id },
+      });
+    }
+    if (a.decimals !== PHASE10_TESTNET_AALEX_DECIMALS) {
+      throw new LedgerDomainError('VALIDATION', 'aalex asset decimals mismatch', {
+        details: {
+          reason: 'ASSET_DECIMALS_MISMATCH',
+          expected: PHASE10_TESTNET_AALEX_DECIMALS,
+          actual: a.decimals,
+        },
+      });
+    }
+    const contract = (a.contract_identity ?? '').trim();
+    if (contract !== PHASE10_TESTNET_AALEX_CONTRACT_IDENTITY) {
+      throw new LedgerDomainError('VALIDATION', 'aalex Jetton master mismatch', {
+        details: {
+          reason: 'ASSET_CONTRACT_MISMATCH',
+          expected: PHASE10_TESTNET_AALEX_CONTRACT_IDENTITY,
+          actual: contract,
+        },
+      });
+    }
+  }
+
+  return { networkId: net.id, assetId: a.id, symbol: a.symbol };
 }
 
 async function assertTargetUserForProvision(
@@ -411,7 +561,7 @@ async function insertProvisionAudit(
 }
 
 /**
- * Provision Available USDT for the allowlisted Phase 10 Testnet user.
+ * Provision Available balance for an allowlisted Phase 10 Testnet user (USDT or aalex).
  */
 export async function provisionPhase10TestnetAvailable(
   db: LedgerDb,
@@ -442,7 +592,7 @@ export async function provisionPhase10TestnetAvailable(
   return withLedgerTransaction(db, async (client) => {
     const { adminUserId } = await resolveOwnerAdmin(client, config.ownerAdminUserId);
     const targetUserId = await assertTargetUserForProvision(client, config, input.userId);
-    const { networkId, assetId } = await resolveTestnetUsdt(client, config.withdrawalNetworkCode);
+    const { networkId, assetId } = await resolveTestnetProvisionAsset(client, config);
 
     const intent: Phase10ProvisionIntent = {
       operationId,
@@ -595,7 +745,7 @@ export async function reversePhase10TestnetAvailableProvision(
       });
     }
     await assertTargetUserForReverse(client, config, intent.targetUserId);
-    const { assetId, networkId } = await resolveTestnetUsdt(client, config.withdrawalNetworkCode);
+    const { assetId, networkId } = await resolveTestnetProvisionAsset(client, config);
     if (intent.assetId !== assetId || intent.networkId !== networkId) {
       throw new LedgerDomainError(
         'VALIDATION',

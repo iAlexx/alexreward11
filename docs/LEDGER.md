@@ -38,6 +38,7 @@ Catalogue get-or-create and posting load **authoritative** asset rows from Postg
 | Account type              | Required asset                           |
 | ------------------------- | ---------------------------------------- |
 | `HOT_WALLET_USDT_ASSET`   | ACTIVE non-native `USDT`                 |
+| `HOT_WALLET_JETTON_ASSET` | ACTIVE allowlisted non-USDT Jetton (aalex: exact master + 9 decimals) |
 | `HOT_WALLET_TON_ASSET`    | ACTIVE native `TON`                      |
 | `TON_NETWORK_FEE_EXPENSE` | ACTIVE native `TON`                      |
 | Other catalogue types     | Any ACTIVE asset (still single-asset tx) |

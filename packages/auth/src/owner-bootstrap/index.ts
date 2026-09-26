@@ -1,0 +1,155 @@
+export { canonicalizeToJcs, JcsError } from './jcs.js';
+export {
+  DuplicateJsonKeyError,
+  parseStrictJson,
+} from './strict-json.js';
+export {
+  base64UrlDecode,
+  base64UrlEncode,
+  bytesToHex,
+  ed25519Sign,
+  ed25519Verify,
+  generateEd25519KeyPair,
+  hexToBytes,
+} from './ed25519.js';
+export {
+  buildTestGrantPayload,
+  createEphemeralCeremonyAuthority,
+  fingerprintPublicKey,
+  intendedSubjectFromPayload,
+  parseAndVerifyGrantEnvelope,
+  signGrantEnvelope,
+  validateGrantPayload,
+  type CeremonyAuthority,
+  type DeploymentEnv,
+  type OwnerBootstrapGrantEnvelope,
+  type OwnerBootstrapGrantPayload,
+} from './grant.js';
+export {
+  buildIsolatedTestEndpointProfile,
+  type BootstrapEndpointProfile,
+  type BootstrapTlsMode,
+} from './endpoint.js';
+export {
+  CEREMONY_ENDPOINT_PROFILE_DIGEST_METHOD,
+  bootstrapEndpointProfileFromCeremonyWire,
+  ceremonyWireFromBootstrapEndpointProfile,
+  digestCeremonyEndpointProfileV1,
+  parseCeremonyEndpointProfileV1Json,
+  validateCeremonyEndpointProfileV1,
+  type CeremonyDeploymentEnvV1,
+  type CeremonyEndpointProfileTlsV1,
+  type CeremonyEndpointProfileV1,
+} from './ceremony-profile-v1.js';
+export {
+  CEREMONY_SEAL_PROVENANCE_CHANNEL_B_V1,
+  assertSealProfileDigestMatchesProfile,
+  digestCeremonySealV1,
+  parseCeremonySealV1Json,
+  validateCeremonySealV1,
+  type CeremonySealV1,
+  type CeremonySealWitnessV1,
+} from './ceremony-seal-v1.js';
+export {
+  DEPLOYMENT_TRUST_DERIVATIVE_KIND_V1,
+  assertDerivativeConsistentWithProfile,
+  assertDerivativeDigestEqualsRecordedSealDigest,
+  claimDerivativeProvenanceAuthenticated,
+  parseDeploymentTrustDerivativeV1Json,
+  refuseSameHostChecksumAsChannelB,
+  validateDeploymentTrustDerivativeV1,
+  type DeploymentTrustDerivativeV1,
+} from './ceremony-trust-derivative-v1.js';
+export {
+  ISOLATED_OWNER_CEREMONY_TARGET,
+  assertIsolatedSealProfileDigestMatches,
+  bootstrapEndpointProfileFromIsolatedCeremonyWire,
+  buildIsolatedCeremonyEndpointProfileV1,
+  digestIsolatedCeremonyEndpointProfileV1,
+  parseIsolatedCeremonyEndpointProfileV1Json,
+  validateIsolatedCeremonyEndpointProfileV1,
+  type IsolatedCeremonyEndpointProfileV1,
+} from './isolated-ceremony-profile-v1.js';
+export {
+  assertCeremonyDirOutsideRepo,
+  assertConnectionUrlAllowedForIsolatedCeremony,
+  assertIsolatedCeremonyAllowsEnrollment,
+  assertWitnessesAreConcrete,
+  draftCeremonySeal,
+  generateEphemeralCeremonyKeypairFiles,
+  loadCeremonyAuthorityFromDir,
+  loadCeremonyPublicKey,
+  loadCeremonySeal,
+  loadChannelBRecord,
+  loadIsolatedCeremonyProfile,
+  recordChannelBDigestFromOwner,
+  writeCeremonyPublicManifest,
+  writeIsolatedCeremonyProfile,
+  type CeremonyPublicKeyRecord,
+  type CeremonyPublicManifest,
+  type ChannelBOwnerDigestRecord,
+} from './isolated-ceremony-gate.js';
+export {
+  buildIsolatedCeremonyGrantPayload,
+  openIsolatedCeremonyBootstrap,
+  runIsolatedOptionCEnrollment,
+} from './isolated-ceremony-enroll.js';
+export {
+  ISOLATED_TELEGRAM_OWNER_BOOTSTRAP_TARGET,
+  assertConfiguredOwnerTelegramUserId,
+  assertIsolatedTelegramOwnerBootstrapTarget,
+  enrollIsolatedTelegramOwner,
+  parseIsolatedOwnerBootstrapUrl,
+  verifyOwnerTelegramIdentityForBootstrap,
+  type IsolatedTelegramOwnerBootstrapResult,
+  type IsolatedTelegramOwnerBootstrapUrlFacts,
+} from './isolated-telegram-owner-bootstrap.js';
+export {
+  G5_SPKI_V1_DECISION,
+  assertSpkiPinningUnsupportedForV1,
+  buildVerifyFullTlsSocketOptions,
+} from './tls-verify-full.js';
+export {
+  assertBootstrapTlsAndEndpoint,
+  assertNoConflictingSslConnectionParams,
+  assertPoolBoundBootstrapTrust,
+  buildOwnerBootstrapPoolConfig,
+  clearIsolatedTestBootstrapClock,
+  createBootstrapTrustMaterial,
+  createOwnerBootstrapPool,
+  readAuthoritativeBootstrapNowSec,
+  peekIsolatedTestBootstrapClock,
+  setIsolatedTestBootstrapClock,
+  type BootstrapConnectionFacts,
+  type OwnerBootstrapPool,
+} from './pool.js';
+export {
+  OWNER_BOOTSTRAP_LOCK_ORDER,
+  abortOwnerBootstrapAttempt,
+  buildChannelAbortBytes,
+  buildChannelPopBytes,
+  buildFinalCredBytes,
+  buildOwnerChallengeBytes,
+  completeOwnerBootstrapEnrollment,
+  createEnrollmentChannelKeypair,
+  generateTotpCode,
+  generateTotpSecretBytes,
+  // internalSupersedePendingBootstrapAttempt intentionally NOT re-exported from package root
+  // (narrow internal cleanup — available via owner-bootstrap/index for in-package use only).
+  signChannelAbort,
+  signChannelPop,
+  signFinalCredReq,
+  signOwnerRedeemChallenge,
+  startOwnerBootstrapAttempt,
+  submitOwnerBootstrapPop,
+  type BootstrapTrustMaterial,
+  type CompleteEnrollmentInput,
+  type CompleteEnrollmentResult,
+  type EnrollmentChannelKeypair,
+  type FinalCredPublicHeader,
+  type StartAttemptResult,
+  type SubmitPopResult,
+} from './redeem.js';
+
+// Re-export internal helper only from this subpath module (not packages/auth public API).
+export { internalSupersedePendingBootstrapAttempt } from './redeem.js';

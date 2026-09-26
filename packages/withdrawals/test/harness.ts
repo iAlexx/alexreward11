@@ -696,4 +696,20 @@ export async function truncateWithdrawalTables(pool: Pool): Promise<void> {
       users
     RESTART IDENTITY CASCADE
   `);
+  // M0: TRUNCATE admin_users CASCADE removes admin_owner_authority seat row.
+  // Restore vacant singleton so OWNER binding inserts remain enforceable.
+  await pool.query(`
+    DO $m0_restore_seat$
+    BEGIN
+      IF to_regclass('public.admin_owner_authority') IS NOT NULL THEN
+        INSERT INTO admin_owner_authority (seat) VALUES (1)
+        ON CONFLICT (seat) DO UPDATE
+          SET holder_admin_user_id = NULL,
+              active_binding_id = NULL,
+              claimed_at = NULL,
+              updated_at = now();
+      END IF;
+    END
+    $m0_restore_seat$
+  `);
 }

@@ -118,6 +118,27 @@ describe('Phase 9 signer policy', () => {
       /FALLBACK_ENCRYPTED/,
     );
   });
+
+  it('admits USDT when expectedAssetSymbol is USDT (post asset-switch policy)', () => {
+    const usdtConfig = localSigningFixtureConfig({ expectedAssetSymbol: 'USDT' });
+    expect(() =>
+      assertSigningPolicy(
+        baseRow({
+          asset_symbol: 'USDT',
+          asset_contract_identity:
+            '0:53a1eee8c135c0472b4b75b14880ef1b5798f76d24e78b7f8140899be800c6e8',
+        }),
+        usdtConfig,
+      ),
+    ).not.toThrow();
+  });
+
+  it('rejects aalex when expectedAssetSymbol is USDT', () => {
+    const usdtConfig = localSigningFixtureConfig({ expectedAssetSymbol: 'USDT' });
+    expect(() => assertSigningPolicy(baseRow({ asset_symbol: 'aalex' }), usdtConfig)).toThrow(
+      /Unexpected payout asset symbol/,
+    );
+  });
 });
 
 describe('Phase 9 local ephemeral crypto', () => {

@@ -326,7 +326,7 @@ const workerSchema = serviceSchema
 /** Local/test-only signer defaults. Staging/production must set keys explicitly. */
 const LOCAL_SIGNER_DEFAULTS = {
   SIGNER_DATABASE_URL:
-    'postgresql://alex_rewards:local-alex-rewards-only@localhost:55432/alex_rewards',
+    'postgresql://alex_rewards_signer:local-signer-ro-only@localhost:55432/alex_rewards',
   SIGNER_KEY_MODE: 'local_ephemeral',
   SIGNER_SPIKE_ENABLED: 'true',
   SIGNER_NETWORK_CODE: 'TON_TESTNET',
@@ -560,6 +560,7 @@ const LOCAL_PHASE10_TESTNET_PROVISION_DEFAULTS = {
   PHASE10_TESTNET_PROVISION_ALLOWED_USER_ID: '',
   PHASE10_TESTNET_PROVISION_MAX_ATOMIC: '1000000',
   PHASE10_TESTNET_PROVISION_OWNER_ADMIN_USER_ID: '',
+  PHASE10_TESTNET_PROVISION_REQUIRED_DATABASE_NAME: '',
   WITHDRAWAL_NETWORK_CODE: 'TON_TESTNET',
   WITHDRAWAL_ASSET_SYMBOL: 'USDT',
 } as const;
@@ -571,6 +572,10 @@ const phase10TestnetProvisionSchema = commonSchema
     PHASE10_TESTNET_PROVISION_ALLOWED_USER_ID: optionalUuidOrEmpty,
     PHASE10_TESTNET_PROVISION_MAX_ATOMIC: optionalPositiveAtomicOrEmpty,
     PHASE10_TESTNET_PROVISION_OWNER_ADMIN_USER_ID: optionalUuidOrEmpty,
+    PHASE10_TESTNET_PROVISION_REQUIRED_DATABASE_NAME: z.preprocess(
+      (value) => (value === undefined || value === null ? '' : value),
+      z.string().max(128),
+    ),
     WITHDRAWAL_NETWORK_CODE: z.string().min(1).max(64),
     WITHDRAWAL_ASSET_SYMBOL: z.string().min(1).max(32),
   })
@@ -597,11 +602,14 @@ const phase10TestnetProvisionSchema = commonSchema
           message: 'must be exactly TON_TESTNET when provisioning is enabled',
         });
       }
-      if (value.WITHDRAWAL_ASSET_SYMBOL !== 'USDT') {
+      if (
+        value.WITHDRAWAL_ASSET_SYMBOL !== 'USDT' &&
+        value.WITHDRAWAL_ASSET_SYMBOL !== 'aalex'
+      ) {
         context.addIssue({
           code: 'custom',
           path: ['WITHDRAWAL_ASSET_SYMBOL'],
-          message: 'must be exactly USDT when provisioning is enabled',
+          message: 'must be USDT or aalex when provisioning is enabled',
         });
       }
       if (value.PHASE10_TESTNET_PROVISION_ALLOWED_USER_ID === '') {
@@ -624,6 +632,54 @@ const phase10TestnetProvisionSchema = commonSchema
           path: ['PHASE10_TESTNET_PROVISION_MAX_ATOMIC'],
           message: 'required positive atomic amount when Phase 10 Testnet provisioning is enabled',
         });
+      }
+      if (value.WITHDRAWAL_ASSET_SYMBOL === 'aalex') {
+        const requiredDb = value.PHASE10_TESTNET_PROVISION_REQUIRED_DATABASE_NAME.trim();
+        if (requiredDb === '') {
+          context.addIssue({
+            code: 'custom',
+            path: ['PHASE10_TESTNET_PROVISION_REQUIRED_DATABASE_NAME'],
+            message: 'required when WITHDRAWAL_ASSET_SYMBOL=aalex and provisioning is enabled',
+          });
+        }
+        if (requiredDb === 'alex_rewards') {
+          context.addIssue({
+            code: 'custom',
+            path: ['PHASE10_TESTNET_PROVISION_REQUIRED_DATABASE_NAME'],
+            message: 'operational database name alex_rewards is forbidden for aalex provision',
+          });
+        }
+        if (value.PHASE10_TESTNET_PROVISION_MAX_ATOMIC !== '') {
+          try {
+            const max = BigInt(value.PHASE10_TESTNET_PROVISION_MAX_ATOMIC);
+            if (max > 10_000_000_000n) {
+              context.addIssue({
+                code: 'custom',
+                path: ['PHASE10_TESTNET_PROVISION_MAX_ATOMIC'],
+                message: 'aalex provision max cannot exceed 10000000000 (10 aalex absolute ceiling)',
+              });
+            }
+          } catch {
+            // regex already enforces digits; ignore
+          }
+        }
+      }
+      // Refuse obvious operational URL when aalex is selected (no silent fallback).
+      if (value.WITHDRAWAL_ASSET_SYMBOL === 'aalex') {
+        try {
+          const url = new URL(value.DATABASE_URL);
+          const dbName = url.pathname.replace(/^\//, '').split('?')[0] ?? '';
+          const port = url.port === '' ? '5432' : url.port;
+          if (dbName === 'alex_rewards' || (port === '55432' && dbName === 'alex_rewards')) {
+            context.addIssue({
+              code: 'custom',
+              path: ['DATABASE_URL'],
+              message: 'aalex provision cannot use operational alex_rewards@55432',
+            });
+          }
+        } catch {
+          // postgresUrl already validated
+        }
       }
     }
   });

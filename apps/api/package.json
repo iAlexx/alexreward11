@@ -12,6 +12,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@alex-rewards/ads": "workspace:*",
     "@alex-rewards/auth": "workspace:*",
     "@alex-rewards/config": "workspace:*",
     "@alex-rewards/contracts": "workspace:*",

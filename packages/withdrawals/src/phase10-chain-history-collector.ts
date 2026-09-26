@@ -2,12 +2,13 @@
  * Phase 10 dual-provider Hot Wallet outgoing Jetton history collector.
  * Calls primary + secondary enumerateOutgoingJettonTransfers independently.
  * Never accepts caller-supplied transfer arrays. Fail closed on incomplete /
- * disagreement / binding mismatches. Acceptance remains gated by
- * PHASE10_CHAIN_HISTORY_PROVIDER_COLLECTOR_AVAILABLE = false.
+ * disagreement / binding mismatches. Acceptance availability:
+ * PHASE10_CHAIN_HISTORY_PROVIDER_COLLECTOR_AVAILABLE = true (Owner B1, 2026-09-25).
  *
  * Production entrypoint: collectPhase10LiveProviderBackedChainHistory
- * (TonCenter primary + TonAPI secondary, readiness fingerprints, health probes,
- * DB-loaded expected payouts via loadPhase10ExpectedCampaignPayouts).
+ * (authoritative primary/secondary roles via resolvePhase10LiveProviderRoles,
+ * readiness fingerprints, health probes, DB-loaded expected payouts via
+ * loadPhase10ExpectedCampaignPayouts).
  * Injectable dual-fake / fetchImpl paths are test-only and not exported from
  * package index.
  */
@@ -32,7 +33,11 @@ import {
   type Phase10ChainHistoryOutgoingTransfer,
   type Phase10ChainHistoryReconciliationResult,
 } from './phase10-chain-history-evidence.js';
-import { fingerprintProviderEndpoint } from './phase10-live-probes.js';
+import { resolvePhase10LiveProviderRoles } from './phase10-provider-roles.js';
+import {
+  PHASE10_USDT_Z_CANARY_WITHDRAWAL_ID,
+  isAuthorizedPhase10PreManifestCanary,
+} from './phase10-usdt-z-canary.js';
 
 export const PHASE10_CHAIN_HISTORY_COLLECTOR_VERSION = '1.0.0' as const;
 
@@ -107,15 +112,15 @@ export interface CollectPhase10ProviderBackedChainHistoryForTestsInput {
 }
 
 export interface Phase10LiveProviderEndpointConfig {
-  /** Must be 'toncenter' (primary) or 'tonapi' (secondary); enforced at runtime. */
+  /** Must be toncenter|tonapi; primary/secondary roles come from configured mapping. */
   readonly kind: string;
   readonly baseUrl: string;
   readonly apiKey?: string | null;
 }
 
 /**
- * Production collector input. Providers are constructed internally from
- * TonCenter (primary) + TonAPI (secondary) configs — never injectable fakes.
+ * Production collector input. Providers are constructed internally from the
+ * authoritative primary/secondary role mapping (same source as live readiness).
  * Expected payouts are loaded from DB; never caller-supplied arrays / fetchImpl.
  */
 export interface CollectPhase10LiveProviderBackedChainHistoryInput {
@@ -137,6 +142,15 @@ export interface CollectPhase10LiveProviderBackedChainHistoryInput {
   readonly readinessSecondaryEndpointFingerprint: string;
   readonly collectionId?: string;
   readonly generatedAt?: string;
+  /**
+   * Optional canary authorization context (B3 Option C).
+   * Required to include the sole pre-manifest USDT-Z canary in expected payouts.
+   */
+  readonly baselineIsolatedHistoricalAttemptIds?: readonly string[] | null;
+  readonly campaignEvidenceOrdinalByWithdrawalId?: Readonly<Record<string, number>> | null;
+  readonly campaignEvidenceInvariantPassByWithdrawalId?: Readonly<
+    Record<string, boolean>
+  > | null;
 }
 
 /** Test-only Live input: production shape plus optional fetchImpl injection. */
@@ -152,6 +166,15 @@ export interface LoadPhase10ExpectedCampaignPayoutsInput {
   readonly expectedHotWalletAddress: string;
   readonly expectedJettonMaster: string;
   readonly controlledUserId: string;
+  /**
+   * Optional canary authorization context (B3 Option C).
+   * Without these, the pre-manifest canary remains excluded (fail closed).
+   */
+  readonly baselineIsolatedHistoricalAttemptIds?: readonly string[] | null;
+  readonly campaignEvidenceOrdinalByWithdrawalId?: Readonly<Record<string, number>> | null;
+  readonly campaignEvidenceInvariantPassByWithdrawalId?: Readonly<
+    Record<string, boolean>
+  > | null;
 }
 
 export interface Phase10ChainHistoryCollectorArtifact {
@@ -626,10 +649,11 @@ export async function collectPhase10ProviderBackedChainHistoryForTests(
 }
 
 /**
- * Production collector: constructs TonCenter (primary) + TonAPI (secondary),
- * verifies readiness fingerprints + Testnet health, loads expected payouts from
- * DB, then dual-enumerates. Never accepts injectable provider fakes, fetchImpl,
- * or caller transfer / expectedPayout arrays.
+ * Production collector: constructs independent primary + secondary providers from
+ * the same authoritative role mapping as live readiness (TON_PRIMARY_* /
+ * TON_SECONDARY_*), verifies readiness fingerprints + Testnet health, loads
+ * expected payouts from DB, then dual-enumerates. Never accepts injectable
+ * provider fakes, fetchImpl, or caller transfer / expectedPayout arrays.
  */
 export async function collectPhase10LiveProviderBackedChainHistory(
   input: CollectPhase10LiveProviderBackedChainHistoryInput,
@@ -651,22 +675,25 @@ async function runLiveProviderBackedCollection(
   input: CollectPhase10LiveProviderBackedChainHistoryInput,
   fetchImpl: typeof fetch | undefined,
 ): Promise<Phase10ChainHistoryCollectorArtifact> {
-  if (input.primary.kind !== 'toncenter') {
-    throw new Error(
-      `BINDING_REFUSED: live primary.kind must be 'toncenter' (got ${input.primary.kind})`,
-    );
+  const resolved = resolvePhase10LiveProviderRoles({
+    primary: {
+      kind: input.primary.kind,
+      baseUrl: input.primary.baseUrl,
+      apiKey: input.primary.apiKey ?? null,
+    },
+    secondary: {
+      kind: input.secondary.kind,
+      baseUrl: input.secondary.baseUrl,
+      apiKey: input.secondary.apiKey ?? null,
+    },
+  });
+  if (!resolved.ok) {
+    throw new Error(`BINDING_REFUSED: ${resolved.reasons.join('; ')}`);
   }
-  if (input.secondary.kind !== 'tonapi') {
-    throw new Error(
-      `BINDING_REFUSED: live secondary.kind must be 'tonapi' (got ${input.secondary.kind})`,
-    );
-  }
+  const { roles } = resolved;
+  const primaryFingerprint = roles.primary.endpointFingerprint;
+  const secondaryFingerprint = roles.secondary.endpointFingerprint;
 
-  const primaryFingerprint = fingerprintProviderEndpoint(input.primary.baseUrl);
-  const secondaryFingerprint = fingerprintProviderEndpoint(input.secondary.baseUrl);
-  if (primaryFingerprint === null || secondaryFingerprint === null) {
-    throw new Error('BINDING_REFUSED: unable to derive provider endpoint fingerprints');
-  }
   if (primaryFingerprint !== input.readinessPrimaryEndpointFingerprint.trim()) {
     throw new Error(
       'BINDING_REFUSED: primary endpoint fingerprint does not match readiness evidence',
@@ -677,20 +704,17 @@ async function runLiveProviderBackedCollection(
       'BINDING_REFUSED: secondary endpoint fingerprint does not match readiness evidence',
     );
   }
-  if (primaryFingerprint === secondaryFingerprint) {
-    throw new Error('BINDING_REFUSED: primary and secondary endpoint fingerprints must differ');
-  }
 
   const primary = createTonChainProvider({
-    kind: 'toncenter',
-    baseUrl: input.primary.baseUrl,
-    ...(input.primary.apiKey !== undefined ? { apiKey: input.primary.apiKey } : {}),
+    kind: roles.primary.kind,
+    baseUrl: roles.primary.baseUrl,
+    ...(roles.primary.apiKey !== null ? { apiKey: roles.primary.apiKey } : {}),
     ...(fetchImpl !== undefined ? { fetchImpl } : {}),
   });
   const secondary = createTonChainProvider({
-    kind: 'tonapi',
-    baseUrl: input.secondary.baseUrl,
-    ...(input.secondary.apiKey !== undefined ? { apiKey: input.secondary.apiKey } : {}),
+    kind: roles.secondary.kind,
+    baseUrl: roles.secondary.baseUrl,
+    ...(roles.secondary.apiKey !== null ? { apiKey: roles.secondary.apiKey } : {}),
     ...(fetchImpl !== undefined ? { fetchImpl } : {}),
   });
 
@@ -703,7 +727,7 @@ async function runLiveProviderBackedCollection(
     primaryHealth.networkGlobalId !== PHASE10_TON_TESTNET_NETWORK_GLOBAL_ID
   ) {
     throw new Error(
-      `BINDING_REFUSED: primary TonCenter health must be ok on Testnet (ok=${primaryHealth.ok}, networkGlobalId=${primaryHealth.networkGlobalId})`,
+      `BINDING_REFUSED: primary ${roles.primary.kind} health must be ok on Testnet (ok=${primaryHealth.ok}, networkGlobalId=${primaryHealth.networkGlobalId})`,
     );
   }
   if (
@@ -711,7 +735,7 @@ async function runLiveProviderBackedCollection(
     secondaryHealth.networkGlobalId !== PHASE10_TON_TESTNET_NETWORK_GLOBAL_ID
   ) {
     throw new Error(
-      `BINDING_REFUSED: secondary TonAPI health must be ok on Testnet (ok=${secondaryHealth.ok}, networkGlobalId=${secondaryHealth.networkGlobalId})`,
+      `BINDING_REFUSED: secondary ${roles.secondary.kind} health must be ok on Testnet (ok=${secondaryHealth.ok}, networkGlobalId=${secondaryHealth.networkGlobalId})`,
     );
   }
 
@@ -722,6 +746,20 @@ async function runLiveProviderBackedCollection(
     expectedHotWalletAddress: input.hotWalletAddress,
     expectedJettonMaster: input.jettonMaster,
     controlledUserId: input.controlledUserId,
+    ...(input.baselineIsolatedHistoricalAttemptIds !== undefined
+      ? { baselineIsolatedHistoricalAttemptIds: input.baselineIsolatedHistoricalAttemptIds }
+      : {}),
+    ...(input.campaignEvidenceOrdinalByWithdrawalId !== undefined
+      ? {
+          campaignEvidenceOrdinalByWithdrawalId: input.campaignEvidenceOrdinalByWithdrawalId,
+        }
+      : {}),
+    ...(input.campaignEvidenceInvariantPassByWithdrawalId !== undefined
+      ? {
+          campaignEvidenceInvariantPassByWithdrawalId:
+            input.campaignEvidenceInvariantPassByWithdrawalId,
+        }
+      : {}),
   });
 
   return coordinateDualProviderEnumeration({
@@ -732,8 +770,8 @@ async function runLiveProviderBackedCollection(
     observationWindow: input.observationWindow,
     primary,
     secondary,
-    primaryKind: 'toncenter',
-    secondaryKind: 'tonapi',
+    primaryKind: roles.primary.kind,
+    secondaryKind: roles.secondary.kind,
     primaryEndpointFingerprint: primaryFingerprint,
     secondaryEndpointFingerprint: secondaryFingerprint,
     expectedPayouts,
@@ -1055,6 +1093,7 @@ export async function loadPhase10ExpectedCampaignPayouts(
     input.expectedHotWalletAddress.trim(),
     expectedJettonMaster,
     controlledUserId,
+    PHASE10_USDT_Z_CANARY_WITHDRAWAL_ID,
   ];
 
   const proofs = await db.query<{
@@ -1074,6 +1113,8 @@ export async function loadPhase10ExpectedCampaignPayouts(
     broadcast_submitted_at: Date | string | null;
     requested_at: Date | string | null;
     hot_wallet_address: string | null;
+    withdrawal_state: string | null;
+    settlement_ledger_tx_id: string | null;
   }>(
     `SELECT w.id::text AS withdrawal_id,
             r.withdrawal_attempt_id::text AS attempt_id,
@@ -1090,7 +1131,9 @@ export async function loadPhase10ExpectedCampaignPayouts(
             w.broadcasted_at,
             att.broadcast_submitted_at,
             w.requested_at,
-            hw.address AS hot_wallet_address
+            hw.address AS hot_wallet_address,
+            w.state::text AS withdrawal_state,
+            w.settlement_ledger_tx_id::text AS settlement_ledger_tx_id
      FROM withdrawal_payout_reconciliations r
      JOIN withdrawals w ON w.id = r.withdrawal_id
      JOIN user_wallets uw ON uw.id = w.wallet_id
@@ -1100,7 +1143,10 @@ export async function loadPhase10ExpectedCampaignPayouts(
      LEFT JOIN withdrawal_attempts att ON att.id = r.withdrawal_attempt_id
      WHERE w.id = ANY($1::uuid[])
        AND r.resolution = 'INTENDED_PAYOUT_PROVEN'
-       AND w.requested_at >= $2::timestamptz
+       AND (
+         w.requested_at >= $2::timestamptz
+         OR w.id = $6::uuid
+       )
        AND n.code = 'TON_TESTNET'
        AND a.symbol = 'USDT'
        AND hw.address IS NOT NULL
@@ -1111,7 +1157,36 @@ export async function loadPhase10ExpectedCampaignPayouts(
     params,
   );
 
-  const provenWithdrawalIds = new Set(proofs.rows.map((row) => row.withdrawal_id));
+  const createdAtMs = campaignCreatedAt.getTime();
+  const acceptedProofRows = proofs.rows.filter((row) => {
+    const requestedMs =
+      row.requested_at instanceof Date
+        ? row.requested_at.getTime()
+        : typeof row.requested_at === 'string'
+          ? Date.parse(row.requested_at)
+          : Number.NaN;
+    if (Number.isFinite(requestedMs) && requestedMs >= createdAtMs) {
+      return true;
+    }
+    // Pre-manifest row: only the sole Owner-authorized USDT-Z canary may pass.
+    const ordinal =
+      input.campaignEvidenceOrdinalByWithdrawalId?.[row.withdrawal_id] ?? null;
+    const invariantPass =
+      input.campaignEvidenceInvariantPassByWithdrawalId?.[row.withdrawal_id] ?? null;
+    return isAuthorizedPhase10PreManifestCanary({
+      withdrawalId: row.withdrawal_id,
+      campaignWithdrawalIds,
+      evidenceOrdinal: ordinal,
+      withdrawalState: row.withdrawal_state,
+      settlementLedgerTxId: row.settlement_ledger_tx_id,
+      hasIntendedPayoutProven: true,
+      finalSuccessfulAttemptId: row.attempt_id,
+      baselineIsolatedHistoricalAttemptIds: input.baselineIsolatedHistoricalAttemptIds ?? null,
+      evidenceInvariantPass: invariantPass,
+    });
+  });
+
+  const provenWithdrawalIds = new Set(acceptedProofRows.map((row) => row.withdrawal_id));
   for (const withdrawalId of campaignWithdrawalIds) {
     if (!provenWithdrawalIds.has(withdrawalId)) {
       throw new Error(
@@ -1120,7 +1195,7 @@ export async function loadPhase10ExpectedCampaignPayouts(
     }
   }
 
-  const payouts: Phase10ExpectedCampaignPayout[] = proofs.rows.map((row) => {
+  const payouts: Phase10ExpectedCampaignPayout[] = acceptedProofRows.map((row) => {
     const queryId = row.observed_query_id ?? row.attempt_query_id ?? null;
     const recipient = row.observed_recipient?.trim() || row.recipient?.trim() || '';
     const amountAtomic = row.observed_amount_atomic?.trim() || row.net_amount_atomic.trim();

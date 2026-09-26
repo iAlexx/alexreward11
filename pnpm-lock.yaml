@@ -90,6 +90,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@alex-rewards/ads':
+        specifier: workspace:*
+        version: link:../../packages/ads
       '@alex-rewards/auth':
         specifier: workspace:*
         version: link:../../packages/auth
@@ -188,6 +191,12 @@ importers:
 
   apps/miniapp:
     dependencies:
+      '@adsgram/common':
+        specifier: 1.0.2
+        version: 1.0.2
+      '@adsgram/react':
+        specifier: 1.0.2
+        version: 1.0.2(react@19.2.8)
       '@alex-rewards/config':
         specifier: workspace:*
         version: link:../../packages/config
@@ -312,16 +321,39 @@ importers:
         specifier: 4.23.13
         version: 4.23.13
 
-  packages/ads: {}
+  packages/ads:
+    dependencies:
+      '@alex-rewards/db':
+        specifier: workspace:*
+        version: link:../db
+      '@alex-rewards/rewards':
+        specifier: workspace:*
+        version: link:../rewards
+      pg:
+        specifier: 8.23.0
+        version: 8.23.0
+    devDependencies:
+      '@types/pg':
+        specifier: 8.23.1
+        version: 8.23.1
 
   packages/auth:
     dependencies:
+      '@alex-rewards/config':
+        specifier: workspace:*
+        version: link:../config
       '@alex-rewards/db':
         specifier: workspace:*
         version: link:../db
       '@alex-rewards/telegram':
         specifier: workspace:*
         version: link:../telegram
+      '@noble/ciphers':
+        specifier: 1.3.0
+        version: 1.3.0
+      '@noble/hashes':
+        specifier: 1.8.0
+        version: 1.8.0
       ioredis:
         specifier: 6.0.0
         version: 6.0.0(supports-color@8.1.1)
@@ -332,6 +364,12 @@ importers:
       '@types/pg':
         specifier: 8.23.1
         version: 8.23.1
+      cross-env:
+        specifier: 7.0.3
+        version: 7.0.3
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(vite@8.2.2(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.13)(yaml@2.9.0))
 
   packages/config:
     dependencies:
@@ -597,6 +635,14 @@ importers:
         version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@24.13.3)(vite@8.2.2(@types/node@24.13.3)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.13)(yaml@2.9.0))
 
 packages:
+
+  '@adsgram/common@1.0.2':
+    resolution: {integrity: sha512-lExGFbRhdz/JdqqOc/1c0lU8OQAtTG6Y0WE2hw5hUV0+v+xZXbaWVyKXcCDr3l+KuxbPw7P515a/+CXjsYQuqA==}
+
+  '@adsgram/react@1.0.2':
+    resolution: {integrity: sha512-41Ywf5zweIu/cbvyfyQK1DRK6L64wr1+u+F5XAICM2wV4uJa0mnfQ8dCa51JZ9uvde3BTuMqpToU8VomPc6XQQ==}
+    peerDependencies:
+      react: '>=16.8.0'
 
   '@alloc/quick-lru@5.3.0':
     resolution: {integrity: sha512-U4+70Pc5ZS9osnCBCE5Jha/ciHM+Yp+CNMNC/7HvYbNRk1Ldd+f7qO65W5qfhu/TCv+/ozljlXXe9Nj8419DMA==}
@@ -4758,6 +4804,13 @@ packages:
     resolution: {integrity: sha512-sC95tT5iHHH9gtpj6A81kh+NEaRAUFN+qlUPDUbRfOMvNf5QCBqsb3WgvnpVtK5Y+4UfA6KqufotuTvMGiTlsA==}
 
 snapshots:
+
+  '@adsgram/common@1.0.2': {}
+
+  '@adsgram/react@1.0.2(react@19.2.8)':
+    dependencies:
+      '@adsgram/common': 1.0.2
+      react: 19.2.8
 
   '@alloc/quick-lru@5.3.0': {}
 

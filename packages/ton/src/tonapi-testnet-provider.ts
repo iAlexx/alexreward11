@@ -418,7 +418,54 @@ export class TonApiTestnetProvider implements TonChainProvider {
       throw new Error('MALFORMED_RESPONSE: TonAPI sender Jetton wallet transaction hash missing');
     }
 
-    const recipientNode = flattenTrace(senderNode.trace).find(({ transaction }) => {
+    const notificationMatches = (message: Record<string, unknown>): boolean => {
+      const body = messageBody(message);
+      const notification = body === null ? null : parseJettonMessageHex(body);
+      const destination = optionalAddress(message.destination);
+      return (
+        message.msg_type === 'int_msg' &&
+        message.bounced !== true &&
+        destination !== null &&
+        addressEquals(destination, input.recipient!) &&
+        notification?.op === JETTON_TRANSFER_NOTIFICATION_OP &&
+        notification.queryId === input.queryId &&
+        notification.amountAtomic === input.amountAtomic &&
+        notification.address !== undefined &&
+        addressEquals(notification.address, input.hotWallet)
+      );
+    };
+    const recipientNotifyOnOwner = (node: {
+      transaction: Record<string, unknown>;
+      trace: Record<string, unknown>;
+    }): boolean => {
+      // TonAPI often omits jetton-wallet out_msgs and surfaces notify as a child
+      // owner transaction (which may abort while the Jetton credit already stuck).
+      return flattenTrace(node.trace).some(({ transaction }) => {
+        const account = optionalAddress(transaction.account);
+        const incoming =
+          transaction.in_msg === undefined
+            ? null
+            : asRecord(transaction.in_msg, 'TonAPI recipient owner notify in_msg');
+        if (
+          account === null ||
+          !addressEquals(account, input.recipient!) ||
+          incoming === null ||
+          incoming.bounced === true
+        ) {
+          return false;
+        }
+        const incomingBody = messageBody(incoming);
+        const notification = incomingBody === null ? null : parseJettonMessageHex(incomingBody);
+        return (
+          notification?.op === JETTON_TRANSFER_NOTIFICATION_OP &&
+          notification.queryId === input.queryId &&
+          notification.amountAtomic === input.amountAtomic &&
+          notification.address !== undefined &&
+          addressEquals(notification.address, input.hotWallet)
+        );
+      });
+    };
+    const recipientNode = flattenTrace(senderNode.trace).find(({ transaction, trace }) => {
       const account = optionalAddress(transaction.account);
       const incoming =
         transaction.in_msg === undefined
@@ -448,22 +495,10 @@ export class TonApiTestnetProvider implements TonChainProvider {
       ) {
         return false;
       }
-      return transactionMessages(transaction, 'out_msgs').some((message) => {
-        const body = messageBody(message);
-        const notification = body === null ? null : parseJettonMessageHex(body);
-        const destination = optionalAddress(message.destination);
-        return (
-          message.msg_type === 'int_msg' &&
-          message.bounced !== true &&
-          destination !== null &&
-          addressEquals(destination, input.recipient!) &&
-          notification?.op === JETTON_TRANSFER_NOTIFICATION_OP &&
-          notification.queryId === input.queryId &&
-          notification.amountAtomic === input.amountAtomic &&
-          notification.address !== undefined &&
-          addressEquals(notification.address, input.hotWallet)
-        );
-      });
+      return (
+        transactionMessages(transaction, 'out_msgs').some(notificationMatches) ||
+        recipientNotifyOnOwner({ transaction, trace })
+      );
     });
     if (recipientNode === undefined) return [];
 

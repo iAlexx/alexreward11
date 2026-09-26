@@ -96,8 +96,49 @@ export async function persistPreBroadcastEvidence(
 }
 
 /**
- * Mark that sendBoc was invoked. After this, FAILED_PRE_BROADCAST is impossible
- * and blind resend is forbidden.
+ * Atomically claim first broadcast send for an attempt.
+ * Persists broadcast_submitted_at BEFORE the external sendBoc side effect.
+ * Exactly one concurrent caller receives `claimed: true`; losers must not sendBoc.
+ */
+export async function claimFirstBroadcastSend(
+  client: PoolClient,
+  input: {
+    readonly attemptId: string;
+    readonly fencingToken: bigint;
+    readonly ambiguityClass?: BroadcastAmbiguityClass | null;
+    readonly broadcastResultState?: 'BROADCASTED' | 'UNKNOWN' | 'RECONCILE_REQUIRED';
+    readonly chainReference?: string | null;
+  },
+): Promise<{ readonly claimed: boolean }> {
+  const state = input.broadcastResultState ?? 'UNKNOWN';
+  const result = await client.query<{ id: string; dispatch_fencing_token: string }>(
+    `UPDATE withdrawal_attempts SET
+       broadcast_submitted_at = now(),
+       broadcast_started_at = COALESCE(broadcast_started_at, now()),
+       broadcast_ambiguity_class = COALESCE($2, broadcast_ambiguity_class),
+       broadcast_result_state = $3::withdrawal_attempt_result,
+       chain_reference = COALESCE($4, chain_reference),
+       updated_at = now()
+     WHERE id = $1::uuid
+       AND broadcast_submitted_at IS NULL
+       AND signed_external_message_boc IS NOT NULL
+       AND dispatch_fencing_token = $5::bigint
+     RETURNING id::text, dispatch_fencing_token::text`,
+    [
+      input.attemptId,
+      input.ambiguityClass ?? null,
+      state,
+      input.chainReference ?? null,
+      input.fencingToken.toString(10),
+    ],
+  );
+  return { claimed: result.rows[0] !== undefined };
+}
+
+/**
+ * Mark that sendBoc was invoked (or update post-send ambiguity state).
+ * Prefer claimFirstBroadcastSend for the initial claim that elects the sender.
+ * This helper remains for post-send state updates and idempotent COALESCE stamps.
  */
 export async function markBroadcastSubmitted(
   client: PoolClient,
@@ -217,6 +258,7 @@ export function classifySubmitError(error: unknown): BroadcastSubmitClassificati
 
 export const broadcastGate = {
   persistPreBroadcastEvidence,
+  claimFirstBroadcastSend,
   markBroadcastSubmitted,
   assertBlindResendForbidden,
   classifySubmitError,

@@ -243,7 +243,107 @@ export async function createWithdrawalFromQuote(
     if (q.user_id !== input.authenticatedUserId) {
       throw new WithdrawalDomainError('UNAUTHORIZED', 'Authentication required');
     }
+    // After quote lock: recheck authoritative idempotency (may have committed while waiting).
+    const afterLockExisting = await client.query<{
+      id: string;
+      public_id: string;
+      user_id: string;
+      withdrawal_quote_id: string;
+      state: WithdrawalState;
+      requested_amount_atomic: string;
+      fee_amount_atomic: string;
+      net_amount_atomic: string;
+      priority_review: boolean;
+      risk_decision: string | null;
+      workflow_id: string | null;
+    }>(
+      `SELECT ${WITHDRAWAL_SELECT}
+       FROM withdrawals
+       WHERE idempotency_scope = $1 AND idempotency_key = $2
+       FOR SHARE`,
+      [scope, input.idempotencyKey],
+    );
+    if (afterLockExisting.rows[0] !== undefined) {
+      const row = afterLockExisting.rows[0];
+      if (
+        !intentsMatch(
+          {
+            userId: input.authenticatedUserId,
+            quoteId: input.quoteId,
+            requestedAmountAtomic: row.requested_amount_atomic,
+            feeAmountAtomic: row.fee_amount_atomic,
+            netAmountAtomic: row.net_amount_atomic,
+          },
+          {
+            userId: row.user_id,
+            quoteId: row.withdrawal_quote_id,
+            requestedAmountAtomic: row.requested_amount_atomic,
+            feeAmountAtomic: row.fee_amount_atomic,
+            netAmountAtomic: row.net_amount_atomic,
+          },
+        ) ||
+        row.withdrawal_quote_id !== input.quoteId ||
+        row.user_id !== input.authenticatedUserId
+      ) {
+        throw new WithdrawalDomainError(
+          'IDEMPOTENCY_CONFLICT',
+          'Idempotency key reused with different intent',
+        );
+      }
+      return mapWithdrawal(row);
+    }
+
     if (q.status === 'CONSUMED') {
+      // Prefer authoritative idempotency recovery (same key → original withdrawal).
+      const byKey = await client.query<{
+        id: string;
+        public_id: string;
+        user_id: string;
+        withdrawal_quote_id: string;
+        state: WithdrawalState;
+        requested_amount_atomic: string;
+        fee_amount_atomic: string;
+        net_amount_atomic: string;
+        priority_review: boolean;
+        risk_decision: string | null;
+        workflow_id: string | null;
+      }>(
+        `SELECT ${WITHDRAWAL_SELECT}
+         FROM withdrawals
+         WHERE idempotency_scope = $1 AND idempotency_key = $2
+         FOR SHARE`,
+        [scope, input.idempotencyKey],
+      );
+      if (byKey.rows[0] !== undefined) {
+        const row = byKey.rows[0];
+        if (
+          row.withdrawal_quote_id === input.quoteId &&
+          row.user_id === input.authenticatedUserId &&
+          intentsMatch(
+            {
+              userId: input.authenticatedUserId,
+              quoteId: input.quoteId,
+              requestedAmountAtomic: row.requested_amount_atomic,
+              feeAmountAtomic: row.fee_amount_atomic,
+              netAmountAtomic: row.net_amount_atomic,
+            },
+            {
+              userId: row.user_id,
+              quoteId: row.withdrawal_quote_id,
+              requestedAmountAtomic: row.requested_amount_atomic,
+              feeAmountAtomic: row.fee_amount_atomic,
+              netAmountAtomic: row.net_amount_atomic,
+            },
+          )
+        ) {
+          return mapWithdrawal(row);
+        }
+        throw new WithdrawalDomainError(
+          'IDEMPOTENCY_CONFLICT',
+          'Idempotency key reused with different intent',
+        );
+      }
+      // Quote consumed by a different key / intent.
       throw new WithdrawalDomainError('QUOTE_CONSUMED', 'Quote already consumed');
     }
     if (q.status === 'CANCELLED' || q.status === 'EXPIRED') {
@@ -301,6 +401,7 @@ export async function createWithdrawalFromQuote(
     };
 
     try {
+      await client.query('SAVEPOINT withdrawal_create_insert');
       const inserted = await client.query<{
         id: string;
         public_id: string;
@@ -359,19 +460,21 @@ export async function createWithdrawalFromQuote(
           hotWallet.id,
         ],
       );
+      await client.query('RELEASE SAVEPOINT withdrawal_create_insert');
       const row = inserted.rows[0];
       if (row === undefined) {
         throw new WithdrawalDomainError('INTERNAL', 'withdrawal insert failed');
       }
       w = row;
     } catch (error) {
+      await client.query('ROLLBACK TO SAVEPOINT withdrawal_create_insert').catch(() => undefined);
       if (
         typeof error === 'object' &&
         error !== null &&
         'code' in error &&
         (error as { code?: string }).code === '23505'
       ) {
-        // Unique quote conflict — recover original if same idempotency, else fail.
+        // Unique quote/idempotency conflict — recover original if same intent (txn not aborted).
         const byQuote = await client.query<{
           id: string;
           public_id: string;

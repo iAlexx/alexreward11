@@ -13,6 +13,13 @@ import {
   WithdrawalDomainError,
 } from '@alex-rewards/withdrawals';
 
+import {
+  toWithdrawalPayoutActivityResult,
+  type WithdrawalPayoutActivityResult,
+} from './payout-activity-result.js';
+
+export type { WithdrawalPayoutActivityResult } from './payout-activity-result.js';
+
 export interface WithdrawalActivityDeps {
   readonly pool: Pool;
   readonly config: WithdrawalEngineConfig;
@@ -34,7 +41,7 @@ export function createWithdrawalActivities(deps: WithdrawalActivityDeps) {
   return {
     async executeWithdrawalFakePayout(input: {
       withdrawalId: string;
-    }): Promise<{ state: string; attemptId: string | null }> {
+    }): Promise<WithdrawalPayoutActivityResult> {
       if (!deps.config.fakeChainEnabled) {
         throw new Error('Fake payout chain is disabled');
       }
@@ -44,19 +51,17 @@ export function createWithdrawalActivities(deps: WithdrawalActivityDeps) {
         withdrawalId: input.withdrawalId,
         scenario,
       });
-      return {
-        state: result.state,
-        attemptId: result.attemptId,
-      };
+      return toWithdrawalPayoutActivityResult(result);
     },
 
     /**
      * Phase 10 Testnet payout activity. Fail-closed until Owner resources exist.
      * Does not run real Testnet broadcasts without WITHDRAWAL_REAL_CHAIN_ENABLED + providers.
+     * Preserves pipeline `reason` and `stagesCompleted` for Temporal diagnostics.
      */
     async executeWithdrawalTestnetPayout(input: {
       withdrawalId: string;
-    }): Promise<{ state: string; attemptId: string | null }> {
+    }): Promise<WithdrawalPayoutActivityResult> {
       if (deps.config.fakeChainEnabled) {
         throw new Error('Testnet payout activity forbidden while fake chain is enabled');
       }
@@ -82,10 +87,7 @@ export function createWithdrawalActivities(deps: WithdrawalActivityDeps) {
           return built.canonicalMessageHashHex;
         },
       });
-      return {
-        state: result.state,
-        attemptId: result.attemptId,
-      };
+      return toWithdrawalPayoutActivityResult(result);
     },
   };
 }

@@ -27,7 +27,7 @@ const requiredPackages = [
   'withdrawals',
 ];
 const financialShells = [
-  'ads',
+  // ads is implemented in Phase 11 (AdsGram + provider framework).
   'fraud',
   // ledger is implemented in Phase 4 (Ledger Core).
   // rewards is implemented in Phase 5 (Reward Engine).
@@ -187,6 +187,26 @@ for (const name of financialShells) {
   }
   const source = await readFile(new URL(`packages/${name}/src/index.ts`, root), 'utf8');
   if (!source.includes('export {};')) failures.push(`packages/${name}: boundary shell was changed`);
+}
+
+// Phase 11: ads may use Reward Engine but must never import ledger write APIs directly.
+{
+  const adsFiles = (await walk('packages/ads/')).filter((path) =>
+    /\.(?:ts|tsx|js|mjs)$/.test(path.replaceAll('\\', '/')),
+  );
+  for (const path of adsFiles) {
+    const source = await readFile(new URL(path, root), 'utf8');
+    if (/from\s+['"]@alex-rewards\/ledger['"]/.test(source)) {
+      failures.push(`${path}: packages/ads must not import @alex-rewards/ledger (use Reward Engine)`);
+    }
+    if (
+      /postLedgerTransaction/.test(source) &&
+      !path.includes('certification') &&
+      !path.includes('.test.')
+    ) {
+      failures.push(`${path}: packages/ads must not call postLedgerTransaction`);
+    }
+  }
 }
 
 // Phase 8: bot + control-center must not import KMS or TON sign paths;

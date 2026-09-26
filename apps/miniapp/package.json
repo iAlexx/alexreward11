@@ -12,6 +12,8 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@adsgram/common": "1.0.2",
+    "@adsgram/react": "1.0.2",
     "@alex-rewards/config": "workspace:*",
     "@alex-rewards/contracts": "workspace:*",
     "@sentry/nextjs": "10.73.0",

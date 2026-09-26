@@ -95,6 +95,7 @@ function baseConfig(input: {
   networkCode?: string;
   assetSymbol?: string;
   maxAmountAtomic?: string;
+  requiredDatabaseName?: string;
 }): Phase10TestnetProvisionRuntimeConfig {
   return {
     enabled: input.enabled ?? true,
@@ -104,6 +105,7 @@ function baseConfig(input: {
     allowedUserId: input.userId,
     maxAmountAtomic: input.maxAmountAtomic ?? '1000000',
     ownerAdminUserId: input.adminUserId,
+    requiredDatabaseName: input.requiredDatabaseName ?? '',
   };
 }
 
@@ -140,6 +142,21 @@ describePhase10('phase10 testnet available provision', () => {
         admin_users,
         users
       RESTART IDENTITY CASCADE
+    `);
+    // M0: TRUNCATE admin_users CASCADE removes admin_owner_authority seat row.
+    await pool.query(`
+      DO $m0_restore_seat$
+      BEGIN
+        IF to_regclass('public.admin_owner_authority') IS NOT NULL THEN
+          INSERT INTO admin_owner_authority (seat) VALUES (1)
+          ON CONFLICT (seat) DO UPDATE
+            SET holder_admin_user_id = NULL,
+                active_binding_id = NULL,
+                claimed_at = NULL,
+                updated_at = now();
+        END IF;
+      END
+      $m0_restore_seat$
     `);
     await pool.query(`UPDATE networks SET status = 'ACTIVE' WHERE code = 'TON_TESTNET'`);
     await pool.query(

@@ -362,15 +362,31 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 canary signing recovery (isol
   it('non-Owner ACTIVE admin cannot mutate even with a session (P1)', async () => {
     const { withdrawalId, fencingToken } = await seedStuckSigning();
     const otherAdmin = await createOwnerAdmin(pool, `non-owner-${Date.now()}@example.local`);
-    const otherToken = await provisionAuthenticatedOwner(otherAdmin);
+    // M0: a second unrevoked OWNER binding is refused. Use a non-OWNER role + session.
+    const finance = await pool.query<{ id: string }>(
+      `SELECT id FROM admin_roles WHERE code = 'FINANCE'`,
+    );
+    const financeId = finance.rows[0]?.id;
+    if (financeId === undefined) throw new Error('FINANCE role missing');
     await pool.query(
-      `UPDATE admin_role_bindings SET revoked_at = now() WHERE admin_user_id = $1::uuid`,
-      [otherAdmin],
+      `INSERT INTO admin_role_bindings (admin_user_id, role_id)
+       VALUES ($1::uuid, $2::uuid)`,
+      [otherAdmin, financeId],
+    );
+    const rawToken = randomBytes(32).toString('hex');
+    const tokenHash = hashPhase10CanaryOwnerSessionToken(rawToken);
+    await pool.query(
+      `INSERT INTO admin_sessions (
+         admin_user_id, session_token_hash, idle_expires_at, absolute_expires_at, reauthenticated_at
+       ) VALUES (
+         $1::uuid, $2, now() + interval '1 hour', now() + interval '8 hours', now()
+       )`,
+      [otherAdmin, tokenHash],
     );
     const result = await executePhase10CanarySigningZeroAttemptsRecovery(pool, {
       ...mutateAuth(withdrawalId, fencingToken),
       ownerAdminUserId: otherAdmin,
-      ownerSessionToken: otherToken,
+      ownerSessionToken: rawToken,
     });
     expect(result.accepted).toBe(false);
     expect(result.refusalReasons.some((r) => r.includes('OWNER role binding'))).toBe(true);

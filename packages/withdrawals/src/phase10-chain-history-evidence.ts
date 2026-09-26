@@ -1,8 +1,10 @@
 /**
  * Authoritative Hot Wallet outgoing Jetton history evidence for Phase 10 acceptance.
  * Caller booleans / caller arrays / empty arrays alone are never sufficient.
- * Until a provider-backed enumeration port exists, evidence remains
- * CHAIN_HISTORY_PROOF_REQUIRED (fail closed). No secrets.
+ * Provider-backed enumeration is Owner-authorized available (B1, 2026-09-25):
+ * `collectPhase10LiveProviderBackedChainHistory` is wired and acceptance may
+ * accept PROVIDER_BACKED artifacts that also satisfy independence / ZERO_UNEXPECTED /
+ * binding checks. No secrets.
  */
 
 import { createHash } from 'node:crypto';
@@ -13,11 +15,12 @@ export const PHASE10_CHAIN_HISTORY_EVIDENCE_SCHEMA_VERSION = 1 as const;
 export const PHASE10_CHAIN_HISTORY_PROOF_REQUIRED = 'CHAIN_HISTORY_PROOF_REQUIRED' as const;
 export const PHASE10_TON_TESTNET_NETWORK_GLOBAL_ID = -3 as const;
 /**
- * Flip only when a real read-only provider-backed full outgoing Jetton history
- * collector exists and is wired into evidence generation. Until then, any claimed
- * PROVIDER_BACKED authority is refused by acceptance.
+ * Owner-authorized true (B1, 2026-09-25): a real read-only provider-backed full
+ * outgoing Jetton history collector exists and is wired into evidence generation
+ * (`collectPhase10LiveProviderBackedChainHistory`). Acceptance still requires
+ * PROVIDER_BACKED authority, independenceProven, ZERO_UNEXPECTED, and binding checks.
  */
-export const PHASE10_CHAIN_HISTORY_PROVIDER_COLLECTOR_AVAILABLE = false as const;
+export const PHASE10_CHAIN_HISTORY_PROVIDER_COLLECTOR_AVAILABLE = true as const;
 
 export type Phase10ChainHistoryReconciliationResult =
   | 'ZERO_UNEXPECTED'
@@ -180,7 +183,8 @@ export function buildPhase10ChainHistoryEvidence(
 /**
  * Internal-only builder for forged/provider-shaped artifacts in package tests.
  * NOT part of the public package API — do not re-export from index.ts.
- * Acceptance refuses PROVIDER_BACKED until PHASE10_CHAIN_HISTORY_PROVIDER_COLLECTOR_AVAILABLE.
+ * With PHASE10_CHAIN_HISTORY_PROVIDER_COLLECTOR_AVAILABLE=true, PROVIDER_BACKED
+ * artifacts still must satisfy independence / ZERO_UNEXPECTED / binding checks.
  */
 export function buildPhase10ProviderBackedChainHistoryEvidenceForTests(
   input: BuildPhase10ProviderBackedChainHistoryInput,

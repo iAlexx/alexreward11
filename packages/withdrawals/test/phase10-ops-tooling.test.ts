@@ -286,6 +286,30 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 ops tooling', () => {
     expect(report.balanceDelta.baselinePresent).toBe(true);
   });
 
+  it('hot wallet monitor flags insufficient Jetton and insufficient native TON (injected)', async () => {
+    const jettonShort = await buildPhase10HotWalletMonitorReport(pool, {
+      networkCode: 'TON_TESTNET',
+      fakeChainEnabled: true,
+      balanceObservations: { tonNanotons: '1000000000', jettonAtomic: '189999' },
+      minGasReserveNanotons: '50000000',
+      nextPayoutJettonAtomic: '190000',
+    });
+    expect(jettonShort.jettonForNextPayout.sufficient).toBe(false);
+    expect(jettonShort.notes.some((n) => n.includes('insufficient Jetton'))).toBe(true);
+    expect(jettonShort.gasReserve.sufficient).toBe(true);
+
+    const tonShort = await buildPhase10HotWalletMonitorReport(pool, {
+      networkCode: 'TON_TESTNET',
+      fakeChainEnabled: true,
+      balanceObservations: { tonNanotons: '49999999', jettonAtomic: '6000000' },
+      minGasReserveNanotons: '50000000',
+      nextPayoutJettonAtomic: '190000',
+    });
+    expect(tonShort.gasReserve.sufficient).toBe(false);
+    expect(tonShort.notes.some((n) => n.includes('insufficient native TON'))).toBe(true);
+    expect(tonShort.jettonForNextPayout.sufficient).toBe(true);
+  });
+
   it('durable TEP-74 evidence insert is idempotent and readable for invariants', async () => {
     const userId = await createTestUser(pool, '9604');
     await bindVerifiedPrimaryWallet(pool, userId, networkId);
@@ -396,6 +420,7 @@ describe('phase10 acceptance gate', () => {
         campaignEvidencePath: join(tmpdir(), 'missing-campaign.json'),
         failureInjectionEvidencePath: join(tmpdir(), 'missing-failures.json'),
         readinessEvidencePath: join(tmpdir(), 'missing-readiness.json'),
+      acceptanceCutoff: new Date(Date.now() - 5_000).toISOString(),
       });
       expect(result.mayCreateFinalArchive).toBe(false);
       expect(result.mayMarkPhase10Closed).toBe(false);
@@ -1007,6 +1032,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 pre-commit blocker DB regress
       campaignEvidencePath: campaignPath,
       failureInjectionEvidencePath: failurePath,
       readinessEvidencePath: readinessPath,
+    acceptanceCutoff: new Date(Date.now() - 5_000).toISOString(),
     });
     expect(result.mayCreateFinalArchive).toBe(false);
     expect(result.confirmedCount).toBe(0);
@@ -1085,6 +1111,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 pre-commit blocker DB regress
       campaignEvidencePath: campaignPath,
       failureInjectionEvidencePath: failurePath,
       readinessEvidencePath: readinessPath,
+    acceptanceCutoff: new Date(Date.now() - 5_000).toISOString(),
     });
     expect(result.verdict).toBe('REFUSED_CAMPAIGN_BINDING');
     expect(result.mayCreateFinalArchive).toBe(false);
@@ -1116,6 +1143,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 pre-commit blocker DB regress
       campaignEvidencePath: campaignPath,
       failureInjectionEvidencePath: failurePath,
       readinessEvidencePath: readinessPath,
+    acceptanceCutoff: new Date(Date.now() - 5_000).toISOString(),
     });
     expect(result.verdict).toBe('REFUSED_CAMPAIGN_BINDING');
     expect(result.reasons.some((r) => r.includes('TON_TESTNET'))).toBe(true);
@@ -1194,6 +1222,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 pre-commit blocker DB regress
       campaignEvidencePath: campaignPath,
       failureInjectionEvidencePath: failurePath,
       readinessEvidencePath: readinessPath,
+    acceptanceCutoff: new Date(Date.now() - 5_000).toISOString(),
     });
     expect(result.verdict).toBe('REFUSED_CAMPAIGN_BINDING');
     expect(result.confirmedCount).toBe(0);
@@ -1420,6 +1449,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 pre-commit blocker DB regress
       failureInjectionEvidencePath: failurePath,
       readinessEvidencePath: readinessPath,
       chainHistoryEvidencePath: chainHistoryPath,
+    acceptanceCutoff: new Date(Date.now() - 5_000).toISOString(),
     });
     expect(result.verdict).toBe('REFUSED_CAMPAIGN_BINDING');
     expect(result.reasons.some((r) => r.includes('controlledUserId'))).toBe(true);
@@ -1471,6 +1501,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 pre-commit blocker DB regress
       failureInjectionEvidencePath: failurePath,
       readinessEvidencePath: readinessPath,
       chainHistoryEvidencePath: chainHistoryPath,
+    acceptanceCutoff: new Date(Date.now() - 5_000).toISOString(),
     });
     expect(result.verdict).toBe('REFUSED_CAMPAIGN_BINDING');
     expect(result.confirmedCount).toBe(0);
@@ -1520,6 +1551,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 pre-commit blocker DB regress
       failureInjectionEvidencePath: failurePath,
       readinessEvidencePath: readinessPath,
       chainHistoryEvidencePath: chainHistoryPath,
+    acceptanceCutoff: new Date(Date.now() - 5_000).toISOString(),
     });
     expect(result.verdict).toBe('REFUSED_CAMPAIGN_BINDING');
     expect(result.reasons.some((r) => r.includes('missing evidence record'))).toBe(true);
@@ -1568,6 +1600,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 pre-commit blocker DB regress
       failureInjectionEvidencePath: failurePath,
       readinessEvidencePath: readinessPath,
       chainHistoryEvidencePath: chainHistoryPath,
+    acceptanceCutoff: new Date(Date.now() - 5_000).toISOString(),
     });
     expect(result.verdict).toBe('REFUSED_CAMPAIGN_BINDING');
     expect(result.reasons.some((r) => r.includes('missing campaignId'))).toBe(true);
@@ -1627,6 +1660,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 pre-commit blocker DB regress
       failureInjectionEvidencePath: failurePath,
       readinessEvidencePath: readinessPath,
       chainHistoryEvidencePath: chainHistoryPath,
+    acceptanceCutoff: new Date(Date.now() - 5_000).toISOString(),
     });
     expect(result.verdict).toBe('REFUSED_CAMPAIGN_BINDING');
     expect(result.reasons.some((r) => r.includes('duplicate evidence ordinal'))).toBe(true);
@@ -1675,6 +1709,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 pre-commit blocker DB regress
       failureInjectionEvidencePath: failurePath,
       readinessEvidencePath: readinessPath,
       chainHistoryEvidencePath: chainHistoryPath,
+    acceptanceCutoff: new Date(Date.now() - 5_000).toISOString(),
     });
     expect(result.verdict).toBe('REFUSED_CAMPAIGN_BINDING');
     expect(result.reasons.some((r) => r.includes('campaignId mismatch'))).toBe(true);
@@ -1744,6 +1779,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 pre-commit blocker DB regress
       failureInjectionEvidencePath: failurePath,
       readinessEvidencePath: readinessPath,
       chainHistoryEvidencePath: chainHistoryPath,
+    acceptanceCutoff: new Date(Date.now() - 5_000).toISOString(),
     });
     // Structurally accepted: must not refuse for missing canonical withdrawalIds / withdrawals array.
     expect(result.reasons.every((r) => !r.includes('missing non-empty withdrawalIds'))).toBe(true);
@@ -1891,6 +1927,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 pre-commit blocker DB regress
       failureInjectionEvidencePath: failurePath,
       readinessEvidencePath: readinessPath,
       chainHistoryEvidencePath: chainHistoryPath,
+    acceptanceCutoff: new Date(Date.now() - 5_000).toISOString(),
     });
     expect(result.reasons.every((r) => !r.includes('missing non-empty withdrawalIds'))).toBe(true);
     expect(result.reasons.every((r) => !r.includes('missing non-empty withdrawals'))).toBe(true);

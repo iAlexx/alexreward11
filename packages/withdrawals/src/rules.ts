@@ -2,6 +2,7 @@ import type { PoolClient } from 'pg';
 
 import { LOCKED_INITIAL_WITHDRAWAL } from './config.js';
 import { WithdrawalDomainError } from './errors.js';
+import { PROPOSED_ISOLATED_AALEX_WITHDRAWAL } from './proposed-isolated-aalex-rules.js';
 
 export interface FeeRuleRow {
   readonly id: string;
@@ -197,6 +198,110 @@ export async function seedLockedInitialWithdrawalRules(
   const feeRuleId = fee.rows[0]?.id;
   if (feeRuleId === undefined || limitRuleId === undefined) {
     throw new WithdrawalDomainError('INTERNAL', 'failed to seed locked withdrawal rules');
+  }
+  return { feeRuleId, limitRuleId };
+}
+
+/**
+ * TEST/LOCAL only: seed proposed isolated aalex fee + limit rules as ACTIVE.
+ * Do not call against operational or live isolated DBs without Owner authorization.
+ */
+export async function seedProposedIsolatedAalexWithdrawalRules(
+  client: PoolClient,
+  input: { readonly assetId: string; readonly networkId: string },
+): Promise<{ feeRuleId: string; limitRuleId: string }> {
+  const fee = await client.query<{ id: string }>(
+    `INSERT INTO withdrawal_fee_rules (
+       asset_id, network_id, rule_version, fixed_fee_atomic, percentage_bps,
+       status, valid_from, reason
+     ) VALUES (
+       $1::uuid, $2::uuid, 1, $3, 0, 'ACTIVE', now(),
+       'LOCAL FIXTURE proposed isolated aalex fee (not production)'
+     )
+     ON CONFLICT (asset_id, network_id, rule_version) DO UPDATE
+       SET status = 'ACTIVE',
+           fixed_fee_atomic = EXCLUDED.fixed_fee_atomic,
+           percentage_bps = EXCLUDED.percentage_bps,
+           reason = EXCLUDED.reason
+     RETURNING id`,
+    [
+      input.assetId,
+      input.networkId,
+      PROPOSED_ISOLATED_AALEX_WITHDRAWAL.fixedFeeAtomic.toString(10),
+    ],
+  );
+  const limit = await client.query<{ id: string }>(
+    `INSERT INTO withdrawal_limit_rules (
+       asset_id, network_id, rule_version, risk_tier,
+       min_withdrawal_atomic, max_single_withdrawal_atomic,
+       max_user_hourly_atomic, max_user_daily_atomic,
+       max_hot_wallet_hourly_atomic, max_hot_wallet_daily_atomic,
+       max_auto_payout_atomic, wallet_change_cooldown_seconds,
+       status, valid_from, reason
+     ) VALUES (
+       $1::uuid, $2::uuid, 1, NULL,
+       $3, $4, $5, $6, $7, $8,
+       $9, $10,
+       'ACTIVE', now(), 'LOCAL FIXTURE proposed isolated aalex limits (not production)'
+     )
+     ON CONFLICT DO NOTHING
+     RETURNING id`,
+    [
+      input.assetId,
+      input.networkId,
+      PROPOSED_ISOLATED_AALEX_WITHDRAWAL.minWithdrawalAtomic.toString(10),
+      PROPOSED_ISOLATED_AALEX_WITHDRAWAL.maxSingleWithdrawalAtomic.toString(10),
+      PROPOSED_ISOLATED_AALEX_WITHDRAWAL.maxUserHourlyAtomic.toString(10),
+      PROPOSED_ISOLATED_AALEX_WITHDRAWAL.maxUserDailyAtomic.toString(10),
+      PROPOSED_ISOLATED_AALEX_WITHDRAWAL.maxHotWalletHourlyAtomic.toString(10),
+      PROPOSED_ISOLATED_AALEX_WITHDRAWAL.maxHotWalletDailyAtomic.toString(10),
+      PROPOSED_ISOLATED_AALEX_WITHDRAWAL.maxAutoPayoutAtomic === null
+        ? null
+        : PROPOSED_ISOLATED_AALEX_WITHDRAWAL.maxAutoPayoutAtomic.toString(10),
+      PROPOSED_ISOLATED_AALEX_WITHDRAWAL.walletChangeCooldownSeconds,
+    ],
+  );
+  let limitRuleId = limit.rows[0]?.id;
+  if (limitRuleId === undefined) {
+    const existing = await client.query<{ id: string }>(
+      `SELECT id FROM withdrawal_limit_rules
+       WHERE asset_id = $1::uuid AND network_id = $2::uuid AND rule_version = 1 AND risk_tier IS NULL`,
+      [input.assetId, input.networkId],
+    );
+    limitRuleId = existing.rows[0]?.id;
+    if (limitRuleId !== undefined) {
+      await client.query(
+        `UPDATE withdrawal_limit_rules SET
+           min_withdrawal_atomic = $2,
+           max_single_withdrawal_atomic = $3,
+           max_user_hourly_atomic = $4,
+           max_user_daily_atomic = $5,
+           max_hot_wallet_hourly_atomic = $6,
+           max_hot_wallet_daily_atomic = $7,
+           max_auto_payout_atomic = $8,
+           wallet_change_cooldown_seconds = $9,
+           status = 'ACTIVE',
+           reason = 'LOCAL FIXTURE proposed isolated aalex limits (not production)'
+         WHERE id = $1::uuid`,
+        [
+          limitRuleId,
+          PROPOSED_ISOLATED_AALEX_WITHDRAWAL.minWithdrawalAtomic.toString(10),
+          PROPOSED_ISOLATED_AALEX_WITHDRAWAL.maxSingleWithdrawalAtomic.toString(10),
+          PROPOSED_ISOLATED_AALEX_WITHDRAWAL.maxUserHourlyAtomic.toString(10),
+          PROPOSED_ISOLATED_AALEX_WITHDRAWAL.maxUserDailyAtomic.toString(10),
+          PROPOSED_ISOLATED_AALEX_WITHDRAWAL.maxHotWalletHourlyAtomic.toString(10),
+          PROPOSED_ISOLATED_AALEX_WITHDRAWAL.maxHotWalletDailyAtomic.toString(10),
+          PROPOSED_ISOLATED_AALEX_WITHDRAWAL.maxAutoPayoutAtomic === null
+            ? null
+            : PROPOSED_ISOLATED_AALEX_WITHDRAWAL.maxAutoPayoutAtomic.toString(10),
+          PROPOSED_ISOLATED_AALEX_WITHDRAWAL.walletChangeCooldownSeconds,
+        ],
+      );
+    }
+  }
+  const feeRuleId = fee.rows[0]?.id;
+  if (feeRuleId === undefined || limitRuleId === undefined) {
+    throw new WithdrawalDomainError('INTERNAL', 'failed to seed proposed aalex withdrawal rules');
   }
   return { feeRuleId, limitRuleId };
 }

@@ -9,6 +9,9 @@ export const WITHDRAWAL_APPROVED_OUTBOX_EVENT = 'withdrawal.approved' as const;
 export const WITHDRAWAL_OWNER_REVIEW_REQUIRED_OUTBOX_EVENT =
   'withdrawal.owner_review_required' as const;
 
+/** Owner-gated redispatch after FAILED_PRE_BROADCAST (same withdrawal/{id}). */
+export const WITHDRAWAL_FAILED_PRE_RETRY_OUTBOX_EVENT = 'withdrawal.failed_pre_retry' as const;
+
 export function withdrawalApprovedDedupeKey(withdrawalId: string): string {
   return `withdrawal.approved:${withdrawalId}`;
 }
@@ -18,6 +21,20 @@ export function withdrawalOwnerReviewRequiredDedupeKey(
   expectedState: 'MANUAL_REVIEW',
 ): string {
   return `withdrawal.owner_review_required:${withdrawalId}:${expectedState}`;
+}
+
+/**
+ * Stable per retry-epoch dedupe key. Ordinal increments only when a prior
+ * failed-pre-retry outbox for this withdrawal is no longer PENDING.
+ */
+export function withdrawalFailedPreRetryDedupeKey(
+  withdrawalId: string,
+  retryOrdinal: number,
+): string {
+  if (!Number.isInteger(retryOrdinal) || retryOrdinal < 1) {
+    throw new Error('retryOrdinal must be a positive integer');
+  }
+  return `withdrawal.failed_pre_retry:${withdrawalId}:${retryOrdinal}`;
 }
 
 export function withdrawalWorkflowId(withdrawalId: string): string {

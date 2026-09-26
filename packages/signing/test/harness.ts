@@ -54,7 +54,8 @@ export async function resetAndMigrate(url: string): Promise<void> {
     await assertConnectedDestructiveTestDatabase(client);
     await client.query('DROP SCHEMA IF EXISTS public CASCADE');
     await client.query('CREATE SCHEMA public');
-    await client.query('GRANT ALL ON SCHEMA public TO PUBLIC');
+    // Do not GRANT CREATE TO PUBLIC — signer isolation (S-05) requires locked-down public.
+    await client.query('GRANT USAGE ON SCHEMA public TO PUBLIC');
   } finally {
     await client.end();
   }
