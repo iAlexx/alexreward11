@@ -11,10 +11,11 @@ Phase 11 request-counting semantics. The original Phase 11 package is preserved 
 `82b52bc1dacc93aa6ca046ff1d41282b68ad4e4431f3eed01c7d206ee410e7ef`
 
 **Remediation implementation SHA:** `e855c091c0bad68b231c685d6c2610e504dcc50a`  
-**Latest remediation tip SHA:** `c6be44d3c495f3dffa49f6512b22a6b55e40fae4`
+**Latest remediation tip SHA:** `39e678b80a9ec7ce3cabb7cc914abba9ca6a1b22`
 
 **GitHub draft PR:** https://github.com/iAlexx/alexreward11/pull/7 (Draft — **not merged**)  
-**GitHub Actions run (final tip):** https://github.com/iAlexx/alexreward11/actions/runs/36242298807
+**GitHub Actions run (CI-green tip for Phase 11 job):** https://github.com/iAlexx/alexreward11/actions/runs/36242298807  
+(docs tip `39e678b` is packaging/docs-only atop that green tip)
 
 - `phase11-remediation` job: **PASS** (report non-empty, scoped Prettier, turbo build, typecheck, boundaries, `test:phase11`)
 - `quality` job: **FAIL** — historical Prettier debt in Phase 11 ancestry (Foundation validation); kept visible, not weakened
@@ -101,13 +102,13 @@ PASS, ads typecheck PASS, Prettier check on remediation-touched files PASS.
 
 ## GitHub CI
 
-| Gate                                | Result                                                                                                 |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| Draft PR                            | #7 (not merged)                                                                                        |
-| Overall repository `quality` job    | May **FAIL** on historical Prettier debt (91+ files in Phase 11 ancestry). Kept visible; not weakened. |
-| Dedicated `phase11-remediation` job | Must **PASS** independently (`needs` omitted; PR HEAD checkout)                                        |
+| Gate                                | Result                                                                                   |
+| ----------------------------------- | ---------------------------------------------------------------------------------------- |
+| Draft PR                            | #7 (not merged)                                                                          |
+| Overall repository `quality` job    | **FAIL** — historical Prettier debt (Foundation validation). Kept visible; not weakened. |
+| Dedicated `phase11-remediation` job | **PASS** on run `36242298807` (PR HEAD checkout; independent of `quality`)               |
 
-`PHASE11_GITHUB_CI_JOB_PASS` and `OVERALL_REPOSITORY_CI_PASS` are reported separately.
+`PHASE11_GITHUB_CI_JOB_PASS=YES`. `OVERALL_REPOSITORY_CI_PASS=NO`.
 
 ---
 
