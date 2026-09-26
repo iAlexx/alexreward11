@@ -5,6 +5,10 @@
  * These tests are designed to FAIL on the pre-remediation model (client
  * REQUEST_APPROVED → provider_requests++) and PASS after the fix.
  */
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { Pool } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -15,7 +19,6 @@ import {
   ingestAdsGramRewardUrl,
   recordAdSessionOutcome,
   recordClientSignal,
-  refuseClientAuthoritativeProviderRequestCount,
   type AuthorizeAdResult,
 } from '../src/index.js';
 
@@ -40,6 +43,27 @@ import {
   utcDayString,
 } from './harness.js';
 
+const adsSrcRoot = join(fileURLToPath(new URL('.', import.meta.url)), '..', 'src');
+
+/** Collect Phase 11 ads package TypeScript sources (no tests). */
+function collectAdsSourceText(): string {
+  const chunks: string[] = [];
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(full);
+        continue;
+      }
+      if (entry.name.endsWith('.ts')) {
+        chunks.push(readFileSync(full, 'utf8'));
+      }
+    }
+  };
+  walk(adsSrcRoot);
+  return chunks.join('\n');
+}
+
 async function replaceRequestLimit(
   pool: Pool,
   input: { readonly maxCount: number; readonly cutover: Date; readonly ruleVersion: number },
@@ -47,17 +71,12 @@ async function replaceRequestLimit(
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    await client.query(
-      `UPDATE provider_limit_rules
-       SET status = 'SUPERSEDED', valid_to = $2::timestamptz, updated_at = now()
-       WHERE id = $1::uuid AND status = 'ACTIVE'`,
-      [ADSGRAM_REQUEST_RULE_ID, input.cutover.toISOString()],
-    );
-    // Also supersede any later ACTIVE replacement from a prior test in this file.
+    // Monotonic cutover: never set valid_to before an ACTIVE rule's valid_from
+    // (provider_limit_rules_valid_window CHECK).
     await client.query(
       `UPDATE provider_limit_rules
        SET status = 'SUPERSEDED',
-           valid_to = COALESCE(valid_to, $2::timestamptz),
+           valid_to = GREATEST(valid_from + interval '1 millisecond', $2::timestamptz),
            updated_at = now()
        WHERE provider_id = $1::uuid
          AND limit_metric = 'REQUEST'
@@ -72,7 +91,9 @@ async function replaceRequestLimit(
          approved_by_admin_id, approved_at
        ) VALUES (
          $1::uuid, 'PROVIDER_HARD', 'REQUEST', 'UTC_DAY', $2, $3,
-         'ACTIVE', $4::timestamptz, 'WRITTEN_SUPPORT',
+         'ACTIVE',
+         GREATEST($4::timestamptz, now()),
+         'WRITTEN_SUPPORT',
          'P11-01 remediation test rule revision',
          'test limit revision', $5::uuid, now()
        )
@@ -221,11 +242,28 @@ describe.skipIf(phase11DatabaseUrl === '')('Phase 11 P11-01 request counting rem
     expect(counters.rows[0]?.successful_rewards ?? 0).toBe(0);
   });
 
-  it('P11-R5: AdsGram has no authoritative provider-request proof path; client path refuse-closed', async () => {
+  it('P11-R5: no AdsGram/client/authorize path mutates authoritative provider_requests', async () => {
     expect(getProvider(ADSGRAM_CODE).getCapabilities().productionMonetaryStatus).toBe('BLOCKED');
-    expect(() => refuseClientAuthoritativeProviderRequestCount()).toThrow(
-      /cannot increment authoritative provider_requests/,
-    );
+
+    const source = collectAdsSourceText();
+    // Forbidden authoritative mutations (increment / overwrite usage).
+    expect(source).not.toMatch(/provider_requests\s*=\s*provider_requests\s*\+\s*1/);
+    expect(source).not.toMatch(/SET\s+provider_requests\s*=\s*(?!0\b)/i);
+
+    // Specific production modules must not contain write mutations of the column.
+    const lifecycle = readFileSync(join(adsSrcRoot, 'sessions', 'lifecycle.ts'), 'utf8');
+    const authorizeSrc = readFileSync(join(adsSrcRoot, 'sessions', 'authorize.ts'), 'utf8');
+    const webhook = readFileSync(join(adsSrcRoot, 'webhooks', 'adsgram-reward.ts'), 'utf8');
+    const adapter = readFileSync(join(adsSrcRoot, 'providers', 'adsgram', 'adapter.ts'), 'utf8');
+    for (const text of [lifecycle, authorizeSrc, webhook, adapter]) {
+      expect(text).not.toMatch(/provider_requests\s*=\s*provider_requests\s*\+\s*1/);
+      expect(text).not.toMatch(/SET\s+provider_requests\s*=/i);
+    }
+
+    // Authorize may INSERT zeros / SELECT, never increment.
+    expect(authorizeSrc).toMatch(/INSERT INTO ad_daily_counters/);
+    expect(authorizeSrc).toMatch(/FOR UPDATE/);
+    expect(authorizeSrc).not.toMatch(/provider_requests\s*\+/);
   });
 
   it('P11-R6: conservative REQUEST limit 30 comes from versioned data', async () => {
@@ -365,7 +403,6 @@ describe.skipIf(phase11DatabaseUrl === '')('Phase 11 P11-01 request counting rem
     });
     expect(total).toBeLessThanOrEqual(3);
 
-    // Boundary exhaustion: after N sessions, further authorize refuses.
     if (total < 3) {
       await seedTerminalAuthorizedSessions(pool, {
         userId,
@@ -374,7 +411,6 @@ describe.skipIf(phase11DatabaseUrl === '')('Phase 11 P11-01 request counting rem
         count: 3 - total,
       });
     }
-    // Terminate any live winner so REQUEST_LIMIT (not SESSION_ALREADY_ACTIVE) is observed.
     await pool.query(
       `UPDATE ad_sessions SET state = 'NO_FILL', failure_code = 'TEST_TERMINATE', updated_at = now()
        WHERE user_id = $1::uuid AND provider_id = $2::uuid
@@ -390,6 +426,97 @@ describe.skipIf(phase11DatabaseUrl === '')('Phase 11 P11-01 request counting rem
     expect(
       await countDailySessions(pool, { userId, providerId: ADSGRAM_PROVIDER_ID, utcDay }),
     ).toBe(3);
+  });
+
+  it('P11-R13b: FOR UPDATE serialization — B cannot pass while A holds daily counter lock', async () => {
+    const utcDay = utcDayString();
+    const n = 2;
+    const cutover = new Date(Date.now() - 100);
+    await replaceRequestLimit(pool, { maxCount: n, cutover, ruleVersion: 23 });
+
+    const userId = await createTestUser(pool);
+    await seedTerminalAuthorizedSessions(pool, {
+      userId,
+      providerId: ADSGRAM_PROVIDER_ID,
+      utcDay,
+      count: n - 1,
+    });
+    // Ensure the serialization row exists (same as authorize).
+    await pool.query(
+      `INSERT INTO ad_daily_counters (
+         user_id, provider_id, utc_day, provider_requests, successful_rewards
+       ) VALUES ($1::uuid, $2::uuid, $3::date, 0, 0)
+       ON CONFLICT (user_id, provider_id, utc_day) DO NOTHING`,
+      [userId, ADSGRAM_PROVIDER_ID, utcDay],
+    );
+
+    const locker = await pool.connect();
+    try {
+      await locker.query('BEGIN');
+      await locker.query(
+        `SELECT provider_requests, successful_rewards
+         FROM ad_daily_counters
+         WHERE user_id = $1::uuid AND provider_id = $2::uuid AND utc_day = $3::date
+         FOR UPDATE`,
+        [userId, ADSGRAM_PROVIDER_ID, utcDay],
+      );
+
+      // Production authorize on another connection — must block on the same FOR UPDATE.
+      const authorizePromise = authorize(userId);
+
+      // Confirm B is waiting on a lock (not merely delayed by one-live-session).
+      let waiting = false;
+      for (let attempt = 0; attempt < 40; attempt += 1) {
+        const locks = await pool.query<{ waiting: boolean }>(
+          `SELECT EXISTS (
+             SELECT 1
+             FROM pg_stat_activity a
+             JOIN pg_locks l ON l.pid = a.pid
+             WHERE a.datname = current_database()
+               AND a.pid <> pg_backend_pid()
+               AND NOT l.granted
+               AND a.state = 'active'
+           ) AS waiting`,
+        );
+        waiting = locks.rows[0]?.waiting === true;
+        if (waiting) break;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      expect(waiting).toBe(true);
+
+      // Advance conservative usage to N while A still holds the serialization point.
+      await seedTerminalAuthorizedSessions(pool, {
+        userId,
+        providerId: ADSGRAM_PROVIDER_ID,
+        utcDay,
+        count: 1,
+      });
+      expect(
+        await countDailySessions(pool, { userId, providerId: ADSGRAM_PROVIDER_ID, utcDay }),
+      ).toBe(n);
+
+      await locker.query('COMMIT');
+
+      await expect(authorizePromise).rejects.toMatchObject({
+        code: 'REQUEST_LIMIT_REACHED',
+        details: { maxCount: n },
+      });
+      expect(
+        await countDailySessions(pool, { userId, providerId: ADSGRAM_PROVIDER_ID, utcDay }),
+      ).toBe(n);
+      expect(
+        await readDailyProviderRequests(pool, {
+          userId,
+          providerId: ADSGRAM_PROVIDER_ID,
+          utcDay,
+        }),
+      ).toBe(0);
+    } catch (error) {
+      await locker.query('ROLLBACK').catch(() => undefined);
+      throw error;
+    } finally {
+      locker.release();
+    }
   });
 
   it('P11-R14: historical AUTHORIZATION_PASSED still identifies rule version N after N+1 activates', async () => {
