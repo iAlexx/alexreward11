@@ -22,6 +22,7 @@ import {
   createTestUser,
   phase11DatabaseUrl,
   resetAndMigrate,
+  seedTerminalAuthorizedSessions,
   setDailyCounters,
   usdtAssetId,
   utcDayString,
@@ -106,13 +107,13 @@ describe.skipIf(phase11DatabaseUrl === '')('Phase 11 versioned provider limits',
     expect(before.requestUtcDay?.maxCount).toBe(30);
     expect(before.requestUtcDay?.decidingRule.ruleVersion).toBe(1);
 
-    // At 30 counted requests the approved value refuses a new session.
+    // At 30 conservative server-authorized sessions the approved value refuses a new session.
     const blockedUser = await createTestUser(pool);
-    await setDailyCounters(pool, {
+    await seedTerminalAuthorizedSessions(pool, {
       userId: blockedUser,
       providerId: ADSGRAM_PROVIDER_ID,
       utcDay,
-      providerRequests: 30,
+      count: 30,
     });
     await expect(
       authorizeRewardedAdSession(pool, {

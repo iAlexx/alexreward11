@@ -115,3 +115,10 @@ Real PostgreSQL via `resetAndMigrate`; no mock data. See `docs/TEST_PLAN.md`.
 - The Earn UI (Phase 12)
 - Ad revenue recognition (`AD_NETWORK_RECEIVABLE` / `AD_REVENUE`) posts
 - Any provider loaded at runtime rather than at compile time
+
+## P11-01 remediation (independent review)
+
+Client `REQUEST_APPROVED` is **client-observed attempt evidence only** and must not increment
+authoritative `ad_daily_counters.provider_requests`. Conservative REQUEST safety is enforced
+at authorize via a DB-serialized count of server-created `ad_sessions` against the versioned
+REQUEST/UTC_DAY rule. See `docs/PHASE_11_INDEPENDENT_REVIEW_REMEDIATION.md`.

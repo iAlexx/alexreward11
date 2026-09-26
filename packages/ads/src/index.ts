@@ -147,6 +147,7 @@ export {
   recordAdSessionOutcome,
   recordClientSignal,
   recordProviderSignal,
+  refuseClientAuthoritativeProviderRequestCount,
 } from './sessions/lifecycle.js';
 export type {
   AdSessionFailureOutcome,

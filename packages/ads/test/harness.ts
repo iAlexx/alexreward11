@@ -434,6 +434,60 @@ export async function setDailyCounters(
   );
 }
 
+/**
+ * Seed terminal (non-live) ad_sessions that consume conservative REQUEST safety
+ * allowance without claiming authoritative provider_requests (P11-01).
+ */
+export async function seedTerminalAuthorizedSessions(
+  pool: Pool,
+  input: {
+    readonly userId: string;
+    readonly providerId: string;
+    readonly utcDay: string;
+    readonly count: number;
+  },
+): Promise<void> {
+  for (let i = 0; i < input.count; i += 1) {
+    await pool.query(
+      `INSERT INTO ad_sessions (
+         id, user_id, provider_id, state, utc_day, expires_at, created_at,
+         provider_request_counted, successful_reward_counted, failure_code
+       ) VALUES (
+         $1::uuid, $2::uuid, $3::uuid, 'NO_FILL', $4::date,
+         now() + interval '1 hour', now(),
+         false, false, 'TEST_SEED'
+       )`,
+      [randomUUID(), input.userId, input.providerId, input.utcDay],
+    );
+  }
+}
+
+export async function countDailySessions(
+  pool: Pool,
+  input: { readonly userId: string; readonly providerId: string; readonly utcDay: string },
+): Promise<number> {
+  const result = await pool.query<{ total: string }>(
+    `SELECT count(*)::text AS total
+     FROM ad_sessions
+     WHERE user_id = $1::uuid AND provider_id = $2::uuid AND utc_day = $3::date`,
+    [input.userId, input.providerId, input.utcDay],
+  );
+  return Number(result.rows[0]?.total ?? '0');
+}
+
+export async function readDailyProviderRequests(
+  pool: Pool,
+  input: { readonly userId: string; readonly providerId: string; readonly utcDay: string },
+): Promise<number> {
+  const result = await pool.query<{ provider_requests: number }>(
+    `SELECT provider_requests
+     FROM ad_daily_counters
+     WHERE user_id = $1::uuid AND provider_id = $2::uuid AND utc_day = $3::date`,
+    [input.userId, input.providerId, input.utcDay],
+  );
+  return result.rows[0]?.provider_requests ?? 0;
+}
+
 export function utcDayString(asOf: Date = new Date()): string {
   return asOf.toISOString().slice(0, 10);
 }
