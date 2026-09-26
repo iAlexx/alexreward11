@@ -45,7 +45,8 @@ export function LoginForm() {
         ...(begun.adminUserId === undefined ? {} : { adminUserId: begun.adminUserId }),
         response: assertion as never,
       });
-      await setSessionFromLogin(issued.sessionToken);
+      void issued;
+      await setSessionFromLogin();
       router.replace('/overview');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Passkey sign-in failed');
@@ -66,7 +67,8 @@ export function LoginForm() {
       });
       setPassword('');
       setTotpCode('');
-      await setSessionFromLogin(issued.sessionToken);
+      void issued;
+      await setSessionFromLogin();
       router.replace('/overview');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Password+TOTP sign-in failed');
@@ -86,7 +88,8 @@ export function LoginForm() {
         recoveryCode,
       });
       setRecoveryCode('');
-      await setSessionFromLogin(issued.sessionToken);
+      void issued;
+      await setSessionFromLogin();
       router.replace('/overview');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Recovery sign-in failed');

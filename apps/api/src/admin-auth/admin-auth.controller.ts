@@ -97,6 +97,8 @@ export class AdminAuthController {
       await this.throttle(ip, 'webauthn-register-options');
       const begun = await beginWebAuthnRegistration(this.pool, {
         adminUserId: session.adminUserId,
+        adminSessionId: session.sessionId,
+        reauthenticatedAt: session.reauthenticatedAt,
         rp: this.rp(),
         ...this.gate(),
       });
@@ -132,6 +134,8 @@ export class AdminAuthController {
       }
       const result = await finishWebAuthnRegistration(this.pool, {
         adminUserId: session.adminUserId,
+        adminSessionId: session.sessionId,
+        reauthenticatedAt: session.reauthenticatedAt,
         // RegistrationResponseJSON shape from browser
         response: response as never,
         rp: this.rp(),
@@ -205,7 +209,6 @@ export class AdminAuthController {
         idleExpiresAt: bundle.result.idleExpiresAt,
         absoluteExpiresAt: bundle.result.absoluteExpiresAt,
         reauthenticatedAt: bundle.result.reauthenticatedAt,
-        sessionToken,
       };
     } catch (error) {
       if (error instanceof AuthDomainError) throw mapAuthError(error);
@@ -240,7 +243,6 @@ export class AdminAuthController {
         idleExpiresAt: bundle.result.idleExpiresAt,
         absoluteExpiresAt: bundle.result.absoluteExpiresAt,
         reauthenticatedAt: bundle.result.reauthenticatedAt,
-        sessionToken,
       };
     } catch (error) {
       if (error instanceof AuthDomainError) throw mapAuthError(error);
@@ -273,7 +275,6 @@ export class AdminAuthController {
         idleExpiresAt: bundle.result.idleExpiresAt,
         absoluteExpiresAt: bundle.result.absoluteExpiresAt,
         reauthenticatedAt: bundle.result.reauthenticatedAt,
-        sessionToken,
       };
     } catch (error) {
       if (error instanceof AuthDomainError) throw mapAuthError(error);
@@ -335,6 +336,7 @@ export class AdminAuthController {
       if (phase === 'options') {
         const begun = await beginReauthViaWebAuthn(this.pool, {
           adminUserId: session.adminUserId,
+          adminSessionId: session.sessionId,
           rp: this.rp(),
           ...this.gate(),
         });

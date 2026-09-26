@@ -49,7 +49,6 @@ export interface AdminAuthSessionIssued {
   readonly idleExpiresAt: string;
   readonly absoluteExpiresAt: string;
   readonly reauthenticatedAt: string | null;
-  readonly sessionToken: string;
 }
 
 export interface AdminWebAuthnOptionsResponse {
@@ -131,13 +130,15 @@ export interface AdminAdsProviderStatus {
 }
 
 export interface AdminEconomicsSnapshot {
-  readonly estimatedMarginAtomic: string | null;
-  readonly settledMarginAtomic: string | null;
-  readonly estimatedLabel: 'ESTIMATED';
-  readonly settledLabel: 'SETTLED';
-  readonly pendingReceivablesAtomic: string | null;
-  readonly feeRevenueAtomic: string | null;
-  readonly asOf: string | null;
+  readonly metrics: readonly {
+    readonly metric: string;
+    readonly basis: string;
+    readonly amountAtomic: string | null;
+    readonly status: string;
+    readonly reasonCode?: string;
+    readonly asOf?: string;
+  }[];
+  readonly note: string;
 }
 
 export interface AdminFeatureFlagItem {

@@ -12,11 +12,7 @@ import {
 
 import { createAdminApiClient, type AdminApiClient } from '../lib/admin-api/client';
 import type { AdminSessionResponse } from '../lib/admin-api/types';
-import {
-  clearStoredBearerToken,
-  getStoredBearerToken,
-  setStoredBearerToken,
-} from '../lib/auth/session-store';
+import { clearStoredBearerToken, getStoredBearerToken } from '../lib/auth/session-store';
 import { webConfig } from '../lib/env';
 
 type SessionStatus = 'LOADING' | 'AUTHENTICATED' | 'UNAUTHENTICATED';
@@ -25,7 +21,8 @@ type AdminSessionContextValue = {
   readonly status: SessionStatus;
   readonly session: AdminSessionResponse | null;
   readonly api: AdminApiClient;
-  readonly setSessionFromLogin: (sessionToken: string) => Promise<void>;
+  /** Cookie-only: refreshes session from HttpOnly cookie after login. */
+  readonly setSessionFromLogin: () => Promise<void>;
   readonly refreshSession: () => Promise<void>;
   readonly logout: () => Promise<void>;
   readonly markUnauthenticated: () => void;
@@ -63,13 +60,10 @@ export function AdminSessionProvider({ children }: { readonly children: ReactNod
     }
   }, [api, markUnauthenticated]);
 
-  const setSessionFromLogin = useCallback(
-    async (sessionToken: string) => {
-      setStoredBearerToken(sessionToken);
-      await refreshSession();
-    },
-    [refreshSession],
-  );
+  const setSessionFromLogin = useCallback(async () => {
+    clearStoredBearerToken();
+    await refreshSession();
+  }, [refreshSession]);
 
   const logout = useCallback(async () => {
     try {
