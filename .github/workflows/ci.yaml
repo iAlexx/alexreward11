@@ -177,6 +177,8 @@ jobs:
             packages/ads/test/phase11-certification.test.ts \
             packages/ads/test/phase11-limits-version.test.ts \
             packages/ads/test/phase11-p11-01-request-counting.test.ts
+      - name: Build Ads dependency graph
+        run: pnpm exec turbo run build --filter=@alex-rewards/ads...
       - name: Ads package typecheck
         run: pnpm --filter @alex-rewards/ads run typecheck
       - name: Architecture boundaries
