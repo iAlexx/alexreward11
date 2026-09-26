@@ -1,10 +1,18 @@
 # Phase 12 Acceptance Report — User Mini App UI + Founder Experience
 
-**Status:** **PASS**
+> **Historical pointer (independent review):** This report records the **original** Phase 12
+> packaging acceptance. It does **not** claim that Standard/Founder browser E2E or live
+> Telegram smoke passed. Independent remediation is documented in
+> `docs/PHASE_12_INDEPENDENT_REVIEW_REMEDIATION.md` on branch
+> `phase12-independent-remediation`. The original package SHA
+> `e1f498cc0f1c8f1f8ad9c442b167b4e5da3006c0fafba2955584c9ac14aa912f` remains the sealed
+> original; do not treat this historical PASS as closing post-P11-01 or E2E findings.
+
+**Status:** **PASS** _(original packaging — superseded in part by independent remediation)_
 
 **Phase slug:** `PHASE_12_MINIAPP_UI_FOUNDER`  
 **Master specification:** Version 1.3  
-**Accepted commit:** _(see Section M)_  
+**Accepted commit:** _(see Section M)_
 
 **AdsGram production monetary status:** **BLOCKED**  
 **AdsGram clarification gate:** **NO** (unchanged; UI cannot flip this)  
@@ -78,13 +86,13 @@ pnpm archive:phase -- --phase 12 --slug MINIAPP_UI_FOUNDER --commit <sha> ...
 
 ## F. Test evidence
 
-| Suite | Result |
-| ----- | ------ |
-| `apps/api` phase12 read models + DB | **12 PASS** |
+| Suite                                                      | Result      |
+| ---------------------------------------------------------- | ----------- |
+| `apps/api` phase12 read models + DB                        | **12 PASS** |
 | `apps/miniapp` (authority, scenarios, i18n, smoke, health) | **25 PASS** |
-| `packages/i18n` catalog sync | **2 PASS** |
-| Phase 11 regression | **29 PASS** |
-| `verify:boundaries` | **PASS** |
+| `packages/i18n` catalog sync                               | **2 PASS**  |
+| Phase 11 regression                                        | **29 PASS** |
+| `verify:boundaries`                                        | **PASS**    |
 
 Owner authority scenarios covered (client tamper / BLOCKED / NO optimistic credit /
 Founder claim shape / Home partial failure / a11y landmarks).
@@ -149,19 +157,19 @@ safe to leave or disable via routing. No Phase 10/11 archive mutation.
 
 ## N. Gate PASS/FAIL
 
-| Gate | Result |
-| ---- | ------ |
-| Required screens | **PASS** |
-| Standard-user authority/smoke | **PASS** |
+| Gate                                            | Result   |
+| ----------------------------------------------- | -------- |
+| Required screens                                | **PASS** |
+| Standard-user authority/smoke                   | **PASS** |
 | Founder server-driven badge/number/entitlements | **PASS** |
-| Founder claim (code-only, clear, no log) | **PASS** |
-| AR/EN/RU + RTL | **PASS** |
-| Accessibility landmarks/labels | **PASS** |
-| Loading/error/degraded | **PASS** |
-| AdsGram BLOCKED | **PASS** |
-| Phase 10/11 immutable | **PASS** |
-| Phase 13 not started | **PASS** |
-| **PHASE12_GATE** | **PASS** |
+| Founder claim (code-only, clear, no log)        | **PASS** |
+| AR/EN/RU + RTL                                  | **PASS** |
+| Accessibility landmarks/labels                  | **PASS** |
+| Loading/error/degraded                          | **PASS** |
+| AdsGram BLOCKED                                 | **PASS** |
+| Phase 10/11 immutable                           | **PASS** |
+| Phase 13 not started                            | **PASS** |
+| **PHASE12_GATE**                                | **PASS** |
 
 ---
 
