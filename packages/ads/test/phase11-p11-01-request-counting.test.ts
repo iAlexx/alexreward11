@@ -150,9 +150,9 @@ describe.skipIf(phase11DatabaseUrl === '')('Phase 11 P11-01 request counting rem
     const utcDay = utcDayString();
     const userId = await createTestUser(pool);
     const session = await authorize(userId);
-    expect(await readDailyProviderRequests(pool, { userId, providerId: ADSGRAM_PROVIDER_ID, utcDay })).toBe(
-      0,
-    );
+    expect(
+      await readDailyProviderRequests(pool, { userId, providerId: ADSGRAM_PROVIDER_ID, utcDay }),
+    ).toBe(0);
 
     const signal = await recordClientSignal(pool, {
       adSessionId: session.adSessionId,
@@ -169,9 +169,9 @@ describe.skipIf(phase11DatabaseUrl === '')('Phase 11 P11-01 request counting rem
       [session.adSessionId],
     );
     expect(stored.rows[0]).toMatchObject({ source: 'CLIENT', authenticity: 'UNVERIFIED' });
-    expect(await readDailyProviderRequests(pool, { userId, providerId: ADSGRAM_PROVIDER_ID, utcDay })).toBe(
-      0,
-    );
+    expect(
+      await readDailyProviderRequests(pool, { userId, providerId: ADSGRAM_PROVIDER_ID, utcDay }),
+    ).toBe(0);
     expect((await readSessionRow(pool, session.adSessionId)).providerRequestCounted).toBe(false);
   });
 
@@ -190,9 +190,9 @@ describe.skipIf(phase11DatabaseUrl === '')('Phase 11 P11-01 request counting rem
       eventType: 'REQUEST_APPROVED',
     });
     expect(dup.signalCreated).toBe(false);
-    expect(await readDailyProviderRequests(pool, { userId, providerId: ADSGRAM_PROVIDER_ID, utcDay })).toBe(
-      0,
-    );
+    expect(
+      await readDailyProviderRequests(pool, { userId, providerId: ADSGRAM_PROVIDER_ID, utcDay }),
+    ).toBe(0);
   });
 
   it('P11-R3: omitting REQUEST_APPROVED cannot bypass conservative authorize allowance', async () => {
@@ -230,9 +230,9 @@ describe.skipIf(phase11DatabaseUrl === '')('Phase 11 P11-01 request counting rem
     });
     expect(outcome.state).toBe('NO_FILL');
     expect(await countLedgerTransactions(pool)).toBe(ledgerBefore);
-    expect(await readDailyProviderRequests(pool, { userId, providerId: ADSGRAM_PROVIDER_ID, utcDay })).toBe(
-      0,
-    );
+    expect(
+      await readDailyProviderRequests(pool, { userId, providerId: ADSGRAM_PROVIDER_ID, utcDay }),
+    ).toBe(0);
 
     const counters = await pool.query<{ successful_rewards: number }>(
       `SELECT successful_rewards FROM ad_daily_counters
@@ -333,7 +333,11 @@ describe.skipIf(phase11DatabaseUrl === '')('Phase 11 P11-01 request counting rem
     const userId = await createTestUser(pool);
     const session = await authorize(userId);
     for (const event of ['REQUEST_APPROVED', 'AD_LOADED', 'AD_STARTED', 'CLIENT_COMPLETION']) {
-      await recordClientSignal(pool, { adSessionId: session.adSessionId, userId, eventType: event });
+      await recordClientSignal(pool, {
+        adSessionId: session.adSessionId,
+        userId,
+        eventType: event,
+      });
     }
     const ledgerBefore = await countLedgerTransactions(pool);
     const result = await attemptVerifyAndIssueAdReward(pool, {
@@ -388,9 +392,7 @@ describe.skipIf(phase11DatabaseUrl === '')('Phase 11 P11-01 request counting rem
       count: 2,
     });
 
-    const results = await Promise.allSettled(
-      Array.from({ length: 12 }, () => authorize(userId)),
-    );
+    const results = await Promise.allSettled(Array.from({ length: 12 }, () => authorize(userId)));
     const fulfilled = results.filter((r) => r.status === 'fulfilled');
     const rejected = results.filter((r) => r.status === 'rejected');
     expect(fulfilled.length).toBeLessThanOrEqual(1);
@@ -597,9 +599,9 @@ describe.skipIf(phase11DatabaseUrl === '')('Phase 11 P11-01 request counting rem
       utcDay,
     });
     expect(sessions).toBeGreaterThan(0);
-    expect(await readDailyProviderRequests(pool, { userId, providerId: ADSGRAM_PROVIDER_ID, utcDay })).toBe(
-      0,
-    );
+    expect(
+      await readDailyProviderRequests(pool, { userId, providerId: ADSGRAM_PROVIDER_ID, utcDay }),
+    ).toBe(0);
     // Counter row exists as lock container with zeros.
     await setDailyCounters(pool, {
       userId,
@@ -608,8 +610,8 @@ describe.skipIf(phase11DatabaseUrl === '')('Phase 11 P11-01 request counting rem
       providerRequests: 0,
       successfulRewards: 0,
     });
-    expect(await readDailyProviderRequests(pool, { userId, providerId: ADSGRAM_PROVIDER_ID, utcDay })).toBe(
-      0,
-    );
+    expect(
+      await readDailyProviderRequests(pool, { userId, providerId: ADSGRAM_PROVIDER_ID, utcDay }),
+    ).toBe(0);
   });
 });
