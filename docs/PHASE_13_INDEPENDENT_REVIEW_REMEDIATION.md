@@ -1,7 +1,8 @@
 # Phase 13 Independent Review Remediation
 
-**Status:** Remediation on branch `phase13-independent-remediation` — **not** independently
-accepted until Owner review. Original Phase 13 package / acceptance report is preserved;
+**Status:** Independent remediation complete on `phase13-independent-remediation`
+(dedicated Phase 13 GitHub gates PASS on tip `2b5079c`). **Not** Owner-accepted until
+external archive/code review. Original Phase 13 package / acceptance report is preserved;
 see supersession pointer on `docs/PHASE_13_ACCEPTANCE_REPORT.md`.
 
 **Specification:** Master Spec V1.3  
@@ -102,11 +103,54 @@ Independent of historical `quality` (same pattern as Phase 11/12 remediation):
 2. **`phase13-admin-e2e`** — postgres `alex_rewards_phase13_e2e` + redis; Playwright Chromium
    with deps; `PHASE13_ADMIN_E2E=1`; `pnpm test:phase13:admin-e2e`.
 
+### GitHub CI on tip `2b5079c` (run `36269004238`)
+
+| Gate                  | Result                                          |
+| --------------------- | ----------------------------------------------- |
+| `phase11-remediation` | SUCCESS                                         |
+| `phase12-remediation` | SUCCESS                                         |
+| `phase12-e2e`         | SUCCESS                                         |
+| `phase13-remediation` | SUCCESS                                         |
+| `phase13-admin-e2e`   | SUCCESS                                         |
+| Historical `quality`  | FAIL (Prettier debt kept visible; not weakened) |
+| `docker-smoke`        | SKIPPED (needs `quality`)                       |
+| OVERALL_REPOSITORY_CI | NO (`quality` FAIL)                             |
+
+Draft PR: https://github.com/iAlexx/alexreward11/pull/9  
+Base: `phase12-independent-remediation` · Draft · **not merged**.
+
+---
+
+## Baseline / forward-port
+
+- Independently accepted Phase 12 tip: `8994802887e624a323fa224e42626a3f7ea06943`
+- Historical Phase 13 implementation forward-ported: `56900dbd840ee918d76735f24b13d7d3edbc0197`
+- Historical docs tip **not** cherry-picked as acceptance truth: `68a53ddef934941fe507d164c1344d229ae57a48`
+- Historical branch `feature/owner-admin-session-auth` left untouched
+
+---
+
+## Historical Phase 13 package (preserved, unchanged)
+
+- Path (main worktree archives):  
+  `phase-archives/PHASE_13_ADMIN_POLICY_ECONOMICS/PHASE_13_ADMIN_POLICY_ECONOMICS_PACKAGE_20260925-223636_68a53dd.zip`
+- Outer SHA-256:  
+  `2e1abba0a5e36f686a3836e8dcb6b640419c72eab0edad70203941bbb3a38832`
+- Master archive identity for the historical package remains  
+  `PHASE_13_ADMIN_POLICY_ECONOMICS`.
+- New independent remediation package uses visibly separate directory  
+  `PHASE_13_INDEPENDENT_REVIEW_REMEDIATION` (same pattern as Phase 12).
+
+Live hardware passkey smoke: **NOT_RUN_CONFIG_REQUIRED** (no Owner-approved
+production Admin RP ID / origin for this remediation).
+
 ---
 
 ## Explicit non-claims
 
 - AdsGram remains **BLOCKED**
+- Clarification gate remains **NO**
 - No Phase 14
 - This remediation is not independently accepted until Owner review
-- No archive / package hash claimed in this document
+- `INDEPENDENT_PHASE13_ARCHIVE_VERIFIED` remains **NO** until Owner external verification
+- No archive / package hash claimed in this document (see external `PACKAGE_SHA256.txt`)
