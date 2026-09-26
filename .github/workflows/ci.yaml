@@ -318,6 +318,156 @@ jobs:
           PHASE11_ADS_TESTS: '1'
         run: pnpm test:phase12:e2e
 
+  # Independent Phase 13 remediation gate.
+  # Does NOT need quality — historical Prettier debt must remain visible on `quality`.
+  phase13-remediation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:18.6@sha256:4ef4dbc939d61acea57712655ddb4b4ab27419c913f94cca0cd57cb3ea3c2280
+        env:
+          POSTGRES_USER: alex_rewards
+          POSTGRES_PASSWORD: local-alex-rewards-only
+          POSTGRES_DB: alex_rewards_phase2
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U alex_rewards -d alex_rewards_phase2"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:8.8.2@sha256:37227fff5638322f4ebea25d6d0dc3ee50848604e82b81426f11507b3ec7d2cc
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Check out PR HEAD (not merge ref)
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Install pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          version: 11.25.0
+          run_install: false
+      - name: Install Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - name: Install from lockfile
+        run: pnpm install --frozen-lockfile
+      - name: Remediation report must be non-empty
+        run: test -s docs/PHASE_13_INDEPENDENT_REVIEW_REMEDIATION.md
+      - name: Prettier check (Phase 13 remediation-touched files only)
+        run: |
+          pnpm exec prettier --check \
+            docs/PHASE_13_INDEPENDENT_REVIEW_REMEDIATION.md \
+            docs/PHASE_13_ACCEPTANCE_REPORT.md \
+            .github/workflows/ci.yaml \
+            package.json \
+            apps/admin-e2e/package.json \
+            apps/admin-e2e/playwright.config.ts \
+            apps/admin-e2e/README.md \
+            apps/admin-e2e/src \
+            apps/admin-e2e/tests \
+            apps/admin-e2e/scripts \
+            apps/admin/src/components/HighImpactCeremony.tsx \
+            apps/admin/src/components/pages/FeatureFlagsPage.tsx \
+            apps/admin/src/lib/admin-api/client.ts \
+            apps/admin/src/lib/admin-api/types.ts
+      - name: Build Phase 13 dependency graph
+        env:
+          NEXT_PUBLIC_API_BASE_URL: http://localhost:3032
+        run: pnpm exec turbo run build --filter=@alex-rewards/api... --filter=@alex-rewards/admin... --filter=@alex-rewards/auth... --filter=@alex-rewards/contracts...
+      - name: Architecture boundaries
+        run: pnpm verify:boundaries
+      - name: Phase 11 AdsGram gates
+        env:
+          PHASE11_DATABASE_URL: postgresql://alex_rewards:local-alex-rewards-only@127.0.0.1:5432/alex_rewards_phase2
+          PHASE11_ADS_TESTS: '1'
+        run: pnpm test:phase11
+      - name: Phase 12 gates
+        env:
+          PHASE12_DATABASE_URL: postgresql://alex_rewards:local-alex-rewards-only@127.0.0.1:5432/alex_rewards_phase2
+          PHASE12_API_TESTS: '1'
+        run: pnpm test:phase12
+      - name: Phase 13 gates
+        env:
+          PHASE13_DATABASE_URL: postgresql://alex_rewards:local-alex-rewards-only@127.0.0.1:5432/alex_rewards_phase2
+          PHASE13_ADMIN_AUTH_TESTS: '1'
+          OWNER_ADMIN_AUTH_DATABASE_URL: postgresql://alex_rewards:local-alex-rewards-only@127.0.0.1:5432/alex_rewards_phase2
+          PHASE13_API_TESTS: '1'
+        run: pnpm test:phase13
+
+  # Independent Phase 13 Admin browser E2E (Playwright) — isolated alex_rewards_phase13_e2e DB.
+  # Does NOT need quality.
+  phase13-admin-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:18.6@sha256:4ef4dbc939d61acea57712655ddb4b4ab27419c913f94cca0cd57cb3ea3c2280
+        env:
+          POSTGRES_USER: alex_rewards
+          POSTGRES_PASSWORD: local-alex-rewards-only
+          POSTGRES_DB: alex_rewards_phase13_e2e
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U alex_rewards -d alex_rewards_phase13_e2e"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:8.8.2@sha256:37227fff5638322f4ebea25d6d0dc3ee50848604e82b81426f11507b3ec7d2cc
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Check out PR HEAD (not merge ref)
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Install pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          version: 11.25.0
+          run_install: false
+      - name: Install Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: 24.18.0
+          cache: pnpm
+      - name: Install from lockfile
+        run: pnpm install --frozen-lockfile
+      - name: Install Playwright Chromium
+        run: pnpm --filter @alex-rewards/admin-e2e exec playwright install --with-deps chromium
+      - name: Phase 13 Admin browser E2E
+        env:
+          PHASE13_ADMIN_E2E: '1'
+          PHASE13_DATABASE_URL: postgresql://alex_rewards:local-alex-rewards-only@127.0.0.1:5432/alex_rewards_phase13_e2e
+          PHASE13_ADMIN_E2E_DATABASE_URL: postgresql://alex_rewards:local-alex-rewards-only@127.0.0.1:5432/alex_rewards_phase13_e2e
+          PHASE13_ADMIN_E2E_REDIS_URL: redis://127.0.0.1:6379/13
+          PHASE13_ADMIN_E2E_API_PORT: '3032'
+          PHASE13_ADMIN_E2E_ADMIN_PORT: '3031'
+          PHASE13_ADMIN_E2E_API_BASE_URL: http://localhost:3032
+          PHASE13_ADMIN_E2E_ADMIN_BASE_URL: http://localhost:3031
+          NEXT_PUBLIC_API_BASE_URL: http://localhost:3032
+          ADMIN_WEBAUTHN_RP_ID: localhost
+          ADMIN_WEBAUTHN_ORIGIN: http://localhost:3031
+        run: pnpm test:phase13:admin-e2e
+
   docker-smoke:
     needs: quality
     runs-on: ubuntu-latest
