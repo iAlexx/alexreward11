@@ -11,11 +11,11 @@ Phase 11 request-counting semantics. The original Phase 11 package is preserved 
 `82b52bc1dacc93aa6ca046ff1d41282b68ad4e4431f3eed01c7d206ee410e7ef`
 
 **Remediation implementation SHA:** `e855c091c0bad68b231c685d6c2610e504dcc50a`  
-**Latest remediation tip SHA:** `39e678b80a9ec7ce3cabb7cc914abba9ca6a1b22`
+**Latest remediation tip SHA:** `8c65118343ef8e8b0c889eb54868683d6fcd7141`  
+**(Phase 11 job CI-green tip:** `c6be44d3c495f3dffa49f6512b22a6b55e40fae4` — subsequent tips are docs/packaging only)**
 
 **GitHub draft PR:** https://github.com/iAlexx/alexreward11/pull/7 (Draft — **not merged**)  
-**GitHub Actions run (CI-green tip for Phase 11 job):** https://github.com/iAlexx/alexreward11/actions/runs/36242298807  
-(docs tip `39e678b` is packaging/docs-only atop that green tip)
+**GitHub Actions run (Phase 11 job PASS):** https://github.com/iAlexx/alexreward11/actions/runs/36242298807
 
 - `phase11-remediation` job: **PASS** (report non-empty, scoped Prettier, turbo build, typecheck, boundaries, `test:phase11`)
 - `quality` job: **FAIL** — historical Prettier debt in Phase 11 ancestry (Foundation validation); kept visible, not weakened
@@ -118,7 +118,9 @@ PASS, ads typecheck PASS, Prettier check on remediation-touched files PASS.
   `82b52bc1dacc93aa6ca046ff1d41282b68ad4e4431f3eed01c7d206ee410e7ef`
 - Previous remediation package (pre-final-corrections) preserved unchanged:
   `aa3bf47a5aa7d913a162afb477e715fc5a270d686c7706f1cf3d3072e5064916`
-- Final remediation package SHA: _(filled after final archive)_
+- Final remediation package SHA (built from tip `8c65118`):
+  `2663e87a545d6e281602b84cf7530bae438e4f4de4548c75f4eee2bbe2330b99`
+  Path: `phase-archives/PHASE_11_ADSGRAM_PROVIDER_FRAMEWORK/PHASE_11_ADSGRAM_PROVIDER_FRAMEWORK_PACKAGE_20260926-123535_8c65118.zip`
 - Directory companions from original acceptance kept as `*.original-bad4bd5.*`
 - **INDEPENDENT_ARCHIVE_VERIFIED:** NO until Owner independently hashes package bytes
 
