@@ -4,6 +4,9 @@ import type {
   PatchUserSettingsRequest,
   ReferralsSummaryResponse,
   TasksListResponse,
+  TonProofBindRequest,
+  TonProofBindResponse,
+  TonProofChallengeResponse,
   UserBalancesResponse,
   UserSettingsResponse,
   WalletSummaryResponse,
@@ -135,6 +138,33 @@ export interface WithdrawalListItem {
 
 export interface WithdrawalsListResponse {
   readonly withdrawals: readonly WithdrawalListItem[];
+}
+
+/** Server-authored withdrawal quote (fees/net/expiry — never computed in the Mini App). */
+export interface WithdrawalQuoteResponse {
+  readonly id: string;
+  readonly userId: string;
+  readonly assetId: string;
+  readonly networkId: string;
+  readonly primaryWalletId: string;
+  readonly requestedAmountAtomic: string;
+  readonly feeAmountAtomic: string;
+  readonly netAmountAtomic: string;
+  readonly basePlatformFeeAtomic: string;
+  readonly membershipFeeDiscountBps: number;
+  readonly feeRuleId: string;
+  readonly feeRuleVersion: number;
+  readonly limitRuleId: string;
+  readonly limitRuleVersion: number;
+  readonly priorityReview: boolean;
+  readonly status: string;
+  /** ISO-8601 string after JSON serialization. */
+  readonly expiresAt: string;
+}
+
+export interface CreateWithdrawalRequest {
+  readonly quoteId: string;
+  readonly idempotencyKey: string;
 }
 
 function resolveBaseUrl(baseUrl: string): string {
@@ -306,8 +336,36 @@ export function createApiClient(options: ApiClientOptions) {
       return request<WalletSummaryResponse>('/v1/wallets');
     },
 
+    createTonProofChallenge(): Promise<TonProofChallengeResponse> {
+      return request<TonProofChallengeResponse>('/v1/wallets/ton-proof/challenge', {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+    },
+
+    bindTonProofWallet(body: TonProofBindRequest): Promise<TonProofBindResponse> {
+      return request<TonProofBindResponse>('/v1/wallets/ton-proof/bind', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+    },
+
     getWithdrawals(): Promise<WithdrawalsListResponse> {
       return request<WithdrawalsListResponse>('/v1/withdrawals');
+    },
+
+    createWithdrawalQuote(amountAtomic: string): Promise<WithdrawalQuoteResponse> {
+      return request<WithdrawalQuoteResponse>('/v1/withdrawals/quote', {
+        method: 'POST',
+        body: JSON.stringify({ amountAtomic }),
+      });
+    },
+
+    createWithdrawal(body: CreateWithdrawalRequest): Promise<WithdrawalListItem> {
+      return request<WithdrawalListItem>('/v1/withdrawals', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
     },
   };
 }

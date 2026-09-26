@@ -1,18 +1,24 @@
 'use client';
 
+import { TonConnectUIProvider } from '@tonconnect/ui-react';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslations } from 'next-intl';
 
+import { tonConnectManifestUrl } from '../lib/env';
 import { formatAtomicAmount, isAtomicAmountString } from '../lib/money/format';
 import { queryKeys } from '../lib/query/keys';
 import { useAuth } from '../providers/AuthProvider';
 import { DomainStateView } from './DomainState';
 import { MoneyAmount } from './MoneyAmount';
+import { WalletTonConnectPanel } from './WalletTonConnectPanel';
+import { WalletWithdrawalQuote } from './WalletWithdrawalQuote';
 
 export function WalletScreen() {
   const t = useTranslations('wallet');
+  const home = useTranslations('home');
   const common = useTranslations('common');
   const { api } = useAuth();
+  const manifestUrl = tonConnectManifestUrl();
 
   const balances = useQuery({
     queryKey: queryKeys.balances,
@@ -44,7 +50,9 @@ export function WalletScreen() {
           <DomainStateView state="ERROR" onRetry={() => void balances.refetch()} />
         ) : (
           <div className="alex-stack-sm">
-            <MoneyAmount bucket={balances.data.available} label={t('balancesTitle')} />
+            <MoneyAmount bucket={balances.data.available} label={home('balanceAvailable')} />
+            <MoneyAmount bucket={balances.data.pending} label={home('balancePending')} />
+            <MoneyAmount bucket={balances.data.reserved} label={home('balanceReserved')} />
             <p className="alex-meta">{common('baseUnitsNote')}</p>
           </div>
         )}
@@ -55,15 +63,7 @@ export function WalletScreen() {
         {wallets.isError || wallets.data === undefined ? (
           <DomainStateView state="ERROR" onRetry={() => void wallets.refetch()} />
         ) : (
-          <DomainStateView
-            state={
-              wallets.data.status === 'READY' && wallets.data.wallets.length === 0
-                ? 'EMPTY'
-                : wallets.data.status
-            }
-            emptyTitle={t('noWalletsTitle')}
-            emptyBody={t('noWalletsBody')}
-          >
+          <div className="alex-stack-sm">
             <p className="alex-meta">
               {t('network')}: {wallets.data.acceptedNetworkCode}
             </p>
@@ -72,31 +72,54 @@ export function WalletScreen() {
                 {t('cooldownUntil', { time: wallets.data.withdrawalCooldownUntil })}
               </p>
             ) : null}
-            <ul className="alex-list">
-              {wallets.data.wallets.map((wallet) => (
-                <li key={wallet.id} className="alex-stack-sm">
-                  <p className="alex-title-sm">{wallet.friendlyAddress}</p>
-                  <p className="alex-muted">
-                    {wallet.isPrimary ? t('primary') : null}
-                    {wallet.isPrimary ? ' · ' : null}
-                    {wallet.verified ? t('verified') : t('notVerified')}
-                    {wallet.disabledAt !== null ? ` · ${t('disabled')}` : null}
-                  </p>
-                  {wallet.verificationMethod !== null ? (
-                    <p className="alex-meta">
-                      {t('verificationMethod')}: {wallet.verificationMethod}
+            {wallets.data.wallets.length === 0 ? (
+              <DomainStateView
+                state="EMPTY"
+                emptyTitle={t('noWalletsTitle')}
+                emptyBody={t('noWalletsBody')}
+              />
+            ) : (
+              <ul className="alex-list">
+                {wallets.data.wallets.map((wallet) => (
+                  <li key={wallet.id} className="alex-stack-sm">
+                    <p className="alex-title-sm">{wallet.friendlyAddress}</p>
+                    <p className="alex-muted">
+                      {wallet.isPrimary || wallet.id === wallets.data.primaryWalletId
+                        ? t('primary')
+                        : null}
+                      {wallet.isPrimary || wallet.id === wallets.data.primaryWalletId
+                        ? ' · '
+                        : null}
+                      {wallet.verified ? t('verified') : t('notVerified')}
+                      {wallet.disabledAt !== null ? ` · ${t('disabled')}` : null}
                     </p>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-            <div className="alex-banner" role="status">
-              <p className="alex-title-sm">{t('connectUnavailableTitle')}</p>
-              <p className="alex-muted">{t('connectUnavailableBody')}</p>
-            </div>
-          </DomainStateView>
+                    {wallet.verifiedAt !== null ? (
+                      <p className="alex-meta">{t('verifiedAt', { time: wallet.verifiedAt })}</p>
+                    ) : null}
+                    {wallet.verificationMethod !== null ? (
+                      <p className="alex-meta">
+                        {t('verificationMethod')}: {wallet.verificationMethod}
+                      </p>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {manifestUrl === null ? (
+              <div className="alex-banner" role="status">
+                <p className="alex-title-sm">{t('connectUnavailableTitle')}</p>
+                <p className="alex-muted">{t('connectUnavailableBody')}</p>
+              </div>
+            ) : (
+              <TonConnectUIProvider manifestUrl={manifestUrl} restoreConnection={false}>
+                <WalletTonConnectPanel />
+              </TonConnectUIProvider>
+            )}
+          </div>
         )}
       </section>
+
+      <WalletWithdrawalQuote />
 
       <section className="alex-card">
         <h2 className="alex-title-sm">{t('withdrawalsTitle')}</h2>
@@ -122,6 +145,12 @@ export function WalletScreen() {
                   {t('withdrawalFee')}:{' '}
                   {isAtomicAmountString(item.feeAmountAtomic)
                     ? formatAtomicAmount(item.feeAmountAtomic)
+                    : '—'}
+                </p>
+                <p className="alex-meta">
+                  {t('withdrawalRequested')}:{' '}
+                  {isAtomicAmountString(item.requestedAmountAtomic)
+                    ? formatAtomicAmount(item.requestedAmountAtomic)
                     : '—'}
                 </p>
               </li>

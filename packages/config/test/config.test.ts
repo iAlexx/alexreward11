@@ -386,6 +386,24 @@ describe('environment validation', () => {
       NEXT_PUBLIC_API_BASE_URL: 'https://api.example.com',
     });
     expect(Object.keys(config).sort()).toEqual(['NEXT_PUBLIC_API_BASE_URL', 'NODE_ENV']);
+    expect(config.NEXT_PUBLIC_TONCONNECT_MANIFEST_URL).toBeUndefined();
+  });
+
+  it('accepts optional TonConnect manifest URL without inventing one', () => {
+    const config = loadWebConfig({
+      NODE_ENV: 'test',
+      NEXT_PUBLIC_API_BASE_URL: 'https://api.example.com',
+      NEXT_PUBLIC_TONCONNECT_MANIFEST_URL: 'https://app.example.com/tonconnect-manifest.json',
+    });
+    expect(config.NEXT_PUBLIC_TONCONNECT_MANIFEST_URL).toBe(
+      'https://app.example.com/tonconnect-manifest.json',
+    );
+    const empty = loadWebConfig({
+      NODE_ENV: 'test',
+      NEXT_PUBLIC_API_BASE_URL: 'https://api.example.com',
+      NEXT_PUBLIC_TONCONNECT_MANIFEST_URL: '',
+    });
+    expect(empty.NEXT_PUBLIC_TONCONNECT_MANIFEST_URL).toBeUndefined();
   });
 
   it('worker local defaults keep real chain off', () => {

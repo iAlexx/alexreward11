@@ -21,6 +21,7 @@
     "@alex-rewards/ui": "workspace:*",
     "@sentry/nextjs": "10.73.0",
     "@tanstack/react-query": "5.102.8",
+    "@tonconnect/ui-react": "3.0.2",
     "next": "16.3.4",
     "next-intl": "4.14.2",
     "react": "19.2.8",

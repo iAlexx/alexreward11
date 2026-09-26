@@ -11,6 +11,8 @@ const config: NextConfig = {
     '@alex-rewards/contracts',
     '@alex-rewards/i18n',
     '@alex-rewards/ui',
+    '@tonconnect/ui-react',
+    '@tonconnect/ui',
   ],
   async headers() {
     return [

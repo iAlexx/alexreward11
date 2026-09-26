@@ -480,6 +480,11 @@ const webSchema = z.object({
   NODE_ENV: nodeEnvironment,
   NEXT_PUBLIC_API_BASE_URL: z.url(),
   NEXT_PUBLIC_SENTRY_DSN: optionalUrl,
+  /**
+   * HTTPS URL of the Mini App's tonconnect-manifest.json.
+   * When absent, the Wallet screen degrades honestly (no invented production URL).
+   */
+  NEXT_PUBLIC_TONCONNECT_MANIFEST_URL: optionalUrl,
 });
 
 export type ApiConfig = z.infer<typeof apiSchema>;
