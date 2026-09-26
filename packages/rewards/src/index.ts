@@ -56,6 +56,7 @@ export {
 } from './simulated.js';
 
 export { issueSimulatedReward } from './issuance.js';
+export { issueAdReward } from './issue-ad.js';
 export { matureRewardEvent } from './maturity.js';
 
 export {
@@ -66,6 +67,9 @@ export {
 } from './config.js';
 
 export { insertOutboxEvent } from './outbox.js';
+
+export { readUserLifetimeEarned } from './user-read.js';
+export type { ReadUserLifetimeEarnedInput, UserLifetimeEarned } from './user-read.js';
 
 export type {
   MembershipBonusUnavailablePolicy,
@@ -87,6 +91,7 @@ export type {
   SimulatedSourceIdentity,
   CompleteSimulatedSourceCommand,
   IssueSimulatedRewardCommand,
+  IssueAdRewardCommand,
   IssuedRewardResult,
   MatureRewardEventCommand,
   MatureRewardEventResult,

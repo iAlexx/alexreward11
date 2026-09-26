@@ -1,9 +1,12 @@
 import type { Pool, PoolClient } from 'pg';
 
 import {
-  admitWalletSeqno,
+  admitWalletSeqnoWithRateLimitRetry,
   createTonChainProvider,
   FakeTonChainProvider,
+  DEFAULT_SEQNO_READMISSION_PACE_MS,
+  type AdmitWalletSeqnoBlocked,
+  type AdmitWalletSeqnoRateLimitRetryOptions,
   type TonChainProvider,
   type TonProviderKind,
 } from '@alex-rewards/ton';
@@ -18,6 +21,7 @@ import {
 } from './attempts.js';
 import {
   assertBlindResendForbidden,
+  claimFirstBroadcastSend,
   classifySubmitError,
   markBroadcastSubmitted,
   persistPreBroadcastEvidence,
@@ -128,6 +132,18 @@ export interface RunRealTestnetPayoutPipelineInput {
   readonly allowTestExecutionPath?: boolean;
   /** Test-only durable-boundary crash injection. */
   readonly crashAfter?: RealPipelineCrashPoint;
+  /**
+   * Test-only: override seqno admission rate-limit pacing/backoff sleep.
+   * Production always uses real timers. Only honored when allowTestExecutionPath
+   * or skipAssertReady is true.
+   */
+  readonly seqnoAdmissionSleepMs?: (ms: number) => Promise<void>;
+  /** Test-only: override post-lease readmission pace (default ~1100ms). */
+  readonly seqnoReadmissionPaceMs?: number;
+  /** Test-only: override RATE_LIMITED max dual-admission attempts. */
+  readonly seqnoAdmissionRateLimitMaxAttempts?: number;
+  /** Test-only: override RATE_LIMITED base backoff ms. */
+  readonly seqnoAdmissionRateLimitBaseDelayMs?: number;
 }
 
 function createProviderFromConfig(
@@ -147,6 +163,92 @@ function deriveQueryId(withdrawalId: string, attemptNumber: number, salt: string
       Math.abs([...`${withdrawalId}:${salt}`].reduce((a, c) => (a * 31 + c.charCodeAt(0)) | 0, 7)),
     )
   );
+}
+
+function seqnoAdmissionTestHooksActive(input: RunRealTestnetPayoutPipelineInput): boolean {
+  return input.allowTestExecutionPath === true || input.skipAssertReady === true;
+}
+
+async function readDispatchLeaseFenceHeld(
+  db: Pool,
+  input: {
+    readonly hotWalletId: string;
+    readonly ownerIdentity: string;
+    readonly fencingToken: bigint;
+  },
+): Promise<AdmitWalletSeqnoBlocked | null> {
+  const lease = await db.query<{
+    fencing_token: string;
+    expires_at: Date;
+    released_at: Date | null;
+    owner_identity: string;
+  }>(
+    `SELECT fencing_token::text, expires_at, released_at, owner_identity
+     FROM hot_wallet_dispatch_leases
+     WHERE hot_wallet_id = $1::uuid`,
+    [input.hotWalletId],
+  );
+  const row = lease.rows[0];
+  if (row === undefined) {
+    return {
+      ok: false,
+      code: 'LEASE_FENCE_INVALID',
+      message: 'dispatch lease missing during seqno rate-limit retry',
+    };
+  }
+  if (row.released_at !== null) {
+    return {
+      ok: false,
+      code: 'LEASE_FENCE_INVALID',
+      message: 'dispatch lease released during seqno rate-limit retry',
+    };
+  }
+  if (row.expires_at.getTime() <= Date.now()) {
+    return {
+      ok: false,
+      code: 'LEASE_FENCE_INVALID',
+      message: 'dispatch lease expired during seqno rate-limit retry',
+    };
+  }
+  if (row.owner_identity !== input.ownerIdentity) {
+    return {
+      ok: false,
+      code: 'LEASE_FENCE_INVALID',
+      message: 'dispatch lease owner mismatch during seqno rate-limit retry',
+    };
+  }
+  if (BigInt(row.fencing_token) !== input.fencingToken) {
+    return {
+      ok: false,
+      code: 'LEASE_FENCE_INVALID',
+      message: 'dispatch fencing token mismatch during seqno rate-limit retry',
+    };
+  }
+  return null;
+}
+
+function buildSeqnoAdmissionRetryOptions(
+  input: RunRealTestnetPayoutPipelineInput,
+  extras: {
+    readonly initialDelayMs?: number;
+    readonly beforeRetry?: () => Promise<AdmitWalletSeqnoBlocked | null>;
+  } = {},
+): AdmitWalletSeqnoRateLimitRetryOptions {
+  return {
+    ...(seqnoAdmissionTestHooksActive(input) &&
+    input.seqnoAdmissionRateLimitMaxAttempts !== undefined
+      ? { maxAttempts: input.seqnoAdmissionRateLimitMaxAttempts }
+      : {}),
+    ...(seqnoAdmissionTestHooksActive(input) &&
+    input.seqnoAdmissionRateLimitBaseDelayMs !== undefined
+      ? { baseDelayMs: input.seqnoAdmissionRateLimitBaseDelayMs }
+      : {}),
+    ...(seqnoAdmissionTestHooksActive(input) && input.seqnoAdmissionSleepMs !== undefined
+      ? { sleep: input.seqnoAdmissionSleepMs }
+      : {}),
+    ...(extras.initialDelayMs !== undefined ? { initialDelayMs: extras.initialDelayMs } : {}),
+    ...(extras.beforeRetry !== undefined ? { beforeRetry: extras.beforeRetry } : {}),
+  };
 }
 
 interface PersistedPipelineContext {
@@ -270,6 +372,10 @@ async function confirmAndSettle(
     amountAtomic: context.netAmountAtomic,
     senderJettonWallet: context.payoutJettonWallet,
     normalizedExternalMessageHash,
+    ...(attempt.externalMessageCellHash !== null &&
+    attempt.externalMessageCellHash.trim() !== ''
+      ? { externalMessageCellHash: attempt.externalMessageCellHash }
+      : {}),
   };
   const primaryEvidence = await primary.observeJettonTransfer(observeInput);
   stagesCompleted.push('watcher_reconciliation');
@@ -427,7 +533,10 @@ async function confirmAndSettle(
   crashAt(input, 'AFTER_CONFIRMATION_BEFORE_SETTLE');
 
   await withWithdrawalTransaction(db, async (client) => {
-    await settleWithdrawalReservation(client, { withdrawalId: context.withdrawalId });
+    await settleWithdrawalReservation(client, {
+      withdrawalId: context.withdrawalId,
+      confirmedAttemptId: attempt.id,
+    });
     const ownerIdentity = hotWalletDispatchOwnerIdentity(context.withdrawalId);
     const fence = await client.query<{ fencing_token: string }>(
       `SELECT fencing_token::text FROM hot_wallet_dispatch_leases
@@ -557,13 +666,32 @@ async function resumePersistedPipeline(
   let state = context.state;
 
   if (state === 'CONFIRMED') {
+    let settledAttemptId = attempt.id;
     await withWithdrawalTransaction(db, async (client) => {
-      await settleWithdrawalReservation(client, { withdrawalId: context.withdrawalId });
+      // Attribute from durable proof / prior settled identity — never assume latest attempt.
+      const settled = await settleWithdrawalReservation(client, {
+        withdrawalId: context.withdrawalId,
+      });
+      settledAttemptId = settled.confirmedAttemptId;
+      const ownerIdentity = hotWalletDispatchOwnerIdentity(context.withdrawalId);
+      const fence = await client.query<{ fencing_token: string }>(
+        `SELECT fencing_token::text FROM hot_wallet_dispatch_leases
+         WHERE hot_wallet_id = $1::uuid AND owner_identity = $2 AND released_at IS NULL`,
+        [context.hotWalletId, ownerIdentity],
+      );
+      if (fence.rows[0] !== undefined) {
+        await releaseHotWalletDispatchLease(client, {
+          hotWalletId: context.hotWalletId,
+          ownerIdentity,
+          fencingToken: BigInt(fence.rows[0].fencing_token),
+          reason: 'CONFIRMED_SETTLED',
+        });
+      }
     });
     stagesCompleted.push('idempotent_confirmed_finalization');
     return {
       state: 'CONFIRMED',
-      attemptId: attempt.id,
+      attemptId: settledAttemptId,
       seqno: Number(attempt.expectedSeqno),
       stagesCompleted,
     };
@@ -709,6 +837,7 @@ async function resumePersistedPipeline(
     }
     const resumeOwner = hotWalletDispatchOwnerIdentity(context.withdrawalId);
     const resumeFence = BigInt(attempt.dispatchFencingToken);
+    let resumeBroadcastClaimed = false;
     await withWithdrawalTransaction(db, async (client) => {
       // Same-withdrawal may reacquire if lease expired while still pre-broadcast.
       // Same-owner reclaim keeps fencing_token STABLE (attempt fence is immutable).
@@ -735,12 +864,24 @@ async function resumePersistedPipeline(
         fencingToken: lease.fencingToken,
         ownerIdentity: resumeOwner,
       });
-      await markBroadcastSubmitted(client, {
+      const claim = await claimFirstBroadcastSend(client, {
         attemptId: attempt.id,
+        fencingToken: resumeFence,
         ambiguityClass: null,
         broadcastResultState: 'UNKNOWN',
       });
+      resumeBroadcastClaimed = claim.claimed;
     });
+    if (!resumeBroadcastClaimed) {
+      stagesCompleted.push('broadcast_claim_lost_observe_only');
+      return {
+        state: 'RECONCILE_REQUIRED',
+        attemptId: attempt.id,
+        reason: 'broadcast_already_claimed',
+        seqno: Number(attempt.expectedSeqno),
+        stagesCompleted,
+      };
+    }
     crashAt(input, 'AFTER_SUBMIT_INTENT');
 
     let sendResult: { accepted: boolean; messageHash?: string; providerReference?: string };
@@ -832,6 +973,9 @@ async function resumePersistedPipeline(
     attempt = (await loadPersistedAttempt(db, context.withdrawalId))!;
     state = 'CONFIRMING';
   } else {
+    // Already submitted (or missing boc handled above). Never blind resend.
+    // BROADCASTING→RECONCILE_REQUIRED must be conditional: a concurrent winner may
+    // already have advanced past BROADCASTING (avoid STATE_CONFLICT races).
     await withWithdrawalTransaction(db, async (client) => {
       if (state === 'SIGNING') {
         await transitionWithdrawal(client, {
@@ -846,12 +990,24 @@ async function resumePersistedPipeline(
         });
         state = 'RECONCILE_REQUIRED';
       } else if (state === 'BROADCASTING') {
-        await transitionWithdrawal(client, {
-          id: context.withdrawalId,
-          from: 'BROADCASTING',
-          to: 'RECONCILE_REQUIRED',
-        });
-        state = 'RECONCILE_REQUIRED';
+        const moved = await client.query<{ id: string }>(
+          `UPDATE withdrawals
+           SET state = 'RECONCILE_REQUIRED'::withdrawal_state,
+               updated_at = now()
+           WHERE id = $1::uuid
+             AND state = 'BROADCASTING'::withdrawal_state
+           RETURNING id::text`,
+          [context.withdrawalId],
+        );
+        if (moved.rows[0] !== undefined) {
+          state = 'RECONCILE_REQUIRED';
+        } else {
+          const current = await client.query<{ state: WithdrawalState }>(
+            `SELECT state FROM withdrawals WHERE id = $1::uuid`,
+            [context.withdrawalId],
+          );
+          state = current.rows[0]?.state ?? state;
+        }
       } else if (state === 'BROADCASTED') {
         await transitionWithdrawal(client, {
           id: context.withdrawalId,
@@ -990,13 +1146,39 @@ export async function runRealTestnetPayoutPipeline(
   }
   const existingAttempt = await loadPersistedAttempt(db, input.withdrawalId);
   if (initialState === 'CONFIRMED') {
+    let settledAttemptId = existingAttempt?.id ?? null;
     await withWithdrawalTransaction(db, async (client) => {
-      await settleWithdrawalReservation(client, { withdrawalId: input.withdrawalId });
+      // Resolve confirmed attempt from durable proof — do not use latest attempt_number.
+      const settled = await settleWithdrawalReservation(client, {
+        withdrawalId: input.withdrawalId,
+      });
+      settledAttemptId = settled.confirmedAttemptId;
+      const hot = await client.query<{ hot_wallet_id: string | null }>(
+        `SELECT hot_wallet_id::text FROM withdrawals WHERE id = $1::uuid`,
+        [input.withdrawalId],
+      );
+      const hotWalletId = hot.rows[0]?.hot_wallet_id;
+      if (hotWalletId !== null && hotWalletId !== undefined) {
+        const ownerIdentity = hotWalletDispatchOwnerIdentity(input.withdrawalId);
+        const fence = await client.query<{ fencing_token: string }>(
+          `SELECT fencing_token::text FROM hot_wallet_dispatch_leases
+           WHERE hot_wallet_id = $1::uuid AND owner_identity = $2 AND released_at IS NULL`,
+          [hotWalletId, ownerIdentity],
+        );
+        if (fence.rows[0] !== undefined) {
+          await releaseHotWalletDispatchLease(client, {
+            hotWalletId,
+            ownerIdentity,
+            fencingToken: BigInt(fence.rows[0].fencing_token),
+            reason: 'CONFIRMED_SETTLED',
+          });
+        }
+      }
     });
     stagesCompleted.push('idempotent_confirmed_finalization');
     return {
       state: 'CONFIRMED',
-      attemptId: existingAttempt?.id ?? null,
+      attemptId: settledAttemptId,
       ...(existingAttempt === null ? {} : { seqno: Number(existingAttempt.expectedSeqno) }),
       stagesCompleted,
     };
@@ -1104,15 +1286,28 @@ export async function runRealTestnetPayoutPipeline(
     if (publicKey.length !== 32) {
       throw new WithdrawalDomainError('VALIDATION', 'Signer public key must be 32 bytes');
     }
-    const admission = await admitWalletSeqno({
-      networkGlobalId: input.phase10.networkGlobalId,
-      hotWalletAddress: context.hotWalletAddress,
-      publicKeyHex: identity.publicKeyHex,
-      signerKeyReference: identity.publicKeyFingerprint,
-      approvedSignerKeyReference: context.signerKeyReference,
-      primary,
-      secondary,
-    });
+    const admission = await admitWalletSeqnoWithRateLimitRetry(
+      {
+        networkGlobalId: input.phase10.networkGlobalId,
+        hotWalletAddress: context.hotWalletAddress,
+        publicKeyHex: identity.publicKeyHex,
+        signerKeyReference: identity.publicKeyFingerprint,
+        approvedSignerKeyReference: context.signerKeyReference,
+        primary,
+        secondary,
+      },
+      buildSeqnoAdmissionRetryOptions(input, {
+        initialDelayMs: seqnoAdmissionTestHooksActive(input)
+          ? (input.seqnoReadmissionPaceMs ?? 0)
+          : DEFAULT_SEQNO_READMISSION_PACE_MS,
+        beforeRetry: async () =>
+          readDispatchLeaseFenceHeld(db, {
+            hotWalletId: context.hotWalletId,
+            ownerIdentity: owner,
+            fencingToken: BigInt(lease.fencing_token!),
+          }),
+      }),
+    );
     if (!admission.ok) {
       await withWithdrawalTransaction(db, async (client) => {
         await transitionWithdrawal(client, {
@@ -1386,15 +1581,18 @@ export async function runRealTestnetPayoutPipeline(
   }
 
   // --- Account-state / seqno admission BEFORE SIGNING and lease ---
-  const initialAdmission = await admitWalletSeqno({
-    networkGlobalId: input.phase10.networkGlobalId,
-    hotWalletAddress: loaded.hotWalletAddress,
-    publicKeyHex: identity.publicKeyHex,
-    signerKeyReference: identity.publicKeyFingerprint,
-    approvedSignerKeyReference: loaded.signerKeyReference,
-    primary,
-    secondary,
-  });
+  const initialAdmission = await admitWalletSeqnoWithRateLimitRetry(
+    {
+      networkGlobalId: input.phase10.networkGlobalId,
+      hotWalletAddress: loaded.hotWalletAddress,
+      publicKeyHex: identity.publicKeyHex,
+      signerKeyReference: identity.publicKeyFingerprint,
+      approvedSignerKeyReference: loaded.signerKeyReference,
+      primary,
+      secondary,
+    },
+    buildSeqnoAdmissionRetryOptions(input),
+  );
   if (!initialAdmission.ok) {
     stagesCompleted.push('wallet_seqno_admission_blocked');
     return {
@@ -1462,15 +1660,31 @@ export async function runRealTestnetPayoutPipeline(
   crashAt(input, 'AFTER_ENTER_SIGNING');
 
   // Re-validate admission before immutable attempt (state may change between reads).
-  const readmission = await admitWalletSeqno({
-    networkGlobalId: input.phase10.networkGlobalId,
-    hotWalletAddress: context.hotWalletAddress,
-    publicKeyHex: identity.publicKeyHex,
-    signerKeyReference: identity.publicKeyFingerprint,
-    approvedSignerKeyReference: context.signerKeyReference,
-    primary,
-    secondary,
-  });
+  // Pace + RATE_LIMITED retry: TonCenter free-tier often 429s on back-to-back
+  // getAddressInformation after initial dual-provider admission. Dual providers
+  // remain mandatory on every attempt; lease fence is re-checked before each retry.
+  const readmission = await admitWalletSeqnoWithRateLimitRetry(
+    {
+      networkGlobalId: input.phase10.networkGlobalId,
+      hotWalletAddress: context.hotWalletAddress,
+      publicKeyHex: identity.publicKeyHex,
+      signerKeyReference: identity.publicKeyFingerprint,
+      approvedSignerKeyReference: context.signerKeyReference,
+      primary,
+      secondary,
+    },
+    buildSeqnoAdmissionRetryOptions(input, {
+      initialDelayMs: seqnoAdmissionTestHooksActive(input)
+        ? (input.seqnoReadmissionPaceMs ?? 0)
+        : DEFAULT_SEQNO_READMISSION_PACE_MS,
+      beforeRetry: async () =>
+        readDispatchLeaseFenceHeld(db, {
+          hotWalletId: context.hotWalletId,
+          ownerIdentity: context.ownerIdentity,
+          fencingToken: context.fencingToken,
+        }),
+    }),
+  );
   if (!readmission.ok || readmission.seqno !== initialAdmission.seqno) {
     await withWithdrawalTransaction(db, async (client) => {
       await transitionWithdrawal(client, {
@@ -1679,20 +1893,32 @@ export async function runRealTestnetPayoutPipeline(
   stagesCompleted.push('persist_signed_boc_before_send');
   crashAt(input, 'AFTER_BOC_PERSISTED');
 
-  // Mark submit intent immediately before sendBoc so crash/timeout cannot look like
-  // FAILED_PRE_BROADCAST (ambiguous → reconcile; never blind resend).
+  // Atomic first-broadcast claim BEFORE sendBoc. Losing contenders must not send.
+  let broadcastClaimed = false;
   await withWithdrawalTransaction(db, async (client) => {
     await assertHotWalletDispatchFence(client, {
       hotWalletId: context.hotWalletId,
       fencingToken: context.fencingToken,
       ownerIdentity,
     });
-    await markBroadcastSubmitted(client, {
+    const claim = await claimFirstBroadcastSend(client, {
       attemptId: attempt.id,
+      fencingToken: context.fencingToken,
       ambiguityClass: null,
       broadcastResultState: 'UNKNOWN',
     });
+    broadcastClaimed = claim.claimed;
   });
+  if (!broadcastClaimed) {
+    stagesCompleted.push('broadcast_claim_lost_observe_only');
+    return {
+      state: 'RECONCILE_REQUIRED',
+      attemptId: attempt.id,
+      reason: 'broadcast_already_claimed',
+      seqno,
+      stagesCompleted,
+    };
+  }
   crashAt(input, 'AFTER_SUBMIT_INTENT');
 
   let sendResult: { accepted: boolean; messageHash?: string; providerReference?: string };

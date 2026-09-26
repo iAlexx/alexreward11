@@ -6,14 +6,23 @@ import { proxyActivities } from '@temporalio/workflow';
  * Phase 10: optional Testnet activity selected by input.realChainEnabled.
  * Default remains Phase 7 fake payout when realChainEnabled is not true
  * (preserves existing fake-chain Temporal tests).
+ *
+ * Result preserves optional `reason` / `stagesCompleted` from activities for diagnostics.
  */
+export interface WithdrawalPayoutWorkflowResult {
+  readonly state: string;
+  readonly attemptId: string | null;
+  readonly reason?: string;
+  readonly stagesCompleted?: readonly string[];
+}
+
 export interface WithdrawalPayoutActivities {
   executeWithdrawalFakePayout(input: {
     withdrawalId: string;
-  }): Promise<{ state: string; attemptId: string | null }>;
+  }): Promise<WithdrawalPayoutWorkflowResult>;
   executeWithdrawalTestnetPayout(input: {
     withdrawalId: string;
-  }): Promise<{ state: string; attemptId: string | null }>;
+  }): Promise<WithdrawalPayoutWorkflowResult>;
 }
 
 const { executeWithdrawalFakePayout, executeWithdrawalTestnetPayout } =
@@ -29,7 +38,7 @@ export async function withdrawalPayoutWorkflow(input: {
   withdrawalId: string;
   /** When true and fake chain disabled, use Phase 10 Testnet activity. */
   realChainEnabled?: boolean;
-}): Promise<{ state: string; attemptId: string | null }> {
+}): Promise<WithdrawalPayoutWorkflowResult> {
   if (input.realChainEnabled === true) {
     return await executeWithdrawalTestnetPayout({ withdrawalId: input.withdrawalId });
   }

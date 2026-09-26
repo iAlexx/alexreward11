@@ -36,9 +36,14 @@ provider business behaviour is implemented here.
 | `0021_phase10_broadcast_evidence.sql`                | Phase 10: additive nullable `signed_external_message_boc` / `broadcast_submitted_at` / `broadcast_ambiguity_class` on `withdrawal_attempts` (intent immutability from 0017 unchanged)                                                                        |
 | `0022_external_message_identity.sql`                 | Phase 10: additive nullable signed Wallet request BOC, final External-In cell hash, and Tonkeeper-normalized message hash evidence                                                                                                                           |
 | `0023_attempt_requires_state_init.sql`               | Phase 10: additive `requires_state_init` on `withdrawal_attempts` + signer view (StateInit bound to proven uninit admission, not seqno=0 alone)                                                                                                              |
+| `0024_owner_admin_auth_hardening.sql`                | Owner admin auth: additive `totp_last_accepted_step` on `admin_credentials`; `admin_auth_throttle` for persistent attempt lockouts                                                                                                                           |
+| `0025_single_owner_authority.sql`                    | M0: `admin_owner_authority` singleton seat + trigger + partial unique index — at most one effective OWNER binding; vacant seat = pre-bootstrap; revoke does not enable informal transfer                                                                         |
+| `0026_owner_bootstrap_grants.sql`                    | M1 Stage B: `owner_bootstrap_grants` / `owner_bootstrap_attempts` enrollment ledger (no secrets)                                                                                                                                                             |
+| `0027_signer_login_isolation.sql`                    | Phase 10 S-05: dedicated LOGIN `alex_rewards_signer` inheriting `alex_rewards_signer_ro`; password provisioned outside migrations                                                                                                                             |
 
-Migrations `0001`–`0022` remain immutable. Proven-account StateInit requirement is added only by
-forward migration `0023`.
+Migrations `0001`–`0026` remain immutable. Signer login isolation is added only by
+forward migration `0027` (local provision script sets password; ops credential rotation
+requires separate Owner approval — see `docs/SIGNER_DB_PRIVILEGE_ISOLATION.md`).
 
 ## Conventions
 

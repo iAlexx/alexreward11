@@ -6,6 +6,7 @@ import { createShutdownCoordinator, initializeObservability } from '@alex-reward
 import {
   EncryptedLocalSigningProvider,
   LocalEphemeralSignPort,
+  assertSignerDatabaseReadBoundary,
   type LockableSignPort,
   type SignPort,
 } from '@alex-rewards/signing';
@@ -48,6 +49,8 @@ if (config.SIGNER_KEY_MODE === 'self_hosted_encrypted') {
 }
 
 try {
+  // S-05: refuse to serve if SIGNER_DATABASE_URL is a privileged / writable login.
+  await assertSignerDatabaseReadBoundary(pool);
   await registerSignerRoutes(server, {
     pool,
     serviceToken: config.SIGNER_SERVICE_TOKEN,

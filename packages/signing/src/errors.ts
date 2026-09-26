@@ -16,7 +16,9 @@ export type SignerErrorCode =
   | 'SPIKE_DISABLED'
   | 'INVALID_REQUEST'
   | 'DB_DENIED'
-  | 'ACTION_UNAVAILABLE';
+  | 'ACTION_UNAVAILABLE'
+  | 'CONFIG'
+  | 'INTERNAL';
 
 export class SignerError extends Error {
   readonly code: SignerErrorCode;

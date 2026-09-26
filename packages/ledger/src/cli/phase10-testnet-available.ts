@@ -58,6 +58,7 @@ function toRuntimeConfig(
     allowedUserId: config.PHASE10_TESTNET_PROVISION_ALLOWED_USER_ID,
     maxAmountAtomic: config.PHASE10_TESTNET_PROVISION_MAX_ATOMIC,
     ownerAdminUserId: config.PHASE10_TESTNET_PROVISION_OWNER_ADMIN_USER_ID,
+    requiredDatabaseName: config.PHASE10_TESTNET_PROVISION_REQUIRED_DATABASE_NAME,
   };
 }
 

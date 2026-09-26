@@ -14,6 +14,8 @@ import {
   type Phase10ChainHistoryAcceptanceBinding,
 } from './phase10-chain-history-evidence.js';
 import { checkPhase10PayoutInvariants } from './phase10-payout-invariants.js';
+import { parsePhase10AcceptanceCutoff } from './phase10-provider-roles.js';
+import { isAuthorizedPhase10PreManifestCanary } from './phase10-usdt-z-canary.js';
 
 const MIN_CONTROLLED_CONFIRMED = 100;
 const MIN_PLANNED_COUNT = 100;
@@ -55,6 +57,12 @@ export interface Phase10AcceptanceGateResult {
   readonly confirmedCount: number;
   readonly duplicateEconomicPayouts: number;
   readonly duplicateSettlements: number;
+  /**
+   * Immutable acceptance cutoff used for chain-history observation-window end
+   * coverage (captured before collection). Null when not applicable / refused
+   * before cutoff validation.
+   */
+  readonly acceptanceCutoff: string | null;
 }
 
 export interface Phase10AcceptanceFromEvidenceInput {
@@ -69,6 +77,12 @@ export interface Phase10AcceptanceFromEvidenceInput {
   readonly chainHistoryEvidencePath?: string | null;
   /** Optional precomputed invariant dump path; still re-verified against DB. */
   readonly invariantResultsPath?: string | null;
+  /**
+   * Immutable UTC ISO timestamp captured BEFORE chain-history collection.
+   * Required for authoritative acceptance. Used as campaignWindowEnd for
+   * observation-window coverage — never replaced with evaluator-time now().
+   */
+  readonly acceptanceCutoff: string;
 }
 
 /** @deprecated Prefer Phase10AcceptanceFromEvidenceInput with evaluatePhase10AcceptanceFromEvidence. */
@@ -88,6 +102,8 @@ interface CampaignEvidenceFile {
   readonly withdrawalIds?: unknown;
   /** Legacy alias — used only when withdrawalIds is absent/empty. */
   readonly withdrawals?: unknown;
+  /** Historical isolated baseline attempt allowlist (canary B3 Option C). */
+  readonly baselineIsolatedHistoricalAttemptIds?: unknown;
   readonly evidence?: unknown;
   readonly payouts?: ReadonlyArray<{
     readonly withdrawalId?: string;
@@ -131,6 +147,7 @@ function refuse(
     readonly confirmedCount?: number;
     readonly duplicateEconomicPayouts?: number;
     readonly duplicateSettlements?: number;
+    readonly acceptanceCutoff?: string | null;
   },
 ): Phase10AcceptanceGateResult {
   return {
@@ -141,6 +158,7 @@ function refuse(
     confirmedCount: extras?.confirmedCount ?? 0,
     duplicateEconomicPayouts: extras?.duplicateEconomicPayouts ?? 0,
     duplicateSettlements: extras?.duplicateSettlements ?? 0,
+    acceptanceCutoff: extras?.acceptanceCutoff ?? null,
   };
 }
 
@@ -249,6 +267,54 @@ function extractWithdrawalIds(file: CampaignEvidenceFile): string[] {
   }
 
   return ids;
+}
+
+function extractBaselineIsolatedHistoricalAttemptIds(
+  file: CampaignEvidenceFile,
+): readonly string[] | null {
+  if (!Array.isArray(file.baselineIsolatedHistoricalAttemptIds)) return null;
+  const ids = file.baselineIsolatedHistoricalAttemptIds.filter(
+    (id): id is string => typeof id === 'string' && id.trim() !== '',
+  );
+  return ids;
+}
+
+function findEvidenceRecordForWithdrawal(
+  file: CampaignEvidenceFile,
+  withdrawalId: string,
+): Record<string, unknown> | null {
+  if (!Array.isArray(file.evidence)) return null;
+  for (const row of file.evidence) {
+    const rec = asRecord(row);
+    if (rec === null) continue;
+    const id = readNonEmptyString(rec.withdrawalId) ?? readNonEmptyString(rec.id);
+    if (id === withdrawalId) return rec;
+  }
+  return null;
+}
+
+function readEvidenceOrdinal(rec: Record<string, unknown> | null): number | null {
+  if (rec === null) return null;
+  const ordinalRaw = rec.ordinal;
+  if (typeof ordinalRaw === 'number' && Number.isInteger(ordinalRaw)) return ordinalRaw;
+  if (typeof ordinalRaw === 'string' && ordinalRaw.trim() !== '') {
+    const n = Number(ordinalRaw);
+    if (Number.isInteger(n)) return n;
+  }
+  return null;
+}
+
+function readEvidenceInvariantPass(rec: Record<string, unknown> | null): boolean {
+  if (rec === null) return false;
+  const raw = rec.invariantResult ?? rec.invariant;
+  if (typeof raw === 'string' && raw.trim().toUpperCase() === 'PASS') return true;
+  if (raw === true) return true;
+  return false;
+}
+
+function readEvidenceAttemptId(rec: Record<string, unknown> | null): string | null {
+  if (rec === null) return null;
+  return readNonEmptyString(rec.attemptId) ?? readNonEmptyString(rec.finalAttemptId);
 }
 
 /**
@@ -887,30 +953,49 @@ export async function evaluatePhase10AcceptanceFromEvidence(
 ): Promise<Phase10AcceptanceGateResult> {
   const reasons: string[] = [];
 
+  const cutoffParsed = parsePhase10AcceptanceCutoff(input.acceptanceCutoff);
+  if (!cutoffParsed.ok || cutoffParsed.cutoff === null) {
+    return refuse('REFUSED_MISSING_LIVE_EVIDENCE', [
+      cutoffParsed.reason ??
+        'acceptanceCutoff required and must be a valid ISO timestamp (captured before chain-history collection)',
+    ]);
+  }
+  const acceptanceCutoff = cutoffParsed.cutoff;
+  const refuseCut = (
+    verdict: Phase10AcceptanceGateVerdict,
+    refuseReasons: readonly string[],
+    extras?: {
+      readonly confirmedCount?: number;
+      readonly duplicateEconomicPayouts?: number;
+      readonly duplicateSettlements?: number;
+    },
+  ): Phase10AcceptanceGateResult =>
+    refuse(verdict, refuseReasons, { ...extras, acceptanceCutoff });
+
   let campaign: CampaignEvidenceFile;
   try {
     const parsed = await readJsonFile(input.campaignEvidencePath);
     const campaignObject = asRecord(parsed);
     if (campaignObject === null) {
-      return refuse('REFUSED_MISSING_LIVE_EVIDENCE', ['campaign evidence is not a JSON object']);
+      return refuseCut('REFUSED_MISSING_LIVE_EVIDENCE', ['campaign evidence is not a JSON object']);
     }
     campaign = campaignObject;
   } catch (error) {
-    return refuse('REFUSED_MISSING_LIVE_EVIDENCE', [
+    return refuseCut('REFUSED_MISSING_LIVE_EVIDENCE', [
       `campaign evidence missing or unreadable: ${error instanceof Error ? error.message : String(error)}`,
     ]);
   }
 
   const structureErrors = validateCampaignStructure(campaign);
   if (structureErrors.length > 0) {
-    return refuse('REFUSED_CAMPAIGN_BINDING', structureErrors);
+    return refuseCut('REFUSED_CAMPAIGN_BINDING', structureErrors);
   }
 
   let failureRaw: unknown;
   try {
     failureRaw = await readJsonFile(input.failureInjectionEvidencePath);
   } catch (error) {
-    return refuse('REFUSED_MISSING_LIVE_EVIDENCE', [
+    return refuseCut('REFUSED_MISSING_LIVE_EVIDENCE', [
       `failure-injection evidence missing or unreadable: ${
         error instanceof Error ? error.message : String(error)
       }`,
@@ -925,7 +1010,7 @@ export async function evaluatePhase10AcceptanceFromEvidence(
   try {
     readinessRaw = await readJsonFile(input.readinessEvidencePath);
   } catch (error) {
-    return refuse('REFUSED_MISSING_LIVE_EVIDENCE', [
+    return refuseCut('REFUSED_MISSING_LIVE_EVIDENCE', [
       `readiness/preflight evidence missing or unreadable: ${
         error instanceof Error ? error.message : String(error)
       }`,
@@ -945,7 +1030,7 @@ export async function evaluatePhase10AcceptanceFromEvidence(
   // Bind readiness identity/network/asset to campaign (even though each was validated alone).
   if (readinessParsed.parsed !== null) {
     if (readinessParsed.parsed.controlledUserId !== controlledUserId) {
-      return refuse('REFUSED_CAMPAIGN_BINDING', [
+      return refuseCut('REFUSED_CAMPAIGN_BINDING', [
         ...reasons,
         'readiness controlledUserId does not match campaign controlledUserId',
       ]);
@@ -955,7 +1040,7 @@ export async function evaluatePhase10AcceptanceFromEvidence(
       campaignNetwork !== 'TON_TESTNET' ||
       readinessParsed.parsed.networkCode !== 'TON_TESTNET'
     ) {
-      return refuse('REFUSED_CAMPAIGN_BINDING', [
+      return refuseCut('REFUSED_CAMPAIGN_BINDING', [
         ...reasons,
         'readiness networkCode / campaign networkCode must both be TON_TESTNET',
       ]);
@@ -965,7 +1050,7 @@ export async function evaluatePhase10AcceptanceFromEvidence(
       campaignAsset !== 'USDT' ||
       readinessParsed.parsed.assetSymbol !== 'USDT'
     ) {
-      return refuse('REFUSED_CAMPAIGN_BINDING', [
+      return refuseCut('REFUSED_CAMPAIGN_BINDING', [
         ...reasons,
         'readiness assetSymbol / campaign assetSymbol must both be USDT',
       ]);
@@ -974,13 +1059,13 @@ export async function evaluatePhase10AcceptanceFromEvidence(
 
   const listedIds = extractWithdrawalIds(campaign);
   if (listedIds.length === 0) {
-    return refuse('REFUSED_MISSING_LIVE_EVIDENCE', [
+    return refuseCut('REFUSED_MISSING_LIVE_EVIDENCE', [
       ...reasons,
       'campaign evidence contains no withdrawal ids',
     ]);
   }
   if (listedIds.length !== new Set(listedIds).size) {
-    return refuse('REFUSED_CAMPAIGN_BINDING', [
+    return refuseCut('REFUSED_CAMPAIGN_BINDING', [
       ...reasons,
       'campaign evidence contains duplicate withdrawal IDs',
     ]);
@@ -996,7 +1081,7 @@ export async function evaluatePhase10AcceptanceFromEvidence(
     campaignCreatedAt,
   );
   if (!dbBinding.ok || dbBinding.binding === null) {
-    return refuse('REFUSED_CAMPAIGN_BINDING', [...reasons, ...dbBinding.reasons]);
+    return refuseCut('REFUSED_CAMPAIGN_BINDING', [...reasons, ...dbBinding.reasons]);
   }
 
   // Authoritative Hot Wallet outgoing-history evidence (never caller boolean / self-binding).
@@ -1020,7 +1105,8 @@ export async function evaluatePhase10AcceptanceFromEvidence(
         jettonMaster: dbBinding.binding.jettonMaster,
         networkGlobalId: PHASE10_TON_TESTNET_NETWORK_GLOBAL_ID,
         campaignWindowStart: campaignCreatedAt.toISOString(),
-        campaignWindowEnd: new Date().toISOString(),
+        // Stable pre-collection cutoff — never evaluator-time now().
+        campaignWindowEnd: acceptanceCutoff,
         primaryEndpointFingerprint: readinessParsed.parsed?.primaryEndpointFingerprint ?? null,
         secondaryEndpointFingerprint: readinessParsed.parsed?.secondaryEndpointFingerprint ?? null,
         expectedCampaignPayoutIdentities: dbBinding.binding.expectedCampaignPayoutIdentities ?? [],
@@ -1036,7 +1122,7 @@ export async function evaluatePhase10AcceptanceFromEvidence(
 
   const evidenceBindingErrors = validateCampaignEvidenceRecords(campaign, campaignId, distinctIds);
   if (evidenceBindingErrors.length > 0) {
-    return refuse('REFUSED_CAMPAIGN_BINDING', [...reasons, ...evidenceBindingErrors]);
+    return refuseCut('REFUSED_CAMPAIGN_BINDING', [...reasons, ...evidenceBindingErrors]);
   }
 
   let confirmedCount = 0;
@@ -1055,13 +1141,15 @@ export async function evaluatePhase10AcceptanceFromEvidence(
       asset_symbol: string;
       requested_at: Date;
       created_at: Date;
+      settlement_ledger_tx_id: string | null;
     }>(
       `SELECT w.user_id::text AS user_id,
               w.state::text AS state,
               n.code AS network_code,
               a.symbol AS asset_symbol,
               w.requested_at,
-              w.created_at
+              w.created_at,
+              w.settlement_ledger_tx_id::text AS settlement_ledger_tx_id
        FROM withdrawals w
        JOIN networks n ON n.id = w.network_id
        JOIN assets a ON a.id = w.asset_id
@@ -1100,11 +1188,46 @@ export async function evaluatePhase10AcceptanceFromEvidence(
       continue;
     }
     if (requestedAt.getTime() < campaignCreatedAt.getTime()) {
-      campaignBindingFail = true;
-      reasons.push(
-        `campaign withdrawal ${withdrawalId} requested_at is before campaign.createdAt (historical/non-campaign)`,
+      // B3 Option C: sole pre-manifest USDT-Z canary may pass when all strict guards hold.
+      const evidenceRec = findEvidenceRecordForWithdrawal(campaign, withdrawalId);
+      const evidenceAttemptId = readEvidenceAttemptId(evidenceRec);
+      const ipp = await input.db.query<{
+        attempt_id: string | null;
+      }>(
+        `SELECT r.withdrawal_attempt_id::text AS attempt_id
+         FROM withdrawal_payout_reconciliations r
+         WHERE r.withdrawal_id = $1::uuid
+           AND r.resolution = 'INTENDED_PAYOUT_PROVEN'
+         ORDER BY r.resolved_at ASC NULLS LAST, r.id ASC
+         LIMIT 1`,
+        [withdrawalId],
       );
-      continue;
+      const ippAttemptId =
+        ipp.rows[0]?.attempt_id !== undefined &&
+        ipp.rows[0]?.attempt_id !== null &&
+        ipp.rows[0].attempt_id.trim() !== ''
+          ? ipp.rows[0].attempt_id.trim()
+          : null;
+      const finalSuccessfulAttemptId = ippAttemptId ?? evidenceAttemptId;
+      const canaryAuthorized = isAuthorizedPhase10PreManifestCanary({
+        withdrawalId,
+        campaignWithdrawalIds: distinctIds,
+        evidenceOrdinal: readEvidenceOrdinal(evidenceRec),
+        withdrawalState: bound.state,
+        settlementLedgerTxId: bound.settlement_ledger_tx_id,
+        hasIntendedPayoutProven: ipp.rows.length > 0,
+        finalSuccessfulAttemptId,
+        baselineIsolatedHistoricalAttemptIds:
+          extractBaselineIsolatedHistoricalAttemptIds(campaign),
+        evidenceInvariantPass: readEvidenceInvariantPass(evidenceRec),
+      });
+      if (!canaryAuthorized) {
+        campaignBindingFail = true;
+        reasons.push(
+          `campaign withdrawal ${withdrawalId} requested_at is before campaign.createdAt (historical/non-campaign)`,
+        );
+        continue;
+      }
     }
 
     const report = await checkPhase10PayoutInvariants(input.db, withdrawalId, {
@@ -1148,14 +1271,14 @@ export async function evaluatePhase10AcceptanceFromEvidence(
   }
 
   if (campaignBindingFail) {
-    return refuse('REFUSED_CAMPAIGN_BINDING', reasons, {
+    return refuseCut('REFUSED_CAMPAIGN_BINDING', reasons, {
       confirmedCount,
       duplicateEconomicPayouts: duplicateEconomic,
       duplicateSettlements: duplicateSettlement,
     });
   }
   if (duplicateEconomic > 0 || chainHistoryUnexpected > 0) {
-    return refuse(
+    return refuseCut(
       'REFUSED_DUPLICATE_ECONOMIC_PAYOUT',
       [
         ...reasons,
@@ -1172,7 +1295,7 @@ export async function evaluatePhase10AcceptanceFromEvidence(
     );
   }
   if (duplicateSettlement > 0) {
-    return refuse(
+    return refuseCut(
       'REFUSED_DUPLICATE_SETTLEMENT',
       [...reasons, `duplicateSettlements=${duplicateSettlement}`],
       {
@@ -1183,21 +1306,21 @@ export async function evaluatePhase10AcceptanceFromEvidence(
     );
   }
   if (chainProofFail) {
-    return refuse('REFUSED_CHAIN_PROOF_REQUIRED', reasons, {
+    return refuseCut('REFUSED_CHAIN_PROOF_REQUIRED', reasons, {
       confirmedCount,
       duplicateEconomicPayouts: duplicateEconomic,
       duplicateSettlements: duplicateSettlement,
     });
   }
   if (unresolved) {
-    return refuse('REFUSED_UNRESOLVED_CAMPAIGN', reasons, {
+    return refuseCut('REFUSED_UNRESOLVED_CAMPAIGN', reasons, {
       confirmedCount,
       duplicateEconomicPayouts: duplicateEconomic,
       duplicateSettlements: duplicateSettlement,
     });
   }
   if (invariantFail || chainHistoryFail || reasons.length > 0) {
-    return refuse(
+    return refuseCut(
       invariantFail ? 'REFUSED_INVARIANT_FAILURE' : 'REFUSED_MISSING_LIVE_EVIDENCE',
       reasons,
       {
@@ -1208,7 +1331,7 @@ export async function evaluatePhase10AcceptanceFromEvidence(
     );
   }
   if (confirmedCount < MIN_CONTROLLED_CONFIRMED) {
-    return refuse(
+    return refuseCut(
       'REFUSED_INSUFFICIENT_CONFIRMED_COUNT',
       [`confirmed=${confirmedCount} (need >= ${MIN_CONTROLLED_CONFIRMED})`],
       {
@@ -1229,6 +1352,7 @@ export async function evaluatePhase10AcceptanceFromEvidence(
     confirmedCount,
     duplicateEconomicPayouts: duplicateEconomic,
     duplicateSettlements: duplicateSettlement,
+    acceptanceCutoff,
   };
 }
 

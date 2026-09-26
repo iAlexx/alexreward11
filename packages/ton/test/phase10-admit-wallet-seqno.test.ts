@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   admitWalletSeqno,
+  admitWalletSeqnoWithRateLimitRetry,
   approvedWalletV5R1CodeHash,
   deriveWalletV5R1AddressRaw,
   FakeTonChainProvider,
@@ -286,3 +287,167 @@ describe('admitWalletSeqno (fail-closed V5R1)', () => {
     }
   });
 });
+
+describe('admitWalletSeqnoWithRateLimitRetry', () => {
+  it('recovers from transient RATE_LIMITED via full dual-provider re-admission', async () => {
+    const primary = new FakeTonChainProvider();
+    const secondary = new FakeTonChainProvider();
+    primary.seedActiveV5R1({
+      address: HOT_WALLET_RAW,
+      seqno: 9,
+      publicKeyHex: TEST_PUBLIC_KEY_HEX,
+    });
+    secondary.seedActiveV5R1({
+      address: HOT_WALLET_RAW,
+      seqno: 9,
+      publicKeyHex: TEST_PUBLIC_KEY_HEX,
+    });
+    secondary.seedTransientAccountStateErrors(HOT_WALLET_RAW, [
+      new TonProviderHttpError(429, '{"ok":false,"result":"Ratelimit exceed","code":429}', 'TonCenter getAddressInformation'),
+    ]);
+
+    const sleeps: number[] = [];
+    const result = await admitWalletSeqnoWithRateLimitRetry(
+      {
+        networkGlobalId: -3,
+        hotWalletAddress: HOT_WALLET_RAW,
+        publicKeyHex: TEST_PUBLIC_KEY_HEX,
+        signerKeyReference: FINGERPRINT,
+        approvedSignerKeyReference: FINGERPRINT,
+        primary,
+        secondary,
+      },
+      {
+        maxAttempts: 3,
+        baseDelayMs: 25,
+        sleep: async (ms) => {
+          sleeps.push(ms);
+        },
+      },
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.seqno).toBe(9);
+    expect(sleeps).toEqual([25]);
+    expect(secondary.getAccountStateCallCount(HOT_WALLET_RAW)).toBe(2);
+    expect(primary.getAccountStateCallCount(HOT_WALLET_RAW)).toBe(2);
+  });
+
+  it('fail-closes after persistent RATE_LIMITED without substituting providers', async () => {
+    const primary = new FakeTonChainProvider();
+    const secondary = new FakeTonChainProvider();
+    primary.seedActiveV5R1({
+      address: HOT_WALLET_RAW,
+      seqno: 1,
+      publicKeyHex: TEST_PUBLIC_KEY_HEX,
+    });
+    secondary.seedActiveV5R1({
+      address: HOT_WALLET_RAW,
+      seqno: 1,
+      publicKeyHex: TEST_PUBLIC_KEY_HEX,
+    });
+    secondary.seedAccountStateError(
+      HOT_WALLET_RAW,
+      new TonProviderHttpError(429, 'Ratelimit exceed', 'TonCenter getAddressInformation'),
+    );
+
+    const result = await admitWalletSeqnoWithRateLimitRetry(
+      {
+        networkGlobalId: -3,
+        hotWalletAddress: HOT_WALLET_RAW,
+        publicKeyHex: TEST_PUBLIC_KEY_HEX,
+        signerKeyReference: FINGERPRINT,
+        approvedSignerKeyReference: FINGERPRINT,
+        primary,
+        secondary,
+      },
+      {
+        maxAttempts: 3,
+        baseDelayMs: 10,
+        sleep: async () => undefined,
+      },
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe('RATE_LIMITED');
+    expect(secondary.getAccountStateCallCount(HOT_WALLET_RAW)).toBe(3);
+    expect(primary.getAccountStateCallCount(HOT_WALLET_RAW)).toBe(3);
+  });
+
+  it('aborts retry when beforeRetry reports lease fence invalid', async () => {
+    const primary = new FakeTonChainProvider();
+    const secondary = new FakeTonChainProvider();
+    primary.seedActiveV5R1({
+      address: HOT_WALLET_RAW,
+      seqno: 2,
+      publicKeyHex: TEST_PUBLIC_KEY_HEX,
+    });
+    secondary.seedActiveV5R1({
+      address: HOT_WALLET_RAW,
+      seqno: 2,
+      publicKeyHex: TEST_PUBLIC_KEY_HEX,
+    });
+    secondary.seedAccountStateError(
+      HOT_WALLET_RAW,
+      new TonProviderHttpError(429, 'slow down', 'TonCenter'),
+    );
+
+    let beforeRetryCalls = 0;
+    const result = await admitWalletSeqnoWithRateLimitRetry(
+      {
+        networkGlobalId: -3,
+        hotWalletAddress: HOT_WALLET_RAW,
+        publicKeyHex: TEST_PUBLIC_KEY_HEX,
+        signerKeyReference: FINGERPRINT,
+        approvedSignerKeyReference: FINGERPRINT,
+        primary,
+        secondary,
+      },
+      {
+        maxAttempts: 4,
+        baseDelayMs: 10,
+        sleep: async () => undefined,
+        beforeRetry: async () => {
+          beforeRetryCalls += 1;
+          return {
+            ok: false,
+            code: 'LEASE_FENCE_INVALID',
+            message: 'dispatch lease expired during seqno rate-limit retry',
+          };
+        },
+      },
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe('LEASE_FENCE_INVALID');
+    expect(beforeRetryCalls).toBe(1);
+    expect(secondary.getAccountStateCallCount(HOT_WALLET_RAW)).toBe(1);
+  });
+
+  it('does not retry non-rate-limit provider failures', async () => {
+    const primary = new FakeTonChainProvider();
+    const secondary = new FakeTonChainProvider();
+    primary.seedAccountStateError(HOT_WALLET_RAW, new Error('provider timed out'));
+    secondary.seedUninit(HOT_WALLET_RAW);
+    const result = await admitWalletSeqnoWithRateLimitRetry(
+      {
+        networkGlobalId: -3,
+        hotWalletAddress: HOT_WALLET_RAW,
+        publicKeyHex: TEST_PUBLIC_KEY_HEX,
+        signerKeyReference: FINGERPRINT,
+        approvedSignerKeyReference: FINGERPRINT,
+        primary,
+        secondary,
+      },
+      { maxAttempts: 4, sleep: async () => undefined },
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe('TIMEOUT');
+    expect(primary.getAccountStateCallCount(HOT_WALLET_RAW)).toBe(1);
+  });
+});
+

@@ -21,7 +21,10 @@
  * Operational database alex_rewards is always refused in CI. Does not start Temporal,
  * unlock Signer, enable chain, or broadcast.
  */
-import { sha256Hex } from '@alex-rewards/auth';
+import {
+  ADMIN_REAUTH_MAX_AGE_MS,
+  hashAdminSessionToken,
+} from '@alex-rewards/auth';
 import { isApprovedDestructiveTestDatabaseName } from '@alex-rewards/db';
 import type { Pool, PoolClient } from 'pg';
 
@@ -60,11 +63,11 @@ export const PHASE10_CANARY_RECOVERY_OPERATIONAL_MUTATION_CONFIRM =
   'I_CONFIRM_OPERATIONAL_ALEX_REWARDS_CANARY_RECOVERY' as const;
 
 /** High-impact Owner reauthentication window (spec: recent reauth required). */
-export const PHASE10_CANARY_RECOVERY_REAUTH_MAX_AGE_MS = 15 * 60 * 1000;
+export const PHASE10_CANARY_RECOVERY_REAUTH_MAX_AGE_MS = ADMIN_REAUTH_MAX_AGE_MS;
 
 /** Hash raw Owner admin session token for admin_sessions.session_token_hash lookup. */
 export function hashPhase10CanaryOwnerSessionToken(rawToken: string): string {
-  return sha256Hex(`admin-session:${rawToken.trim()}`);
+  return hashAdminSessionToken(rawToken);
 }
 
 /**

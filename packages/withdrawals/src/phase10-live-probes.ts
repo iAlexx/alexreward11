@@ -225,6 +225,169 @@ export function evaluateProviderIndependence(input: {
   };
 }
 
+export type Phase10LiveProviderKind = 'toncenter' | 'tonapi';
+
+export interface Phase10LiveProviderRoleEndpointInput {
+  readonly kind: string | null | undefined;
+  readonly baseUrl: string | null | undefined;
+  readonly apiKey?: string | null | undefined;
+}
+
+export interface Phase10ResolvedLiveProviderRole {
+  readonly kind: Phase10LiveProviderKind;
+  readonly baseUrl: string;
+  readonly apiKey: string | null;
+  readonly endpointFingerprint: string;
+}
+
+export interface Phase10ResolvedLiveProviderRoles {
+  readonly networkCode: 'TON_TESTNET';
+  readonly networkGlobalId: typeof PHASE10_TON_TESTNET_NETWORK_GLOBAL_ID;
+  readonly primary: Phase10ResolvedLiveProviderRole;
+  readonly secondary: Phase10ResolvedLiveProviderRole;
+  readonly independenceProven: true;
+}
+
+export type Phase10LiveProviderRolesResolveResult =
+  | { readonly ok: true; readonly roles: Phase10ResolvedLiveProviderRoles }
+  | { readonly ok: false; readonly reasons: readonly string[] };
+
+function normalizeLiveProviderKind(
+  value: string | null | undefined,
+): Phase10LiveProviderKind | null {
+  const normalized = (value ?? '').trim().toLowerCase();
+  if (normalized === 'toncenter' || normalized === 'tonapi') return normalized;
+  return null;
+}
+
+/**
+ * Authoritative Phase 10 live provider-role resolution.
+ * Single source for primary/secondary kind + endpoint + fingerprint used by
+ * readiness probes, collector, and acceptance fingerprint binding.
+ * Roles come from configured TON_PRIMARY_* / TON_SECONDARY_* — never module-local order hardcoding.
+ */
+export function resolvePhase10LiveProviderRoles(input: {
+  readonly primary: Phase10LiveProviderRoleEndpointInput;
+  readonly secondary: Phase10LiveProviderRoleEndpointInput;
+}): Phase10LiveProviderRolesResolveResult {
+  const reasons: string[] = [];
+  const primaryKind = normalizeLiveProviderKind(input.primary.kind);
+  const secondaryKind = normalizeLiveProviderKind(input.secondary.kind);
+  const primaryUrl = (input.primary.baseUrl ?? '').trim();
+  const secondaryUrl = (input.secondary.baseUrl ?? '').trim();
+
+  if (primaryKind === null) {
+    reasons.push(
+      `primary.kind must be toncenter|tonapi (got ${JSON.stringify(input.primary.kind ?? '')})`,
+    );
+  }
+  if (secondaryKind === null) {
+    reasons.push(
+      `secondary.kind must be toncenter|tonapi (got ${JSON.stringify(input.secondary.kind ?? '')})`,
+    );
+  }
+  if (primaryUrl === '') {
+    reasons.push('primary.baseUrl is required');
+  }
+  if (secondaryUrl === '') {
+    reasons.push('secondary.baseUrl is required');
+  }
+  if (primaryKind !== null && secondaryKind !== null && primaryKind === secondaryKind) {
+    reasons.push('primary.kind and secondary.kind must differ (provider independence)');
+  }
+
+  const primaryFp = fingerprintProviderEndpoint(primaryUrl);
+  const secondaryFp = fingerprintProviderEndpoint(secondaryUrl);
+  if (primaryFp === null) {
+    reasons.push('unable to derive primary endpoint fingerprint');
+  }
+  if (secondaryFp === null) {
+    reasons.push('unable to derive secondary endpoint fingerprint');
+  }
+  if (primaryFp !== null && secondaryFp !== null && primaryFp === secondaryFp) {
+    reasons.push('primary and secondary endpoint fingerprints must differ');
+  }
+
+  if (primaryKind !== null && secondaryKind !== null && primaryFp !== null && secondaryFp !== null) {
+    const independence = evaluateProviderIndependence({
+      primaryKind,
+      secondaryKind,
+      primaryUrl,
+      secondaryUrl,
+    });
+    if (!independence.proven) {
+      reasons.push(
+        independence.reason ??
+          independence.code ??
+          'provider independence not proven for configured roles',
+      );
+    }
+  }
+
+  if (
+    reasons.length > 0 ||
+    primaryKind === null ||
+    secondaryKind === null ||
+    primaryFp === null ||
+    secondaryFp === null
+  ) {
+    return { ok: false, reasons };
+  }
+
+  return {
+    ok: true,
+    roles: {
+      networkCode: 'TON_TESTNET',
+      networkGlobalId: PHASE10_TON_TESTNET_NETWORK_GLOBAL_ID,
+      primary: {
+        kind: primaryKind,
+        baseUrl: primaryUrl,
+        apiKey:
+          input.primary.apiKey === undefined || input.primary.apiKey === null
+            ? null
+            : String(input.primary.apiKey).trim() || null,
+        endpointFingerprint: primaryFp,
+      },
+      secondary: {
+        kind: secondaryKind,
+        baseUrl: secondaryUrl,
+        apiKey:
+          input.secondary.apiKey === undefined || input.secondary.apiKey === null
+            ? null
+            : String(input.secondary.apiKey).trim() || null,
+        endpointFingerprint: secondaryFp,
+      },
+      independenceProven: true,
+    },
+  };
+}
+
+/** Parse + validate acceptanceCutoff ISO timestamp. Fail closed on empty/invalid. */
+export function parsePhase10AcceptanceCutoff(value: unknown): {
+  readonly ok: boolean;
+  readonly cutoff: string | null;
+  readonly reason: string | null;
+} {
+  if (typeof value !== 'string' || value.trim() === '') {
+    return {
+      ok: false,
+      cutoff: null,
+      reason:
+        'acceptanceCutoff required and must be a valid ISO timestamp (captured before chain-history collection)',
+    };
+  }
+  const cutoff = value.trim();
+  const ms = Date.parse(cutoff);
+  if (!Number.isFinite(ms)) {
+    return {
+      ok: false,
+      cutoff: null,
+      reason: 'acceptanceCutoff is not a valid ISO timestamp',
+    };
+  }
+  return { ok: true, cutoff, reason: null };
+}
+
 function networkBlockerForProvider(
   label: 'PRIMARY' | 'SECONDARY',
   observation: Phase10ProviderProbeObservation,
@@ -492,21 +655,62 @@ export async function runPhase10LiveExternalProbes(
   const observedAt = new Date().toISOString();
   const blockers: string[] = [];
 
-  const independence = evaluateProviderIndependence({
-    primaryKind: input.primary.kind,
-    secondaryKind: input.secondary.kind,
-    primaryUrl: input.primary.baseUrl,
-    secondaryUrl: input.secondary.baseUrl,
+  const rolesResolved = resolvePhase10LiveProviderRoles({
+    primary: {
+      kind: input.primary.kind,
+      baseUrl: input.primary.baseUrl,
+      apiKey: input.primary.apiKey ?? null,
+    },
+    secondary: {
+      kind: input.secondary.kind,
+      baseUrl: input.secondary.baseUrl,
+      apiKey: input.secondary.apiKey ?? null,
+    },
   });
-  if (!independence.proven) {
+
+  const independence = rolesResolved.ok
+    ? {
+        proven: true as const,
+        code: null,
+        reason: null,
+        primaryFingerprint: rolesResolved.roles.primary.endpointFingerprint,
+        secondaryFingerprint: rolesResolved.roles.secondary.endpointFingerprint,
+      }
+    : evaluateProviderIndependence({
+        primaryKind: input.primary.kind,
+        secondaryKind: input.secondary.kind,
+        primaryUrl: input.primary.baseUrl,
+        secondaryUrl: input.secondary.baseUrl,
+      });
+
+  if (!rolesResolved.ok) {
+    for (const reason of rolesResolved.reasons) {
+      blockers.push(`${PHASE10_PROVIDER_INDEPENDENCE_UNPROVEN}: ${reason}`);
+    }
+  } else if (!independence.proven) {
     blockers.push(
       `${PHASE10_PROVIDER_INDEPENDENCE_UNPROVEN}: ${independence.reason ?? 'independence unproven'}`,
     );
   }
 
+  const primaryEndpoint: Phase10ProviderEndpointConfig = rolesResolved.ok
+    ? {
+        kind: rolesResolved.roles.primary.kind,
+        baseUrl: rolesResolved.roles.primary.baseUrl,
+        apiKey: rolesResolved.roles.primary.apiKey,
+      }
+    : input.primary;
+  const secondaryEndpoint: Phase10ProviderEndpointConfig = rolesResolved.ok
+    ? {
+        kind: rolesResolved.roles.secondary.kind,
+        baseUrl: rolesResolved.roles.secondary.baseUrl,
+        apiKey: rolesResolved.roles.secondary.apiKey,
+      }
+    : input.secondary;
+
   const [primary, secondary] = await Promise.all([
-    probeOneProvider('primary', input.primary, input.inject?.primaryHealth),
-    probeOneProvider('secondary', input.secondary, input.inject?.secondaryHealth),
+    probeOneProvider('primary', primaryEndpoint, input.inject?.primaryHealth),
+    probeOneProvider('secondary', secondaryEndpoint, input.inject?.secondaryHealth),
   ]);
 
   if (!primary.healthy) {
@@ -704,14 +908,19 @@ async function probeWalletSeqnoAdmission(
     };
   }
 
-  const primaryKind = input.primary.kind?.trim().toLowerCase() || null;
-  const secondaryKind = input.secondary.kind?.trim().toLowerCase() || null;
-  if (
-    (primaryKind !== 'toncenter' && primaryKind !== 'tonapi') ||
-    (secondaryKind !== 'toncenter' && secondaryKind !== 'tonapi') ||
-    input.primary.baseUrl === null ||
-    input.secondary.baseUrl === null
-  ) {
+  const rolesForSeqno = resolvePhase10LiveProviderRoles({
+    primary: {
+      kind: input.primary.kind,
+      baseUrl: input.primary.baseUrl,
+      apiKey: input.primary.apiKey ?? null,
+    },
+    secondary: {
+      kind: input.secondary.kind,
+      baseUrl: input.secondary.baseUrl,
+      apiKey: input.secondary.apiKey ?? null,
+    },
+  });
+  if (!rolesForSeqno.ok) {
     return {
       probePerformed: false,
       admitted: false,
@@ -719,7 +928,7 @@ async function probeWalletSeqnoAdmission(
       accountStatus: null,
       requiresStateInit: null,
       code: 'PROVIDERS_INCOMPLETE',
-      message: 'dual Testnet providers required for seqno admission probe',
+      message: `dual Testnet providers required for seqno admission probe: ${rolesForSeqno.reasons.join('; ')}`,
       hotWalletAddress: expectedWallet,
       networkGlobalId: PHASE10_TON_TESTNET_NETWORK_GLOBAL_ID,
       publicKeyFingerprint: identity.publicKeyFingerprint,
@@ -729,14 +938,14 @@ async function probeWalletSeqnoAdmission(
 
   try {
     const primary = createTonChainProvider({
-      kind: primaryKind,
-      baseUrl: input.primary.baseUrl,
-      apiKey: input.primary.apiKey ?? null,
+      kind: rolesForSeqno.roles.primary.kind,
+      baseUrl: rolesForSeqno.roles.primary.baseUrl,
+      apiKey: rolesForSeqno.roles.primary.apiKey,
     });
     const secondary = createTonChainProvider({
-      kind: secondaryKind,
-      baseUrl: input.secondary.baseUrl,
-      apiKey: input.secondary.apiKey ?? null,
+      kind: rolesForSeqno.roles.secondary.kind,
+      baseUrl: rolesForSeqno.roles.secondary.baseUrl,
+      apiKey: rolesForSeqno.roles.secondary.apiKey,
     });
     const result = await admitWalletSeqno({
       networkGlobalId: PHASE10_TON_TESTNET_NETWORK_GLOBAL_ID,

@@ -200,8 +200,8 @@ function completeEmptyResult(providerKind: string): EnumerateOutgoingJettonTrans
 }
 
 describe('Phase 10 chain history collector', () => {
-  it('keeps PHASE10_CHAIN_HISTORY_PROVIDER_COLLECTOR_AVAILABLE false', () => {
-    expect(PHASE10_CHAIN_HISTORY_PROVIDER_COLLECTOR_AVAILABLE).toBe(false);
+  it('keeps PHASE10_CHAIN_HISTORY_PROVIDER_COLLECTOR_AVAILABLE true (Owner B1)', () => {
+    expect(PHASE10_CHAIN_HISTORY_PROVIDER_COLLECTOR_AVAILABLE).toBe(true);
     expect(PHASE10_CHAIN_HISTORY_COLLECTOR_VERSION).toBe('1.0.0');
     expect(
       'collectPhase10ProviderBackedChainHistoryForTests' in publicIndex ||
@@ -241,8 +241,33 @@ describe('Phase 10 chain history collector', () => {
     const evidence = toPhase10ChainHistoryEvidenceArtifact(result);
     expect(evidence.reconciliationResult).toBe('ZERO_UNEXPECTED');
     expect(evidence.enumerationAuthority).toBe('PROVIDER_BACKED');
-    // Acceptance still blocked while collector availability flag is false.
-    expect(evaluateChainHistoryForAcceptance(evidence).ok).toBe(false);
+    expect(evidence.providerIdentity.independenceProven).toBe(true);
+    // Owner B1: valid PROVIDER_BACKED + ZERO_UNEXPECTED + independence is acceptance-ok.
+    expect(evaluateChainHistoryForAcceptance(evidence).ok).toBe(true);
+  });
+
+  it('PROVIDER_BACKED without independenceProven still fails closed', async () => {
+    const primary = new FakeTonChainProvider();
+    const secondary = new FakeTonChainProvider();
+    const transfer = seedTransfer({
+      queryId: '42',
+      amountAtomic: '1000',
+      transferIdentity: 'agreed-1',
+    });
+    primary.seedEnumeratedOutgoingTransfer(transfer);
+    secondary.seedEnumeratedOutgoingTransfer({ ...transfer, providerKind: 'fake-secondary' });
+    const expected = expectedPayout({ queryId: '42', amountAtomic: '1000' });
+    const result = await collectPhase10ProviderBackedChainHistoryForTests(
+      baseCollectInput(primary, secondary, [expected]),
+    );
+    const evidence = toPhase10ChainHistoryEvidenceArtifact(result);
+    const noIndependence = {
+      ...evidence,
+      providerIdentity: { ...evidence.providerIdentity, independenceProven: false },
+    };
+    const evaluated = evaluateChainHistoryForAcceptance(noIndependence);
+    expect(evaluated.ok).toBe(false);
+    expect(evaluated.reasons.some((r) => r.includes('independence'))).toBe(true);
   });
 
   it('primary-only transfer → PROVIDER_HISTORY_DISAGREEMENT', async () => {
@@ -589,14 +614,14 @@ describe('Phase 10 chain history collector', () => {
         ...liveBase,
         primary: { kind: 'fake', baseUrl: primaryUrl },
       }),
-    ).rejects.toThrow(/primary\.kind must be 'toncenter'/);
+    ).rejects.toThrow(/primary\.kind must be toncenter\|tonapi/);
 
     await expect(
       collectPhase10LiveProviderBackedChainHistory({
         ...liveBase,
         secondary: { kind: 'fake', baseUrl: secondaryUrl },
       }),
-    ).rejects.toThrow(/secondary\.kind must be 'tonapi'/);
+    ).rejects.toThrow(/secondary\.kind must be toncenter\|tonapi/);
 
     await expect(
       collectPhase10LiveProviderBackedChainHistory({

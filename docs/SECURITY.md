@@ -66,3 +66,26 @@ See `docs/CONTROL_CENTER.md` and `docs/REVIEW_QUEUE.md`.
 - `local_ephemeral` mode is local/test only and does **not** satisfy the production self-hosted gate.
 
 See `docs/TON_SIGNER.md`.
+
+## Phase 11 — advertising trust boundary
+
+- **AdsGram production monetary issuance is BLOCKED** (`production_monetary_status = BLOCKED`,
+  six OPEN clarification items). Unblocking is an Owner-reviewed data change, not a code change.
+- Client evidence is **never** money. A client completion is a signal; it cannot advance a session
+  past `CLIENT_COMPLETED` and cannot raise a balance.
+- Session state is **derived** from append-only `ad_session_signals` and then persisted. Clients
+  never assign state, and signals are never mutated or deleted.
+- `v1/ads/*` requires an active Phase 3 session; the ad session id is a path locator only and
+  every request is re-checked against the authenticated user. Requests carrying reward-authority
+  fields (amount, bonus, verification, ledger ids) are refused `400` before any domain call.
+- `GET /webhooks/adsgram/reward` is unauthenticated by provider design. It returns one uniform
+  `{ accepted: true, rewardCredited: false }` body for every outcome so it cannot be used as an
+  oracle, is throttled through Redis, and **fails closed** when the throttle store is unavailable.
+- Providers are fixed at build time in a compile-time registry; nothing is loaded dynamically.
+- The monetary gate is provider-neutral and reads only data — no provider name is branched on.
+- `packages/ads` must never import `@alex-rewards/ledger` or post a ledger transaction; issuance
+  goes through `issueAdReward` in the Reward Engine, asserted against source on disk.
+- No production debug or fake-completion endpoint exists. The only provider that passes the gate
+  in tests (`HARNESS_CERT`) lives in the test harness and is never seeded or shipped.
+
+See `docs/ADS_SPEC.md` and `docs/ADSGRAM_CLARIFICATION_REGISTER.md`.

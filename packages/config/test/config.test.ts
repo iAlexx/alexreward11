@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   loadApiConfig,
   loadBotConfig,
+  loadPhase10TestnetProvisionConfig,
   loadSignerConfig,
   loadWebConfig,
   loadWorkerConfig,
@@ -34,6 +35,12 @@ const remoteAuthPolicy = {
   WITHDRAWAL_NETWORK_CODE: 'TON',
   WITHDRAWAL_ASSET_SYMBOL: 'USDT',
   WITHDRAWAL_FAKE_CHAIN_ENABLED: 'false',
+  WALLET_TON_PROOF_DOMAIN: 'miniapp.example.com',
+  WALLET_CHALLENGE_TTL_SECONDS: '300',
+  WALLET_PROOF_MAX_AGE_SECONDS: '900',
+  WALLET_PROOF_MAX_FUTURE_SKEW_SECONDS: '60',
+  WALLET_PROOF_RATE_LIMIT_WINDOW_SECONDS: '300',
+  WALLET_PROOF_RATE_LIMIT_MAX: '10',
 } as const;
 
 describe('environment validation', () => {
@@ -248,6 +255,41 @@ describe('environment validation', () => {
     expect(config.WITHDRAWAL_NETWORK_CODE).toBe('TON');
     expect(config.WITHDRAWAL_QUOTE_TTL_SECONDS).toBe(600);
     expect(config.WITHDRAWAL_FAKE_CHAIN_ENABLED).toBe(false);
+    expect(config.WALLET_TON_PROOF_DOMAIN).toBe('miniapp.example.com');
+    expect(config.WALLET_CHALLENGE_TTL_SECONDS).toBe(300);
+  });
+
+  it('applies local wallet ownership defaults when unset', () => {
+    const config = loadApiConfig({
+      ...common,
+      ...apiAuth,
+      DATABASE_URL: 'postgresql://alex:local@localhost:5432/db',
+      REDIS_URL: 'redis://localhost:6379',
+      TEMPORAL_ADDRESS: 'localhost:7233',
+    });
+    expect(config.WALLET_TON_PROOF_DOMAIN).toBe('alex-rewards.local.test');
+    expect(config.WALLET_CHALLENGE_TTL_SECONDS).toBe(300);
+    expect(config.WALLET_PROOF_MAX_AGE_SECONDS).toBe(900);
+  });
+
+  it('rejects a local ton_proof domain outside local/test', () => {
+    expect(() =>
+      loadApiConfig({
+        DEPLOYMENT_ENV: 'production',
+        NODE_ENV: 'production',
+        OTEL_ENABLED: 'true',
+        OTEL_EXPORTER_OTLP_ENDPOINT: 'https://otel.example.com',
+        SENTRY_DSN: 'https://public@example.com/1',
+        DATABASE_URL: 'postgresql://user:pass@db.example.com:5432/db',
+        REDIS_URL: 'rediss://redis.example.com:6379',
+        TEMPORAL_ADDRESS: 'temporal.example.com:7233',
+        TELEGRAM_BOT_TOKEN: 'production-grade-telegram-bot-token',
+        SESSION_ACCESS_SECRET: 'production-grade-session-access-secret',
+        ...remoteAuthPolicy,
+        WITHDRAWAL_NETWORK_CODE: 'TON',
+        WALLET_TON_PROOF_DOMAIN: 'alex-rewards.local.test',
+      }),
+    ).toThrow(/WALLET_TON_PROOF_DOMAIN|local ton_proof domains/);
   });
 
   it('fails closed when staging omits withdrawal keys', () => {
@@ -344,6 +386,43 @@ describe('environment validation', () => {
       NEXT_PUBLIC_API_BASE_URL: 'https://api.example.com',
     });
     expect(Object.keys(config).sort()).toEqual(['NEXT_PUBLIC_API_BASE_URL', 'NODE_ENV']);
+    expect(config.NEXT_PUBLIC_TONCONNECT_MANIFEST_URL).toBeUndefined();
+  });
+
+  it('accepts optional TonConnect manifest URL without inventing one', () => {
+    const config = loadWebConfig({
+      NODE_ENV: 'test',
+      NEXT_PUBLIC_API_BASE_URL: 'https://api.example.com',
+      NEXT_PUBLIC_TONCONNECT_MANIFEST_URL: 'https://app.example.com/tonconnect-manifest.json',
+    });
+    expect(config.NEXT_PUBLIC_TONCONNECT_MANIFEST_URL).toBe(
+      'https://app.example.com/tonconnect-manifest.json',
+    );
+    const empty = loadWebConfig({
+      NODE_ENV: 'test',
+      NEXT_PUBLIC_API_BASE_URL: 'https://api.example.com',
+      NEXT_PUBLIC_TONCONNECT_MANIFEST_URL: '',
+    });
+    expect(empty.NEXT_PUBLIC_TONCONNECT_MANIFEST_URL).toBeUndefined();
+  });
+
+  it('accepts optional Terms/Privacy URLs without inventing legal destinations', () => {
+    const config = loadWebConfig({
+      NODE_ENV: 'test',
+      NEXT_PUBLIC_API_BASE_URL: 'https://api.example.com',
+      NEXT_PUBLIC_TERMS_URL: 'https://legal.test/terms',
+      NEXT_PUBLIC_PRIVACY_URL: 'https://legal.test/privacy',
+    });
+    expect(config.NEXT_PUBLIC_TERMS_URL).toBe('https://legal.test/terms');
+    expect(config.NEXT_PUBLIC_PRIVACY_URL).toBe('https://legal.test/privacy');
+    const empty = loadWebConfig({
+      NODE_ENV: 'test',
+      NEXT_PUBLIC_API_BASE_URL: 'https://api.example.com',
+      NEXT_PUBLIC_TERMS_URL: '',
+      NEXT_PUBLIC_PRIVACY_URL: '',
+    });
+    expect(empty.NEXT_PUBLIC_TERMS_URL).toBeUndefined();
+    expect(empty.NEXT_PUBLIC_PRIVACY_URL).toBeUndefined();
   });
 
   it('worker local defaults keep real chain off', () => {
@@ -388,5 +467,92 @@ describe('environment validation', () => {
         WITHDRAWAL_NETWORK_CODE: 'TON_MAINNET',
       }),
     ).toThrow(/MAINNET/);
+  });
+});
+
+describe('Phase 10 Testnet provision config', () => {
+  const base = {
+    ...common,
+    DATABASE_URL: 'postgresql://alex:local@127.0.0.1:55440/alex_rewards_isolated_payout_test',
+  };
+  const allowUser = '00000000-0000-4000-8000-0000000000a1';
+  const ownerAdmin = '00000000-0000-4000-8000-0000000000a2';
+
+  it('defaults remain disabled with USDT', () => {
+    const config = loadPhase10TestnetProvisionConfig(base);
+    expect(config.PHASE10_TESTNET_AVAILABLE_PROVISION_ENABLED).toBe(false);
+    expect(config.WITHDRAWAL_ASSET_SYMBOL).toBe('USDT');
+    expect(config.PHASE10_TESTNET_PROVISION_REQUIRED_DATABASE_NAME).toBe('');
+  });
+
+  it('accepts aalex when enabled with isolated DB identity and capped max', () => {
+    const config = loadPhase10TestnetProvisionConfig({
+      ...base,
+      PHASE10_TESTNET_AVAILABLE_PROVISION_ENABLED: 'true',
+      WITHDRAWAL_ASSET_SYMBOL: 'aalex',
+      PHASE10_TESTNET_PROVISION_ALLOWED_USER_ID: allowUser,
+      PHASE10_TESTNET_PROVISION_OWNER_ADMIN_USER_ID: ownerAdmin,
+      PHASE10_TESTNET_PROVISION_MAX_ATOMIC: '1000000000',
+      PHASE10_TESTNET_PROVISION_REQUIRED_DATABASE_NAME: 'alex_rewards_isolated_payout_test',
+    });
+    expect(config.WITHDRAWAL_ASSET_SYMBOL).toBe('aalex');
+    expect(config.PHASE10_TESTNET_PROVISION_MAX_ATOMIC).toBe('1000000000');
+  });
+
+  it('rejects aalex enabled against operational DATABASE_URL', () => {
+    expect(() =>
+      loadPhase10TestnetProvisionConfig({
+        ...base,
+        DATABASE_URL: 'postgresql://alex:local@127.0.0.1:55432/alex_rewards',
+        PHASE10_TESTNET_AVAILABLE_PROVISION_ENABLED: 'true',
+        WITHDRAWAL_ASSET_SYMBOL: 'aalex',
+        PHASE10_TESTNET_PROVISION_ALLOWED_USER_ID: allowUser,
+        PHASE10_TESTNET_PROVISION_OWNER_ADMIN_USER_ID: ownerAdmin,
+        PHASE10_TESTNET_PROVISION_MAX_ATOMIC: '1000000000',
+        PHASE10_TESTNET_PROVISION_REQUIRED_DATABASE_NAME: 'alex_rewards_isolated_payout_test',
+      }),
+    ).toThrow(/operational|alex_rewards@55432|DATABASE_URL/i);
+  });
+
+  it('rejects aalex without required database name', () => {
+    expect(() =>
+      loadPhase10TestnetProvisionConfig({
+        ...base,
+        PHASE10_TESTNET_AVAILABLE_PROVISION_ENABLED: 'true',
+        WITHDRAWAL_ASSET_SYMBOL: 'aalex',
+        PHASE10_TESTNET_PROVISION_ALLOWED_USER_ID: allowUser,
+        PHASE10_TESTNET_PROVISION_OWNER_ADMIN_USER_ID: ownerAdmin,
+        PHASE10_TESTNET_PROVISION_MAX_ATOMIC: '1000000000',
+      }),
+    ).toThrow(/REQUIRED_DATABASE_NAME|required when WITHDRAWAL_ASSET_SYMBOL=aalex/i);
+  });
+
+  it('rejects production when provisioning enabled', () => {
+    expect(() =>
+      loadPhase10TestnetProvisionConfig({
+        ...base,
+        DEPLOYMENT_ENV: 'production',
+        WITHDRAWAL_NETWORK_CODE: 'TON_TESTNET',
+        WITHDRAWAL_ASSET_SYMBOL: 'USDT',
+        PHASE10_TESTNET_AVAILABLE_PROVISION_ENABLED: 'true',
+        PHASE10_TESTNET_PROVISION_ALLOWED_USER_ID: allowUser,
+        PHASE10_TESTNET_PROVISION_OWNER_ADMIN_USER_ID: ownerAdmin,
+        PHASE10_TESTNET_PROVISION_MAX_ATOMIC: '1000000',
+        PHASE10_TESTNET_PROVISION_REQUIRED_DATABASE_NAME: '',
+      }),
+    ).toThrow(/local\/test|cannot be enabled outside/i);
+  });
+
+  it('USDT enabled path unchanged (required DB name optional)', () => {
+    const config = loadPhase10TestnetProvisionConfig({
+      ...base,
+      PHASE10_TESTNET_AVAILABLE_PROVISION_ENABLED: 'true',
+      WITHDRAWAL_ASSET_SYMBOL: 'USDT',
+      PHASE10_TESTNET_PROVISION_ALLOWED_USER_ID: allowUser,
+      PHASE10_TESTNET_PROVISION_OWNER_ADMIN_USER_ID: ownerAdmin,
+      PHASE10_TESTNET_PROVISION_MAX_ATOMIC: '1000000',
+    });
+    expect(config.WITHDRAWAL_ASSET_SYMBOL).toBe('USDT');
+    expect(config.PHASE10_TESTNET_PROVISION_REQUIRED_DATABASE_NAME).toBe('');
   });
 });

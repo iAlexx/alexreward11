@@ -1,0 +1,54 @@
+/**
+ * ALEx Rewards design tokens — deep slate / sky-teal dark mobile aesthetic.
+ * Isolated product look; not PaidZ, not purple-on-white, not cream/serif terracotta.
+ */
+:root {
+  color-scheme: dark;
+
+  /* Surfaces */
+  --alex-bg: #071019;
+  --alex-surface: #0b1824;
+  --alex-surface-elevated: #122636;
+
+  /* Text */
+  --alex-text: #e7f5ff;
+  --alex-text-secondary: #9bb4c7;
+
+  /* Borders & accent */
+  --alex-border: rgba(125, 211, 252, 0.18);
+  --alex-accent: #38bdf8;
+
+  /* Status */
+  --alex-success: #34d399;
+  --alex-warning: #fbbf24;
+  --alex-error: #f87171;
+
+  /* Spacing scale (4px base) */
+  --alex-space-1: 0.25rem;
+  --alex-space-2: 0.5rem;
+  --alex-space-3: 0.75rem;
+  --alex-space-4: 1rem;
+  --alex-space-5: 1.25rem;
+  --alex-space-6: 1.5rem;
+  --alex-space-8: 2rem;
+  --alex-space-10: 2.5rem;
+  --alex-space-12: 3rem;
+
+  /* Radii */
+  --alex-radius-sm: 0.5rem;
+  --alex-radius-md: 0.75rem;
+  --alex-radius-lg: 1rem;
+  --alex-radius-xl: 1.5rem;
+  --alex-radius-full: 9999px;
+
+  /* Shadows */
+  --alex-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --alex-shadow-md: 0 8px 24px rgba(0, 0, 0, 0.4);
+  --alex-shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.5);
+
+  /* Focus */
+  --alex-focus-ring: 0 0 0 3px rgba(56, 189, 248, 0.45);
+
+  /* Atmosphere helpers aligned with existing miniapp globals */
+  --alex-bg-radial: radial-gradient(circle at top, #123449 0, var(--alex-bg) 55%);
+}

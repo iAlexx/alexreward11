@@ -85,6 +85,8 @@ async function hasUnresolvedPossiblyBroadcastWork(
          WHERE r.withdrawal_attempt_id = a.id
            AND r.resolution = 'DEFINITIVE_NONPAYMENT'
        )
+       -- Per-attempt resolution: a settled confirmed attempt does not block;
+       -- an UNKNOWN / unsettled sibling on the same CONFIRMED withdrawal still blocks.
        AND NOT (
          w.state::text = 'CONFIRMED'
          AND w.settlement_ledger_tx_id IS NOT NULL

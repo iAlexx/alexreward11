@@ -57,6 +57,12 @@ const LOCAL_API_AUTH_POLICY_DEFAULTS = {
   WITHDRAWAL_NETWORK_CODE: 'TON_TESTNET',
   WITHDRAWAL_ASSET_SYMBOL: 'USDT',
   WITHDRAWAL_FAKE_CHAIN_ENABLED: 'true',
+  WALLET_TON_PROOF_DOMAIN: 'alex-rewards.local.test',
+  WALLET_CHALLENGE_TTL_SECONDS: '300',
+  WALLET_PROOF_MAX_AGE_SECONDS: '900',
+  WALLET_PROOF_MAX_FUTURE_SKEW_SECONDS: '60',
+  WALLET_PROOF_RATE_LIMIT_WINDOW_SECONDS: '300',
+  WALLET_PROOF_RATE_LIMIT_MAX: '10',
 } as const;
 
 const apiSchema = serviceSchema
@@ -88,9 +94,33 @@ const apiSchema = serviceSchema
     WITHDRAWAL_NETWORK_CODE: z.string().min(1).max(64),
     WITHDRAWAL_ASSET_SYMBOL: z.string().min(1).max(32),
     WITHDRAWAL_FAKE_CHAIN_ENABLED: booleanFromString,
+    // Wallet ownership (ton_proof). The proof domain is server authority and is never
+    // derived from Host/Origin/Telegram URL; the accepted network is WITHDRAWAL_NETWORK_CODE
+    // so a wallet can only be bound on the network payouts actually use.
+    WALLET_TON_PROOF_DOMAIN: z.string().min(1).max(253),
+    WALLET_CHALLENGE_TTL_SECONDS: z.coerce.number().int().min(30).max(900),
+    WALLET_PROOF_MAX_AGE_SECONDS: z.coerce.number().int().min(60).max(3600),
+    WALLET_PROOF_MAX_FUTURE_SKEW_SECONDS: z.coerce.number().int().min(0).max(300),
+    WALLET_PROOF_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().min(1).max(3600),
+    WALLET_PROOF_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(10_000),
   })
   .superRefine((value, context) => {
     const outsideLocal = value.DEPLOYMENT_ENV !== 'local' && value.DEPLOYMENT_ENV !== 'test';
+    if (outsideLocal) {
+      const domain = value.WALLET_TON_PROOF_DOMAIN.trim().toLowerCase();
+      if (
+        domain === 'localhost' ||
+        domain === '127.0.0.1' ||
+        domain.endsWith('.localhost') ||
+        domain.endsWith('.local.test')
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['WALLET_TON_PROOF_DOMAIN'],
+          message: 'local ton_proof domains cannot be inherited by staging/production',
+        });
+      }
+    }
     if (
       outsideLocal &&
       (value.TELEGRAM_BOT_TOKEN.includes('local-only') ||
@@ -326,7 +356,7 @@ const workerSchema = serviceSchema
 /** Local/test-only signer defaults. Staging/production must set keys explicitly. */
 const LOCAL_SIGNER_DEFAULTS = {
   SIGNER_DATABASE_URL:
-    'postgresql://alex_rewards:local-alex-rewards-only@localhost:55432/alex_rewards',
+    'postgresql://alex_rewards_signer:local-signer-ro-only@localhost:55432/alex_rewards',
   SIGNER_KEY_MODE: 'local_ephemeral',
   SIGNER_SPIKE_ENABLED: 'true',
   SIGNER_NETWORK_CODE: 'TON_TESTNET',
@@ -450,6 +480,19 @@ const webSchema = z.object({
   NODE_ENV: nodeEnvironment,
   NEXT_PUBLIC_API_BASE_URL: z.url(),
   NEXT_PUBLIC_SENTRY_DSN: optionalUrl,
+  /**
+   * HTTPS URL of the Mini App's tonconnect-manifest.json.
+   * When absent, the Wallet screen degrades honestly (no invented production URL).
+   */
+  NEXT_PUBLIC_TONCONNECT_MANIFEST_URL: optionalUrl,
+  /**
+   * Public Terms of Service URL. When absent, Profile degrades honestly (no invented legal URL).
+   */
+  NEXT_PUBLIC_TERMS_URL: optionalUrl,
+  /**
+   * Public Privacy Policy URL. When absent, Profile degrades honestly (no invented legal URL).
+   */
+  NEXT_PUBLIC_PRIVACY_URL: optionalUrl,
 });
 
 export type ApiConfig = z.infer<typeof apiSchema>;
@@ -560,6 +603,7 @@ const LOCAL_PHASE10_TESTNET_PROVISION_DEFAULTS = {
   PHASE10_TESTNET_PROVISION_ALLOWED_USER_ID: '',
   PHASE10_TESTNET_PROVISION_MAX_ATOMIC: '1000000',
   PHASE10_TESTNET_PROVISION_OWNER_ADMIN_USER_ID: '',
+  PHASE10_TESTNET_PROVISION_REQUIRED_DATABASE_NAME: '',
   WITHDRAWAL_NETWORK_CODE: 'TON_TESTNET',
   WITHDRAWAL_ASSET_SYMBOL: 'USDT',
 } as const;
@@ -571,6 +615,10 @@ const phase10TestnetProvisionSchema = commonSchema
     PHASE10_TESTNET_PROVISION_ALLOWED_USER_ID: optionalUuidOrEmpty,
     PHASE10_TESTNET_PROVISION_MAX_ATOMIC: optionalPositiveAtomicOrEmpty,
     PHASE10_TESTNET_PROVISION_OWNER_ADMIN_USER_ID: optionalUuidOrEmpty,
+    PHASE10_TESTNET_PROVISION_REQUIRED_DATABASE_NAME: z.preprocess(
+      (value) => (value === undefined || value === null ? '' : value),
+      z.string().max(128),
+    ),
     WITHDRAWAL_NETWORK_CODE: z.string().min(1).max(64),
     WITHDRAWAL_ASSET_SYMBOL: z.string().min(1).max(32),
   })
@@ -597,11 +645,11 @@ const phase10TestnetProvisionSchema = commonSchema
           message: 'must be exactly TON_TESTNET when provisioning is enabled',
         });
       }
-      if (value.WITHDRAWAL_ASSET_SYMBOL !== 'USDT') {
+      if (value.WITHDRAWAL_ASSET_SYMBOL !== 'USDT' && value.WITHDRAWAL_ASSET_SYMBOL !== 'aalex') {
         context.addIssue({
           code: 'custom',
           path: ['WITHDRAWAL_ASSET_SYMBOL'],
-          message: 'must be exactly USDT when provisioning is enabled',
+          message: 'must be USDT or aalex when provisioning is enabled',
         });
       }
       if (value.PHASE10_TESTNET_PROVISION_ALLOWED_USER_ID === '') {
@@ -624,6 +672,55 @@ const phase10TestnetProvisionSchema = commonSchema
           path: ['PHASE10_TESTNET_PROVISION_MAX_ATOMIC'],
           message: 'required positive atomic amount when Phase 10 Testnet provisioning is enabled',
         });
+      }
+      if (value.WITHDRAWAL_ASSET_SYMBOL === 'aalex') {
+        const requiredDb = value.PHASE10_TESTNET_PROVISION_REQUIRED_DATABASE_NAME.trim();
+        if (requiredDb === '') {
+          context.addIssue({
+            code: 'custom',
+            path: ['PHASE10_TESTNET_PROVISION_REQUIRED_DATABASE_NAME'],
+            message: 'required when WITHDRAWAL_ASSET_SYMBOL=aalex and provisioning is enabled',
+          });
+        }
+        if (requiredDb === 'alex_rewards') {
+          context.addIssue({
+            code: 'custom',
+            path: ['PHASE10_TESTNET_PROVISION_REQUIRED_DATABASE_NAME'],
+            message: 'operational database name alex_rewards is forbidden for aalex provision',
+          });
+        }
+        if (value.PHASE10_TESTNET_PROVISION_MAX_ATOMIC !== '') {
+          try {
+            const max = BigInt(value.PHASE10_TESTNET_PROVISION_MAX_ATOMIC);
+            if (max > 10_000_000_000n) {
+              context.addIssue({
+                code: 'custom',
+                path: ['PHASE10_TESTNET_PROVISION_MAX_ATOMIC'],
+                message:
+                  'aalex provision max cannot exceed 10000000000 (10 aalex absolute ceiling)',
+              });
+            }
+          } catch {
+            // regex already enforces digits; ignore
+          }
+        }
+      }
+      // Refuse obvious operational URL when aalex is selected (no silent fallback).
+      if (value.WITHDRAWAL_ASSET_SYMBOL === 'aalex') {
+        try {
+          const url = new URL(value.DATABASE_URL);
+          const dbName = url.pathname.replace(/^\//, '').split('?')[0] ?? '';
+          const port = url.port === '' ? '5432' : url.port;
+          if (dbName === 'alex_rewards' || (port === '55432' && dbName === 'alex_rewards')) {
+            context.addIssue({
+              code: 'custom',
+              path: ['DATABASE_URL'],
+              message: 'aalex provision cannot use operational alex_rewards@55432',
+            });
+          }
+        } catch {
+          // postgresUrl already validated
+        }
       }
     }
   });

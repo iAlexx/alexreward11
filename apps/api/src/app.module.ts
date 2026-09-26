@@ -2,11 +2,18 @@ import { Module, type DynamicModule } from '@nestjs/common';
 
 import type { ApiConfig } from '@alex-rewards/config';
 
+import { AdsController } from './ads/ads.controller.js';
+import { AdsGramWebhookController } from './ads/adsgram-webhook.controller.js';
 import { AuthController } from './auth/auth.controller.js';
 import { AccessSessionGuard } from './auth/access-session.guard.js';
 import { DependenciesService } from './dependencies.service.js';
 import { HealthController } from './health.controller.js';
+import { MeController } from './me/me.controller.js';
 import { MembershipController } from './membership/membership.controller.js';
+import { ReferralsController } from './referrals/referrals.controller.js';
+import { SupportController } from './support/support.controller.js';
+import { TasksController } from './tasks/tasks.controller.js';
+import { WalletsController } from './wallets/wallets.controller.js';
 import { WithdrawalsController } from './withdrawals/withdrawals.controller.js';
 import { API_CONFIG, DATABASE_POOL, REDIS_CLIENT } from './tokens.js';
 
@@ -15,7 +22,19 @@ export class AppModule {
   static register(config: ApiConfig): DynamicModule {
     return {
       module: AppModule,
-      controllers: [HealthController, AuthController, MembershipController, WithdrawalsController],
+      controllers: [
+        HealthController,
+        AuthController,
+        MembershipController,
+        WithdrawalsController,
+        AdsController,
+        AdsGramWebhookController,
+        MeController,
+        WalletsController,
+        TasksController,
+        ReferralsController,
+        SupportController,
+      ],
       providers: [
         DependenciesService,
         AccessSessionGuard,

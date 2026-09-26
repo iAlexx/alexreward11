@@ -20,6 +20,16 @@ Phase 10 adds the **Testnet payout foundation outside the signer**: provider-neu
 but still must not call TON RPC or broadcast. Real chain stays fail-closed until Owner supplies
 Testnet Jetton master + providers (`docs/PHASE_10_ACCEPTANCE_REPORT.md`).
 
+Phase 11 adds the **advertising provider plugin boundary**: `@alex-rewards/ads` owns ad session
+evidence, derived session state and the provider-neutral monetary eligibility gate. Providers are
+plugins behind one contract (`RewardedAdProvider`) listed in a **compile-time** registry — nothing
+is loaded dynamically, so the set of providers that can ever touch money is fixed at build time.
+The package composes transactions through `@alex-rewards/rewards` and must never import
+`@alex-rewards/ledger` or post a ledger transaction; that boundary is asserted against the source
+on disk by `packages/ads/test/phase11-boundaries.test.ts` as well as by the CI architecture check.
+Provider SDKs stay out of the domain: `@adsgram/react` lives in `apps/miniapp`, and `packages/ads`
+exports only the client signal data contract (`docs/ADS_SPEC.md`).
+
 Readiness means a process can serve its intended current-phase role. Liveness means its event
 loop and HTTP server are responsive. Dependency-aware services expose component status without
 putting secrets in responses.

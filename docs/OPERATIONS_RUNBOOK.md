@@ -57,21 +57,28 @@ without giving signing rights to API/bot/worker.
 - Keep `WITHDRAWAL_REAL_CHAIN_ENABLED=false` until Owner sets `TON_TESTNET_JETTON_MASTER` and
   Testnet provider URLs. Fake chain remains for Phase 7 local tests.
 - Forbidden: Mainnet, AWS KMS, plaintext Hot Wallet keys in env.
-- Status: `docs/PHASE_10_ACCEPTANCE_REPORT.md` — **PHASE 10 CODE COMPLETE — LIVE VALIDATION READY (NOT CLOSED)**.
+- Status: `docs/PHASE_10_ACCEPTANCE_REPORT.md` — **PHASE 10 CODE COMPLETE — LIVE VALIDATION READY (NOT CLOSED)**; isolated Owner auth **VERIFIED** (do not re-enroll).
 
 ## Phase 10 Testnet Available provisioning (internal Owner CLI)
 
 **Testnet only. Host-access Owner-operated tool. Default OFF. Not a production balance editor.**
 
-Used only to provision a deliberately small withdrawable Available USDT balance to ONE
+Used only to provision a deliberately small withdrawable Available balance to ONE
 configured allowlisted controlled Testnet user for Phase 10 payout validation.
+
+Allowlisted assets when the gate is enabled: **USDT** (legacy fixture master) or **aalex**
+(exact isolated Jetton master + 9 decimals). aalex additionally requires
+`PHASE10_TESTNET_PROVISION_REQUIRED_DATABASE_NAME` matching `current_database()` and refuses
+operational `alex_rewards` / `:55432`. Absolute aalex provision ceiling: 10 aalex.
 
 Config (safe placeholders only; never commit real user IDs):
 
 - `PHASE10_TESTNET_AVAILABLE_PROVISION_ENABLED=false`
 - `PHASE10_TESTNET_PROVISION_ALLOWED_USER_ID=` (UUID when enabling)
-- `PHASE10_TESTNET_PROVISION_MAX_ATOMIC=1000000`
+- `PHASE10_TESTNET_PROVISION_MAX_ATOMIC=1000000` (isolated aalex prep: `1000000000`)
 - `PHASE10_TESTNET_PROVISION_OWNER_ADMIN_USER_ID=` (ACTIVE Owner admin UUID when enabling)
+- `PHASE10_TESTNET_PROVISION_REQUIRED_DATABASE_NAME=` (required for aalex)
+- `WITHDRAWAL_ASSET_SYMBOL=USDT` or `aalex`
 
 CLI (after `pnpm --filter @alex-rewards/ledger build`):
 

@@ -37,7 +37,8 @@ export type AdmitWalletSeqnoBlockCode =
   | 'TIMEOUT'
   | 'MALFORMED_RESPONSE'
   | 'PROVIDER_ERROR'
-  | 'CONFLICTING_EVIDENCE';
+  | 'CONFLICTING_EVIDENCE'
+  | 'LEASE_FENCE_INVALID';
 
 export interface AdmitWalletSeqnoInput {
   readonly networkGlobalId: number;
@@ -472,4 +473,85 @@ export async function admitWalletSeqno(
     secondary: secondaryState,
     publicKeyFingerprint: fingerprint,
   };
+}
+
+/** Bounded dual-provider re-admission attempts after HTTP 429 / RATE_LIMITED. */
+export const DEFAULT_SEQNO_ADMISSION_RATE_LIMIT_MAX_ATTEMPTS = 4;
+/** Base backoff (ms); delays are base * 2^(attempt-2) between retries. */
+export const DEFAULT_SEQNO_ADMISSION_RATE_LIMIT_BASE_DELAY_MS = 1_000;
+/**
+ * Optional pace before the first post-lease readmission so TonCenter is not
+ * hit twice within the same free-tier second as the initial admission.
+ */
+export const DEFAULT_SEQNO_READMISSION_PACE_MS = 1_100;
+
+export interface AdmitWalletSeqnoRateLimitRetryOptions {
+  readonly maxAttempts?: number;
+  readonly baseDelayMs?: number;
+  readonly sleep?: (ms: number) => Promise<void>;
+  /**
+   * Invoked after RATE_LIMITED and before sleeping/retrying.
+   * Return a blocked result to abort (e.g. dispatch lease expired / fencing mismatch).
+   * Return null to continue with backoff and a full dual-provider re-admission.
+   */
+  readonly beforeRetry?: () => Promise<AdmitWalletSeqnoBlocked | null>;
+  /** Delay before the first attempt (readmission pacing). */
+  readonly initialDelayMs?: number;
+}
+
+function defaultSleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+/**
+ * Dual-provider admitWalletSeqno with bounded RATE_LIMITED recovery.
+ * Non-rate-limit failures fail closed immediately. Every retry re-runs full
+ * dual-provider admission (never substitutes one provider for the other).
+ */
+export async function admitWalletSeqnoWithRateLimitRetry(
+  input: AdmitWalletSeqnoInput,
+  options: AdmitWalletSeqnoRateLimitRetryOptions = {},
+): Promise<AdmitWalletSeqnoResult> {
+  const maxAttempts = Math.max(
+    1,
+    options.maxAttempts ?? DEFAULT_SEQNO_ADMISSION_RATE_LIMIT_MAX_ATTEMPTS,
+  );
+  const baseDelayMs = Math.max(
+    0,
+    options.baseDelayMs ?? DEFAULT_SEQNO_ADMISSION_RATE_LIMIT_BASE_DELAY_MS,
+  );
+  const sleep = options.sleep ?? defaultSleep;
+  const initialDelayMs = Math.max(0, options.initialDelayMs ?? 0);
+
+  if (initialDelayMs > 0) {
+    await sleep(initialDelayMs);
+  }
+
+  let last: AdmitWalletSeqnoResult | undefined;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    if (attempt > 1) {
+      const abortBeforeWait =
+        options.beforeRetry !== undefined ? await options.beforeRetry() : null;
+      if (abortBeforeWait !== null) {
+        return abortBeforeWait;
+      }
+      const delayMs = baseDelayMs * 2 ** (attempt - 2);
+      if (delayMs > 0) {
+        await sleep(delayMs);
+      }
+      // Re-check after wait: lease may expire during backoff.
+      const abortAfterWait =
+        options.beforeRetry !== undefined ? await options.beforeRetry() : null;
+      if (abortAfterWait !== null) {
+        return abortAfterWait;
+      }
+    }
+    last = await admitWalletSeqno(input);
+    if (last.ok || last.code !== 'RATE_LIMITED') {
+      return last;
+    }
+  }
+  return last!;
 }

@@ -47,9 +47,30 @@ Real signer/KMS/TON broadcast remain out of scope until later Owner-approved pha
 | `0021_phase10_broadcast_evidence.sql`                | Phase 10: additive `signed_external_message_boc` / `broadcast_submitted_at` / `broadcast_ambiguity_class` on `withdrawal_attempts`                                                                           |
 | `0022_external_message_identity.sql`                 | Phase 10: additive signed Wallet request BOC, exact External-In cell hash, and Tonkeeper-normalized External-In hash evidence                                                                                |
 | `0023_attempt_requires_state_init.sql`               | Phase 10: additive `requires_state_init` on `withdrawal_attempts` + signer view (StateInit bound to proven uninit admission)                                                                                 |
+| `0030_phase11_adsgram_foundation.sql`                | Phase 11: authoritative `reward_quotes.ad_session_id` FK + AD source CHECK; `provider_health_snapshots`; `provider_clarification_items`; AdsGram provider/manifest/unit/limit seed (BLOCKED)                 |
 
 Migrations `0001`–`0022` remain immutable. Migration `0023` adds only the proven-account
 StateInit requirement column and appends it to the signer view.
+
+### Phase 11 notes (`0030`)
+
+- **Authoritative quote↔session link.** `reward_quotes.ad_session_id` is the single pointer, is
+  unique (`reward_quotes_ad_session_uidx`), and for `source_type = 'AD'` a CHECK requires
+  `source_id = ad_session_id`. `ad_sessions` deliberately holds **no** quote column, so the two
+  rows can never disagree about which quote is authoritative. Both are written in one transaction.
+- **`provider_health_snapshots`** is append-oriented operational state. It gates _new_ session
+  authorization only and never reverses an issued reward. A provider with no observation is
+  treated as UNAVAILABLE, not as implicitly healthy.
+- **`provider_clarification_items`** is the auditable register of unresolved provider questions
+  (`OPEN` / `RESOLVED` / `WAIVED`). The monetary gate counts OPEN rows; a non-zero count refuses
+  money. See `docs/ADSGRAM_CLARIFICATION_REGISTER.md`.
+- **Seeded AdsGram data is deliberately unpayable**: `production_monetary_status = BLOCKED`,
+  `policy_status = BLOCKED_PENDING_CLARIFICATION`, six OPEN clarification items.
+- **Limits are seeded data, not constants.** The 30 REQUEST / 25 SUCCESS per user per UTC day
+  values are `provider_limit_rules` rows. Changing them means superseding a version and inserting
+  a new approved, sourced one; the `0009` exclusion constraints keep versions from overlapping.
+- A `PROVIDER_HARD` ACTIVE rule requires `approved_by_admin_id`, so the migration seeds a system
+  policy approver used for that purpose only.
 
 ## Schema ownership
 

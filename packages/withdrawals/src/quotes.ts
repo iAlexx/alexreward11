@@ -71,6 +71,9 @@ async function resolveNetworkAndAsset(
   if (config.usdtSymbol === 'USDT' && row.is_native) {
     throw new WithdrawalDomainError('CONFIG', 'USDT withdrawal asset must be non-native');
   }
+  if (config.usdtSymbol === 'aalex' && row.is_native) {
+    throw new WithdrawalDomainError('CONFIG', 'aalex withdrawal asset must be non-native');
+  }
   return { networkId, assetId: row.id };
 }
 

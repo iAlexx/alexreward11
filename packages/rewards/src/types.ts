@@ -152,6 +152,26 @@ export interface CreateRewardQuoteCommand {
   readonly budgetPeriodId?: string | null;
   /** Optional locator; engine resolves ALL applicable bonus periods. */
   readonly membershipBonusBudgetPeriodId?: string | null;
+  /**
+   * Optional pre-generated quote id (required for atomic AD session+quote create).
+   * Spec V1.3: session id and quote id are pre-generated in one transaction.
+   */
+  readonly quoteId?: string;
+  /**
+   * Authoritative AD session FK (reward_quotes.ad_session_id). Required when sourceType=AD.
+   * Must equal sourceId for AD quotes.
+   */
+  readonly adSessionId?: string | null;
+  /** Optional ad unit binding for AD quotes. */
+  readonly adUnitId?: string | null;
+}
+
+export interface IssueAdRewardCommand {
+  readonly quoteId: string;
+  readonly userId: string;
+  readonly adSessionId: string;
+  readonly idempotencyKey: string;
+  readonly asOf?: Date;
 }
 
 export interface RewardQuoteResult {
