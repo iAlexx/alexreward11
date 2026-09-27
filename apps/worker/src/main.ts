@@ -5,33 +5,21 @@ import { NativeConnection, Runtime, Worker } from '@temporalio/worker';
 import Fastify, { LogController } from 'fastify';
 import { Pool } from 'pg';
 
-import { loadWorkerConfig, type WorkerConfig } from '@alex-rewards/config';
+import { loadWorkerConfig } from '@alex-rewards/config';
 import { type HealthResponse } from '@alex-rewards/contracts';
 import { createShutdownCoordinator, initializeObservability } from '@alex-rewards/observability';
 import {
   processWithdrawalApprovedOutboxBatch,
   processWithdrawalFailedPreRetryOutboxBatch,
   buildPhase10PayoutConfig,
-  withdrawalEngineConfigFromValidatedApi,
-  type WithdrawalEngineConfig,
 } from '@alex-rewards/withdrawals';
 
 import { createWithdrawalActivities } from './activities.js';
 import { buildWorkerHealth } from './health.js';
 import { createWithdrawalOutboxPoller, startWithdrawalOutboxRelay } from './outbox-relay.js';
+import { withdrawalEngineConfigFromWorker } from './withdrawal-engine-config.js';
 
 const OUTBOX_POLL_INTERVAL_MS = 2_000;
-
-function withdrawalEngineConfigFromWorker(config: WorkerConfig): WithdrawalEngineConfig {
-  return withdrawalEngineConfigFromValidatedApi({
-    DEPLOYMENT_ENV: config.DEPLOYMENT_ENV,
-    WITHDRAWAL_QUOTE_TTL_SECONDS: config.WITHDRAWAL_QUOTE_TTL_SECONDS,
-    WITHDRAWAL_RISK_POLICY_VERSION: config.WITHDRAWAL_RISK_POLICY_VERSION,
-    WITHDRAWAL_NETWORK_CODE: config.WITHDRAWAL_NETWORK_CODE,
-    WITHDRAWAL_ASSET_SYMBOL: config.WITHDRAWAL_ASSET_SYMBOL,
-    WITHDRAWAL_FAKE_CHAIN_ENABLED: config.WITHDRAWAL_FAKE_CHAIN_ENABLED,
-  });
-}
 
 const config = loadWorkerConfig();
 const withdrawalConfig = withdrawalEngineConfigFromWorker(config);

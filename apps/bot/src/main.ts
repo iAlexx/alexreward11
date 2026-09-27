@@ -45,6 +45,7 @@ const withdrawalEngineConfig = withdrawalEngineConfigFromValidatedApi({
   WITHDRAWAL_NETWORK_CODE: config.WITHDRAWAL_NETWORK_CODE,
   WITHDRAWAL_ASSET_SYMBOL: config.WITHDRAWAL_ASSET_SYMBOL,
   WITHDRAWAL_FAKE_CHAIN_ENABLED: config.WITHDRAWAL_FAKE_CHAIN_ENABLED,
+  STAGING_INTEGRATION_MODE: config.STAGING_INTEGRATION_MODE,
 });
 
 const response = (status: HealthResponse['status']): HealthResponse => ({

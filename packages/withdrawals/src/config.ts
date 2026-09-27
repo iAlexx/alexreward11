@@ -26,6 +26,12 @@ export interface WithdrawalEngineConfig {
   readonly fakeChainEnabled: boolean;
   readonly acceptedNetworkCode: string;
   readonly usdtSymbol: string;
+  /**
+   * Already-validated explicit staging integration flag.
+   * Only STAGING + true may accept TON_TESTNET, and only with fake chain off.
+   * This flag does not authorize payout or broadcast.
+   */
+  readonly stagingIntegrationMode: boolean;
 }
 
 /** Validated API/env subset used to build engine config (no Record casts). */
@@ -36,6 +42,8 @@ export interface ValidatedWithdrawalApiConfig {
   readonly WITHDRAWAL_NETWORK_CODE: string;
   readonly WITHDRAWAL_ASSET_SYMBOL: string;
   readonly WITHDRAWAL_FAKE_CHAIN_ENABLED: boolean;
+  /** Already-validated boolean from ApiConfig, WorkerConfig, or BotConfig. */
+  readonly STAGING_INTEGRATION_MODE: boolean;
 }
 
 export function assertWithdrawalEngineConfig(config: WithdrawalEngineConfig): void {
@@ -51,6 +59,34 @@ export function assertWithdrawalEngineConfig(config: WithdrawalEngineConfig): vo
   if (config.usdtSymbol.trim() === '') {
     throw new WithdrawalDomainError('CONFIG', 'usdtSymbol is required');
   }
+  if (config.stagingIntegrationMode) {
+    if (config.deploymentEnvironment !== 'STAGING') {
+      throw new WithdrawalDomainError(
+        'CONFIG',
+        'STAGING_INTEGRATION_MODE is only allowed when deployment is STAGING',
+      );
+    }
+    if (config.fakeChainEnabled) {
+      throw new WithdrawalDomainError(
+        'CONFIG',
+        'STAGING_INTEGRATION_MODE requires fakeChainEnabled=false',
+      );
+    }
+    if (config.acceptedNetworkCode.toUpperCase().includes('MAINNET')) {
+      throw new WithdrawalDomainError(
+        'CONFIG',
+        'MAINNET network codes are forbidden under STAGING_INTEGRATION_MODE',
+      );
+    }
+    if (config.acceptedNetworkCode !== 'TON_TESTNET') {
+      throw new WithdrawalDomainError(
+        'CONFIG',
+        'STAGING_INTEGRATION_MODE requires acceptedNetworkCode TON_TESTNET',
+      );
+    }
+    return;
+  }
+
   const stagingOrProd =
     config.deploymentEnvironment === 'STAGING' || config.deploymentEnvironment === 'PRODUCTION';
   if (stagingOrProd && config.fakeChainEnabled) {
@@ -99,6 +135,7 @@ export function withdrawalEngineConfigFromValidatedApi(
     fakeChainEnabled: api.WITHDRAWAL_FAKE_CHAIN_ENABLED,
     acceptedNetworkCode: api.WITHDRAWAL_NETWORK_CODE,
     usdtSymbol: api.WITHDRAWAL_ASSET_SYMBOL,
+    stagingIntegrationMode: api.STAGING_INTEGRATION_MODE,
   };
   assertWithdrawalEngineConfig(config);
   return config;
@@ -115,6 +152,7 @@ export function localWithdrawalEngineFixtureConfig(
     fakeChainEnabled: true,
     acceptedNetworkCode: 'TON_TESTNET',
     usdtSymbol: 'USDT',
+    stagingIntegrationMode: false,
     ...overrides,
   };
   assertWithdrawalEngineConfig(config);
