@@ -21,7 +21,79 @@ const commonSchema = z.object({
   OTEL_ENABLED: booleanFromString,
   OTEL_EXPORTER_OTLP_ENDPOINT: optionalUrl,
   SENTRY_DSN: optionalUrl,
+  /**
+   * Explicit Railway / non-production staging-integration opt-in.
+   * Default false. Accepted ONLY when DEPLOYMENT_ENV=staging.
+   * Never a production, local, or test shortcut.
+   */
+  STAGING_INTEGRATION_MODE: booleanFromString,
 });
+
+function isStagingIntegrationMode(value: {
+  readonly DEPLOYMENT_ENV: z.infer<typeof deploymentEnvironment>;
+  readonly STAGING_INTEGRATION_MODE: boolean;
+}): boolean {
+  return value.DEPLOYMENT_ENV === 'staging' && value.STAGING_INTEGRATION_MODE;
+}
+
+/**
+ * Withdrawal network / fake-chain rules for API, Bot, and Worker.
+ * Staging integration mode requires TON_TESTNET + fake chain off; otherwise
+ * the historical fail-closed staging/production rejection of TON_TESTNET stands.
+ */
+function refineWithdrawalNetworkForDeployment(
+  value: {
+    readonly DEPLOYMENT_ENV: z.infer<typeof deploymentEnvironment>;
+    readonly STAGING_INTEGRATION_MODE: boolean;
+    readonly WITHDRAWAL_NETWORK_CODE: string;
+    readonly WITHDRAWAL_FAKE_CHAIN_ENABLED: boolean;
+  },
+  context: z.RefinementCtx,
+): void {
+  const outsideLocal = value.DEPLOYMENT_ENV !== 'local' && value.DEPLOYMENT_ENV !== 'test';
+  const networkUpper = value.WITHDRAWAL_NETWORK_CODE.toUpperCase();
+
+  if (isStagingIntegrationMode(value)) {
+    if (networkUpper.includes('MAINNET')) {
+      context.addIssue({
+        code: 'custom',
+        path: ['WITHDRAWAL_NETWORK_CODE'],
+        message:
+          'MAINNET network codes are forbidden under STAGING_INTEGRATION_MODE (TON Testnet only)',
+      });
+    }
+    if (value.WITHDRAWAL_NETWORK_CODE !== 'TON_TESTNET') {
+      context.addIssue({
+        code: 'custom',
+        path: ['WITHDRAWAL_NETWORK_CODE'],
+        message: 'STAGING_INTEGRATION_MODE requires WITHDRAWAL_NETWORK_CODE=TON_TESTNET',
+      });
+    }
+    if (value.WITHDRAWAL_FAKE_CHAIN_ENABLED) {
+      context.addIssue({
+        code: 'custom',
+        path: ['WITHDRAWAL_FAKE_CHAIN_ENABLED'],
+        message: 'STAGING_INTEGRATION_MODE requires WITHDRAWAL_FAKE_CHAIN_ENABLED=false',
+      });
+    }
+    return;
+  }
+
+  if (outsideLocal && value.WITHDRAWAL_FAKE_CHAIN_ENABLED) {
+    context.addIssue({
+      code: 'custom',
+      path: ['WITHDRAWAL_FAKE_CHAIN_ENABLED'],
+      message: 'fake payout chain is forbidden outside local/test',
+    });
+  }
+  if (outsideLocal && value.WITHDRAWAL_NETWORK_CODE === 'TON_TESTNET') {
+    context.addIssue({
+      code: 'custom',
+      path: ['WITHDRAWAL_NETWORK_CODE'],
+      message: 'TON_TESTNET cannot be inherited by staging/production',
+    });
+  }
+}
 
 const postgresUrl = z
   .url()
@@ -184,20 +256,7 @@ const apiSchema = serviceSchema
         message: 'must list at least one explicit origin outside local/test',
       });
     }
-    if (outsideLocal && value.WITHDRAWAL_FAKE_CHAIN_ENABLED) {
-      context.addIssue({
-        code: 'custom',
-        path: ['WITHDRAWAL_FAKE_CHAIN_ENABLED'],
-        message: 'fake payout chain is forbidden outside local/test',
-      });
-    }
-    if (outsideLocal && value.WITHDRAWAL_NETWORK_CODE === 'TON_TESTNET') {
-      context.addIssue({
-        code: 'custom',
-        path: ['WITHDRAWAL_NETWORK_CODE'],
-        message: 'TON_TESTNET cannot be inherited by staging/production',
-      });
-    }
+    refineWithdrawalNetworkForDeployment(value, context);
   });
 
 const botSchema = commonSchema
@@ -264,20 +323,7 @@ const botSchema = commonSchema
         message: 'is required when Control Center transport is enabled or outside local/test',
       });
     }
-    if (outsideLocal && value.WITHDRAWAL_FAKE_CHAIN_ENABLED) {
-      context.addIssue({
-        code: 'custom',
-        path: ['WITHDRAWAL_FAKE_CHAIN_ENABLED'],
-        message: 'fake payout chain is forbidden outside local/test',
-      });
-    }
-    if (outsideLocal && value.WITHDRAWAL_NETWORK_CODE === 'TON_TESTNET') {
-      context.addIssue({
-        code: 'custom',
-        path: ['WITHDRAWAL_NETWORK_CODE'],
-        message: 'TON_TESTNET cannot be inherited by staging/production',
-      });
-    }
+    refineWithdrawalNetworkForDeployment(value, context);
   })
   .transform((value) => {
     const ownerTelegramUserIds = value.CONTROL_CENTER_OWNER_TELEGRAM_USER_IDS.split(',')
@@ -345,22 +391,12 @@ const workerSchema = serviceSchema
     ),
   })
   .superRefine((value, context) => {
-    const outsideLocal = value.DEPLOYMENT_ENV !== 'local' && value.DEPLOYMENT_ENV !== 'test';
-    if (outsideLocal && value.WITHDRAWAL_FAKE_CHAIN_ENABLED) {
-      context.addIssue({
-        code: 'custom',
-        path: ['WITHDRAWAL_FAKE_CHAIN_ENABLED'],
-        message: 'fake payout chain is forbidden outside local/test',
-      });
-    }
-    if (outsideLocal && value.WITHDRAWAL_NETWORK_CODE === 'TON_TESTNET') {
-      context.addIssue({
-        code: 'custom',
-        path: ['WITHDRAWAL_NETWORK_CODE'],
-        message: 'TON_TESTNET cannot be inherited by staging/production',
-      });
-    }
-    if (value.WITHDRAWAL_NETWORK_CODE.toUpperCase().includes('MAINNET')) {
+    refineWithdrawalNetworkForDeployment(value, context);
+    // Worker always refuses MAINNET codes (including under local/test).
+    if (
+      !isStagingIntegrationMode(value) &&
+      value.WITHDRAWAL_NETWORK_CODE.toUpperCase().includes('MAINNET')
+    ) {
       context.addIssue({
         code: 'custom',
         path: ['WITHDRAWAL_NETWORK_CODE'],
@@ -565,15 +601,28 @@ function parseEnvironment<T>(schema: z.ZodType<T>, environment: NodeJS.ProcessEn
 }
 
 function assertSecureEnvironment(config: CommonConfig & Record<string, unknown>): void {
-  if (config.DEPLOYMENT_ENV === 'local' || config.DEPLOYMENT_ENV === 'test') return;
-
-  if (!config.OTEL_ENABLED || config.OTEL_EXPORTER_OTLP_ENDPOINT === undefined) {
+  if (config.STAGING_INTEGRATION_MODE && config.DEPLOYMENT_ENV !== 'staging') {
     throw new Error(
-      'Invalid environment configuration: OTLP export is required outside local/test',
+      'Invalid environment configuration: STAGING_INTEGRATION_MODE is only allowed when DEPLOYMENT_ENV=staging',
     );
   }
-  if (config.SENTRY_DSN === undefined) {
-    throw new Error('Invalid environment configuration: SENTRY_DSN is required outside local/test');
+
+  if (config.DEPLOYMENT_ENV === 'local' || config.DEPLOYMENT_ENV === 'test') return;
+
+  const stagingIntegration = isStagingIntegrationMode(config);
+
+  // Observability remains mandatory outside local/test except explicit staging integration.
+  if (!stagingIntegration) {
+    if (!config.OTEL_ENABLED || config.OTEL_EXPORTER_OTLP_ENDPOINT === undefined) {
+      throw new Error(
+        'Invalid environment configuration: OTLP export is required outside local/test',
+      );
+    }
+    if (config.SENTRY_DSN === undefined) {
+      throw new Error(
+        'Invalid environment configuration: SENTRY_DSN is required outside local/test',
+      );
+    }
   }
 
   for (const key of ['DATABASE_URL', 'REDIS_URL', 'NEXT_PUBLIC_API_BASE_URL'] as const) {

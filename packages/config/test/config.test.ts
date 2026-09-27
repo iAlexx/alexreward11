@@ -407,6 +407,159 @@ describe('environment validation', () => {
     ).toThrow(/WITHDRAWAL_FAKE_CHAIN_ENABLED|fake payout/);
   });
 
+  describe('STAGING_INTEGRATION_MODE', () => {
+    const stagingBase = {
+      DEPLOYMENT_ENV: 'staging',
+      NODE_ENV: 'production',
+      DATABASE_URL: 'postgresql://user:pass@db.example.com:5432/db',
+      REDIS_URL: 'rediss://redis.example.com:6379',
+      TEMPORAL_ADDRESS: 'temporal.example.com:7233',
+      TELEGRAM_BOT_TOKEN: 'staging-grade-telegram-bot-token-value',
+      SESSION_ACCESS_SECRET: 'staging-grade-session-access-secret!!',
+      ...remoteAuthPolicy,
+      WITHDRAWAL_NETWORK_CODE: 'TON_TESTNET',
+      WITHDRAWAL_FAKE_CHAIN_ENABLED: 'false',
+    } as const;
+
+    it('defaults STAGING_INTEGRATION_MODE to false', () => {
+      const config = loadApiConfig({
+        ...common,
+        ...apiAuth,
+        DATABASE_URL: 'postgresql://alex:local@localhost:5432/db',
+        REDIS_URL: 'redis://localhost:6379',
+        TEMPORAL_ADDRESS: 'localhost:7233',
+      });
+      expect(config.STAGING_INTEGRATION_MODE).toBe(false);
+    });
+
+    it('refuses production with STAGING_INTEGRATION_MODE=true', () => {
+      expect(() =>
+        loadApiConfig({
+          ...stagingBase,
+          DEPLOYMENT_ENV: 'production',
+          STAGING_INTEGRATION_MODE: 'true',
+          OTEL_ENABLED: 'true',
+          OTEL_EXPORTER_OTLP_ENDPOINT: 'https://otel.example.com',
+          SENTRY_DSN: 'https://public@example.com/1',
+          WITHDRAWAL_NETWORK_CODE: 'TON',
+        }),
+      ).toThrow(/STAGING_INTEGRATION_MODE|DEPLOYMENT_ENV=staging/);
+    });
+
+    it('refuses local with STAGING_INTEGRATION_MODE=true', () => {
+      expect(() =>
+        loadApiConfig({
+          ...common,
+          ...apiAuth,
+          STAGING_INTEGRATION_MODE: 'true',
+          DATABASE_URL: 'postgresql://alex:local@localhost:5432/db',
+          REDIS_URL: 'redis://localhost:6379',
+          TEMPORAL_ADDRESS: 'localhost:7233',
+        }),
+      ).toThrow(/STAGING_INTEGRATION_MODE|DEPLOYMENT_ENV=staging/);
+    });
+
+    it('refuses test with STAGING_INTEGRATION_MODE=true', () => {
+      expect(() =>
+        loadApiConfig({
+          ...common,
+          DEPLOYMENT_ENV: 'test',
+          ...apiAuth,
+          STAGING_INTEGRATION_MODE: 'true',
+          DATABASE_URL: 'postgresql://alex:local@localhost:5432/db',
+          REDIS_URL: 'redis://localhost:6379',
+          TEMPORAL_ADDRESS: 'localhost:7233',
+        }),
+      ).toThrow(/STAGING_INTEGRATION_MODE|DEPLOYMENT_ENV=staging/);
+    });
+
+    it('accepts staging + mode=true + TON_TESTNET + fake=false without OTEL/Sentry', () => {
+      const config = loadApiConfig({
+        ...stagingBase,
+        STAGING_INTEGRATION_MODE: 'true',
+        OTEL_ENABLED: 'false',
+      });
+      expect(config.STAGING_INTEGRATION_MODE).toBe(true);
+      expect(config.DEPLOYMENT_ENV).toBe('staging');
+      expect(config.WITHDRAWAL_NETWORK_CODE).toBe('TON_TESTNET');
+      expect(config.WITHDRAWAL_FAKE_CHAIN_ENABLED).toBe(false);
+      expect(config.OTEL_ENABLED).toBe(false);
+      expect(config.SENTRY_DSN).toBeUndefined();
+    });
+
+    it('refuses staging + mode=true + MAINNET', () => {
+      expect(() =>
+        loadApiConfig({
+          ...stagingBase,
+          STAGING_INTEGRATION_MODE: 'true',
+          OTEL_ENABLED: 'false',
+          WITHDRAWAL_NETWORK_CODE: 'TON_MAINNET',
+        }),
+      ).toThrow(/MAINNET|TON_TESTNET/);
+    });
+
+    it('refuses staging + mode=true + fake chain enabled', () => {
+      expect(() =>
+        loadApiConfig({
+          ...stagingBase,
+          STAGING_INTEGRATION_MODE: 'true',
+          OTEL_ENABLED: 'false',
+          WITHDRAWAL_FAKE_CHAIN_ENABLED: 'true',
+        }),
+      ).toThrow(/WITHDRAWAL_FAKE_CHAIN_ENABLED|fake/);
+    });
+
+    it('keeps fail-closed staging + mode=false + TON_TESTNET', () => {
+      expect(() =>
+        loadApiConfig({
+          ...stagingBase,
+          STAGING_INTEGRATION_MODE: 'false',
+          OTEL_ENABLED: 'true',
+          OTEL_EXPORTER_OTLP_ENDPOINT: 'https://otel.example.com',
+          SENTRY_DSN: 'https://public@example.com/1',
+          WITHDRAWAL_NETWORK_CODE: 'TON_TESTNET',
+        }),
+      ).toThrow(/WITHDRAWAL_NETWORK_CODE|TON_TESTNET/);
+    });
+
+    it('still requires OTEL + Sentry in production', () => {
+      expect(() =>
+        loadApiConfig({
+          ...stagingBase,
+          DEPLOYMENT_ENV: 'production',
+          STAGING_INTEGRATION_MODE: 'false',
+          OTEL_ENABLED: 'false',
+          WITHDRAWAL_NETWORK_CODE: 'TON',
+        }),
+      ).toThrow(/OTLP|SENTRY/);
+    });
+
+    it('still refuses local-only secrets under staging integration mode', () => {
+      expect(() =>
+        loadApiConfig({
+          ...stagingBase,
+          STAGING_INTEGRATION_MODE: 'true',
+          OTEL_ENABLED: 'false',
+          TELEGRAM_BOT_TOKEN: 'local-only-telegram-bot-token-for-tests',
+          SESSION_ACCESS_SECRET: 'local-only-session-access-secret-32b',
+        }),
+      ).toThrow(/local-only/);
+    });
+
+    it('still refuses localhost Wallet/WebAuthn under staging integration mode', () => {
+      expect(() =>
+        loadApiConfig({
+          ...stagingBase,
+          STAGING_INTEGRATION_MODE: 'true',
+          OTEL_ENABLED: 'false',
+          WALLET_TON_PROOF_DOMAIN: 'localhost',
+          ADMIN_WEBAUTHN_RP_ID: 'localhost',
+          ADMIN_WEBAUTHN_ORIGIN: 'http://localhost:3001',
+        }),
+      ).toThrow(/WALLET_TON_PROOF_DOMAIN|ADMIN_WEBAUTHN/);
+    });
+  });
+
   it('accepts only explicitly public web configuration', () => {
     const config = loadWebConfig({
       NODE_ENV: 'test',
