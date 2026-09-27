@@ -64,7 +64,7 @@ server.get('/health/ready', async (_request, reply) => {
 server.get('/health', async () => response('ok'));
 
 try {
-  await server.listen({ port: config.BOT_PORT, host: '0.0.0.0' });
+  await server.listen({ port: config.BOT_PORT, host: config.BOT_LISTEN_HOST });
   if (config.BOT_TRANSPORT_MODE === 'polling' && config.TELEGRAM_BOT_TOKEN !== undefined) {
     if (config.DATABASE_URL === undefined) {
       throw new Error('DATABASE_URL is required when bot transport is enabled');
@@ -136,7 +136,11 @@ try {
     }, OWNER_REVIEW_POLL_INTERVAL_MS);
   }
   observability.logger.info(
-    { port: config.BOT_PORT, transport: config.BOT_TRANSPORT_MODE },
+    {
+      port: config.BOT_PORT,
+      listenHost: config.BOT_LISTEN_HOST,
+      transport: config.BOT_TRANSPORT_MODE,
+    },
     'bot listening',
   );
 } catch (error) {

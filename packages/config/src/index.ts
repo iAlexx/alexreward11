@@ -277,6 +277,15 @@ const apiSchema = serviceSchema
 const botSchema = commonSchema
   .extend({
     BOT_PORT: z.coerce.number().int().min(1024).max(65535).default(3003),
+    /**
+     * Explicit bot HTTP bind address. Allowed: `0.0.0.0` | `::`.
+     * Local/test/production/normal staging default to `0.0.0.0` when unset.
+     * Staging integration mode defaults to `::` when unset (Railway public networking).
+     */
+    BOT_LISTEN_HOST: z.preprocess(
+      (value) => (value === '' || value === undefined || value === null ? undefined : value),
+      z.enum(['0.0.0.0', '::']).optional(),
+    ),
     BOT_TRANSPORT_MODE: z.enum(['disabled', 'polling']).default('disabled'),
     TELEGRAM_BOT_TOKEN: optionalSecret,
     DATABASE_URL: postgresUrl.optional(),
@@ -344,7 +353,13 @@ const botSchema = commonSchema
     const ownerTelegramUserIds = value.CONTROL_CENTER_OWNER_TELEGRAM_USER_IDS.split(',')
       .map((item) => item.trim())
       .filter((item) => item.length > 0);
-    return { ...value, ownerTelegramUserIds };
+    return {
+      ...value,
+      ownerTelegramUserIds,
+      BOT_LISTEN_HOST:
+        value.BOT_LISTEN_HOST ??
+        (isStagingIntegrationMode(value) ? ('::' as const) : ('0.0.0.0' as const)),
+    };
   });
 
 const LOCAL_BOT_CONTROL_CENTER_DEFAULTS = {

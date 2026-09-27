@@ -883,6 +883,92 @@ describe('environment validation', () => {
       expect(config.STAGING_INTEGRATION_MODE).toBe(false);
     });
   });
+
+  describe('BOT_LISTEN_HOST', () => {
+    const botLocal = {
+      ...common,
+      BOT_TRANSPORT_MODE: 'disabled' as const,
+    };
+
+    const botTest = {
+      ...common,
+      DEPLOYMENT_ENV: 'test' as const,
+      BOT_TRANSPORT_MODE: 'polling' as const,
+      TELEGRAM_BOT_TOKEN: 'local-only-telegram-bot-token-for-tests',
+      DATABASE_URL: 'postgresql://alex:local@localhost:5432/db',
+    };
+
+    const botRemote = {
+      NODE_ENV: 'production' as const,
+      BOT_TRANSPORT_MODE: 'polling' as const,
+      TELEGRAM_BOT_TOKEN: 'staging-grade-telegram-bot-token-value',
+      DATABASE_URL: 'postgresql://user:pass@db.example.com:5432/db',
+      CONTROL_CENTER_OWNER_TELEGRAM_USER_IDS: '900001',
+      CONTROL_CENTER_ACTION_TOKEN_TTL_SECONDS: '900',
+      CONTROL_CENTER_CONFIRM_TOKEN_TTL_SECONDS: '300',
+      CONTROL_CENTER_RATE_LIMIT_WINDOW_SECONDS: '60',
+      CONTROL_CENTER_RATE_LIMIT_MAX: '30',
+      WITHDRAWAL_QUOTE_TTL_SECONDS: '300',
+      WITHDRAWAL_RISK_POLICY_VERSION: '1',
+      WITHDRAWAL_ASSET_SYMBOL: 'USDT',
+      WITHDRAWAL_FAKE_CHAIN_ENABLED: 'false',
+    };
+
+    it('defaults local and test to 0.0.0.0', () => {
+      expect(loadBotConfig(botLocal).BOT_LISTEN_HOST).toBe('0.0.0.0');
+      expect(loadBotConfig(botTest).BOT_LISTEN_HOST).toBe('0.0.0.0');
+      expect(loadBotConfig(botLocal).BOT_TRANSPORT_MODE).toBe('disabled');
+    });
+
+    it('defaults explicit staging integration to ::', () => {
+      const config = loadBotConfig({
+        ...botRemote,
+        DEPLOYMENT_ENV: 'staging',
+        STAGING_INTEGRATION_MODE: 'true',
+        WITHDRAWAL_NETWORK_CODE: 'TON_TESTNET',
+      });
+      expect(config.BOT_LISTEN_HOST).toBe('::');
+    });
+
+    it('keeps normal staging default 0.0.0.0', () => {
+      const config = loadBotConfig({
+        ...botRemote,
+        DEPLOYMENT_ENV: 'staging',
+        STAGING_INTEGRATION_MODE: 'false',
+        OTEL_ENABLED: 'true',
+        OTEL_EXPORTER_OTLP_ENDPOINT: 'https://otel.example.com',
+        SENTRY_DSN: 'https://public@example.com/1',
+        WITHDRAWAL_NETWORK_CODE: 'TON',
+      });
+      expect(config.BOT_LISTEN_HOST).toBe('0.0.0.0');
+    });
+
+    it('keeps production default 0.0.0.0', () => {
+      const config = loadBotConfig({
+        ...botRemote,
+        DEPLOYMENT_ENV: 'production',
+        OTEL_ENABLED: 'true',
+        OTEL_EXPORTER_OTLP_ENDPOINT: 'https://otel.example.com',
+        SENTRY_DSN: 'https://public@example.com/1',
+        WITHDRAWAL_NETWORK_CODE: 'TON',
+      });
+      expect(config.BOT_LISTEN_HOST).toBe('0.0.0.0');
+      expect(config.WITHDRAWAL_FAKE_CHAIN_ENABLED).toBe(false);
+    });
+
+    it('accepts explicit :: and 0.0.0.0', () => {
+      expect(loadBotConfig({ ...botLocal, BOT_LISTEN_HOST: '::' }).BOT_LISTEN_HOST).toBe('::');
+      expect(loadBotConfig({ ...botLocal, BOT_LISTEN_HOST: '0.0.0.0' }).BOT_LISTEN_HOST).toBe(
+        '0.0.0.0',
+      );
+    });
+
+    it('rejects an invalid listen host', () => {
+      expect(() => loadBotConfig({ ...botLocal, BOT_LISTEN_HOST: '127.0.0.1' })).toThrow(
+        /BOT_LISTEN_HOST/,
+      );
+    });
+  });
 });
 
 describe('Phase 10 Testnet provision config', () => {
