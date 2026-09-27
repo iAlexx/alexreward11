@@ -6,7 +6,7 @@ import Fastify, { LogController } from 'fastify';
 import { Pool } from 'pg';
 
 import { loadWorkerConfig, type WorkerConfig } from '@alex-rewards/config';
-import { HEALTH_CONTRACT_VERSION, type HealthResponse } from '@alex-rewards/contracts';
+import { type HealthResponse } from '@alex-rewards/contracts';
 import { createShutdownCoordinator, initializeObservability } from '@alex-rewards/observability';
 import {
   processWithdrawalApprovedOutboxBatch,
@@ -17,6 +17,8 @@ import {
 } from '@alex-rewards/withdrawals';
 
 import { createWithdrawalActivities } from './activities.js';
+import { buildWorkerHealth } from './health.js';
+import { createWithdrawalOutboxPoller, startWithdrawalOutboxRelay } from './outbox-relay.js';
 
 const OUTBOX_POLL_INTERVAL_MS = 2_000;
 
@@ -68,21 +70,19 @@ let ready = false;
 let dbPool: Pool | undefined;
 let temporalClient: Client | undefined;
 let outboxPollTimer: ReturnType<typeof setInterval> | undefined;
-let outboxPollInFlight = false;
 
-const health = (status: HealthResponse['status']): HealthResponse => ({
-  contractVersion: HEALTH_CONTRACT_VERSION,
-  service: 'worker',
-  status,
-  timestamp: new Date().toISOString(),
-  components: [{ name: 'temporal-worker', state: status }],
-});
-server.get('/health/live', async () => health('ok'));
+const health = (readyForTraffic: boolean): HealthResponse =>
+  buildWorkerHealth({
+    ready: readyForTraffic,
+    outboxRelayEnabled: config.WORKER_OUTBOX_RELAY_ENABLED,
+    timestamp: new Date().toISOString(),
+  });
+server.get('/health/live', async () => health(true));
 server.get('/health/ready', async (_request, reply) => {
-  const status = ready ? 'ok' : 'unavailable';
-  return reply.code(ready ? 200 : 503).send(health(status));
+  const body = health(ready);
+  return reply.code(body.status === 'ok' ? 200 : 503).send(body);
 });
-server.get('/health', async () => health('ok'));
+server.get('/health', async () => health(true));
 
 try {
   nativeConnection = await NativeConnection.connect({ address: config.TEMPORAL_ADDRESS });
@@ -112,31 +112,39 @@ try {
     process.exitCode = 1;
   });
 
-  // Always poll when DATABASE_URL is present; activities fail closed if fake disabled.
-  outboxPollTimer = setInterval(() => {
-    if (outboxPollInFlight || dbPool === undefined || temporalClient === undefined) return;
-    outboxPollInFlight = true;
-    void processWithdrawalApprovedOutboxBatch(dbPool, {
-      client: temporalClient,
-      taskQueue: config.TEMPORAL_TASK_QUEUE,
-      fakeChainEnabled: withdrawalConfig.fakeChainEnabled,
-      realChainEnabled: phase10Config.realChainEnabled,
-    })
-      .then(() =>
-        processWithdrawalFailedPreRetryOutboxBatch(dbPool!, {
-          client: temporalClient!,
-          taskQueue: config.TEMPORAL_TASK_QUEUE,
-          fakeChainEnabled: withdrawalConfig.fakeChainEnabled,
-          realChainEnabled: phase10Config.realChainEnabled,
-        }),
-      )
-      .catch((error: unknown) => {
-        observability.logger.warn({ err: error }, 'withdrawal outbox relay batch failed');
-      })
-      .finally(() => {
-        outboxPollInFlight = false;
-      });
-  }, OUTBOX_POLL_INTERVAL_MS);
+  // Historical poll when enabled. Disabled staging integration never arms this interval.
+  outboxPollTimer = startWithdrawalOutboxRelay({
+    enabled: config.WORKER_OUTBOX_RELAY_ENABLED,
+    intervalMs: OUTBOX_POLL_INTERVAL_MS,
+    poll: async () => {
+      if (dbPool === undefined || temporalClient === undefined) return;
+      const pool = dbPool;
+      const client = temporalClient;
+      await createWithdrawalOutboxPoller({
+        processApproved: () =>
+          processWithdrawalApprovedOutboxBatch(pool, {
+            client,
+            taskQueue: config.TEMPORAL_TASK_QUEUE,
+            fakeChainEnabled: withdrawalConfig.fakeChainEnabled,
+            realChainEnabled: phase10Config.realChainEnabled,
+          }),
+        processFailedPreRetry: () =>
+          processWithdrawalFailedPreRetryOutboxBatch(pool, {
+            client,
+            taskQueue: config.TEMPORAL_TASK_QUEUE,
+            fakeChainEnabled: withdrawalConfig.fakeChainEnabled,
+            realChainEnabled: phase10Config.realChainEnabled,
+          }),
+      })();
+    },
+    onError: (error) => {
+      observability.logger.warn({ err: error }, 'withdrawal outbox relay batch failed');
+    },
+  });
+
+  if (!config.WORKER_OUTBOX_RELAY_ENABLED) {
+    observability.logger.info({ outboxRelayEnabled: false }, 'withdrawal outbox relay disabled');
+  }
 
   observability.logger.info(
     {
@@ -145,6 +153,7 @@ try {
       taskQueue: config.TEMPORAL_TASK_QUEUE,
       fakeChainEnabled: withdrawalConfig.fakeChainEnabled,
       realChainEnabled: phase10Config.realChainEnabled,
+      outboxRelayEnabled: config.WORKER_OUTBOX_RELAY_ENABLED,
     },
     'worker listening',
   );

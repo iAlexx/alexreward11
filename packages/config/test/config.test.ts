@@ -788,6 +788,101 @@ describe('environment validation', () => {
       expect(config.WORKER_LISTEN_HOST).toBe('0.0.0.0');
     });
   });
+
+  describe('WORKER_OUTBOX_RELAY_ENABLED', () => {
+    const workerLocal = {
+      ...common,
+      DATABASE_URL: 'postgresql://alex_rewards:local-alex-rewards-only@localhost:5432/alex_rewards',
+      REDIS_URL: 'redis://localhost:6379/0',
+      TEMPORAL_ADDRESS: 'localhost:7233',
+      TEMPORAL_TASK_QUEUE: 'alex-rewards-foundation',
+    };
+
+    const workerRemote = {
+      NODE_ENV: 'production',
+      DATABASE_URL: 'postgresql://user:pass@db.example.com:5432/db',
+      REDIS_URL: 'rediss://redis.example.com:6379',
+      TEMPORAL_ADDRESS: 'temporal.example.com:7233',
+      TEMPORAL_TASK_QUEUE: 'alex-rewards-foundation',
+      WITHDRAWAL_QUOTE_TTL_SECONDS: '300',
+      WITHDRAWAL_RISK_POLICY_VERSION: '1',
+      WITHDRAWAL_ASSET_SYMBOL: 'USDT',
+      WITHDRAWAL_FAKE_CHAIN_ENABLED: 'false',
+      WITHDRAWAL_REAL_CHAIN_ENABLED: 'false',
+      SIGNER_BASE_URL: 'https://signer.example.com',
+    };
+
+    it('preserves local and test relay-enabled behavior', () => {
+      expect(loadWorkerConfig(workerLocal).WORKER_OUTBOX_RELAY_ENABLED).toBe(true);
+      expect(
+        loadWorkerConfig({ ...workerLocal, DEPLOYMENT_ENV: 'test' }).WORKER_OUTBOX_RELAY_ENABLED,
+      ).toBe(true);
+      expect(loadWorkerConfig(workerLocal).WITHDRAWAL_FAKE_CHAIN_ENABLED).toBe(true);
+      expect(loadWorkerConfig(workerLocal).WITHDRAWAL_REAL_CHAIN_ENABLED).toBe(false);
+    });
+
+    it('defaults staging integration mode to false when unset', () => {
+      const config = loadWorkerConfig({
+        ...workerRemote,
+        DEPLOYMENT_ENV: 'staging',
+        STAGING_INTEGRATION_MODE: 'true',
+        WITHDRAWAL_NETWORK_CODE: 'TON_TESTNET',
+      });
+      expect(config.WORKER_OUTBOX_RELAY_ENABLED).toBe(false);
+      expect(config.WITHDRAWAL_FAKE_CHAIN_ENABLED).toBe(false);
+      expect(config.WITHDRAWAL_REAL_CHAIN_ENABLED).toBe(false);
+    });
+
+    it('accepts explicit false and true in staging integration', () => {
+      const base = {
+        ...workerRemote,
+        DEPLOYMENT_ENV: 'staging' as const,
+        STAGING_INTEGRATION_MODE: 'true',
+        WITHDRAWAL_NETWORK_CODE: 'TON_TESTNET',
+      };
+      expect(
+        loadWorkerConfig({ ...base, WORKER_OUTBOX_RELAY_ENABLED: 'false' })
+          .WORKER_OUTBOX_RELAY_ENABLED,
+      ).toBe(false);
+      expect(
+        loadWorkerConfig({ ...base, WORKER_OUTBOX_RELAY_ENABLED: 'true' })
+          .WORKER_OUTBOX_RELAY_ENABLED,
+      ).toBe(true);
+    });
+
+    it('rejects a non-boolean relay flag', () => {
+      expect(() =>
+        loadWorkerConfig({ ...workerLocal, WORKER_OUTBOX_RELAY_ENABLED: 'yes' }),
+      ).toThrow(/WORKER_OUTBOX_RELAY_ENABLED/);
+    });
+
+    it('keeps production unset relay enabled', () => {
+      const config = loadWorkerConfig({
+        ...workerRemote,
+        DEPLOYMENT_ENV: 'production',
+        OTEL_ENABLED: 'true',
+        OTEL_EXPORTER_OTLP_ENDPOINT: 'https://otel.example.com',
+        SENTRY_DSN: 'https://public@example.com/1',
+        WITHDRAWAL_NETWORK_CODE: 'TON',
+      });
+      expect(config.WORKER_OUTBOX_RELAY_ENABLED).toBe(true);
+      expect(config.WITHDRAWAL_FAKE_CHAIN_ENABLED).toBe(false);
+      expect(config.WITHDRAWAL_REAL_CHAIN_ENABLED).toBe(false);
+    });
+
+    it('keeps normal staging unset relay enabled', () => {
+      const config = loadWorkerConfig({
+        ...workerRemote,
+        DEPLOYMENT_ENV: 'staging',
+        OTEL_ENABLED: 'true',
+        OTEL_EXPORTER_OTLP_ENDPOINT: 'https://otel.example.com',
+        SENTRY_DSN: 'https://public@example.com/1',
+        WITHDRAWAL_NETWORK_CODE: 'TON',
+      });
+      expect(config.WORKER_OUTBOX_RELAY_ENABLED).toBe(true);
+      expect(config.STAGING_INTEGRATION_MODE).toBe(false);
+    });
+  });
 });
 
 describe('Phase 10 Testnet provision config', () => {

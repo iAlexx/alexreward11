@@ -394,6 +394,16 @@ const workerSchema = serviceSchema
       (value) => (value === '' || value === undefined || value === null ? undefined : value),
       z.enum(['0.0.0.0', '::']).optional(),
     ),
+    /**
+     * Withdrawal outbox relay. Boolean `true` | `false` only.
+     * Unset outside staging integration preserves historical relay-on behavior.
+     * Staging integration defaults to `false` when unset so infrastructure smoke
+     * does not claim, dispatch, or otherwise mutate financial outbox rows.
+     */
+    WORKER_OUTBOX_RELAY_ENABLED: z.preprocess(
+      (value) => (value === '' || value === undefined || value === null ? undefined : value),
+      z.enum(['true', 'false']).optional(),
+    ),
     TEMPORAL_TASK_QUEUE: z.string().min(3),
     WITHDRAWAL_QUOTE_TTL_SECONDS: z.coerce.number().int().min(1).max(86_400),
     WITHDRAWAL_RISK_POLICY_VERSION: z.coerce.number().int().min(1).max(10_000),
@@ -462,6 +472,10 @@ const workerSchema = serviceSchema
     WORKER_LISTEN_HOST:
       value.WORKER_LISTEN_HOST ??
       (isStagingIntegrationMode(value) ? ('::' as const) : ('0.0.0.0' as const)),
+    WORKER_OUTBOX_RELAY_ENABLED:
+      value.WORKER_OUTBOX_RELAY_ENABLED === undefined
+        ? !isStagingIntegrationMode(value)
+        : value.WORKER_OUTBOX_RELAY_ENABLED === 'true',
   }));
 
 /** Local/test-only signer defaults. Staging/production must set keys explicitly. */
