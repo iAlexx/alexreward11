@@ -1,8 +1,8 @@
 'use client';
 
-import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 
+import { AppLink } from '../../../../components/AppLink';
 import { FounderStatusPanel } from '../../../../components/FounderClaimForm';
 
 export default function FounderPage() {
@@ -11,9 +11,9 @@ export default function FounderPage() {
 
   return (
     <div className="alex-stack">
-      <Link href="/profile" className="alex-chip-link">
+      <AppLink href="/profile" className="alex-chip-link">
         ← {common('back')}
-      </Link>
+      </AppLink>
       <h1 className="alex-title">{t('title')}</h1>
       <FounderStatusPanel />
     </div>

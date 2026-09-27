@@ -6,7 +6,6 @@ import {
   type PublicPayoutIdentityMode,
 } from '@alex-rewards/contracts';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { useState } from 'react';
 
@@ -14,6 +13,7 @@ import { ApiError } from '../lib/api/client';
 import { privacyPolicyUrl, termsOfServiceUrl } from '../lib/env';
 import { queryKeys } from '../lib/query/keys';
 import { useAuth } from '../providers/AuthProvider';
+import { AppLink } from './AppLink';
 import { DomainStateView } from './DomainState';
 
 const LOCALES: readonly LocaleCode[] = ['ar', 'en', 'ru'];
@@ -104,9 +104,9 @@ export function ProfileScreen() {
 
       <section className="alex-card">
         <h2 className="alex-title-sm">{t('membershipTitle')}</h2>
-        <Link href="/profile/founder" className="alex-chip-link">
+        <AppLink href="/profile/founder" className="alex-chip-link">
           {t('founderEntry')}
-        </Link>
+        </AppLink>
         <p className="alex-muted">{t('founderEntryBody')}</p>
       </section>
 

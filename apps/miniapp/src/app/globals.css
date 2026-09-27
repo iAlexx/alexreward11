@@ -10,6 +10,10 @@ body {
   margin: 0;
   background: var(--alex-bg-radial);
   color: var(--alex-text);
+  /* A long unbreakable string (wallet address) must not widen the layout
+     viewport. That pushed the fixed bar off-screen and let the row under it
+     take the tap. */
+  overflow-x: clip;
 }
 
 a {
@@ -80,8 +84,14 @@ input {
 
 .alex-bottom-nav {
   position: fixed;
-  left: 50%;
-  transform: translateX(-50%);
+  /* Above page content. A phone layout viewport is taller than the visual
+     viewport, so the last cards sit under this bar. `backdrop-filter` made
+     hit-testing fall through to those cards. No transform: `translateX(-50%)`
+     parked the layout box past the right edge. */
+  z-index: 1;
+  left: 0;
+  right: 0;
+  margin-inline: auto;
   bottom: 0;
   width: min(28rem, 100%);
   display: grid;
@@ -90,8 +100,7 @@ input {
   padding: var(--alex-space-2) var(--alex-space-2)
     calc(var(--alex-space-2) + env(safe-area-inset-bottom, 0px));
   border-top: 1px solid var(--alex-border);
-  background: color-mix(in srgb, var(--alex-surface) 94%, transparent);
-  backdrop-filter: blur(12px);
+  background: var(--alex-surface);
 }
 
 .alex-bottom-nav__item {
@@ -133,6 +142,7 @@ input {
   margin: 0;
   font-size: 1.05rem;
   font-weight: 650;
+  overflow-wrap: anywhere;
 }
 
 .alex-muted {

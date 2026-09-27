@@ -1,9 +1,9 @@
 'use client';
 
-import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 
 import { useAuth } from '../providers/AuthProvider';
+import { AppLink } from './AppLink';
 
 export function ProfileHeader() {
   const t = useTranslations('app');
@@ -19,9 +19,9 @@ export function ProfileHeader() {
         <p className="alex-brand">{t('brand')}</p>
         <p className="alex-muted alex-profile-header__user">{display}</p>
       </div>
-      <Link href="/profile" className="alex-chip-link" aria-label={t('openProfile')}>
+      <AppLink href="/profile" className="alex-chip-link" aria-label={t('openProfile')}>
         {display.slice(0, 1).toUpperCase()}
-      </Link>
+      </AppLink>
     </header>
   );
 }

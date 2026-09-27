@@ -1,8 +1,9 @@
 'use client';
 
-import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useTranslations } from 'next-intl';
+
+import { AppLink } from './AppLink';
 
 const NAV_ITEMS = [
   { href: '/', key: 'home' as const },
@@ -27,14 +28,14 @@ export function BottomNav() {
       {NAV_ITEMS.map((item) => {
         const active = isActive(pathname, item.href);
         return (
-          <Link
+          <AppLink
             key={item.href}
             href={item.href}
             className={active ? 'alex-bottom-nav__item is-active' : 'alex-bottom-nav__item'}
             aria-current={active ? 'page' : undefined}
           >
             <span>{t(item.key)}</span>
-          </Link>
+          </AppLink>
         );
       })}
     </nav>

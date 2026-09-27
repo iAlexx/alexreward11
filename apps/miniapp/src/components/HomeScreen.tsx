@@ -2,11 +2,11 @@
 
 import type { DomainEnvelope, HomeSummaryResponse } from '@alex-rewards/contracts';
 import { useQuery } from '@tanstack/react-query';
-import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 
 import { queryKeys } from '../lib/query/keys';
 import { useAuth } from '../providers/AuthProvider';
+import { AppLink } from './AppLink';
 import { DomainStateView, type UiDomainState } from './DomainState';
 import { MoneyAmount } from './MoneyAmount';
 import { formatAtomicAmount, isAtomicAmountString } from '../lib/money/format';
@@ -102,9 +102,9 @@ export function HomeScreen() {
               </dl>
             ) : null}
           </DomainStateView>
-          <Link href="/earn" className="alex-button alex-button--ghost">
+          <AppLink href="/earn" className="alex-button alex-button--ghost">
             {t('openEarn')}
-          </Link>
+          </AppLink>
         </section>
 
         <section className="alex-card">
@@ -179,9 +179,9 @@ export function HomeScreen() {
                     ? t('membershipFounder')
                     : t('membershipStandard')}
                 </p>
-                <Link href="/profile/founder" className="alex-chip-link">
+                <AppLink href="/profile/founder" className="alex-chip-link">
                   {t('openFounder')}
-                </Link>
+                </AppLink>
               </>
             ) : null}
           </DomainStateView>
