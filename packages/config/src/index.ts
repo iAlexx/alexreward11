@@ -302,6 +302,9 @@ const botSchema = commonSchema
     WITHDRAWAL_FAKE_CHAIN_ENABLED: booleanFromString,
   })
   .superRefine((value, context) => {
+    // HTTP-only Railway smoke. Polling, normal staging, and production stay fail-closed.
+    const stagingIntegrationDisabledSmoke =
+      isStagingIntegrationMode(value) && value.BOT_TRANSPORT_MODE === 'disabled';
     if (value.BOT_TRANSPORT_MODE !== 'disabled' && value.TELEGRAM_BOT_TOKEN === undefined) {
       context.addIssue({
         code: 'custom',
@@ -309,7 +312,11 @@ const botSchema = commonSchema
         message: 'is required when BOT_TRANSPORT_MODE enables Telegram connectivity',
       });
     }
-    if (value.DEPLOYMENT_ENV !== 'local' && value.BOT_TRANSPORT_MODE === 'disabled') {
+    if (
+      value.DEPLOYMENT_ENV !== 'local' &&
+      value.BOT_TRANSPORT_MODE === 'disabled' &&
+      !stagingIntegrationDisabledSmoke
+    ) {
       context.addIssue({
         code: 'custom',
         path: ['BOT_TRANSPORT_MODE'],
@@ -320,7 +327,7 @@ const botSchema = commonSchema
     const ownerIds = value.CONTROL_CENTER_OWNER_TELEGRAM_USER_IDS.split(',')
       .map((item) => item.trim())
       .filter((item) => item.length > 0);
-    if (outsideLocal && ownerIds.length === 0) {
+    if (outsideLocal && ownerIds.length === 0 && !stagingIntegrationDisabledSmoke) {
       context.addIssue({
         code: 'custom',
         path: ['CONTROL_CENTER_OWNER_TELEGRAM_USER_IDS'],
@@ -338,6 +345,7 @@ const botSchema = commonSchema
       }
     }
     if (
+      !stagingIntegrationDisabledSmoke &&
       (outsideLocal || value.BOT_TRANSPORT_MODE !== 'disabled') &&
       value.DATABASE_URL === undefined
     ) {

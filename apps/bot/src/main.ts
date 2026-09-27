@@ -13,6 +13,7 @@ import { createShutdownCoordinator, initializeObservability } from '@alex-reward
 import { withdrawalEngineConfigFromValidatedApi } from '@alex-rewards/withdrawals';
 
 import { createGrammyApprovalsSender } from './approvals-telegram-sender.js';
+import { shouldStartTelegramControlCenter } from './telegram-control-center-gate.js';
 
 const OWNER_REVIEW_POLL_INTERVAL_MS = 2_000;
 
@@ -65,7 +66,7 @@ server.get('/health', async () => response('ok'));
 
 try {
   await server.listen({ port: config.BOT_PORT, host: config.BOT_LISTEN_HOST });
-  if (config.BOT_TRANSPORT_MODE === 'polling' && config.TELEGRAM_BOT_TOKEN !== undefined) {
+  if (shouldStartTelegramControlCenter(config.BOT_TRANSPORT_MODE, config.TELEGRAM_BOT_TOKEN)) {
     if (config.DATABASE_URL === undefined) {
       throw new Error('DATABASE_URL is required when bot transport is enabled');
     }

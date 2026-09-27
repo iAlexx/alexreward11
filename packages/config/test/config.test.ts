@@ -969,6 +969,116 @@ describe('environment validation', () => {
       );
     });
   });
+
+  describe('staging integration disabled bot smoke', () => {
+    const smokeControl = {
+      NODE_ENV: 'production' as const,
+      CONTROL_CENTER_ACTION_TOKEN_TTL_SECONDS: '900',
+      CONTROL_CENTER_CONFIRM_TOKEN_TTL_SECONDS: '300',
+      CONTROL_CENTER_RATE_LIMIT_WINDOW_SECONDS: '60',
+      CONTROL_CENTER_RATE_LIMIT_MAX: '30',
+      WITHDRAWAL_QUOTE_TTL_SECONDS: '300',
+      WITHDRAWAL_RISK_POLICY_VERSION: '1',
+      WITHDRAWAL_ASSET_SYMBOL: 'USDT',
+      WITHDRAWAL_FAKE_CHAIN_ENABLED: 'false',
+    };
+
+    const stagingSmoke = {
+      ...smokeControl,
+      DEPLOYMENT_ENV: 'staging' as const,
+      STAGING_INTEGRATION_MODE: 'true',
+      BOT_TRANSPORT_MODE: 'disabled' as const,
+      WITHDRAWAL_NETWORK_CODE: 'TON_TESTNET',
+    };
+
+    const stagingPolling = {
+      ...smokeControl,
+      DEPLOYMENT_ENV: 'staging' as const,
+      STAGING_INTEGRATION_MODE: 'true',
+      BOT_TRANSPORT_MODE: 'polling' as const,
+      WITHDRAWAL_NETWORK_CODE: 'TON_TESTNET',
+      TELEGRAM_BOT_TOKEN: 'staging-grade-telegram-bot-token-value',
+      CONTROL_CENTER_OWNER_TELEGRAM_USER_IDS: '900001',
+      DATABASE_URL: 'postgresql://user:pass@db.example.com:5432/db',
+    };
+
+    it('allows disabled transport without token, allowlist, or database', () => {
+      const config = loadBotConfig(stagingSmoke);
+      expect(config.BOT_TRANSPORT_MODE).toBe('disabled');
+      expect(config.STAGING_INTEGRATION_MODE).toBe(true);
+      expect(config.TELEGRAM_BOT_TOKEN).toBeUndefined();
+      expect(config.ownerTelegramUserIds).toEqual([]);
+      expect(config.DATABASE_URL).toBeUndefined();
+      expect(config.REDIS_URL).toBeUndefined();
+      expect(config.WITHDRAWAL_NETWORK_CODE).toBe('TON_TESTNET');
+      expect(config.WITHDRAWAL_FAKE_CHAIN_ENABLED).toBe(false);
+    });
+
+    it('rejects disabled transport for normal staging and production', () => {
+      const observability = {
+        OTEL_ENABLED: 'true',
+        OTEL_EXPORTER_OTLP_ENDPOINT: 'https://otel.example.com',
+        SENTRY_DSN: 'https://public@example.com/1',
+      };
+      expect(() =>
+        loadBotConfig({
+          ...smokeControl,
+          ...observability,
+          DEPLOYMENT_ENV: 'staging',
+          STAGING_INTEGRATION_MODE: 'false',
+          BOT_TRANSPORT_MODE: 'disabled',
+          WITHDRAWAL_NETWORK_CODE: 'TON',
+          CONTROL_CENTER_OWNER_TELEGRAM_USER_IDS: '900001',
+          DATABASE_URL: 'postgresql://user:pass@db.example.com:5432/db',
+        }),
+      ).toThrow(/cannot be disabled/);
+      expect(() =>
+        loadBotConfig({
+          ...smokeControl,
+          ...observability,
+          DEPLOYMENT_ENV: 'production',
+          BOT_TRANSPORT_MODE: 'disabled',
+          WITHDRAWAL_NETWORK_CODE: 'TON',
+          CONTROL_CENTER_OWNER_TELEGRAM_USER_IDS: '900001',
+          DATABASE_URL: 'postgresql://user:pass@db.example.com:5432/db',
+        }),
+      ).toThrow(/cannot be disabled/);
+    });
+
+    it('still requires token, allowlist, and database when staging integration polls', () => {
+      expect(() =>
+        loadBotConfig({
+          ...stagingPolling,
+          TELEGRAM_BOT_TOKEN: undefined,
+        }),
+      ).toThrow(/TELEGRAM_BOT_TOKEN/);
+      expect(() =>
+        loadBotConfig({
+          ...stagingPolling,
+          CONTROL_CENTER_OWNER_TELEGRAM_USER_IDS: '',
+        }),
+      ).toThrow(/CONTROL_CENTER_OWNER_TELEGRAM_USER_IDS|Owner Telegram allowlist/);
+      expect(() =>
+        loadBotConfig({
+          ...stagingPolling,
+          DATABASE_URL: undefined,
+        }),
+      ).toThrow(/DATABASE_URL/);
+    });
+
+    it('preserves local disabled transport and rejects test disabled transport', () => {
+      const local = loadBotConfig({ ...common, BOT_TRANSPORT_MODE: 'disabled' });
+      expect(local.BOT_TRANSPORT_MODE).toBe('disabled');
+      expect(local.WITHDRAWAL_FAKE_CHAIN_ENABLED).toBe(true);
+      expect(() =>
+        loadBotConfig({
+          ...common,
+          DEPLOYMENT_ENV: 'test',
+          BOT_TRANSPORT_MODE: 'disabled',
+        }),
+      ).toThrow(/cannot be disabled/);
+    });
+  });
 });
 
 describe('Phase 10 Testnet provision config', () => {
