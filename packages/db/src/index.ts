@@ -25,6 +25,7 @@ export async function probeDatabase(pool: Pool): Promise<DatabaseProbeResult> {
 
 export { defaultMigrationsDirectory, listMigrationFiles, migrateDatabase } from './migrate.js';
 export type { MigrateDatabaseOptions, MigrateDatabaseResult, MigrationFile } from './migrate.js';
+export { repairPhase13LegacyMigrationMarkers } from './migrate.js';
 export {
   assertConnectedDestructiveTestDatabase,
   assertSafeDestructiveTestDatabaseUrl,

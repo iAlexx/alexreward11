@@ -144,6 +144,15 @@ const LOCAL_API_AUTH_POLICY_DEFAULTS = {
 const apiSchema = serviceSchema
   .extend({
     API_PORT: z.coerce.number().int().min(1024).max(65535).default(3002),
+    /**
+     * Explicit Fastify bind address. Allowed: `0.0.0.0` | `::`.
+     * Local/test/production default to `0.0.0.0` when unset (production unchanged).
+     * Staging integration mode defaults to `::` when unset (Railway public networking).
+     */
+    API_LISTEN_HOST: z.preprocess(
+      (value) => (value === '' || value === undefined || value === null ? undefined : value),
+      z.enum(['0.0.0.0', '::']).optional(),
+    ),
     TELEGRAM_BOT_TOKEN: z.string().min(20),
     SESSION_ACCESS_SECRET: z.string().min(32),
     // No Zod defaults: staging/production must supply these explicitly (fail closed).
@@ -257,7 +266,13 @@ const apiSchema = serviceSchema
       });
     }
     refineWithdrawalNetworkForDeployment(value, context);
-  });
+  })
+  .transform((value) => ({
+    ...value,
+    API_LISTEN_HOST:
+      value.API_LISTEN_HOST ??
+      (isStagingIntegrationMode(value) ? ('::' as const) : ('0.0.0.0' as const)),
+  }));
 
 const botSchema = commonSchema
   .extend({

@@ -15,6 +15,7 @@
     "lint": "eslint src",
     "test": "vitest run",
     "test:phase2": "cross-env PHASE2_MIGRATION_TESTS=1 vitest run test/phase2-migrations.test.ts",
+    "test:migration-ledger": "cross-env MIGRATE_LEDGER_TESTS=1 vitest run --fileParallelism=false test/migration-ledger.test.ts",
     "test:m0-single-owner": "vitest run --fileParallelism=false test/m0-single-owner-invariant.test.ts",
     "test:m0-security-gate": "cross-env M1_CI_SECURITY_GATE=1 vitest run --fileParallelism=false test/m0-single-owner-invariant.test.ts"
   },

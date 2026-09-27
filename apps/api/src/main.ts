@@ -79,8 +79,11 @@ try {
     .addBearerAuth()
     .build();
   SwaggerModule.setup('docs', app, SwaggerModule.createDocument(app, openApiConfig));
-  await app.listen(config.API_PORT, '0.0.0.0');
-  observability.logger.info({ port: config.API_PORT }, 'api listening');
+  await app.listen(config.API_PORT, config.API_LISTEN_HOST);
+  observability.logger.info(
+    { port: config.API_PORT, listenHost: config.API_LISTEN_HOST },
+    'api listening',
+  );
 
   const shutdown = createShutdownCoordinator(observability.logger, 'api', [
     () => app.close(),

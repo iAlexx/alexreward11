@@ -558,6 +558,62 @@ describe('environment validation', () => {
         }),
       ).toThrow(/WALLET_TON_PROOF_DOMAIN|ADMIN_WEBAUTHN/);
     });
+
+    it('defaults API_LISTEN_HOST to 0.0.0.0 for local', () => {
+      const config = loadApiConfig({
+        ...common,
+        ...apiAuth,
+        DATABASE_URL: 'postgresql://alex:local@localhost:5432/db',
+        REDIS_URL: 'redis://localhost:6379',
+        TEMPORAL_ADDRESS: 'localhost:7233',
+      });
+      expect(config.API_LISTEN_HOST).toBe('0.0.0.0');
+    });
+
+    it('defaults API_LISTEN_HOST to :: under staging integration mode', () => {
+      const config = loadApiConfig({
+        ...stagingBase,
+        STAGING_INTEGRATION_MODE: 'true',
+        OTEL_ENABLED: 'false',
+      });
+      expect(config.API_LISTEN_HOST).toBe('::');
+    });
+
+    it('accepts explicit API_LISTEN_HOST=:: under staging integration', () => {
+      const config = loadApiConfig({
+        ...stagingBase,
+        STAGING_INTEGRATION_MODE: 'true',
+        OTEL_ENABLED: 'false',
+        API_LISTEN_HOST: '::',
+      });
+      expect(config.API_LISTEN_HOST).toBe('::');
+    });
+
+    it('refuses invalid API_LISTEN_HOST', () => {
+      expect(() =>
+        loadApiConfig({
+          ...common,
+          ...apiAuth,
+          DATABASE_URL: 'postgresql://alex:local@localhost:5432/db',
+          REDIS_URL: 'redis://localhost:6379',
+          TEMPORAL_ADDRESS: 'localhost:7233',
+          API_LISTEN_HOST: '127.0.0.1',
+        }),
+      ).toThrow(/API_LISTEN_HOST/);
+    });
+
+    it('keeps production default API_LISTEN_HOST at 0.0.0.0 when unset', () => {
+      const config = loadApiConfig({
+        ...stagingBase,
+        DEPLOYMENT_ENV: 'production',
+        STAGING_INTEGRATION_MODE: 'false',
+        OTEL_ENABLED: 'true',
+        OTEL_EXPORTER_OTLP_ENDPOINT: 'https://otel.example.com',
+        SENTRY_DSN: 'https://public@example.com/1',
+        WITHDRAWAL_NETWORK_CODE: 'TON',
+      });
+      expect(config.API_LISTEN_HOST).toBe('0.0.0.0');
+    });
   });
 
   it('accepts only explicitly public web configuration', () => {
