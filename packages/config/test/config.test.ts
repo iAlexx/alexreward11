@@ -673,6 +673,7 @@ describe('environment validation', () => {
     expect(config.WITHDRAWAL_FAKE_CHAIN_ENABLED).toBe(true);
     expect(config.SIGNER_BASE_URL).toBe('http://127.0.0.1:3005');
     expect(config.TON_TESTNET_JETTON_MASTER).toBe('');
+    expect(config.WORKER_LISTEN_HOST).toBe('0.0.0.0');
   });
 
   it('worker rejects real chain without Owner Jetton master', () => {
@@ -703,6 +704,89 @@ describe('environment validation', () => {
         WITHDRAWAL_NETWORK_CODE: 'TON_MAINNET',
       }),
     ).toThrow(/MAINNET/);
+  });
+
+  describe('WORKER_LISTEN_HOST', () => {
+    const workerLocal = {
+      ...common,
+      DATABASE_URL: 'postgresql://alex_rewards:local-alex-rewards-only@localhost:5432/alex_rewards',
+      REDIS_URL: 'redis://localhost:6379/0',
+      TEMPORAL_ADDRESS: 'localhost:7233',
+      TEMPORAL_TASK_QUEUE: 'alex-rewards-foundation',
+    };
+
+    const workerRemote = {
+      NODE_ENV: 'production',
+      DATABASE_URL: 'postgresql://user:pass@db.example.com:5432/db',
+      REDIS_URL: 'rediss://redis.example.com:6379',
+      TEMPORAL_ADDRESS: 'temporal.example.com:7233',
+      TEMPORAL_TASK_QUEUE: 'alex-rewards-foundation',
+      WITHDRAWAL_QUOTE_TTL_SECONDS: '300',
+      WITHDRAWAL_RISK_POLICY_VERSION: '1',
+      WITHDRAWAL_ASSET_SYMBOL: 'USDT',
+      WITHDRAWAL_FAKE_CHAIN_ENABLED: 'false',
+      WITHDRAWAL_REAL_CHAIN_ENABLED: 'false',
+      SIGNER_BASE_URL: 'https://signer.example.com',
+    };
+
+    it('defaults local and test to 0.0.0.0', () => {
+      expect(loadWorkerConfig(workerLocal).WORKER_LISTEN_HOST).toBe('0.0.0.0');
+      expect(loadWorkerConfig({ ...workerLocal, DEPLOYMENT_ENV: 'test' }).WORKER_LISTEN_HOST).toBe(
+        '0.0.0.0',
+      );
+    });
+
+    it('defaults staging integration mode to :: when unset', () => {
+      const config = loadWorkerConfig({
+        ...workerRemote,
+        DEPLOYMENT_ENV: 'staging',
+        STAGING_INTEGRATION_MODE: 'true',
+        WITHDRAWAL_NETWORK_CODE: 'TON_TESTNET',
+      });
+      expect(config.WORKER_LISTEN_HOST).toBe('::');
+    });
+
+    it('accepts explicit 0.0.0.0 and ::', () => {
+      expect(
+        loadWorkerConfig({ ...workerLocal, WORKER_LISTEN_HOST: '0.0.0.0' }).WORKER_LISTEN_HOST,
+      ).toBe('0.0.0.0');
+      expect(
+        loadWorkerConfig({ ...workerLocal, WORKER_LISTEN_HOST: '::' }).WORKER_LISTEN_HOST,
+      ).toBe('::');
+    });
+
+    it('rejects an invalid listen host', () => {
+      expect(() => loadWorkerConfig({ ...workerLocal, WORKER_LISTEN_HOST: '127.0.0.1' })).toThrow(
+        /WORKER_LISTEN_HOST/,
+      );
+    });
+
+    it('keeps production default 0.0.0.0 when unset', () => {
+      const config = loadWorkerConfig({
+        ...workerRemote,
+        DEPLOYMENT_ENV: 'production',
+        OTEL_ENABLED: 'true',
+        OTEL_EXPORTER_OTLP_ENDPOINT: 'https://otel.example.com',
+        SENTRY_DSN: 'https://public@example.com/1',
+        WITHDRAWAL_NETWORK_CODE: 'TON',
+      });
+      expect(config.WORKER_LISTEN_HOST).toBe('0.0.0.0');
+      expect(config.WITHDRAWAL_FAKE_CHAIN_ENABLED).toBe(false);
+      expect(config.WITHDRAWAL_REAL_CHAIN_ENABLED).toBe(false);
+    });
+
+    it('keeps normal staging default 0.0.0.0 when integration mode is off', () => {
+      const config = loadWorkerConfig({
+        ...workerRemote,
+        DEPLOYMENT_ENV: 'staging',
+        STAGING_INTEGRATION_MODE: 'false',
+        OTEL_ENABLED: 'true',
+        OTEL_EXPORTER_OTLP_ENDPOINT: 'https://otel.example.com',
+        SENTRY_DSN: 'https://public@example.com/1',
+        WITHDRAWAL_NETWORK_CODE: 'TON',
+      });
+      expect(config.WORKER_LISTEN_HOST).toBe('0.0.0.0');
+    });
   });
 });
 

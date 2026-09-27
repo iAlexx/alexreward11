@@ -104,7 +104,7 @@ try {
     workflowsPath: fileURLToPath(new URL('./workflows.js', import.meta.url)),
     activities,
   });
-  await server.listen({ port: config.WORKER_PORT, host: '0.0.0.0' });
+  await server.listen({ port: config.WORKER_PORT, host: config.WORKER_LISTEN_HOST });
   ready = true;
   workerRunPromise = worker.run().catch((error: unknown) => {
     ready = false;
@@ -141,6 +141,7 @@ try {
   observability.logger.info(
     {
       port: config.WORKER_PORT,
+      listenHost: config.WORKER_LISTEN_HOST,
       taskQueue: config.TEMPORAL_TASK_QUEUE,
       fakeChainEnabled: withdrawalConfig.fakeChainEnabled,
       realChainEnabled: phase10Config.realChainEnabled,

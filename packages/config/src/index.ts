@@ -385,6 +385,15 @@ const optionalEmptyString = z.preprocess(
 const workerSchema = serviceSchema
   .extend({
     WORKER_PORT: z.coerce.number().int().min(1024).max(65535).default(3004),
+    /**
+     * Explicit worker HTTP bind address. Allowed: `0.0.0.0` | `::`.
+     * Local/test/production default to `0.0.0.0` when unset (production unchanged).
+     * Staging integration mode defaults to `::` when unset (Railway public networking).
+     */
+    WORKER_LISTEN_HOST: z.preprocess(
+      (value) => (value === '' || value === undefined || value === null ? undefined : value),
+      z.enum(['0.0.0.0', '::']).optional(),
+    ),
     TEMPORAL_TASK_QUEUE: z.string().min(3),
     WITHDRAWAL_QUOTE_TTL_SECONDS: z.coerce.number().int().min(1).max(86_400),
     WITHDRAWAL_RISK_POLICY_VERSION: z.coerce.number().int().min(1).max(10_000),
@@ -447,7 +456,13 @@ const workerSchema = serviceSchema
         message: 'TON_PRIMARY_PROVIDER_URL is required when WITHDRAWAL_REAL_CHAIN_ENABLED=true',
       });
     }
-  });
+  })
+  .transform((value) => ({
+    ...value,
+    WORKER_LISTEN_HOST:
+      value.WORKER_LISTEN_HOST ??
+      (isStagingIntegrationMode(value) ? ('::' as const) : ('0.0.0.0' as const)),
+  }));
 
 /** Local/test-only signer defaults. Staging/production must set keys explicitly. */
 const LOCAL_SIGNER_DEFAULTS = {
