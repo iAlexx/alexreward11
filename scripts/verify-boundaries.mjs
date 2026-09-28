@@ -28,7 +28,7 @@ const requiredPackages = [
 ];
 const financialShells = [
   // ads is implemented in Phase 11 (AdsGram + provider framework).
-  'fraud',
+  // fraud risk-rule core is implemented in Phase 14 (no ledger / payout authority).
   // ledger is implemented in Phase 4 (Ledger Core).
   // rewards is implemented in Phase 5 (Reward Engine).
   // ton + wallets are implemented in Phase 6 (TON Connect wallet ownership).
@@ -205,6 +205,39 @@ for (const name of financialShells) {
       !path.includes('.test.')
     ) {
       failures.push(`${path}: packages/ads must not call postLedgerTransaction`);
+    }
+  }
+}
+
+// Phase 14: fraud owns risk-rule resolution / snapshots only — never money, payout, or chain.
+{
+  const fraudFiles = (await walk('packages/fraud/')).filter((path) => {
+    const normalized = path.replaceAll('\\', '/');
+    return (
+      /\.(?:ts|tsx|js|mjs)$/.test(normalized) &&
+      !normalized.includes('/dist/') &&
+      !normalized.includes('/node_modules/')
+    );
+  });
+  for (const path of fraudFiles) {
+    const source = await readFile(new URL(path, root), 'utf8');
+    if (/from\s+['"]@alex-rewards\/ledger['"]/.test(source)) {
+      failures.push(`${path}: packages/fraud must not import @alex-rewards/ledger`);
+    }
+    if (/from\s+['"]@alex-rewards\/withdrawals['"]/.test(source)) {
+      failures.push(`${path}: packages/fraud must not import @alex-rewards/withdrawals`);
+    }
+    if (/from\s+['"]@alex-rewards\/signing['"]/.test(source)) {
+      failures.push(`${path}: packages/fraud must not import @alex-rewards/signing`);
+    }
+    if (/from\s+['"]@alex-rewards\/ton['"]/.test(source)) {
+      failures.push(`${path}: packages/fraud must not import @alex-rewards/ton`);
+    }
+    if (/from\s+['"]@alex-rewards\/rewards['"]/.test(source)) {
+      failures.push(`${path}: packages/fraud must not import @alex-rewards/rewards`);
+    }
+    if (/\beval\s*\(/.test(source) || /\bnew\s+Function\s*\(/.test(source)) {
+      failures.push(`${path}: packages/fraud must not use eval/Function executable rules`);
     }
   }
 }

@@ -528,7 +528,18 @@ importers:
         specifier: 8.23.1
         version: 8.23.1
 
-  packages/fraud: {}
+  packages/fraud:
+    dependencies:
+      pg:
+        specifier: 8.23.0
+        version: 8.23.0
+    devDependencies:
+      '@alex-rewards/db':
+        specifier: workspace:*
+        version: link:../db
+      '@types/pg':
+        specifier: 8.23.1
+        version: 8.23.1
 
   packages/i18n: {}
 

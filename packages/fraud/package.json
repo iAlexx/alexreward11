@@ -12,7 +12,15 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint src",
-    "test": "vitest run --passWithNoTests"
+    "lint": "eslint src test",
+    "test": "vitest run --fileParallelism=false",
+    "test:phase14": "cross-env PHASE14_FRAUD_TESTS=1 vitest run --fileParallelism=false test/phase14-risk-core.unit.test.ts test/phase14-risk-core.db.test.ts"
+  },
+  "dependencies": {
+    "pg": "8.23.0"
+  },
+  "devDependencies": {
+    "@alex-rewards/db": "workspace:*",
+    "@types/pg": "8.23.1"
   }
 }
