@@ -22,7 +22,11 @@ export type RiskActionCode = (typeof RISK_ACTION_CODES)[number];
 
 const RISK_ACTION_SET = new Set<string>(RISK_ACTION_CODES);
 const RISK_TIER_KEYS = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const;
-const SIGNAL_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/;
+export const SIGNAL_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/;
+
+export function isValidSignalCode(code: string): boolean {
+  return SIGNAL_CODE_PATTERN.test(code);
+}
 
 /**
  * Shape-only thresholds. Numeric values are validated for range/order; production

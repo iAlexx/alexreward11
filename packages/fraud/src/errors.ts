@@ -7,6 +7,10 @@ export type FraudErrorCode =
   | 'RISK_RULE_NOT_FOUND'
   | 'RISK_SNAPSHOT_INVALID'
   | 'RISK_SNAPSHOT_PERSIST_FAILED'
+  | 'RISK_SIGNAL_INVALID'
+  | 'RISK_SIGNAL_DUPLICATE'
+  | 'RISK_SIGNAL_UNCONFIGURED'
+  | 'RISK_PROFILE_PERSIST_FAILED'
   | 'INTERNAL';
 
 export class FraudDomainError extends Error {
