@@ -135,3 +135,36 @@ export async function insertTrustRule(
   if (id === undefined) throw new Error('trust rule insert failed');
   return id;
 }
+
+/** Explicit TEST-ONLY Eligibility policy row — not a production seed. */
+export async function insertEligibilityPolicy(
+  pool: Pool,
+  input: {
+    readonly policyVersion: number;
+    readonly status: 'DRAFT' | 'ACTIVE' | 'SUPERSEDED' | 'REVOKED';
+    readonly effectiveFrom: Date;
+    readonly effectiveTo?: Date | null;
+    readonly reason?: string | null;
+  },
+): Promise<string> {
+  const result = await pool.query<{ id: string }>(
+    `INSERT INTO eligibility_policy_versions (
+       policy_version, status, effective_from, effective_to, reason
+     ) VALUES (
+       $1, $2::rule_version_status, $3::timestamptz, $4::timestamptz, $5
+     )
+     RETURNING id`,
+    [
+      input.policyVersion,
+      input.status,
+      input.effectiveFrom.toISOString(),
+      input.effectiveTo === undefined || input.effectiveTo === null
+        ? null
+        : input.effectiveTo.toISOString(),
+      input.reason ?? 'phase14-eligibility-test-only',
+    ],
+  );
+  const id = result.rows[0]?.id;
+  if (id === undefined) throw new Error('eligibility policy insert failed');
+  return id;
+}

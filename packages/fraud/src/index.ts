@@ -1,10 +1,11 @@
 /**
- * Phase 14 fraud / risk / trust core.
+ * Phase 14 fraud / risk / trust / eligibility core.
  *
  * Owns versioned risk rule resolution, risk evaluation + snapshots/profiles,
- * and Trust rule-version authority + immutable trust snapshots.
+ * Trust rule-version authority + immutable trust snapshots, and Eligibility
+ * policy-version authority + immutable reason-coded decision persistence.
  * Does not write the ledger, approve payouts, execute adverse actions,
- * invent Trust scoring policy, or implement Eligibility engines.
+ * invent Trust scoring policy, or implement Eligibility business evaluation.
  */
 
 export { FraudDomainError, type FraudErrorCode } from './errors.js';
@@ -75,3 +76,21 @@ export {
   type PersistedTrustSnapshot,
   type TrustState,
 } from './trust-snapshot.js';
+export {
+  loadEligibilityPolicyVersionByNumber,
+  resolveActiveEligibilityPolicyVersion,
+  type EligibilityPolicyStatus,
+  type EligibilityPolicyVersion,
+  type ResolvedEligibilityPolicyVersion,
+} from './eligibility-policy.js';
+export {
+  ELIGIBILITY_ACTION_TYPES,
+  ELIGIBILITY_OUTCOMES,
+  computeEligibilityInputsDigest,
+  persistEligibilityDecision,
+  type EligibilityActionType,
+  type EligibilityDigestInput,
+  type EligibilityOutcome,
+  type PersistEligibilityDecisionInput,
+  type PersistedEligibilityDecision,
+} from './eligibility-decision.js';

@@ -1,4 +1,4 @@
-/** Typed fail-closed errors for the Phase 14 fraud / risk / trust core. */
+/** Typed fail-closed errors for the Phase 14 fraud / risk / trust / eligibility core. */
 
 export type FraudErrorCode =
   | 'RISK_RULE_NOT_CONFIGURED'
@@ -18,6 +18,11 @@ export type FraudErrorCode =
   | 'TRUST_RULE_NOT_FOUND'
   | 'TRUST_SNAPSHOT_INVALID'
   | 'TRUST_SNAPSHOT_PERSIST_FAILED'
+  | 'ELIGIBILITY_POLICY_NOT_CONFIGURED'
+  | 'ELIGIBILITY_POLICY_INTEGRITY'
+  | 'ELIGIBILITY_POLICY_NOT_FOUND'
+  | 'ELIGIBILITY_DECISION_INVALID'
+  | 'ELIGIBILITY_DECISION_PERSIST_FAILED'
   | 'INTERNAL';
 
 export class FraudDomainError extends Error {
