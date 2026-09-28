@@ -3,6 +3,7 @@ import {
   LedgerDomainError,
   postLedgerTransaction,
 } from '@alex-rewards/ledger';
+import type { EvaluateAndPersistEligibilityResult } from '@alex-rewards/fraud';
 import type { PoolClient } from 'pg';
 
 import { insertWithdrawalAuditLog } from './audit.js';
@@ -11,7 +12,11 @@ import { assertWithdrawalEngineConfig, type WithdrawalEngineConfig } from './con
 import { withWithdrawalTransaction, type WithdrawalDb } from './db.js';
 import { WithdrawalDomainError } from './errors.js';
 import { assertWithdrawalRequestsAllowed } from './flags.js';
-import { applyV1RiskPolicy } from './risk.js';
+import {
+  isEligibilityOutcomeEligible,
+  runWithdrawalEligibilityPreflight,
+} from './phase14-preflight.js';
+import { attachAuthoritativeRiskToWithdrawal } from './risk.js';
 import type { LimitRuleRow } from './rules.js';
 import type { WithdrawalState } from './state-machine.js';
 import { requireEligiblePrimaryWallet } from './wallet-gate.js';
@@ -136,6 +141,186 @@ const WITHDRAWAL_SELECT = `id, public_id, user_id, withdrawal_quote_id, state,
   requested_amount_atomic::text, fee_amount_atomic::text, net_amount_atomic::text,
   priority_review, risk_decision::text AS risk_decision, workflow_id`;
 
+type WithdrawalRow = {
+  id: string;
+  public_id: string;
+  user_id: string;
+  withdrawal_quote_id: string;
+  state: WithdrawalState;
+  requested_amount_atomic: string;
+  fee_amount_atomic: string;
+  net_amount_atomic: string;
+  priority_review: boolean;
+  risk_decision: string | null;
+  workflow_id: string | null;
+};
+
+type QuoteRow = {
+  id: string;
+  user_id: string;
+  asset_id: string;
+  network_id: string;
+  primary_wallet_id: string;
+  requested_amount_atomic: string;
+  fee_amount_atomic: string;
+  net_amount_atomic: string;
+  fee_rule_id: string;
+  fee_rule_version: number;
+  limit_rule_id: string | null;
+  limit_rule_version: number | null;
+  base_platform_fee_atomic: string | null;
+  membership_fee_discount_bps: number;
+  user_membership_id: string | null;
+  fee_entitlement_rule_version_id: string | null;
+  priority_entitlement_rule_version_id: string | null;
+  priority_review: boolean;
+  status: string;
+  expires_at: Date;
+};
+
+type HotWalletRow = { id: string };
+
+type TxAResult =
+  | { readonly kind: 'EXISTING'; readonly view: WithdrawalView }
+  | {
+      readonly kind: 'DENIED';
+      readonly error: WithdrawalDomainError;
+    }
+  | {
+      readonly kind: 'READY';
+      readonly quote: QuoteRow;
+      readonly limits: LimitRuleRow;
+      readonly hotWallet: HotWalletRow;
+      readonly gross: bigint;
+      readonly preflight: EvaluateAndPersistEligibilityResult;
+    };
+
+function assertSameIdempotentIntent(
+  input: { authenticatedUserId: string; quoteId: string },
+  row: WithdrawalRow,
+): void {
+  if (
+    !intentsMatch(
+      {
+        userId: input.authenticatedUserId,
+        quoteId: input.quoteId,
+        requestedAmountAtomic: row.requested_amount_atomic,
+        feeAmountAtomic: row.fee_amount_atomic,
+        netAmountAtomic: row.net_amount_atomic,
+      },
+      {
+        userId: row.user_id,
+        quoteId: row.withdrawal_quote_id,
+        requestedAmountAtomic: row.requested_amount_atomic,
+        feeAmountAtomic: row.fee_amount_atomic,
+        netAmountAtomic: row.net_amount_atomic,
+      },
+    ) ||
+    row.withdrawal_quote_id !== input.quoteId ||
+    row.user_id !== input.authenticatedUserId
+  ) {
+    throw new WithdrawalDomainError(
+      'IDEMPOTENCY_CONFLICT',
+      'Idempotency key reused with different intent',
+    );
+  }
+}
+
+async function loadExistingByIdempotency(
+  client: PoolClient,
+  scope: string,
+  idempotencyKey: string,
+): Promise<WithdrawalRow | undefined> {
+  const existing = await client.query<WithdrawalRow>(
+    `SELECT ${WITHDRAWAL_SELECT}
+     FROM withdrawals
+     WHERE idempotency_scope = $1 AND idempotency_key = $2
+     FOR SHARE`,
+    [scope, idempotencyKey],
+  );
+  return existing.rows[0];
+}
+
+async function lockAndValidateQuote(
+  client: PoolClient,
+  input: { authenticatedUserId: string; quoteId: string; idempotencyKey: string },
+  scope: string,
+): Promise<{ quote: QuoteRow; existing?: WithdrawalView }> {
+  const quote = await client.query<QuoteRow>(
+    `SELECT id, user_id, asset_id, network_id, primary_wallet_id,
+            requested_amount_atomic::text, fee_amount_atomic::text, net_amount_atomic::text,
+            fee_rule_id, fee_rule_version, limit_rule_id, limit_rule_version,
+            base_platform_fee_atomic::text, membership_fee_discount_bps,
+            user_membership_id, fee_entitlement_rule_version_id,
+            priority_entitlement_rule_version_id, priority_review,
+            status::text AS status, expires_at
+     FROM withdrawal_quotes
+     WHERE id = $1::uuid
+     FOR UPDATE`,
+    [input.quoteId],
+  );
+  const q = quote.rows[0];
+  if (q === undefined) {
+    throw new WithdrawalDomainError('QUOTE_NOT_FOUND', 'Quote not found');
+  }
+  if (q.user_id !== input.authenticatedUserId) {
+    throw new WithdrawalDomainError('UNAUTHORIZED', 'Authentication required');
+  }
+
+  // After quote lock: recheck authoritative idempotency (may have committed while waiting).
+  const afterLockExisting = await loadExistingByIdempotency(client, scope, input.idempotencyKey);
+  if (afterLockExisting !== undefined) {
+    assertSameIdempotentIntent(input, afterLockExisting);
+    return { quote: q, existing: mapWithdrawal(afterLockExisting) };
+  }
+
+  if (q.status === 'CONSUMED') {
+    const byKey = await loadExistingByIdempotency(client, scope, input.idempotencyKey);
+    if (byKey !== undefined) {
+      if (
+        byKey.withdrawal_quote_id === input.quoteId &&
+        byKey.user_id === input.authenticatedUserId
+      ) {
+        assertSameIdempotentIntent(input, byKey);
+        return { quote: q, existing: mapWithdrawal(byKey) };
+      }
+      throw new WithdrawalDomainError(
+        'IDEMPOTENCY_CONFLICT',
+        'Idempotency key reused with different intent',
+      );
+    }
+    throw new WithdrawalDomainError('QUOTE_CONSUMED', 'Quote already consumed');
+  }
+  if (q.status === 'CANCELLED' || q.status === 'EXPIRED') {
+    throw new WithdrawalDomainError('QUOTE_NOT_OPEN', 'Quote is not open');
+  }
+  if (q.status !== 'OPEN') {
+    throw new WithdrawalDomainError('QUOTE_NOT_OPEN', 'Quote is not open');
+  }
+  if (q.expires_at.getTime() <= Date.now()) {
+    await client.query(
+      `UPDATE withdrawal_quotes SET status = 'EXPIRED', updated_at = now()
+       WHERE id = $1::uuid AND status = 'OPEN'`,
+      [q.id],
+    );
+    throw new WithdrawalDomainError('QUOTE_EXPIRED', 'Quote expired');
+  }
+  if (q.limit_rule_id === null || q.limit_rule_version === null) {
+    throw new WithdrawalDomainError('CONFIG', 'Quote missing limit rule provenance');
+  }
+
+  return { quote: q };
+}
+
+/**
+ * Create a withdrawal from an OPEN quote.
+ *
+ * Two-transaction pattern (Phase 14 Step 13):
+ *   TX A — quote validation + Eligibility/Risk preflight evidence (always commits
+ *           when evidence is written, including INELIGIBLE denials).
+ *   TX B — money path: insert withdrawal, reserve volume, ledger reservation,
+ *           attach pinned Risk/Eligibility (no re-evaluation).
+ */
 export async function createWithdrawalFromQuote(
   db: WithdrawalDb,
   config: WithdrawalEngineConfig,
@@ -151,218 +336,19 @@ export async function createWithdrawalFromQuote(
   }
   const scope = idempotencyScopeForUser(input.authenticatedUserId);
 
-  return withWithdrawalTransaction(db, async (client) => {
-    const existing = await client.query<{
-      id: string;
-      public_id: string;
-      user_id: string;
-      withdrawal_quote_id: string;
-      state: WithdrawalState;
-      requested_amount_atomic: string;
-      fee_amount_atomic: string;
-      net_amount_atomic: string;
-      priority_review: boolean;
-      risk_decision: string | null;
-      workflow_id: string | null;
-    }>(
-      `SELECT ${WITHDRAWAL_SELECT}
-       FROM withdrawals
-       WHERE idempotency_scope = $1 AND idempotency_key = $2
-       FOR SHARE`,
-      [scope, input.idempotencyKey],
-    );
-    if (existing.rows[0] !== undefined) {
-      const row = existing.rows[0];
-      // Intent: same quoteId + userId + amounts (amounts frozen on the withdrawal from quote).
-      if (
-        !intentsMatch(
-          {
-            userId: input.authenticatedUserId,
-            quoteId: input.quoteId,
-            requestedAmountAtomic: row.requested_amount_atomic,
-            feeAmountAtomic: row.fee_amount_atomic,
-            netAmountAtomic: row.net_amount_atomic,
-          },
-          {
-            userId: row.user_id,
-            quoteId: row.withdrawal_quote_id,
-            requestedAmountAtomic: row.requested_amount_atomic,
-            feeAmountAtomic: row.fee_amount_atomic,
-            netAmountAtomic: row.net_amount_atomic,
-          },
-        ) ||
-        row.withdrawal_quote_id !== input.quoteId ||
-        row.user_id !== input.authenticatedUserId
-      ) {
-        throw new WithdrawalDomainError(
-          'IDEMPOTENCY_CONFLICT',
-          'Idempotency key reused with different intent',
-        );
-      }
-      return mapWithdrawal(row);
+  // ---------- TX A: evidence + quote validation (no ledger / volume) ----------
+  const txA = await withWithdrawalTransaction(db, async (client): Promise<TxAResult> => {
+    const existing = await loadExistingByIdempotency(client, scope, input.idempotencyKey);
+    if (existing !== undefined) {
+      assertSameIdempotentIntent(input, existing);
+      return { kind: 'EXISTING', view: mapWithdrawal(existing) };
     }
 
-    const quote = await client.query<{
-      id: string;
-      user_id: string;
-      asset_id: string;
-      network_id: string;
-      primary_wallet_id: string;
-      requested_amount_atomic: string;
-      fee_amount_atomic: string;
-      net_amount_atomic: string;
-      fee_rule_id: string;
-      fee_rule_version: number;
-      limit_rule_id: string | null;
-      limit_rule_version: number | null;
-      base_platform_fee_atomic: string | null;
-      membership_fee_discount_bps: number;
-      user_membership_id: string | null;
-      fee_entitlement_rule_version_id: string | null;
-      priority_entitlement_rule_version_id: string | null;
-      priority_review: boolean;
-      status: string;
-      expires_at: Date;
-    }>(
-      `SELECT id, user_id, asset_id, network_id, primary_wallet_id,
-              requested_amount_atomic::text, fee_amount_atomic::text, net_amount_atomic::text,
-              fee_rule_id, fee_rule_version, limit_rule_id, limit_rule_version,
-              base_platform_fee_atomic::text, membership_fee_discount_bps,
-              user_membership_id, fee_entitlement_rule_version_id,
-              priority_entitlement_rule_version_id, priority_review,
-              status::text AS status, expires_at
-       FROM withdrawal_quotes
-       WHERE id = $1::uuid
-       FOR UPDATE`,
-      [input.quoteId],
-    );
-    const q = quote.rows[0];
-    if (q === undefined) {
-      throw new WithdrawalDomainError('QUOTE_NOT_FOUND', 'Quote not found');
+    const locked = await lockAndValidateQuote(client, input, scope);
+    if (locked.existing !== undefined) {
+      return { kind: 'EXISTING', view: locked.existing };
     }
-    if (q.user_id !== input.authenticatedUserId) {
-      throw new WithdrawalDomainError('UNAUTHORIZED', 'Authentication required');
-    }
-    // After quote lock: recheck authoritative idempotency (may have committed while waiting).
-    const afterLockExisting = await client.query<{
-      id: string;
-      public_id: string;
-      user_id: string;
-      withdrawal_quote_id: string;
-      state: WithdrawalState;
-      requested_amount_atomic: string;
-      fee_amount_atomic: string;
-      net_amount_atomic: string;
-      priority_review: boolean;
-      risk_decision: string | null;
-      workflow_id: string | null;
-    }>(
-      `SELECT ${WITHDRAWAL_SELECT}
-       FROM withdrawals
-       WHERE idempotency_scope = $1 AND idempotency_key = $2
-       FOR SHARE`,
-      [scope, input.idempotencyKey],
-    );
-    if (afterLockExisting.rows[0] !== undefined) {
-      const row = afterLockExisting.rows[0];
-      if (
-        !intentsMatch(
-          {
-            userId: input.authenticatedUserId,
-            quoteId: input.quoteId,
-            requestedAmountAtomic: row.requested_amount_atomic,
-            feeAmountAtomic: row.fee_amount_atomic,
-            netAmountAtomic: row.net_amount_atomic,
-          },
-          {
-            userId: row.user_id,
-            quoteId: row.withdrawal_quote_id,
-            requestedAmountAtomic: row.requested_amount_atomic,
-            feeAmountAtomic: row.fee_amount_atomic,
-            netAmountAtomic: row.net_amount_atomic,
-          },
-        ) ||
-        row.withdrawal_quote_id !== input.quoteId ||
-        row.user_id !== input.authenticatedUserId
-      ) {
-        throw new WithdrawalDomainError(
-          'IDEMPOTENCY_CONFLICT',
-          'Idempotency key reused with different intent',
-        );
-      }
-      return mapWithdrawal(row);
-    }
-
-    if (q.status === 'CONSUMED') {
-      // Prefer authoritative idempotency recovery (same key → original withdrawal).
-      const byKey = await client.query<{
-        id: string;
-        public_id: string;
-        user_id: string;
-        withdrawal_quote_id: string;
-        state: WithdrawalState;
-        requested_amount_atomic: string;
-        fee_amount_atomic: string;
-        net_amount_atomic: string;
-        priority_review: boolean;
-        risk_decision: string | null;
-        workflow_id: string | null;
-      }>(
-        `SELECT ${WITHDRAWAL_SELECT}
-         FROM withdrawals
-         WHERE idempotency_scope = $1 AND idempotency_key = $2
-         FOR SHARE`,
-        [scope, input.idempotencyKey],
-      );
-      if (byKey.rows[0] !== undefined) {
-        const row = byKey.rows[0];
-        if (
-          row.withdrawal_quote_id === input.quoteId &&
-          row.user_id === input.authenticatedUserId &&
-          intentsMatch(
-            {
-              userId: input.authenticatedUserId,
-              quoteId: input.quoteId,
-              requestedAmountAtomic: row.requested_amount_atomic,
-              feeAmountAtomic: row.fee_amount_atomic,
-              netAmountAtomic: row.net_amount_atomic,
-            },
-            {
-              userId: row.user_id,
-              quoteId: row.withdrawal_quote_id,
-              requestedAmountAtomic: row.requested_amount_atomic,
-              feeAmountAtomic: row.fee_amount_atomic,
-              netAmountAtomic: row.net_amount_atomic,
-            },
-          )
-        ) {
-          return mapWithdrawal(row);
-        }
-        throw new WithdrawalDomainError(
-          'IDEMPOTENCY_CONFLICT',
-          'Idempotency key reused with different intent',
-        );
-      }
-      // Quote consumed by a different key / intent.
-      throw new WithdrawalDomainError('QUOTE_CONSUMED', 'Quote already consumed');
-    }
-    if (q.status === 'CANCELLED' || q.status === 'EXPIRED') {
-      throw new WithdrawalDomainError('QUOTE_NOT_OPEN', 'Quote is not open');
-    }
-    if (q.status !== 'OPEN') {
-      throw new WithdrawalDomainError('QUOTE_NOT_OPEN', 'Quote is not open');
-    }
-    if (q.expires_at.getTime() <= Date.now()) {
-      await client.query(
-        `UPDATE withdrawal_quotes SET status = 'EXPIRED', updated_at = now()
-         WHERE id = $1::uuid AND status = 'OPEN'`,
-        [q.id],
-      );
-      throw new WithdrawalDomainError('QUOTE_EXPIRED', 'Quote expired');
-    }
-    if (q.limit_rule_id === null || q.limit_rule_version === null) {
-      throw new WithdrawalDomainError('CONFIG', 'Quote missing limit rule provenance');
-    }
+    const q = locked.quote;
 
     await requireEligiblePrimaryWallet(client, {
       userId: input.authenticatedUserId,
@@ -372,7 +358,7 @@ export async function createWithdrawalFromQuote(
 
     await assertWithdrawalRequestsAllowed(client, config.deploymentEnvironment);
 
-    const limits = await loadLimitRuleById(client, q.limit_rule_id);
+    const limits = await loadLimitRuleById(client, q.limit_rule_id!);
     const gross = BigInt(q.requested_amount_atomic);
     if (gross < limits.minWithdrawalAtomic || gross > limits.maxSingleWithdrawalAtomic) {
       throw new WithdrawalDomainError(
@@ -384,37 +370,136 @@ export async function createWithdrawalFromQuote(
     const hotWallet = await resolveSinglePayoutHotWallet(client, q.network_id, {
       fakeChainEnabled: config.fakeChainEnabled,
     });
+
+    const preflight = await runWithdrawalEligibilityPreflight(client, {
+      userId: input.authenticatedUserId,
+      deploymentEnvironment: config.deploymentEnvironment,
+    });
+
+    if (!isEligibilityOutcomeEligible(preflight.evaluation.outcome)) {
+      return {
+        kind: 'DENIED',
+        error: new WithdrawalDomainError(
+          'ELIGIBILITY_DENIED',
+          'Withdrawal request is not eligible',
+          {
+            details: {
+              outcome: preflight.evaluation.outcome,
+              reasonCodes: [...preflight.evaluation.reasonCodes],
+              eligibilityDecisionId: preflight.decision.id,
+              primaryBlockedGateCode: preflight.evaluation.primaryBlockedGateCode,
+            },
+          },
+        ),
+      };
+    }
+
+    if (preflight.risk === undefined) {
+      return {
+        kind: 'DENIED',
+        error: new WithdrawalDomainError(
+          'RISK_POLICY_REQUIRED',
+          'Eligible withdrawal preflight missing Risk evaluation',
+          {
+            details: { eligibilityDecisionId: preflight.decision.id },
+          },
+        ),
+      };
+    }
+
+    return {
+      kind: 'READY',
+      quote: q,
+      limits,
+      hotWallet: { id: hotWallet.id },
+      gross,
+      preflight,
+    };
+  });
+
+  if (txA.kind === 'EXISTING') {
+    return txA.view;
+  }
+  if (txA.kind === 'DENIED') {
+    // Evidence already committed in TX A.
+    throw txA.error;
+  }
+
+  const { quote: qA, limits: limitsA, hotWallet: hotA, gross, preflight } = txA;
+  const risk = preflight.risk!;
+  const eligibilityDecisionId = preflight.decision.id;
+
+  // ---------- TX B: money path (re-validate; attach pinned Risk) ----------
+  return withWithdrawalTransaction(db, async (client) => {
+    const existing = await loadExistingByIdempotency(client, scope, input.idempotencyKey);
+    if (existing !== undefined) {
+      assertSameIdempotentIntent(input, existing);
+      return mapWithdrawal(existing);
+    }
+
+    const locked = await lockAndValidateQuote(client, input, scope);
+    if (locked.existing !== undefined) {
+      return locked.existing;
+    }
+    const q = locked.quote;
+
+    // Fail closed if quote amounts drifted between TX A and TX B.
+    if (
+      q.id !== qA.id ||
+      q.requested_amount_atomic !== qA.requested_amount_atomic ||
+      q.fee_amount_atomic !== qA.fee_amount_atomic ||
+      q.net_amount_atomic !== qA.net_amount_atomic ||
+      q.primary_wallet_id !== qA.primary_wallet_id ||
+      q.asset_id !== qA.asset_id ||
+      q.network_id !== qA.network_id
+    ) {
+      throw new WithdrawalDomainError('QUOTE_NOT_OPEN', 'Quote changed between preflight and create');
+    }
+
+    await requireEligiblePrimaryWallet(client, {
+      userId: input.authenticatedUserId,
+      networkId: q.network_id,
+      expectedWalletId: q.primary_wallet_id,
+    });
+
+    await assertWithdrawalRequestsAllowed(client, config.deploymentEnvironment);
+
+    const userStatus = await client.query<{ withdrawal_status: string }>(
+      `SELECT withdrawal_status::text AS withdrawal_status
+       FROM users WHERE id = $1::uuid FOR SHARE`,
+      [input.authenticatedUserId],
+    );
+    const restrictedHold = userStatus.rows[0]?.withdrawal_status === 'RESTRICTED';
+
+    const limits = await loadLimitRuleById(client, q.limit_rule_id!);
+    if (limits.id !== limitsA.id) {
+      throw new WithdrawalDomainError('LIMIT_RULE_NOT_FOUND', 'Limit rule changed between preflight and create');
+    }
+    const grossB = BigInt(q.requested_amount_atomic);
+    if (grossB !== gross) {
+      throw new WithdrawalDomainError('VALIDATION', 'Quote gross amount changed between preflight and create');
+    }
+    if (grossB < limits.minWithdrawalAtomic || grossB > limits.maxSingleWithdrawalAtomic) {
+      throw new WithdrawalDomainError(
+        'LIMIT_EXCEEDED',
+        'Gross amount outside single-withdrawal limits',
+      );
+    }
+
+    const hotWallet = await resolveSinglePayoutHotWallet(client, q.network_id, {
+      fakeChainEnabled: config.fakeChainEnabled,
+    });
+    if (hotWallet.id !== hotA.id) {
+      // Hot wallet identity may rotate; re-resolve is authoritative for TX B.
+      // Keep create fail-open on identity change only when still a single ACTIVE wallet.
+    }
     const asOf = new Date();
 
-    let w: {
-      id: string;
-      public_id: string;
-      user_id: string;
-      withdrawal_quote_id: string;
-      state: WithdrawalState;
-      requested_amount_atomic: string;
-      fee_amount_atomic: string;
-      net_amount_atomic: string;
-      priority_review: boolean;
-      risk_decision: string | null;
-      workflow_id: string | null;
-    };
+    let w: WithdrawalRow;
 
     try {
       await client.query('SAVEPOINT withdrawal_create_insert');
-      const inserted = await client.query<{
-        id: string;
-        public_id: string;
-        user_id: string;
-        withdrawal_quote_id: string;
-        state: WithdrawalState;
-        requested_amount_atomic: string;
-        fee_amount_atomic: string;
-        net_amount_atomic: string;
-        priority_review: boolean;
-        risk_decision: string | null;
-        workflow_id: string | null;
-      }>(
+      const inserted = await client.query<WithdrawalRow>(
         `INSERT INTO withdrawals (
            user_id, withdrawal_quote_id, asset_id, network_id, wallet_id,
            requested_amount_atomic, fee_amount_atomic, net_amount_atomic,
@@ -444,6 +529,7 @@ export async function createWithdrawalFromQuote(
           q.requested_amount_atomic,
           q.fee_amount_atomic,
           q.net_amount_atomic,
+          // Compat only — NOT Risk truth. Risk pins risk_policy_version from preflight.
           config.riskPolicyVersion,
           q.priority_review,
           scope,
@@ -474,22 +560,9 @@ export async function createWithdrawalFromQuote(
         'code' in error &&
         (error as { code?: string }).code === '23505'
       ) {
-        // Unique quote/idempotency conflict — recover original if same intent (txn not aborted).
-        const byQuote = await client.query<{
-          id: string;
-          public_id: string;
-          user_id: string;
-          withdrawal_quote_id: string;
-          state: WithdrawalState;
-          requested_amount_atomic: string;
-          fee_amount_atomic: string;
-          net_amount_atomic: string;
-          priority_review: boolean;
-          risk_decision: string | null;
-          workflow_id: string | null;
-          idempotency_scope: string;
-          idempotency_key: string;
-        }>(
+        const byQuote = await client.query<
+          WithdrawalRow & { idempotency_scope: string; idempotency_key: string }
+        >(
           `SELECT ${WITHDRAWAL_SELECT}, idempotency_scope, idempotency_key
            FROM withdrawals
            WHERE withdrawal_quote_id = $1::uuid
@@ -504,27 +577,9 @@ export async function createWithdrawalFromQuote(
         ) {
           return mapWithdrawal(recovered);
         }
-        const byKey = await client.query<{
-          id: string;
-          public_id: string;
-          user_id: string;
-          withdrawal_quote_id: string;
-          state: WithdrawalState;
-          requested_amount_atomic: string;
-          fee_amount_atomic: string;
-          net_amount_atomic: string;
-          priority_review: boolean;
-          risk_decision: string | null;
-          workflow_id: string | null;
-        }>(
-          `SELECT ${WITHDRAWAL_SELECT}
-           FROM withdrawals
-           WHERE idempotency_scope = $1 AND idempotency_key = $2
-           FOR SHARE`,
-          [scope, input.idempotencyKey],
-        );
-        if (byKey.rows[0] !== undefined && byKey.rows[0].withdrawal_quote_id === q.id) {
-          return mapWithdrawal(byKey.rows[0]);
+        const byKey = await loadExistingByIdempotency(client, scope, input.idempotencyKey);
+        if (byKey !== undefined && byKey.withdrawal_quote_id === q.id) {
+          return mapWithdrawal(byKey);
         }
         throw new WithdrawalDomainError(
           'IDEMPOTENCY_CONFLICT',
@@ -541,7 +596,7 @@ export async function createWithdrawalFromQuote(
       hotWalletId: hotWallet.id,
       assetId: q.asset_id,
       networkId: q.network_id,
-      grossAtomic: gross,
+      grossAtomic: grossB,
       limits,
       asOf,
     });
@@ -593,7 +648,6 @@ export async function createWithdrawalFromQuote(
       throw error;
     }
 
-    // Set-once reservation_ledger_tx_id
     await client.query(
       `UPDATE withdrawals
        SET reservation_ledger_tx_id = $2::uuid, updated_at = now()
@@ -608,9 +662,12 @@ export async function createWithdrawalFromQuote(
       [q.id],
     );
 
-    const risk = await applyV1RiskPolicy(client, config, {
+    const riskAttach = await attachAuthoritativeRiskToWithdrawal(client, config, {
       withdrawalId: w.id,
       userId: input.authenticatedUserId,
+      risk,
+      eligibilityDecisionId,
+      restrictedHold,
       fromState: 'REQUESTED',
     });
 
@@ -620,26 +677,20 @@ export async function createWithdrawalFromQuote(
       resourceId: w.id,
       actorType: 'USER',
       afterSnapshot: {
-        state: risk.state,
-        gross: atomicToString(gross),
+        state: riskAttach.state,
+        gross: atomicToString(grossB),
         quoteId: q.id,
-        riskDecision: risk.decision,
+        riskDecision: riskAttach.decision,
+        eligibilityDecisionId,
+        riskPolicyVersion: risk.evaluation.ruleVersion,
+        riskSnapshotId: risk.snapshot.id,
       },
     });
 
-    const refreshed = await client.query<{
-      id: string;
-      public_id: string;
-      user_id: string;
-      withdrawal_quote_id: string;
-      state: WithdrawalState;
-      requested_amount_atomic: string;
-      fee_amount_atomic: string;
-      net_amount_atomic: string;
-      priority_review: boolean;
-      risk_decision: string | null;
-      workflow_id: string | null;
-    }>(`SELECT ${WITHDRAWAL_SELECT} FROM withdrawals WHERE id = $1::uuid`, [w.id]);
+    const refreshed = await client.query<WithdrawalRow>(
+      `SELECT ${WITHDRAWAL_SELECT} FROM withdrawals WHERE id = $1::uuid`,
+      [w.id],
+    );
     const final = refreshed.rows[0];
     if (final === undefined) {
       throw new WithdrawalDomainError('INTERNAL', 'withdrawal missing after create');

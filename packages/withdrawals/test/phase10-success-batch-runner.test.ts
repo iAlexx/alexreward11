@@ -191,7 +191,8 @@ describe('phase10 batch pre-start safety', () => {
     const ledger = 6_000_000n;
     const tonApi = 6_000_000n;
     const tonCenter = 5_810_000n;
-    const match = ledger === tonApi && tonApi === tonCenter;
+    const observed = [ledger, tonApi, tonCenter];
+    const match = observed.every((balance) => balance === observed[0]);
     expect(match).toBe(false);
     const gate = assertPhase10BatchPreStart({
       pauseEnabled: true,

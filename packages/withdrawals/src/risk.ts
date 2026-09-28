@@ -1,3 +1,4 @@
+import type { EvaluateAndPersistRiskResult, RiskActionCode } from '@alex-rewards/fraud';
 import type { PoolClient } from 'pg';
 
 import { insertWithdrawalAuditLog, insertWithdrawalOutboxEvent } from './audit.js';
@@ -11,27 +12,123 @@ import { releaseWithdrawalReservation } from './release.js';
 import { transitionWithdrawal } from './transitions.js';
 import type { WithdrawalState } from './state-machine.js';
 
+/** Stored on withdrawals.risk_decision (DB enum). Never APPROVED. */
 export type V1RiskDecision =
-  'MANUAL_REVIEW' | 'HELD' | 'REJECTED_PRE_BROADCAST' | 'WITHDRAWAL_BLOCKED';
+  | 'MANUAL_REVIEW'
+  | 'HELD'
+  | 'REJECTED_PRE_BROADCAST'
+  | 'WITHDRAWAL_BLOCKED';
+
+type WorkflowOutcome =
+  | { readonly kind: 'MANUAL_REVIEW'; riskDecision: 'MANUAL_REVIEW' }
+  | { readonly kind: 'HELD'; riskDecision: V1RiskDecision; reason: string }
+  | {
+      readonly kind: 'REJECTED';
+      riskDecision: 'REJECTED_PRE_BROADCAST';
+      reason: string;
+    };
 
 /**
- * V1 risk policy: never auto-approves.
- * Ordinary / LOW → MANUAL_REVIEW.
- * BLOCKED account → WITHDRAWAL_BLOCKED → REJECTED (+ release).
- * RESTRICTED → HELD (manual).
+ * Map authoritative Risk action (+ RESTRICTED overlay) to withdrawal workflow.
+ * NEVER auto-approves. ALLOW/EXTEND_PENDING/MANUAL_REVIEW → MANUAL_REVIEW.
+ * Fail-safe HELD for WITHDRAWAL_BLOCKED / SUSPEND_EARNING / FREEZE_ACCOUNT
+ * (does not mutate users.status / withdrawal_status).
  */
-export async function applyV1RiskPolicy(
+function mapRiskActionToWorkflow(
+  action: RiskActionCode,
+  restrictedHold: boolean,
+): WorkflowOutcome {
+  if (restrictedHold) {
+    return {
+      kind: 'HELD',
+      riskDecision: 'HELD',
+      reason: 'ACCOUNT_WITHDRAWAL_RESTRICTED',
+    };
+  }
+
+  switch (action) {
+    case 'ALLOW':
+    case 'EXTEND_PENDING':
+    case 'MANUAL_REVIEW':
+      return { kind: 'MANUAL_REVIEW', riskDecision: 'MANUAL_REVIEW' };
+    case 'HELD':
+      return { kind: 'HELD', riskDecision: 'HELD', reason: 'RISK_ACTION_HELD' };
+    case 'REJECTED_PRE_BROADCAST':
+      return {
+        kind: 'REJECTED',
+        riskDecision: 'REJECTED_PRE_BROADCAST',
+        reason: 'RISK_ACTION_REJECTED_PRE_BROADCAST',
+      };
+    case 'WITHDRAWAL_BLOCKED':
+      return {
+        kind: 'HELD',
+        riskDecision: 'WITHDRAWAL_BLOCKED',
+        reason: 'RISK_ACTION_WITHDRAWAL_BLOCKED_FAILSAFE_HOLD',
+      };
+    case 'SUSPEND_EARNING':
+      return {
+        kind: 'HELD',
+        riskDecision: 'HELD',
+        reason: 'RISK_ACTION_SUSPEND_EARNING_FAILSAFE_HOLD',
+      };
+    case 'FREEZE_ACCOUNT':
+      return {
+        kind: 'HELD',
+        riskDecision: 'HELD',
+        reason: 'RISK_ACTION_FREEZE_ACCOUNT_FAILSAFE_HOLD',
+      };
+    default: {
+      const _exhaustive: never = action;
+      return {
+        kind: 'HELD',
+        riskDecision: 'HELD',
+        reason: `RISK_ACTION_UNKNOWN_FAILSAFE_HOLD:${String(_exhaustive)}`,
+      };
+    }
+  }
+}
+
+/**
+ * Attach preflight Risk + Eligibility evidence to a REQUESTED withdrawal.
+ * Pins risk_policy_version from evaluation.ruleVersion (never config.riskPolicyVersion).
+ * Does not re-evaluate Risk.
+ */
+export async function attachAuthoritativeRiskToWithdrawal(
   client: PoolClient,
-  config: WithdrawalEngineConfig,
+  _config: WithdrawalEngineConfig,
   input: {
     readonly withdrawalId: string;
     readonly userId: string;
+    readonly risk: EvaluateAndPersistRiskResult;
+    readonly eligibilityDecisionId: string;
+    readonly restrictedHold: boolean;
     readonly fromState?: WithdrawalState;
   },
 ): Promise<{ decision: V1RiskDecision; state: WithdrawalState }> {
   const from = input.fromState ?? 'REQUESTED';
   if (from !== 'REQUESTED') {
-    throw new WithdrawalDomainError('STATE_CONFLICT', 'Risk policy expects REQUESTED');
+    throw new WithdrawalDomainError('STATE_CONFLICT', 'Risk attach expects REQUESTED');
+  }
+
+  const ruleVersion = input.risk.evaluation.ruleVersion;
+  if (!Number.isInteger(ruleVersion) || ruleVersion <= 0) {
+    throw new WithdrawalDomainError(
+      'RISK_POLICY_REQUIRED',
+      'Authoritative risk evaluation missing ruleVersion',
+    );
+  }
+  const snapshotId = input.risk.snapshot.id;
+  if (typeof snapshotId !== 'string' || snapshotId.trim() === '') {
+    throw new WithdrawalDomainError(
+      'RISK_POLICY_REQUIRED',
+      'Authoritative risk evaluation missing snapshot id',
+    );
+  }
+  if (input.eligibilityDecisionId.trim() === '') {
+    throw new WithdrawalDomainError(
+      'OWNER_POLICY_REQUIRED',
+      'eligibilityDecisionId is required',
+    );
   }
 
   await transitionWithdrawal(client, {
@@ -40,117 +137,87 @@ export async function applyV1RiskPolicy(
     to: 'RISK_CHECK',
   });
 
-  const user = await client.query<{
-    withdrawal_status: string;
-    status: string;
-  }>(
-    `SELECT withdrawal_status::text AS withdrawal_status, status::text AS status
-     FROM users WHERE id = $1::uuid FOR SHARE`,
-    [input.userId],
+  const workflow = mapRiskActionToWorkflow(
+    input.risk.evaluation.action,
+    input.restrictedHold,
   );
-  const u = user.rows[0];
-  if (u === undefined) {
-    throw new WithdrawalDomainError('UNAUTHORIZED', 'Authentication required');
-  }
 
-  let decision: V1RiskDecision = 'MANUAL_REVIEW';
-  let riskTier: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' = 'LOW';
-  let score = 10;
-  let reasonCodes: string[] = ['V1_ORDINARY_MANUAL_REVIEW'];
-
-  if (u.withdrawal_status === 'BLOCKED' || u.status === 'SUSPENDED') {
-    decision = 'WITHDRAWAL_BLOCKED';
-    riskTier = 'CRITICAL';
-    score = 100;
-    reasonCodes = ['ACCOUNT_WITHDRAWAL_BLOCKED'];
-  } else if (u.withdrawal_status === 'RESTRICTED') {
-    decision = 'HELD';
-    riskTier = 'HIGH';
-    score = 80;
-    reasonCodes = ['ACCOUNT_WITHDRAWAL_RESTRICTED'];
-  }
-
-  const snapshot = await client.query<{ id: string }>(
-    `INSERT INTO risk_snapshots (
-       user_id, decision_scope, score, risk_tier, rule_version,
-       reason_codes, safe_inputs, outputs
-     ) VALUES (
-       $1::uuid, 'WITHDRAWAL_REQUEST', $2, $3::risk_tier, $4,
-       $5::text[], $6::jsonb, $7::jsonb
-     )
-     RETURNING id`,
-    [
-      input.userId,
-      score,
-      riskTier,
-      config.riskPolicyVersion,
-      reasonCodes,
-      JSON.stringify({ withdrawalId: input.withdrawalId }),
-      JSON.stringify({ decision, neverAutoApprove: true }),
-    ],
-  );
-  const snapshotId = snapshot.rows[0]?.id;
-  if (snapshotId === undefined) {
-    throw new WithdrawalDomainError('INTERNAL', 'risk snapshot insert failed');
-  }
-
-  if (decision === 'WITHDRAWAL_BLOCKED') {
+  if (workflow.kind === 'REJECTED') {
     await transitionWithdrawal(client, {
       id: input.withdrawalId,
       from: 'RISK_CHECK',
       to: 'REJECTED',
-      riskPolicyVersion: config.riskPolicyVersion,
-      riskDecision: decision,
+      riskPolicyVersion: ruleVersion,
+      riskDecision: workflow.riskDecision,
       riskSnapshotId: snapshotId,
+      eligibilityDecisionId: input.eligibilityDecisionId,
     });
     await releaseWithdrawalReservation(client, { withdrawalId: input.withdrawalId });
     await insertWithdrawalAuditLog(client, {
-      actionType: 'WITHDRAWAL_RISK_BLOCKED',
+      actionType: 'WITHDRAWAL_RISK_REJECTED_PRE_BROADCAST',
       resourceType: 'withdrawal',
       resourceId: input.withdrawalId,
       actorType: 'SYSTEM',
-      afterSnapshot: { decision, state: 'REJECTED' },
+      afterSnapshot: {
+        decision: workflow.riskDecision,
+        state: 'REJECTED',
+        reason: workflow.reason,
+        riskAction: input.risk.evaluation.action,
+        ruleVersion,
+      },
     });
-    return { decision, state: 'REJECTED' };
+    return { decision: workflow.riskDecision, state: 'REJECTED' };
   }
 
-  if (decision === 'HELD') {
+  if (workflow.kind === 'HELD') {
     await transitionWithdrawal(client, {
       id: input.withdrawalId,
       from: 'RISK_CHECK',
       to: 'HELD',
-      riskPolicyVersion: config.riskPolicyVersion,
-      riskDecision: decision,
+      riskPolicyVersion: ruleVersion,
+      riskDecision: workflow.riskDecision,
       riskSnapshotId: snapshotId,
+      eligibilityDecisionId: input.eligibilityDecisionId,
     });
     await insertWithdrawalAuditLog(client, {
       actionType: 'WITHDRAWAL_RISK_HELD',
       resourceType: 'withdrawal',
       resourceId: input.withdrawalId,
       actorType: 'SYSTEM',
-      afterSnapshot: { decision, state: 'HELD' },
+      afterSnapshot: {
+        decision: workflow.riskDecision,
+        state: 'HELD',
+        reason: workflow.reason,
+        riskAction: input.risk.evaluation.action,
+        restrictedHold: input.restrictedHold,
+        ruleVersion,
+      },
     });
-    // Owner-review Telegram delivery is MANUAL_REVIEW-only in this change.
-    return { decision, state: 'HELD' };
+    return { decision: workflow.riskDecision, state: 'HELD' };
   }
 
-  // Never APPROVED under V1.
+  // MANUAL_REVIEW — never APPROVED. Owner-review Outbox only.
   await transitionWithdrawal(client, {
     id: input.withdrawalId,
     from: 'RISK_CHECK',
     to: 'MANUAL_REVIEW',
-    riskPolicyVersion: config.riskPolicyVersion,
+    riskPolicyVersion: ruleVersion,
     riskDecision: 'MANUAL_REVIEW',
     riskSnapshotId: snapshotId,
+    eligibilityDecisionId: input.eligibilityDecisionId,
   });
   await insertWithdrawalAuditLog(client, {
     actionType: 'WITHDRAWAL_RISK_MANUAL_REVIEW',
     resourceType: 'withdrawal',
     resourceId: input.withdrawalId,
     actorType: 'SYSTEM',
-    afterSnapshot: { decision: 'MANUAL_REVIEW', state: 'MANUAL_REVIEW' },
+    afterSnapshot: {
+      decision: 'MANUAL_REVIEW',
+      state: 'MANUAL_REVIEW',
+      riskAction: input.risk.evaluation.action,
+      ruleVersion,
+    },
   });
-  // Transactional Outbox only — no Telegram/control-center dependency here.
   await insertWithdrawalOutboxEvent(client, {
     aggregateType: 'withdrawal',
     aggregateId: input.withdrawalId,
@@ -162,4 +229,23 @@ export async function applyV1RiskPolicy(
     },
   });
   return { decision: 'MANUAL_REVIEW', state: 'MANUAL_REVIEW' };
+}
+
+/**
+ * Legacy V1 fabricated risk scores (10/80/100) removed.
+ * Callers must use Phase 14 preflight + attachAuthoritativeRiskToWithdrawal.
+ */
+export async function applyV1RiskPolicy(
+  _client: PoolClient,
+  _config: WithdrawalEngineConfig,
+  _input: {
+    readonly withdrawalId: string;
+    readonly userId: string;
+    readonly fromState?: WithdrawalState;
+  },
+): Promise<{ decision: V1RiskDecision; state: WithdrawalState }> {
+  throw new WithdrawalDomainError(
+    'CONFIG',
+    'legacy V1 risk fabrication removed; use Phase 14 preflight',
+  );
 }

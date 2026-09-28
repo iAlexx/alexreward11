@@ -571,6 +571,169 @@ export async function seedFounderPriorityReview(
   return { ruleVersionId };
 }
 
+/** Explicit TEST-ONLY Risk thresholds — NOT PRODUCTION. */
+export const PHASE14_TEST_RISK_THRESHOLDS = {
+  lowMax: 20,
+  mediumMax: 50,
+  highMax: 75,
+} as const;
+
+/** Explicit TEST-ONLY Risk actions — NOT PRODUCTION. Never ALLOW auto-approve. */
+export const PHASE14_TEST_RISK_ACTIONS = {
+  LOW: 'MANUAL_REVIEW',
+  MEDIUM: 'MANUAL_REVIEW',
+  HIGH: 'HELD',
+  CRITICAL: 'WITHDRAWAL_BLOCKED',
+} as const;
+
+/** Explicit TEST-ONLY Eligibility policy — NOT PRODUCTION. */
+export const PHASE14_TEST_ELIGIBILITY_POLICY_CONFIG = {
+  actions: {
+    WITHDRAWAL_REQUEST: {
+      requiredGates: ['ACCOUNT_STATE', 'RISK_POLICY', 'FEATURE_FLAG'],
+      precedence: ['RISK_POLICY', 'ACCOUNT_STATE', 'FEATURE_FLAG'],
+      riskAllowedActions: ['ALLOW', 'EXTEND_PENDING', 'MANUAL_REVIEW', 'HELD'],
+    },
+    AD_SESSION_START: {
+      requiredGates: ['ACCOUNT_STATE', 'FEATURE_FLAG'],
+      precedence: ['ACCOUNT_STATE', 'FEATURE_FLAG'],
+    },
+    MISSION_CLAIM: {
+      requiredGates: ['ACCOUNT_STATE', 'FEATURE_FLAG'],
+      precedence: ['ACCOUNT_STATE', 'FEATURE_FLAG'],
+    },
+    TASK_CLAIM: {
+      requiredGates: ['ACCOUNT_STATE', 'FEATURE_FLAG'],
+      precedence: ['ACCOUNT_STATE', 'FEATURE_FLAG'],
+    },
+  },
+} as const;
+
+/**
+ * TEST ONLY — NOT PRODUCTION.
+ * Inserts an ACTIVE risk_rule_versions row for withdrawal-engine tests.
+ */
+export async function insertPhase14TestRiskRule(
+  pool: Pool,
+  input: {
+    readonly ruleVersion: number;
+    readonly status?: 'DRAFT' | 'ACTIVE' | 'SUPERSEDED' | 'REVOKED';
+    readonly effectiveFrom?: Date;
+    readonly effectiveTo?: Date | null;
+    readonly thresholds?: unknown;
+    readonly signalWeights?: unknown;
+    readonly signalParams?: unknown;
+    readonly actions?: unknown;
+  },
+): Promise<string> {
+  const result = await pool.query<{ id: string }>(
+    `INSERT INTO risk_rule_versions (
+       rule_version, thresholds, signal_weights, signal_params, actions, status,
+       effective_from, effective_to, reason
+     ) VALUES (
+       $1, $2::jsonb, $3::jsonb, $4::jsonb, $5::jsonb, $6::rule_version_status,
+       $7::timestamptz, $8::timestamptz, $9
+     )
+     RETURNING id`,
+    [
+      input.ruleVersion,
+      JSON.stringify(input.thresholds ?? PHASE14_TEST_RISK_THRESHOLDS),
+      JSON.stringify(input.signalWeights ?? {}),
+      JSON.stringify(input.signalParams ?? {}),
+      JSON.stringify(input.actions ?? PHASE14_TEST_RISK_ACTIONS),
+      input.status ?? 'ACTIVE',
+      (input.effectiveFrom ?? new Date(Date.now() - 60_000)).toISOString(),
+      input.effectiveTo === undefined || input.effectiveTo === null
+        ? null
+        : input.effectiveTo.toISOString(),
+      'phase14-withdrawal-test-only-NOT-PRODUCTION',
+    ],
+  );
+  const id = result.rows[0]?.id;
+  if (id === undefined) throw new Error('phase14 test risk rule insert failed');
+  return id;
+}
+
+/**
+ * TEST ONLY — NOT PRODUCTION.
+ * Inserts an ACTIVE eligibility_policy_versions row for withdrawal-engine tests.
+ */
+export async function insertPhase14TestEligibilityPolicy(
+  pool: Pool,
+  input: {
+    readonly policyVersion: number;
+    readonly status?: 'DRAFT' | 'ACTIVE' | 'SUPERSEDED' | 'REVOKED';
+    readonly effectiveFrom?: Date;
+    readonly effectiveTo?: Date | null;
+    readonly policyConfig?: unknown;
+  },
+): Promise<string> {
+  const result = await pool.query<{ id: string }>(
+    `INSERT INTO eligibility_policy_versions (
+       policy_version, status, effective_from, effective_to, reason, policy_config
+     ) VALUES (
+       $1, $2::rule_version_status, $3::timestamptz, $4::timestamptz, $5, $6::jsonb
+     )
+     RETURNING id`,
+    [
+      input.policyVersion,
+      input.status ?? 'ACTIVE',
+      (input.effectiveFrom ?? new Date(Date.now() - 60_000)).toISOString(),
+      input.effectiveTo === undefined || input.effectiveTo === null
+        ? null
+        : input.effectiveTo.toISOString(),
+      'phase14-withdrawal-test-only-NOT-PRODUCTION',
+      JSON.stringify(input.policyConfig ?? PHASE14_TEST_ELIGIBILITY_POLICY_CONFIG),
+    ],
+  );
+  const id = result.rows[0]?.id;
+  if (id === undefined) throw new Error('phase14 test eligibility policy insert failed');
+  return id;
+}
+
+/**
+ * TEST ONLY — NOT PRODUCTION.
+ * Seeds ACTIVE Risk + Eligibility policies so createWithdrawalFromQuote can run
+ * Phase 14 preflight. Ensures WITHDRAWAL_REQUESTS_PAUSE LOCAL flag is present
+ * and disabled (migration 0011 seeds it; re-assert enabled=false).
+ */
+export async function seedPhase14WithdrawalPolicies(
+  pool: Pool,
+  overrides?: {
+    readonly riskRuleVersion?: number;
+    readonly eligibilityPolicyVersion?: number;
+    readonly riskActions?: unknown;
+    readonly riskThresholds?: unknown;
+    readonly riskSignalWeights?: unknown;
+    readonly eligibilityPolicyConfig?: unknown;
+  },
+): Promise<{ riskRuleVersion: number; eligibilityPolicyVersion: number }> {
+  const riskRuleVersion = overrides?.riskRuleVersion ?? 14_001;
+  const eligibilityPolicyVersion = overrides?.eligibilityPolicyVersion ?? 14_001;
+
+  await insertPhase14TestRiskRule(pool, {
+    ruleVersion: riskRuleVersion,
+    status: 'ACTIVE',
+    actions: overrides?.riskActions,
+    thresholds: overrides?.riskThresholds,
+    signalWeights: overrides?.riskSignalWeights,
+  });
+  await insertPhase14TestEligibilityPolicy(pool, {
+    policyVersion: eligibilityPolicyVersion,
+    status: 'ACTIVE',
+    policyConfig: overrides?.eligibilityPolicyConfig,
+  });
+
+  await pool.query(
+    `INSERT INTO feature_flags (flag_key, environment, enabled, description)
+     VALUES ('WITHDRAWAL_REQUESTS_PAUSE', 'LOCAL', false, 'phase14-test pause flag')
+     ON CONFLICT (flag_key, environment) DO UPDATE
+       SET enabled = false, updated_at = now()`,
+  );
+
+  return { riskRuleVersion, eligibilityPolicyVersion };
+}
+
 export async function seedPhase7Base(pool: Pool): Promise<{
   assetId: string;
   networkId: string;
@@ -578,10 +741,13 @@ export async function seedPhase7Base(pool: Pool): Promise<{
   limitRuleId: string;
   hotWalletId: string;
   adminUserId: string;
+  riskRuleVersion: number;
+  eligibilityPolicyVersion: number;
 }> {
   const rules = await seedRules(pool);
   const hotWalletId = await ensureTestHotWallet(pool, rules.networkId);
   const adminUserId = await createOwnerAdmin(pool);
+  const policies = await seedPhase14WithdrawalPolicies(pool);
   return {
     assetId: rules.assetId,
     networkId: rules.networkId,
@@ -589,6 +755,8 @@ export async function seedPhase7Base(pool: Pool): Promise<{
     limitRuleId: rules.limitRuleId,
     hotWalletId,
     adminUserId,
+    riskRuleVersion: policies.riskRuleVersion,
+    eligibilityPolicyVersion: policies.eligibilityPolicyVersion,
   };
 }
 
@@ -668,7 +836,7 @@ export async function createApprovedWithdrawal(
 
 export async function truncateWithdrawalTables(pool: Pool): Promise<void> {
   await assertConnectedDestructiveTestDatabase(pool);
-  await pool.query(`
+  const sql = `
     TRUNCATE TABLE
       withdrawal_payout_reconciliations,
       withdrawal_volume_reservations,
@@ -681,7 +849,13 @@ export async function truncateWithdrawalTables(pool: Pool): Promise<void> {
       hot_wallets,
       outbox_events,
       audit_logs,
+      eligibility_decisions,
       risk_snapshots,
+      risk_profiles,
+      risk_rule_versions,
+      eligibility_policy_versions,
+      trust_snapshots,
+      trust_rule_versions,
       membership_plan_entitlements,
       membership_benefit_rule_versions,
       user_memberships,
@@ -695,7 +869,28 @@ export async function truncateWithdrawalTables(pool: Pool): Promise<void> {
       admin_users,
       users
     RESTART IDENTITY CASCADE
-  `);
+  `;
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      await pool.query(sql);
+      lastError = undefined;
+      break;
+    } catch (error) {
+      lastError = error;
+      const code =
+        typeof error === 'object' && error !== null && 'code' in error
+          ? String((error as { code?: string }).code)
+          : '';
+      if (code !== '40P01' && code !== '55P03') {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
+    }
+  }
+  if (lastError !== undefined) {
+    throw lastError;
+  }
   // M0: TRUNCATE admin_users CASCADE removes admin_owner_authority seat row.
   // Restore vacant singleton so OWNER binding inserts remain enforceable.
   await pool.query(`

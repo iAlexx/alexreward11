@@ -741,6 +741,9 @@ importers:
       '@alex-rewards/db':
         specifier: workspace:*
         version: link:../db
+      '@alex-rewards/fraud':
+        specifier: workspace:*
+        version: link:../fraud
       '@alex-rewards/ledger':
         specifier: workspace:*
         version: link:../ledger

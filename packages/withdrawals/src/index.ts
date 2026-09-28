@@ -126,8 +126,17 @@ export type { WithdrawalQuoteView } from './quotes.js';
 export { createWithdrawalFromQuote } from './create.js';
 export type { WithdrawalView } from './create.js';
 
-export { applyV1RiskPolicy } from './risk.js';
+export {
+  applyV1RiskPolicy,
+  attachAuthoritativeRiskToWithdrawal,
+} from './risk.js';
 export type { V1RiskDecision } from './risk.js';
+
+export {
+  runWithdrawalEligibilityPreflight,
+  mapFraudErrorToWithdrawal,
+  isEligibilityOutcomeEligible,
+} from './phase14-preflight.js';
 
 export { decideWithdrawal } from './decide.js';
 export type { DecideWithdrawalResult, WithdrawalDecision } from './decide.js';

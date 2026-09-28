@@ -68,8 +68,10 @@ export async function decideWithdrawal(
       user_id: string;
       workflow_id: string | null;
       priority_review: boolean;
+      risk_policy_version: number | null;
     }>(
-      `SELECT id, state, held_from_reconcile, user_id, workflow_id, priority_review
+      `SELECT id, state, held_from_reconcile, user_id, workflow_id, priority_review,
+              risk_policy_version
        FROM withdrawals WHERE id = $1::uuid FOR UPDATE`,
       [input.withdrawalId],
     );
@@ -115,6 +117,15 @@ export async function decideWithdrawal(
         details: { expected: input.expectedState, actual: w.state },
       });
     }
+
+    // Approvals pin the withdrawal's risk_policy_version — never blind config override.
+    if (w.risk_policy_version === null) {
+      throw new WithdrawalDomainError(
+        'RISK_POLICY_REQUIRED',
+        'Withdrawal missing pinned risk_policy_version',
+      );
+    }
+    const approvalPolicyVersion = w.risk_policy_version;
 
     let definitiveNonpayment = input.definitiveNonpayment === true;
     if (input.decision === 'REJECT' && w.held_from_reconcile) {
@@ -171,7 +182,7 @@ export async function decideWithdrawal(
          $1::uuid, $2::withdrawal_decision, $3::uuid, $4::actor_source, $5, $6
        )
        RETURNING id`,
-      [w.id, input.decision, adminUserId, decisionSource, reasonTag, config.riskPolicyVersion],
+      [w.id, input.decision, adminUserId, decisionSource, reasonTag, approvalPolicyVersion],
     );
     const approvalId = approval.rows[0]?.id;
     if (approvalId === undefined) {
