@@ -116,6 +116,67 @@ describe('Phase 14 input digest + canonical JSON (unit)', () => {
     plain.a = 1;
     expect(canonicalizeForDigest(plain)).toBe(canonicalizeForDigest({ a: 1 }));
   });
+
+  it('preserves own __proto__ JSON key without digest collision', () => {
+    const withProtoKey = JSON.parse('{"a":1,"__proto__":{"x":1}}') as Record<string, unknown>;
+    expect(Object.prototype.hasOwnProperty.call(withProtoKey, '__proto__')).toBe(true);
+
+    const withoutProto = { a: 1 };
+    expect(canonicalizeForDigest(withProtoKey)).not.toBe(canonicalizeForDigest(withoutProto));
+    expect(computeRiskInputsDigest(1, withProtoKey)).not.toBe(computeRiskInputsDigest(1, withoutProto));
+
+    const withOtherProto = JSON.parse('{"a":1,"__proto__":{"x":2}}') as Record<string, unknown>;
+    expect(computeRiskInputsDigest(1, withProtoKey)).not.toBe(
+      computeRiskInputsDigest(1, withOtherProto),
+    );
+
+    // Unusual valid JSON keys remain preserved / deterministic.
+    const unusual = JSON.parse(
+      '{"__proto__":{"ok":true},"constructor":"c","prototype":"p","z":1,"a":2}',
+    ) as Record<string, unknown>;
+    const unusualReordered = JSON.parse(
+      '{"a":2,"prototype":"p","constructor":"c","z":1,"__proto__":{"ok":true}}',
+    ) as Record<string, unknown>;
+    expect(canonicalizeForDigest(unusual)).toBe(canonicalizeForDigest(unusualReordered));
+    expect(canonicalizeForDigest(unusual)).toContain('"__proto__"');
+    expect(canonicalizeForDigest(unusual)).toContain('"constructor"');
+    expect(canonicalizeForDigest(unusual)).toContain('"prototype"');
+  });
+
+  it('rejects cyclic plain objects and arrays with typed RISK_SNAPSHOT_INVALID', () => {
+    const selfCycle: Record<string, unknown> = {};
+    selfCycle.self = selfCycle;
+    expect(() => canonicalizeForDigest(selfCycle)).toThrow(FraudDomainError);
+    try {
+      canonicalizeForDigest(selfCycle);
+      expect.unreachable('expected cycle rejection');
+    } catch (error) {
+      expect(error).toBeInstanceOf(FraudDomainError);
+      expect((error as FraudDomainError).code).toBe('RISK_SNAPSHOT_INVALID');
+    }
+
+    const nested: Record<string, unknown> = { child: {} };
+    (nested.child as Record<string, unknown>).parent = nested;
+    expect(() => canonicalizeForDigest(nested)).toThrow(FraudDomainError);
+    try {
+      computeRiskInputsDigest(1, nested);
+      expect.unreachable('expected nested cycle rejection');
+    } catch (error) {
+      expect(error).toBeInstanceOf(FraudDomainError);
+      expect((error as FraudDomainError).code).toBe('RISK_SNAPSHOT_INVALID');
+    }
+
+    const arr: unknown[] = [];
+    arr.push(arr);
+    expect(() => canonicalizeForDigest(arr)).toThrow(FraudDomainError);
+    try {
+      canonicalizeForDigest(arr);
+      expect.unreachable('expected array cycle rejection');
+    } catch (error) {
+      expect(error).toBeInstanceOf(FraudDomainError);
+      expect((error as FraudDomainError).code).toBe('RISK_SNAPSHOT_INVALID');
+    }
+  });
 });
 
 describe('Phase 14 sensitive key normalization (unit)', () => {

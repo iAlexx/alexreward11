@@ -76,11 +76,24 @@ export function isPlainJsonObject(value: unknown): value is Record<string, unkno
   return proto === Object.prototype || proto === null;
 }
 
+function throwCycle(path: string): never {
+  throw new FraudDomainError(
+    'RISK_SNAPSHOT_INVALID',
+    `${path} contains a cyclic reference (not valid JSON)`,
+    { path },
+  );
+}
+
 /**
  * Fail-closed JSON-compatible value check for persisted risk snapshot payloads.
  * Rejects Date/Map/Set/Buffer/class instances/bigint/undefined/function/symbol/non-finite numbers.
+ * Detects cycles with a traversal-local WeakSet (path-scoped; shared DAG refs allowed).
  */
-export function assertJsonCompatibleValue(path: string, value: unknown): void {
+export function assertJsonCompatibleValue(
+  path: string,
+  value: unknown,
+  visiting: WeakSet<object> = new WeakSet<object>(),
+): void {
   if (value === null) return;
   const t = typeof value;
   if (t === 'string' || t === 'boolean') return;
@@ -106,7 +119,15 @@ export function assertJsonCompatibleValue(path: string, value: unknown): void {
     });
   }
   if (Array.isArray(value)) {
-    value.forEach((item, index) => assertJsonCompatibleValue(`${path}[${index}]`, item));
+    if (visiting.has(value)) throwCycle(path);
+    visiting.add(value);
+    try {
+      value.forEach((item, index) =>
+        assertJsonCompatibleValue(`${path}[${index}]`, item, visiting),
+      );
+    } finally {
+      visiting.delete(value);
+    }
     return;
   }
   if (!isPlainJsonObject(value)) {
@@ -116,15 +137,21 @@ export function assertJsonCompatibleValue(path: string, value: unknown): void {
       { path },
     );
   }
-  for (const [key, child] of Object.entries(value)) {
-    if (isSensitivePersistedKey(key)) {
-      throw new FraudDomainError(
-        'RISK_SNAPSHOT_INVALID',
-        `${path} key ${key} is not allowed`,
-        { path, key },
-      );
+  if (visiting.has(value)) throwCycle(path);
+  visiting.add(value);
+  try {
+    for (const [key, child] of Object.entries(value)) {
+      if (isSensitivePersistedKey(key)) {
+        throw new FraudDomainError(
+          'RISK_SNAPSHOT_INVALID',
+          `${path} key ${key} is not allowed`,
+          { path, key },
+        );
+      }
+      assertJsonCompatibleValue(`${path}.${key}`, child, visiting);
     }
-    assertJsonCompatibleValue(`${path}.${key}`, child);
+  } finally {
+    visiting.delete(value);
   }
 }
 
@@ -143,6 +170,7 @@ export function assertSafePersistedJsonObject(
  * Deterministic canonical JSON for digests.
  * Sorts object keys recursively; arrays keep order; never relies on insertion order.
  * Rejects non-JSON values fail-closed.
+ * Uses null-prototype containers so keys like `__proto__` remain ordinary data properties.
  */
 export function canonicalizeForDigest(value: unknown): string {
   assertJsonCompatibleValue('canonical', value);
@@ -157,7 +185,8 @@ function sortValue(value: unknown): unknown {
     return value.map(sortValue);
   }
   const record = value as Record<string, unknown>;
-  const sorted: Record<string, unknown> = {};
+  // Null prototype avoids legacy `__proto__` setter swallowing JSON own-keys.
+  const sorted: Record<string, unknown> = Object.create(null);
   for (const key of Object.keys(record).sort()) {
     sorted[key] = sortValue(record[key]);
   }
