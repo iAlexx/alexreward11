@@ -104,7 +104,7 @@ describe('Phase 14 Step 3 collector registry (unit)', () => {
     }
     expect(inputBlock).not.toMatch(/^\s*readonly rule:/m);
     expect(source).toMatch(/collectConfiguredRiskSignals\(client/);
-    expect(source).toMatch(/const evaluatedAt = new Date\(\);/);
+    expect(source).toMatch(/resolveActiveRiskRuleVersionForEvaluation\(client\)/);
     expect(source).toMatch(/signalEvidence/);
   });
 

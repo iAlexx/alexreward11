@@ -128,3 +128,37 @@ export async function loadTrustRuleVersionByNumber(
   }
   return mapRow(row);
 }
+
+/**
+ * Load a Trust rule for snapshot persistence while holding FOR SHARE
+ * until the caller's transaction ends. Complements the BEFORE INSERT trigger.
+ */
+export async function loadTrustRuleVersionForSnapshot(
+  client: PoolClient,
+  ruleVersion: number,
+): Promise<TrustRuleVersion> {
+  if (!Number.isInteger(ruleVersion) || ruleVersion <= 0) {
+    throw new FraudDomainError(
+      'TRUST_SNAPSHOT_INVALID',
+      'ruleVersion must be a positive integer',
+      { ruleVersion },
+    );
+  }
+  const result = await client.query<TrustRuleRow>(
+    `SELECT id, rule_version, status::text AS status,
+            effective_from, effective_to, reason, audit_reference
+     FROM trust_rule_versions
+     WHERE rule_version = $1
+     FOR SHARE`,
+    [ruleVersion],
+  );
+  const row = result.rows[0];
+  if (row === undefined) {
+    throw new FraudDomainError(
+      'TRUST_RULE_NOT_FOUND',
+      `trust rule version ${ruleVersion} not found`,
+      { ruleVersion },
+    );
+  }
+  return mapRow(row);
+}

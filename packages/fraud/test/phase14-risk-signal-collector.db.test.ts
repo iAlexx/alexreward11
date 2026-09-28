@@ -381,9 +381,11 @@ describe.skipIf(phase14DatabaseUrl === '')('Phase 14 Step 3 risk signal collecto
   });
 
   it('unsupported configured signal fails closed with no snapshot/profile write', async () => {
-    await pool.query(`DELETE FROM risk_rule_versions`);
+    await pool.query(
+      `UPDATE risk_rule_versions SET status = 'SUPERSEDED'::rule_version_status WHERE status = 'ACTIVE'`,
+    );
     await insertRiskRule(pool, {
-      ruleVersion: 99,
+      ruleVersion: 99099,
       status: 'ACTIVE',
       effectiveFrom: new Date('2020-01-01T00:00:00.000Z'),
       effectiveTo: null,
@@ -426,10 +428,12 @@ describe.skipIf(phase14DatabaseUrl === '')('Phase 14 Step 3 risk signal collecto
     expect(afterSnaps.rows[0]?.cnt).toBe(beforeSnaps.rows[0]?.cnt);
     expect(afterProfiles.rows[0]?.cnt).toBe(beforeProfiles.rows[0]?.cnt);
 
-    // Restore Step 3 rule for subsequent isolation (file may continue).
-    await pool.query(`DELETE FROM risk_rule_versions`);
+    // Restore an ACTIVE Step 3 rule for subsequent isolation (file may continue).
+    await pool.query(
+      `UPDATE risk_rule_versions SET status = 'SUPERSEDED'::rule_version_status WHERE status = 'ACTIVE'`,
+    );
     await insertRiskRule(pool, {
-      ruleVersion: 1,
+      ruleVersion: 99100,
       status: 'ACTIVE',
       effectiveFrom: new Date('2020-01-01T00:00:00.000Z'),
       effectiveTo: null,
@@ -475,7 +479,7 @@ describe.skipIf(phase14DatabaseUrl === '')('Phase 14 Step 3 risk signal collecto
       expect(result.evaluation.score).toBe(10);
       expect(result.snapshot.score).toBe(10);
       expect(result.profile.score).toBe(10);
-      expect(result.snapshot.safeInputs.ruleVersion).toBe(1);
+      expect(result.snapshot.safeInputs.ruleVersion).toBe(result.rule.ruleVersion);
       expect(result.snapshot.safeInputs.signalEvidence).toBeTruthy();
       expect(result.snapshot.safeInputs.context).toMatchObject({ score: 999, ruleVersion: 999 });
       expect(result.evaluation.reasonCodes).toEqual(result.snapshot.reasonCodes);
@@ -894,9 +898,11 @@ describe.skipIf(phase14DatabaseUrl === '')('Phase 14 Step 4 live primary payout-
   });
 
   it('SHARED_DEVICE_SIGNAL still uses wallet_relationships; SHARED_NETWORK ignores relationship rows', async () => {
-    await pool.query(`DELETE FROM risk_rule_versions`);
+    await pool.query(
+      `UPDATE risk_rule_versions SET status = 'SUPERSEDED'::rule_version_status WHERE status = 'ACTIVE'`,
+    );
     await insertRiskRule(pool, {
-      ruleVersion: 2,
+      ruleVersion: 99101,
       status: 'ACTIVE',
       effectiveFrom: new Date('2020-01-01T00:00:00.000Z'),
       effectiveTo: null,
@@ -934,10 +940,12 @@ describe.skipIf(phase14DatabaseUrl === '')('Phase 14 Step 4 live primary payout-
       client.release();
     }
 
-    // Restore rule version 1 for other tests.
-    await pool.query(`DELETE FROM risk_rule_versions`);
+    // Restore an ACTIVE payout-wallet rule for other tests.
+    await pool.query(
+      `UPDATE risk_rule_versions SET status = 'SUPERSEDED'::rule_version_status WHERE status = 'ACTIVE'`,
+    );
     await insertRiskRule(pool, {
-      ruleVersion: 1,
+      ruleVersion: 99102,
       status: 'ACTIVE',
       effectiveFrom: new Date('2020-01-01T00:00:00.000Z'),
       effectiveTo: null,

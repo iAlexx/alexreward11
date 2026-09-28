@@ -4,6 +4,7 @@ import type { Pool } from 'pg';
 import {
   FraudDomainError,
   computeRiskInputsDigest,
+  evaluateAndPersistRisk,
   loadRiskRuleVersionByNumber,
   persistRiskSnapshot,
   resolveActiveRiskRuleVersion,
@@ -17,6 +18,7 @@ import {
   TEST_RULE_ACTIONS,
   TEST_RULE_THRESHOLDS,
   TEST_RULE_WEIGHTS,
+  waitForBlockedOnHolder,
 } from './harness.js';
 
 const EXCLUSION_VIOLATION = '23P01';
@@ -349,3 +351,470 @@ describe.skipIf(phase14DatabaseUrl === '')('Phase 14 risk snapshot persistence',
     }
   });
 });
+
+const RESTRICT_VIOLATION = '23001';
+const FK_VIOLATION = '23503';
+
+const ALT_RULE_WEIGHTS = {
+  ACCOUNT_AGE: 25,
+  WALLET_REUSE: 15,
+} as const;
+
+const ALT_RULE_THRESHOLDS = {
+  lowMax: 15,
+  mediumMax: 40,
+  highMax: 70,
+} as const;
+
+const ALT_RULE_ACTIONS = {
+  LOW: 'ALLOW',
+  MEDIUM: 'MANUAL_REVIEW',
+  HIGH: 'HELD',
+  CRITICAL: 'WITHDRAWAL_BLOCKED',
+} as const;
+
+describe.skipIf(phase14DatabaseUrl === '')(
+  'Phase 14 Risk rule-version reference integrity',
+  () => {
+    let pool: Pool;
+    let userId: string;
+
+    beforeAll(async () => {
+      await resetAndMigrate(phase14DatabaseUrl);
+      pool = createPool(phase14DatabaseUrl);
+      userId = await createTestUser(pool, '14000100');
+    }, 120_000);
+
+    afterAll(async () => {
+      await pool.end();
+    });
+
+    async function insertReferencedRiskRule(ruleVersion: number): Promise<{
+      calculatedAt: Date;
+      thresholds: unknown;
+      signalWeights: unknown;
+      actions: unknown;
+    }> {
+      await pool.query(
+        `UPDATE risk_rule_versions
+         SET status = 'SUPERSEDED'::rule_version_status
+         WHERE status = 'ACTIVE'`,
+      );
+      await insertRiskRule(pool, {
+        ruleVersion,
+        status: 'ACTIVE',
+        effectiveFrom: new Date('2020-01-01T00:00:00.000Z'),
+        effectiveTo: null,
+      });
+      await pool.query(
+        `UPDATE risk_rule_versions
+         SET reason = 'phase14-risk-ref-immutability', audit_reference = $2
+         WHERE rule_version = $1`,
+        [ruleVersion, `risk-audit-${ruleVersion}`],
+      );
+
+      const client = await pool.connect();
+      try {
+        const snap = await persistRiskSnapshot(client, {
+          userId,
+          decisionScope: 'WITHDRAWAL_REQUEST',
+          score: 10,
+          riskTier: 'LOW',
+          ruleVersion,
+          reasonCodes: ['REF_INTEGRITY'],
+          safeInputs: { fixture: `risk-${ruleVersion}` },
+          outputs: { score: 10 },
+        });
+        const row = await client.query<{
+          thresholds: unknown;
+          signal_weights: unknown;
+          actions: unknown;
+        }>(
+          `SELECT thresholds, signal_weights, actions
+           FROM risk_rule_versions WHERE rule_version = $1`,
+          [ruleVersion],
+        );
+        return {
+          calculatedAt: snap.calculatedAt,
+          thresholds: row.rows[0]?.thresholds,
+          signalWeights: row.rows[0]?.signal_weights,
+          actions: row.rows[0]?.actions,
+        };
+      } finally {
+        client.release();
+      }
+    }
+
+    it('rejects risk_snapshot with nonexistent rule_version via FK', async () => {
+      await expect(
+        pool.query(
+          `INSERT INTO risk_snapshots (
+             user_id, decision_scope, score, risk_tier, rule_version,
+             reason_codes, inputs_digest, safe_inputs, outputs
+           ) VALUES (
+             $1::uuid, 'WITHDRAWAL_REQUEST'::eligibility_action_type, 1, 'LOW'::risk_tier, 99999,
+             ARRAY['X']::text[],
+             'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+             '{}'::jsonb, '{}'::jsonb
+           )`,
+          [userId],
+        ),
+      ).rejects.toMatchObject({ code: FK_VIOLATION });
+    });
+
+    it('rejects referenced thresholds / signal_weights / actions updates', async () => {
+      const ruleVersion = 1010;
+      const before = await insertReferencedRiskRule(ruleVersion);
+
+      await expect(
+        pool.query(
+          `UPDATE risk_rule_versions SET thresholds = $1::jsonb WHERE rule_version = $2`,
+          [JSON.stringify(ALT_RULE_THRESHOLDS), ruleVersion],
+        ),
+      ).rejects.toMatchObject({ code: RESTRICT_VIOLATION });
+      await expect(
+        pool.query(
+          `UPDATE risk_rule_versions SET signal_weights = $1::jsonb WHERE rule_version = $2`,
+          [JSON.stringify(ALT_RULE_WEIGHTS), ruleVersion],
+        ),
+      ).rejects.toMatchObject({ code: RESTRICT_VIOLATION });
+      await expect(
+        pool.query(
+          `UPDATE risk_rule_versions SET actions = $1::jsonb WHERE rule_version = $2`,
+          [JSON.stringify(ALT_RULE_ACTIONS), ruleVersion],
+        ),
+      ).rejects.toMatchObject({ code: RESTRICT_VIOLATION });
+
+      const after = await pool.query<{
+        thresholds: unknown;
+        signal_weights: unknown;
+        actions: unknown;
+      }>(
+        `SELECT thresholds, signal_weights, actions FROM risk_rule_versions WHERE rule_version = $1`,
+        [ruleVersion],
+      );
+      expect(after.rows[0]?.thresholds).toEqual(before.thresholds);
+      expect(after.rows[0]?.signal_weights).toEqual(before.signalWeights);
+      expect(after.rows[0]?.actions).toEqual(before.actions);
+    });
+
+    it('rejects referenced effective_from / reason / audit_reference updates', async () => {
+      const ruleVersion = 1011;
+      await insertReferencedRiskRule(ruleVersion);
+      await expect(
+        pool.query(
+          `UPDATE risk_rule_versions
+           SET effective_from = '2019-01-01T00:00:00.000Z'::timestamptz
+           WHERE rule_version = $1`,
+          [ruleVersion],
+        ),
+      ).rejects.toMatchObject({ code: RESTRICT_VIOLATION });
+      await expect(
+        pool.query(`UPDATE risk_rule_versions SET reason = 'rewritten' WHERE rule_version = $1`, [
+          ruleVersion,
+        ]),
+      ).rejects.toMatchObject({ code: RESTRICT_VIOLATION });
+      await expect(
+        pool.query(
+          `UPDATE risk_rule_versions SET audit_reference = 'rewritten' WHERE rule_version = $1`,
+          [ruleVersion],
+        ),
+      ).rejects.toMatchObject({ code: RESTRICT_VIOLATION });
+    });
+
+    it('rejects DELETE of referenced risk rule', async () => {
+      const ruleVersion = 1012;
+      await insertReferencedRiskRule(ruleVersion);
+      await expect(
+        pool.query(`DELETE FROM risk_rule_versions WHERE rule_version = $1`, [ruleVersion]),
+      ).rejects.toBeTruthy();
+      const still = await pool.query<{ c: string }>(
+        `SELECT count(*)::text AS c FROM risk_rule_versions WHERE rule_version = $1`,
+        [ruleVersion],
+      );
+      expect(still.rows[0]?.c).toBe('1');
+    });
+
+    it('allows safe first effective_to closure; rejects retroactive and second rewrite', async () => {
+      const ruleVersion = 1013;
+      const { calculatedAt, thresholds } = await insertReferencedRiskRule(ruleVersion);
+      const closure = new Date(calculatedAt.getTime() + 60_000);
+      await expect(
+        pool.query(
+          `UPDATE risk_rule_versions SET effective_to = $2::timestamptz WHERE rule_version = $1`,
+          [ruleVersion, closure.toISOString()],
+        ),
+      ).resolves.toBeTruthy();
+      const row = await pool.query<{ effective_to: Date; thresholds: unknown }>(
+        `SELECT effective_to, thresholds FROM risk_rule_versions WHERE rule_version = $1`,
+        [ruleVersion],
+      );
+      expect(row.rows[0]?.effective_to.toISOString()).toBe(closure.toISOString());
+      expect(row.rows[0]?.thresholds).toEqual(thresholds);
+
+      const ruleVersion2 = 1014;
+      const second = await insertReferencedRiskRule(ruleVersion2);
+      await expect(
+        pool.query(
+          `UPDATE risk_rule_versions SET effective_to = $2::timestamptz WHERE rule_version = $1`,
+          [ruleVersion2, second.calculatedAt.toISOString()],
+        ),
+      ).rejects.toMatchObject({ code: RESTRICT_VIOLATION });
+
+      await expect(
+        pool.query(
+          `UPDATE risk_rule_versions SET effective_to = $2::timestamptz WHERE rule_version = $1`,
+          [ruleVersion, new Date(closure.getTime() + 60_000).toISOString()],
+        ),
+      ).rejects.toMatchObject({ code: RESTRICT_VIOLATION });
+    });
+
+    it('allows status-only lifecycle update without rewriting semantics', async () => {
+      const ruleVersion = 1015;
+      const before = await insertReferencedRiskRule(ruleVersion);
+      await expect(
+        pool.query(
+          `UPDATE risk_rule_versions
+           SET status = 'SUPERSEDED'::rule_version_status
+           WHERE rule_version = $1`,
+          [ruleVersion],
+        ),
+      ).resolves.toBeTruthy();
+      const after = await pool.query<{
+        status: string;
+        thresholds: unknown;
+        signal_weights: unknown;
+      }>(
+        `SELECT status::text AS status, thresholds, signal_weights
+         FROM risk_rule_versions WHERE rule_version = $1`,
+        [ruleVersion],
+      );
+      expect(after.rows[0]?.status).toBe('SUPERSEDED');
+      expect(after.rows[0]?.thresholds).toEqual(before.thresholds);
+      expect(after.rows[0]?.signal_weights).toEqual(before.signalWeights);
+    });
+
+    it('allows unreferenced DRAFT risk rule authoring', async () => {
+      await insertRiskRule(pool, {
+        ruleVersion: 1016,
+        status: 'DRAFT',
+        effectiveFrom: new Date('2026-01-01T00:00:00.000Z'),
+        effectiveTo: new Date('2026-06-01T00:00:00.000Z'),
+      });
+      await pool.query(
+        `UPDATE risk_rule_versions SET reason = 'draft-authoring' WHERE rule_version = 1016`,
+      );
+      await expect(
+        pool.query(
+          `UPDATE risk_rule_versions
+           SET thresholds = $1::jsonb,
+               signal_weights = $2::jsonb,
+               actions = $3::jsonb,
+               reason = 'draft-revised',
+               effective_from = '2026-02-01T00:00:00.000Z'::timestamptz,
+               effective_to = '2026-07-01T00:00:00.000Z'::timestamptz
+           WHERE rule_version = 1016`,
+          [
+            JSON.stringify(ALT_RULE_THRESHOLDS),
+            JSON.stringify(ALT_RULE_WEIGHTS),
+            JSON.stringify(ALT_RULE_ACTIONS),
+          ],
+        ),
+      ).resolves.toBeTruthy();
+    });
+  },
+);
+
+describe.skipIf(phase14DatabaseUrl === '')(
+  'Phase 14 Risk first-reference concurrency lock',
+  () => {
+    let pool: Pool;
+    let userId: string;
+
+    beforeAll(async () => {
+      await resetAndMigrate(phase14DatabaseUrl);
+      pool = createPool(phase14DatabaseUrl);
+      userId = await createTestUser(pool, '14000101');
+    }, 120_000);
+
+    afterAll(async () => {
+      await pool.end();
+    });
+
+    it('evaluation-first: open evaluateAndPersistRisk blocks then rejects concurrent weight rewrite', async () => {
+      const step3Weights = { OPEN_HIGH_FRAUD_FLAG: 10, SHARED_PAYOUT_WALLET: 15 } as const;
+      const altWeights = { OPEN_HIGH_FRAUD_FLAG: 40, SHARED_PAYOUT_WALLET: 15 } as const;
+      await insertRiskRule(pool, {
+        ruleVersion: 1020,
+        status: 'ACTIVE',
+        effectiveFrom: new Date('2020-01-01T00:00:00.000Z'),
+        effectiveTo: null,
+        signalWeights: step3Weights,
+      });
+      const original = await pool.query<{ signal_weights: unknown }>(
+        `SELECT signal_weights FROM risk_rule_versions WHERE rule_version = 1020`,
+      );
+
+      const clientA = await pool.connect();
+      const clientB = await pool.connect();
+      const watcher = await pool.connect();
+      try {
+        await clientA.query('BEGIN');
+        await evaluateAndPersistRisk(clientA, {
+          userId,
+          decisionScope: 'WITHDRAWAL_REQUEST',
+        });
+        const holderPid = (
+          await clientA.query<{ pid: number }>(`SELECT pg_backend_pid() AS pid`)
+        ).rows[0]!.pid;
+
+        const updatePromise = clientB.query(
+          `UPDATE risk_rule_versions SET signal_weights = $1::jsonb WHERE rule_version = 1020`,
+          [JSON.stringify(altWeights)],
+        );
+        expect(await waitForBlockedOnHolder(watcher, holderPid)).toBe(true);
+
+        await clientA.query('COMMIT');
+        await expect(updatePromise).rejects.toMatchObject({ code: RESTRICT_VIOLATION });
+
+        const after = await pool.query<{ signal_weights: unknown }>(
+          `SELECT signal_weights FROM risk_rule_versions WHERE rule_version = 1020`,
+        );
+        expect(after.rows[0]?.signal_weights).toEqual(original.rows[0]?.signal_weights);
+      } finally {
+        try {
+          await clientA.query('ROLLBACK');
+        } catch {
+          /* ignore */
+        }
+        clientA.release();
+        clientB.release();
+        watcher.release();
+      }
+    }, 60_000);
+
+    it('update-first: open weight UPDATE blocks evaluator; after commit evaluator uses NEW config', async () => {
+      const step3Weights = { OPEN_HIGH_FRAUD_FLAG: 10, SHARED_PAYOUT_WALLET: 15 } as const;
+      const altWeights = { OPEN_HIGH_FRAUD_FLAG: 40, SHARED_PAYOUT_WALLET: 15 } as const;
+
+      await pool.query(
+        `UPDATE risk_rule_versions SET status = 'SUPERSEDED'::rule_version_status WHERE status = 'ACTIVE'`,
+      );
+      await insertRiskRule(pool, {
+        ruleVersion: 1021,
+        status: 'ACTIVE',
+        effectiveFrom: new Date('2020-01-01T00:00:00.000Z'),
+        effectiveTo: null,
+        signalWeights: step3Weights,
+      });
+
+      const clientA = await pool.connect();
+      const clientB = await pool.connect();
+      const watcher = await pool.connect();
+      try {
+        await clientA.query('BEGIN');
+        await clientA.query(
+          `UPDATE risk_rule_versions SET signal_weights = $1::jsonb WHERE rule_version = 1021`,
+          [JSON.stringify(altWeights)],
+        );
+        const holderPid = (
+          await clientA.query<{ pid: number }>(`SELECT pg_backend_pid() AS pid`)
+        ).rows[0]!.pid;
+
+        const evalPromise = (async () => {
+          await clientB.query('BEGIN');
+          try {
+            const result = await evaluateAndPersistRisk(clientB, {
+              userId,
+              decisionScope: 'AD_SESSION_START',
+            });
+            await clientB.query('COMMIT');
+            return result;
+          } catch (e) {
+            await clientB.query('ROLLBACK');
+            throw e;
+          }
+        })();
+
+        expect(await waitForBlockedOnHolder(watcher, holderPid)).toBe(true);
+        await clientA.query('COMMIT');
+        const result = await evalPromise;
+        expect(result.rule.signalWeights).toEqual(altWeights);
+        expect(result.snapshot.ruleVersion).toBe(1021);
+      } finally {
+        try {
+          await clientA.query('ROLLBACK');
+        } catch {
+          /* ignore */
+        }
+        try {
+          await clientB.query('ROLLBACK');
+        } catch {
+          /* ignore */
+        }
+        clientA.release();
+        clientB.release();
+        watcher.release();
+      }
+    }, 60_000);
+
+    it('raw risk_snapshot INSERT acquires FOR SHARE against concurrent semantic UPDATE', async () => {
+      await pool.query(
+        `UPDATE risk_rule_versions SET status = 'SUPERSEDED'::rule_version_status WHERE status = 'ACTIVE'`,
+      );
+      await insertRiskRule(pool, {
+        ruleVersion: 1022,
+        status: 'DRAFT',
+        effectiveFrom: new Date('2020-01-01T00:00:00.000Z'),
+        effectiveTo: null,
+      });
+      const original = await pool.query<{ thresholds: unknown }>(
+        `SELECT thresholds FROM risk_rule_versions WHERE rule_version = 1022`,
+      );
+
+      const clientA = await pool.connect();
+      const clientB = await pool.connect();
+      const watcher = await pool.connect();
+      try {
+        await clientA.query('BEGIN');
+        await clientA.query(
+          `INSERT INTO risk_snapshots (
+             user_id, decision_scope, score, risk_tier, rule_version,
+             reason_codes, inputs_digest, safe_inputs, outputs
+           ) VALUES (
+             $1::uuid, 'MISSION_CLAIM'::eligibility_action_type, 5, 'LOW'::risk_tier, 1022,
+             ARRAY['RAW']::text[],
+             'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+             '{}'::jsonb, '{}'::jsonb
+           )`,
+          [userId],
+        );
+        const holderPid = (
+          await clientA.query<{ pid: number }>(`SELECT pg_backend_pid() AS pid`)
+        ).rows[0]!.pid;
+
+        const updatePromise = clientB.query(
+          `UPDATE risk_rule_versions SET thresholds = $1::jsonb WHERE rule_version = 1022`,
+          [JSON.stringify(ALT_RULE_THRESHOLDS)],
+        );
+        expect(await waitForBlockedOnHolder(watcher, holderPid)).toBe(true);
+        await clientA.query('COMMIT');
+        await expect(updatePromise).rejects.toMatchObject({ code: RESTRICT_VIOLATION });
+
+        const after = await pool.query<{ thresholds: unknown }>(
+          `SELECT thresholds FROM risk_rule_versions WHERE rule_version = 1022`,
+        );
+        expect(after.rows[0]?.thresholds).toEqual(original.rows[0]?.thresholds);
+      } finally {
+        try {
+          await clientA.query('ROLLBACK');
+        } catch {
+          /* ignore */
+        }
+        clientA.release();
+        clientB.release();
+        watcher.release();
+      }
+    }, 60_000);
+  },
+);

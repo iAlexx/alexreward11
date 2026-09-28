@@ -290,3 +290,53 @@ export async function loadRiskRuleVersionByNumber(
   }
   return mapRow(row);
 }
+
+/**
+ * Authoritative ACTIVE risk-rule resolution for evaluateAndPersistRisk.
+ *
+ * Uses server current time only (no caller `at`). Selects the matching ACTIVE
+ * row with FOR SHARE so thresholds/weights/actions remain stable through the
+ * caller's transaction until snapshot persistence completes.
+ *
+ * Historical unlocked lookup remains resolveActiveRiskRuleVersion(client, { at }).
+ */
+export async function resolveActiveRiskRuleVersionForEvaluation(
+  client: PoolClient,
+): Promise<ResolvedRiskRuleVersion> {
+  const at = new Date();
+  const result = await client.query<RiskRuleRow>(
+    `SELECT id, rule_version, thresholds, signal_weights, actions, status::text AS status,
+            effective_from, effective_to, reason, audit_reference
+     FROM risk_rule_versions
+     WHERE status = 'ACTIVE'
+       AND effective_from <= $1::timestamptz
+       AND (effective_to IS NULL OR $1::timestamptz < effective_to)
+     ORDER BY rule_version ASC
+     FOR SHARE`,
+    [at.toISOString()],
+  );
+
+  if (result.rows.length === 0) {
+    throw new FraudDomainError(
+      'RISK_RULE_NOT_CONFIGURED',
+      'No ACTIVE risk rule version applies at the requested time',
+      { at: at.toISOString() },
+    );
+  }
+  if (result.rows.length > 1) {
+    throw new FraudDomainError(
+      'RISK_RULE_INTEGRITY',
+      'Multiple ACTIVE risk rule versions apply at the same instant',
+      {
+        at: at.toISOString(),
+        ruleVersions: result.rows.map((row) => row.rule_version),
+      },
+    );
+  }
+
+  const mapped = mapRow(result.rows[0]!);
+  if (mapped.status !== 'ACTIVE') {
+    throw new FraudDomainError('RISK_RULE_INTEGRITY', 'Resolved risk rule is not ACTIVE');
+  }
+  return mapped as ResolvedRiskRuleVersion;
+}

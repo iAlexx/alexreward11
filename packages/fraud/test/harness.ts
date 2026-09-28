@@ -7,7 +7,7 @@ import {
   assertSafeDestructiveTestDatabaseUrl,
   migrateDatabase,
 } from '@alex-rewards/db';
-import { Client, Pool } from 'pg';
+import { Client, Pool, type PoolClient } from 'pg';
 
 const explicitUrl = process.env.PHASE14_DATABASE_URL ?? '';
 const optedInUrl =
@@ -197,4 +197,38 @@ export async function insertEligibilityPolicy(
   const id = result.rows[0]?.id;
   if (id === undefined) throw new Error('eligibility policy insert failed');
   return id;
+}
+
+/** Deterministic wait until another backend is blocked on holderPid's granted locks. */
+export async function waitForBlockedOnHolder(
+  watcher: PoolClient,
+  holderPid: number,
+  timeoutMs = 10_000,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const waiting = await watcher.query<{ c: number }>(
+      `SELECT count(*)::int AS c
+       FROM pg_locks blocked
+       JOIN pg_locks holder
+         ON holder.locktype = blocked.locktype
+        AND holder.database IS NOT DISTINCT FROM blocked.database
+        AND holder.relation IS NOT DISTINCT FROM blocked.relation
+        AND holder.page IS NOT DISTINCT FROM blocked.page
+        AND holder.tuple IS NOT DISTINCT FROM blocked.tuple
+        AND holder.virtualxid IS NOT DISTINCT FROM blocked.virtualxid
+        AND holder.transactionid IS NOT DISTINCT FROM blocked.transactionid
+        AND holder.classid IS NOT DISTINCT FROM blocked.classid
+        AND holder.objid IS NOT DISTINCT FROM blocked.objid
+        AND holder.objsubid IS NOT DISTINCT FROM blocked.objsubid
+        AND holder.pid <> blocked.pid
+       WHERE NOT blocked.granted
+         AND holder.granted
+         AND holder.pid = $1`,
+      [holderPid],
+    );
+    if ((waiting.rows[0]?.c ?? 0) > 0) return true;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  return false;
 }

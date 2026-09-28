@@ -13,6 +13,7 @@ import {
   insertTrustRule,
   phase14DatabaseUrl,
   resetAndMigrate,
+  waitForBlockedOnHolder,
 } from './harness.js';
 
 const EXCLUSION_VIOLATION = '23P01';
@@ -408,3 +409,371 @@ describe.skipIf(phase14DatabaseUrl === '')('Phase 14 Trust snapshot persistence'
     }
   });
 });
+
+const TRUST_RESTRICT_VIOLATION = '23001';
+
+describe.skipIf(phase14DatabaseUrl === '')(
+  'Phase 14 Trust rule-version reference integrity',
+  () => {
+    let pool: Pool;
+    let userId: string;
+
+    beforeAll(async () => {
+      await resetAndMigrate(phase14DatabaseUrl);
+      pool = createPool(phase14DatabaseUrl);
+      userId = await createTestUser(pool, '14000110');
+    }, 120_000);
+
+    afterAll(async () => {
+      await pool.end();
+    });
+
+    async function insertReferencedTrustRule(ruleVersion: number): Promise<{
+      calculatedAt: Date;
+      reason: string | null;
+      auditReference: string | null;
+      effectiveFrom: Date;
+    }> {
+      await pool.query(
+        `UPDATE trust_rule_versions
+         SET status = 'SUPERSEDED'::rule_version_status
+         WHERE status = 'ACTIVE'`,
+      );
+      await insertTrustRule(pool, {
+        ruleVersion,
+        status: 'ACTIVE',
+        effectiveFrom: new Date('2020-01-01T00:00:00.000Z'),
+        effectiveTo: null,
+        reason: 'phase14-trust-ref-immutability',
+      });
+      await pool.query(
+        `UPDATE trust_rule_versions SET audit_reference = $2 WHERE rule_version = $1`,
+        [ruleVersion, `trust-audit-${ruleVersion}`],
+      );
+
+      const client = await pool.connect();
+      try {
+        const snap = await persistTrustSnapshot(client, {
+          userId,
+          trustState: 'BASIC',
+          trustScore: 10,
+          ruleVersion,
+          reasonCodes: ['TRUST_REF'],
+          signals: { fixture: ruleVersion },
+        });
+        const row = await client.query<{
+          reason: string | null;
+          audit_reference: string | null;
+          effective_from: Date;
+        }>(
+          `SELECT reason, audit_reference, effective_from
+           FROM trust_rule_versions WHERE rule_version = $1`,
+          [ruleVersion],
+        );
+        return {
+          calculatedAt: snap.calculatedAt,
+          reason: row.rows[0]?.reason ?? null,
+          auditReference: row.rows[0]?.audit_reference ?? null,
+          effectiveFrom: row.rows[0]!.effective_from,
+        };
+      } finally {
+        client.release();
+      }
+    }
+
+    it('rejects referenced semantic/provenance updates', async () => {
+      const ruleVersion = 2010;
+      const before = await insertReferencedTrustRule(ruleVersion);
+      await expect(
+        pool.query(
+          `UPDATE trust_rule_versions
+           SET effective_from = '2019-01-01T00:00:00.000Z'::timestamptz
+           WHERE rule_version = $1`,
+          [ruleVersion],
+        ),
+      ).rejects.toMatchObject({ code: TRUST_RESTRICT_VIOLATION });
+      await expect(
+        pool.query(`UPDATE trust_rule_versions SET reason = 'rewritten' WHERE rule_version = $1`, [
+          ruleVersion,
+        ]),
+      ).rejects.toMatchObject({ code: TRUST_RESTRICT_VIOLATION });
+      await expect(
+        pool.query(
+          `UPDATE trust_rule_versions SET audit_reference = 'rewritten' WHERE rule_version = $1`,
+          [ruleVersion],
+        ),
+      ).rejects.toMatchObject({ code: TRUST_RESTRICT_VIOLATION });
+
+      const after = await pool.query<{
+        reason: string | null;
+        audit_reference: string | null;
+        effective_from: Date;
+      }>(
+        `SELECT reason, audit_reference, effective_from
+         FROM trust_rule_versions WHERE rule_version = $1`,
+        [ruleVersion],
+      );
+      expect(after.rows[0]?.reason).toBe(before.reason);
+      expect(after.rows[0]?.audit_reference).toBe(before.auditReference);
+      expect(after.rows[0]?.effective_from.toISOString()).toBe(before.effectiveFrom.toISOString());
+    });
+
+    it('rejects DELETE of referenced Trust rule', async () => {
+      const ruleVersion = 2011;
+      await insertReferencedTrustRule(ruleVersion);
+      await expect(
+        pool.query(`DELETE FROM trust_rule_versions WHERE rule_version = $1`, [ruleVersion]),
+      ).rejects.toBeTruthy();
+      const still = await pool.query<{ c: string }>(
+        `SELECT count(*)::text AS c FROM trust_rule_versions WHERE rule_version = $1`,
+        [ruleVersion],
+      );
+      expect(still.rows[0]?.c).toBe('1');
+    });
+
+    it('allows safe first effective_to closure; rejects retroactive and second rewrite', async () => {
+      const ruleVersion = 2012;
+      const { calculatedAt } = await insertReferencedTrustRule(ruleVersion);
+      const closure = new Date(calculatedAt.getTime() + 60_000);
+      await expect(
+        pool.query(
+          `UPDATE trust_rule_versions SET effective_to = $2::timestamptz WHERE rule_version = $1`,
+          [ruleVersion, closure.toISOString()],
+        ),
+      ).resolves.toBeTruthy();
+
+      const ruleVersion2 = 2013;
+      const second = await insertReferencedTrustRule(ruleVersion2);
+      await expect(
+        pool.query(
+          `UPDATE trust_rule_versions SET effective_to = $2::timestamptz WHERE rule_version = $1`,
+          [ruleVersion2, second.calculatedAt.toISOString()],
+        ),
+      ).rejects.toMatchObject({ code: TRUST_RESTRICT_VIOLATION });
+
+      await expect(
+        pool.query(
+          `UPDATE trust_rule_versions SET effective_to = $2::timestamptz WHERE rule_version = $1`,
+          [ruleVersion, new Date(closure.getTime() + 60_000).toISOString()],
+        ),
+      ).rejects.toMatchObject({ code: TRUST_RESTRICT_VIOLATION });
+    });
+
+    it('allows status-only lifecycle update', async () => {
+      const ruleVersion = 2014;
+      const before = await insertReferencedTrustRule(ruleVersion);
+      await expect(
+        pool.query(
+          `UPDATE trust_rule_versions
+           SET status = 'SUPERSEDED'::rule_version_status
+           WHERE rule_version = $1`,
+          [ruleVersion],
+        ),
+      ).resolves.toBeTruthy();
+      const after = await pool.query<{
+        status: string;
+        reason: string | null;
+        effective_from: Date;
+      }>(
+        `SELECT status::text AS status, reason, effective_from
+         FROM trust_rule_versions WHERE rule_version = $1`,
+        [ruleVersion],
+      );
+      expect(after.rows[0]?.status).toBe('SUPERSEDED');
+      expect(after.rows[0]?.reason).toBe(before.reason);
+      expect(after.rows[0]?.effective_from.toISOString()).toBe(before.effectiveFrom.toISOString());
+    });
+
+    it('allows unreferenced DRAFT Trust rule authoring', async () => {
+      await insertTrustRule(pool, {
+        ruleVersion: 2015,
+        status: 'DRAFT',
+        effectiveFrom: new Date('2026-01-01T00:00:00.000Z'),
+        effectiveTo: new Date('2026-06-01T00:00:00.000Z'),
+        reason: 'draft-authoring',
+      });
+      await expect(
+        pool.query(
+          `UPDATE trust_rule_versions
+           SET reason = 'draft-revised',
+               effective_from = '2026-02-01T00:00:00.000Z'::timestamptz,
+               effective_to = '2026-07-01T00:00:00.000Z'::timestamptz,
+               audit_reference = 'draft-audit'
+           WHERE rule_version = 2015`,
+        ),
+      ).resolves.toBeTruthy();
+    });
+  },
+);
+
+describe.skipIf(phase14DatabaseUrl === '')(
+  'Phase 14 Trust first-reference concurrency lock',
+  () => {
+    let pool: Pool;
+    let userId: string;
+
+    beforeAll(async () => {
+      await resetAndMigrate(phase14DatabaseUrl);
+      pool = createPool(phase14DatabaseUrl);
+      userId = await createTestUser(pool, '14000111');
+    }, 120_000);
+
+    afterAll(async () => {
+      await pool.end();
+    });
+
+    it('snapshot-first: open persistTrustSnapshot blocks then rejects concurrent reason rewrite', async () => {
+      await insertTrustRule(pool, {
+        ruleVersion: 2020,
+        status: 'DRAFT',
+        effectiveFrom: new Date('2020-01-01T00:00:00.000Z'),
+        effectiveTo: null,
+        reason: 'trust-lock-original',
+      });
+      const original = await pool.query<{ reason: string | null }>(
+        `SELECT reason FROM trust_rule_versions WHERE rule_version = 2020`,
+      );
+
+      const clientA = await pool.connect();
+      const clientB = await pool.connect();
+      const watcher = await pool.connect();
+      try {
+        await clientA.query('BEGIN');
+        await persistTrustSnapshot(clientA, {
+          userId,
+          trustState: 'NEW',
+          trustScore: 0,
+          ruleVersion: 2020,
+          reasonCodes: ['SNAP_FIRST'],
+          signals: {},
+        });
+        const holderPid = (
+          await clientA.query<{ pid: number }>(`SELECT pg_backend_pid() AS pid`)
+        ).rows[0]!.pid;
+
+        const updatePromise = clientB.query(
+          `UPDATE trust_rule_versions SET reason = 'concurrent-rewrite' WHERE rule_version = 2020`,
+        );
+        expect(await waitForBlockedOnHolder(watcher, holderPid)).toBe(true);
+        await clientA.query('COMMIT');
+        await expect(updatePromise).rejects.toMatchObject({ code: TRUST_RESTRICT_VIOLATION });
+
+        const after = await pool.query<{ reason: string | null }>(
+          `SELECT reason FROM trust_rule_versions WHERE rule_version = 2020`,
+        );
+        expect(after.rows[0]?.reason).toBe(original.rows[0]?.reason);
+      } finally {
+        try {
+          await clientA.query('ROLLBACK');
+        } catch {
+          /* ignore */
+        }
+        clientA.release();
+        clientB.release();
+        watcher.release();
+      }
+    }, 60_000);
+
+    it('update-first: open Trust reason UPDATE blocks snapshot persist until commit', async () => {
+      await insertTrustRule(pool, {
+        ruleVersion: 2021,
+        status: 'DRAFT',
+        effectiveFrom: new Date('2020-01-01T00:00:00.000Z'),
+        effectiveTo: null,
+        reason: 'before-update',
+      });
+
+      const clientA = await pool.connect();
+      const clientB = await pool.connect();
+      const watcher = await pool.connect();
+      try {
+        await clientA.query('BEGIN');
+        await clientA.query(
+          `UPDATE trust_rule_versions SET reason = 'after-update' WHERE rule_version = 2021`,
+        );
+        const holderPid = (
+          await clientA.query<{ pid: number }>(`SELECT pg_backend_pid() AS pid`)
+        ).rows[0]!.pid;
+
+        const snapPromise = persistTrustSnapshot(clientB, {
+          userId,
+          trustState: 'BASIC',
+          trustScore: 5,
+          ruleVersion: 2021,
+          reasonCodes: ['UPDATE_FIRST'],
+          signals: {},
+        });
+        expect(await waitForBlockedOnHolder(watcher, holderPid)).toBe(true);
+        await clientA.query('COMMIT');
+        const snap = await snapPromise;
+        expect(snap.ruleVersion).toBe(2021);
+
+        const row = await pool.query<{ reason: string | null }>(
+          `SELECT reason FROM trust_rule_versions WHERE rule_version = 2021`,
+        );
+        expect(row.rows[0]?.reason).toBe('after-update');
+      } finally {
+        try {
+          await clientA.query('ROLLBACK');
+        } catch {
+          /* ignore */
+        }
+        clientA.release();
+        clientB.release();
+        watcher.release();
+      }
+    }, 60_000);
+
+    it('raw trust_snapshots INSERT acquires FOR SHARE against concurrent semantic UPDATE', async () => {
+      await insertTrustRule(pool, {
+        ruleVersion: 2022,
+        status: 'DRAFT',
+        effectiveFrom: new Date('2020-01-01T00:00:00.000Z'),
+        effectiveTo: null,
+        reason: 'raw-trust-original',
+      });
+      const original = await pool.query<{ reason: string | null }>(
+        `SELECT reason FROM trust_rule_versions WHERE rule_version = 2022`,
+      );
+
+      const clientA = await pool.connect();
+      const clientB = await pool.connect();
+      const watcher = await pool.connect();
+      try {
+        await clientA.query('BEGIN');
+        await clientA.query(
+          `INSERT INTO trust_snapshots (
+             user_id, trust_state, trust_score, rule_version, reason_codes, signals
+           ) VALUES (
+             $1::uuid, 'BASIC'::trust_state, 3, 2022, ARRAY['RAW']::text[], '{}'::jsonb
+           )`,
+          [userId],
+        );
+        const holderPid = (
+          await clientA.query<{ pid: number }>(`SELECT pg_backend_pid() AS pid`)
+        ).rows[0]!.pid;
+
+        const updatePromise = clientB.query(
+          `UPDATE trust_rule_versions SET reason = 'raw-concurrent' WHERE rule_version = 2022`,
+        );
+        expect(await waitForBlockedOnHolder(watcher, holderPid)).toBe(true);
+        await clientA.query('COMMIT');
+        await expect(updatePromise).rejects.toMatchObject({ code: TRUST_RESTRICT_VIOLATION });
+
+        const after = await pool.query<{ reason: string | null }>(
+          `SELECT reason FROM trust_rule_versions WHERE rule_version = 2022`,
+        );
+        expect(after.rows[0]?.reason).toBe(original.rows[0]?.reason);
+      } finally {
+        try {
+          await clientA.query('ROLLBACK');
+        } catch {
+          /* ignore */
+        }
+        clientA.release();
+        clientB.release();
+        watcher.release();
+      }
+    }, 60_000);
+  },
+);

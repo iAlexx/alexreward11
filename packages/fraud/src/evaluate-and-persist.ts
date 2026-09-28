@@ -11,7 +11,7 @@ import {
   type PersistedRiskProfile,
 } from './risk-profile.js';
 import {
-  resolveActiveRiskRuleVersion,
+  resolveActiveRiskRuleVersionForEvaluation,
   type ResolvedRiskRuleVersion,
 } from './risk-rule.js';
 import { collectConfiguredRiskSignals } from './risk-signal-collector.js';
@@ -43,6 +43,7 @@ export interface EvaluateAndPersistRiskResult {
  * Authoritative evaluate + persist path.
  *
  * Resolves the ACTIVE risk rule from the DB using server current time only,
+ * holding FOR SHARE on that rule row through the caller transaction, then
  * collects configured risk signals from server-authoritative DB sources,
  * evaluates those collected facts, then writes exactly one immutable snapshot
  * and one current risk_profiles upsert.
@@ -51,7 +52,7 @@ export interface EvaluateAndPersistRiskResult {
  * They must not choose signal facts, weights, score, tier, action, rule, or time.
  *
  * Historical / effective-window rule lookup remains available only via the
- * lower-level resolveActiveRiskRuleVersion(client, { at }) helper.
+ * lower-level unlocked resolveActiveRiskRuleVersion(client, { at }) helper.
  *
  * Transaction semantics: callers MUST pass a PoolClient already bound to their
  * transaction so snapshot + profile commit/rollback together. This function does
@@ -66,11 +67,10 @@ export async function evaluateAndPersistRisk(
   client: PoolClient,
   input: EvaluateAndPersistRiskInput,
 ): Promise<EvaluateAndPersistRiskResult> {
-  const evaluatedAt = new Date();
   const context = input.safeContext ?? {};
   assertSafePersistedJsonObject('safeContext', context);
 
-  const rule = await resolveActiveRiskRuleVersion(client, { at: evaluatedAt });
+  const rule = await resolveActiveRiskRuleVersionForEvaluation(client);
   const collected = await collectConfiguredRiskSignals(client, {
     userId: input.userId,
     rule,

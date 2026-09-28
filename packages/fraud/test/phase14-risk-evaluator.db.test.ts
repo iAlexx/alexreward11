@@ -336,9 +336,11 @@ describe.skipIf(phase14DatabaseUrl === '')('Phase 14 evaluateAndPersistRisk rule
   });
 
   it('no ACTIVE rule => RISK_RULE_NOT_CONFIGURED and no writes', async () => {
-    await pool.query(`DELETE FROM risk_rule_versions`);
+    await pool.query(
+      `UPDATE risk_rule_versions SET status = 'SUPERSEDED'::rule_version_status WHERE status = 'ACTIVE'`,
+    );
     await insertRiskRule(pool, {
-      ruleVersion: 10,
+      ruleVersion: 99110,
       status: 'DRAFT',
       effectiveFrom: new Date('2020-01-01T00:00:00.000Z'),
       effectiveTo: null,
@@ -382,9 +384,11 @@ describe.skipIf(phase14DatabaseUrl === '')('Phase 14 evaluateAndPersistRisk rule
   });
 
   it('future ACTIVE rule only => fail closed before effective_from', async () => {
-    await pool.query(`DELETE FROM risk_rule_versions`);
+    await pool.query(
+      `UPDATE risk_rule_versions SET status = 'SUPERSEDED'::rule_version_status WHERE status = 'ACTIVE'`,
+    );
     await insertRiskRule(pool, {
-      ruleVersion: 20,
+      ruleVersion: 99120,
       status: 'ACTIVE',
       effectiveFrom: new Date('2099-01-01T00:00:00.000Z'),
       effectiveTo: null,
@@ -420,9 +424,11 @@ describe.skipIf(phase14DatabaseUrl === '')('Phase 14 evaluateAndPersistRisk rule
   });
 
   it('malformed ACTIVE rule => fail closed with no snapshot/profile write', async () => {
-    await pool.query(`DELETE FROM risk_rule_versions`);
+    await pool.query(
+      `UPDATE risk_rule_versions SET status = 'SUPERSEDED'::rule_version_status WHERE status = 'ACTIVE'`,
+    );
     await insertRiskRule(pool, {
-      ruleVersion: 30,
+      ruleVersion: 99130,
       status: 'ACTIVE',
       effectiveFrom: new Date('2020-01-01T00:00:00.000Z'),
       effectiveTo: null,

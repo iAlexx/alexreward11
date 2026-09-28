@@ -247,9 +247,9 @@ describe('Phase 14 authoritative persistence surface (unit)', () => {
     expect(inputBlock).not.toMatch(/calculatedAt/);
     expect(inputBlock).not.toMatch(/evaluationTime/);
     expect(inputBlock).not.toMatch(/timestamp/);
-    expect(source).toMatch(/const evaluatedAt = new Date\(\);/);
+    expect(source).toMatch(/resolveActiveRiskRuleVersionForEvaluation\(client\)/);
     expect(source).toMatch(/collectConfiguredRiskSignals\(client/);
-    expect(source).toMatch(/resolveActiveRiskRuleVersion\(client,\s*\{\s*at:\s*evaluatedAt\s*\}\)/);
+    expect(source).not.toMatch(/resolveActiveRiskRuleVersion\(client,\s*\{\s*at:/);
     expect(source).toMatch(/context,/);
     expect(source).not.toMatch(/input\.evaluatedAt/);
     expect(source).not.toMatch(/input\.signalFacts/);

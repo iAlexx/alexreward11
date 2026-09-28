@@ -2,7 +2,7 @@ import type { PoolClient } from 'pg';
 
 import { assertSafePersistedJsonObject } from './canonical.js';
 import { FraudDomainError } from './errors.js';
-import { loadTrustRuleVersionByNumber } from './trust-rule.js';
+import { loadTrustRuleVersionForSnapshot } from './trust-rule.js';
 
 export type TrustState = 'NEW' | 'BASIC' | 'ESTABLISHED' | 'TRUSTED';
 
@@ -81,8 +81,8 @@ export async function persistTrustSnapshot(
     );
   }
 
-  // Rule version must exist in trust_rule_versions (no fabricated versions).
-  const rule = await loadTrustRuleVersionByNumber(client, input.ruleVersion);
+  // Rule version must exist; hold FOR SHARE through caller TX (Step 10).
+  const rule = await loadTrustRuleVersionForSnapshot(client, input.ruleVersion);
   const reasonCodes = normalizeReasonCodes(input.reasonCodes);
   assertSafePersistedJsonObject('signals', input.signals);
 
