@@ -8,8 +8,13 @@
 
 export { FraudDomainError, type FraudErrorCode } from './errors.js';
 export {
+  assertJsonCompatibleValue,
+  assertSafePersistedJsonObject,
   canonicalizeForDigest,
   computeRiskInputsDigest,
+  isPlainJsonObject,
+  isSensitivePersistedKey,
+  normalizeSensitiveKey,
 } from './canonical.js';
 export {
   RISK_ACTION_CODES,

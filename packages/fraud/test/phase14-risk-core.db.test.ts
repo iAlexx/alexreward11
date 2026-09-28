@@ -3,6 +3,7 @@ import type { Pool } from 'pg';
 
 import {
   FraudDomainError,
+  computeRiskInputsDigest,
   loadRiskRuleVersionByNumber,
   persistRiskSnapshot,
   resolveActiveRiskRuleVersion,
@@ -256,6 +257,8 @@ describe.skipIf(phase14DatabaseUrl === '')('Phase 14 risk snapshot persistence',
   it('writes an immutable snapshot matching server evaluation input', async () => {
     const client = await pool.connect();
     try {
+      const safeInputs = { withdrawalId: 'wd-test', accountState: 'ACTIVE', ip_hash: 'ab'.repeat(32) };
+      const expectedDigest = computeRiskInputsDigest(1, safeInputs);
       const snapshot = await persistRiskSnapshot(client, {
         userId,
         decisionScope: 'WITHDRAWAL_REQUEST',
@@ -263,22 +266,23 @@ describe.skipIf(phase14DatabaseUrl === '')('Phase 14 risk snapshot persistence',
         riskTier: 'MEDIUM',
         ruleVersion: 1,
         reasonCodes: ['TEST_FIXTURE_REASON'],
-        safeInputs: { withdrawalId: 'wd-test', accountState: 'ACTIVE' },
+        safeInputs,
         outputs: { decision: 'MANUAL_REVIEW', neverAutoApprove: true },
       });
       expect(snapshot.score).toBe(42);
       expect(snapshot.riskTier).toBe('MEDIUM');
       expect(snapshot.ruleVersion).toBe(1);
       expect(snapshot.reasonCodes).toEqual(['TEST_FIXTURE_REASON']);
-      expect(snapshot.inputsDigest).toMatch(/^[0-9a-f]{64}$/);
+      expect(snapshot.inputsDigest).toBe(expectedDigest);
 
       const stored = await client.query<{
         score: number;
         risk_tier: string;
         rule_version: number;
         reason_codes: string[];
+        inputs_digest: string | null;
       }>(
-        `SELECT score, risk_tier::text AS risk_tier, rule_version, reason_codes
+        `SELECT score, risk_tier::text AS risk_tier, rule_version, reason_codes, inputs_digest
          FROM risk_snapshots WHERE id = $1::uuid`,
         [snapshot.id],
       );
@@ -286,6 +290,7 @@ describe.skipIf(phase14DatabaseUrl === '')('Phase 14 risk snapshot persistence',
       expect(stored.rows[0]?.risk_tier).toBe('MEDIUM');
       expect(stored.rows[0]?.rule_version).toBe(1);
       expect(stored.rows[0]?.reason_codes).toEqual(['TEST_FIXTURE_REASON']);
+      expect(stored.rows[0]?.inputs_digest).toBe(expectedDigest);
 
       await expect(
         client.query(`UPDATE risk_snapshots SET score = 1 WHERE id = $1::uuid`, [snapshot.id]),
@@ -298,7 +303,7 @@ describe.skipIf(phase14DatabaseUrl === '')('Phase 14 risk snapshot persistence',
     }
   });
 
-  it('rejects unsafe snapshot payloads', async () => {
+  it('rejects unsafe snapshot payloads in safeInputs and outputs', async () => {
     const client = await pool.connect();
     try {
       await expect(
@@ -310,6 +315,32 @@ describe.skipIf(phase14DatabaseUrl === '')('Phase 14 risk snapshot persistence',
           ruleVersion: 1,
           reasonCodes: ['TEST_FIXTURE_REASON'],
           safeInputs: { exact_ip: '1.2.3.4' },
+          outputs: {},
+        }),
+      ).rejects.toMatchObject({ code: 'RISK_SNAPSHOT_INVALID' });
+
+      await expect(
+        persistRiskSnapshot(client, {
+          userId,
+          decisionScope: 'WITHDRAWAL_REQUEST',
+          score: 10,
+          riskTier: 'LOW',
+          ruleVersion: 1,
+          reasonCodes: ['TEST_FIXTURE_REASON'],
+          safeInputs: { ok: true },
+          outputs: { access_token: 'leak' },
+        }),
+      ).rejects.toMatchObject({ code: 'RISK_SNAPSHOT_INVALID' });
+
+      await expect(
+        persistRiskSnapshot(client, {
+          userId,
+          decisionScope: 'WITHDRAWAL_REQUEST',
+          score: 10,
+          riskTier: 'LOW',
+          ruleVersion: 1,
+          reasonCodes: ['TEST_FIXTURE_REASON'],
+          safeInputs: { when: new Date() as unknown as string },
           outputs: {},
         }),
       ).rejects.toMatchObject({ code: 'RISK_SNAPSHOT_INVALID' });

@@ -1,9 +1,13 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
 import { describe, expect, it } from 'vitest';
 
 import {
   canonicalizeForDigest,
   computeRiskInputsDigest,
   FraudDomainError,
+  isSensitivePersistedKey,
   parseRiskActions,
   parseRiskSignalWeights,
   parseRiskThresholds,
@@ -64,12 +68,24 @@ describe('Phase 14 risk rule config validation (unit)', () => {
   });
 });
 
-describe('Phase 14 input digest (unit)', () => {
+describe('Phase 14 input digest + canonical JSON (unit)', () => {
   it('same canonical safe inputs => same digest regardless of key order', () => {
     const a = computeRiskInputsDigest(1, { b: 2, a: 1, nested: { z: true, y: 3 } });
     const b = computeRiskInputsDigest(1, { a: 1, nested: { y: 3, z: true }, b: 2 });
     expect(a).toBe(b);
     expect(a).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('array order is significant for digests', () => {
+    const a = computeRiskInputsDigest(1, { ids: ['a', 'b'] });
+    const b = computeRiskInputsDigest(1, { ids: ['b', 'a'] });
+    expect(a).not.toBe(b);
+  });
+
+  it('ruleVersion difference changes digest', () => {
+    const a = computeRiskInputsDigest(1, { x: 1 });
+    const b = computeRiskInputsDigest(2, { x: 1 });
+    expect(a).not.toBe(b);
   });
 
   it('semantically different safe inputs => different digest', () => {
@@ -81,9 +97,79 @@ describe('Phase 14 input digest (unit)', () => {
   it('canonicalize sorts object keys', () => {
     expect(canonicalizeForDigest({ b: 1, a: 2 })).toBe(canonicalizeForDigest({ a: 2, b: 1 }));
   });
+
+  it('rejects Date / Map / Set / bigint / undefined / non-finite / function', () => {
+    expect(() => canonicalizeForDigest(new Date())).toThrow(FraudDomainError);
+    expect(() => canonicalizeForDigest(new Map())).toThrow(FraudDomainError);
+    expect(() => canonicalizeForDigest(new Set())).toThrow(FraudDomainError);
+    expect(() => canonicalizeForDigest({ n: 1n })).toThrow(FraudDomainError);
+    expect(() => canonicalizeForDigest({ u: undefined })).toThrow(FraudDomainError);
+    expect(() => canonicalizeForDigest({ n: Number.NaN })).toThrow(FraudDomainError);
+    expect(() => canonicalizeForDigest({ n: Number.POSITIVE_INFINITY })).toThrow(FraudDomainError);
+    expect(() => canonicalizeForDigest({ n: Number.NEGATIVE_INFINITY })).toThrow(FraudDomainError);
+    expect(() => canonicalizeForDigest({ f: () => 1 })).toThrow(FraudDomainError);
+    expect(() => computeRiskInputsDigest(1, { when: new Date() })).toThrow(FraudDomainError);
+  });
+
+  it('accepts plain JSON including null-prototype objects', () => {
+    const plain = Object.create(null) as Record<string, unknown>;
+    plain.a = 1;
+    expect(canonicalizeForDigest(plain)).toBe(canonicalizeForDigest({ a: 1 }));
+  });
 });
 
-describe('Phase 14 fraud package authority surface (unit)', () => {
+describe('Phase 14 sensitive key normalization (unit)', () => {
+  it('rejects private_key / seed / seed_phrase / access_token / authorization / cookie / IP / geo variants', () => {
+    for (const key of [
+      'private_key',
+      'privateKey',
+      'seed',
+      'seed_phrase',
+      'seedPhrase',
+      'access_token',
+      'authorization',
+      'cookie',
+      'set_cookie',
+      'ipAddress',
+      'raw_ip',
+      'client_ip',
+      'remoteIp',
+      'exact_ip',
+      'latitude',
+      'longitude',
+      'gps',
+    ]) {
+      expect(isSensitivePersistedKey(key), key).toBe(true);
+      expect(() => computeRiskInputsDigest(1, { [key]: 'x' })).toThrow(FraudDomainError);
+    }
+  });
+
+  it('allows privacy-safe ip_hash / ipHash', () => {
+    expect(isSensitivePersistedKey('ip_hash')).toBe(false);
+    expect(isSensitivePersistedKey('ipHash')).toBe(false);
+    const digest = computeRiskInputsDigest(1, {
+      ip_hash: 'aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899',
+      ipHash: '00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff',
+    });
+    expect(digest).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('rejects sensitive keys in outputs path via digest/canonical shared validation', () => {
+    expect(() =>
+      canonicalizeForDigest({ outputs: { access_token: 'x' } }),
+    ).toThrow(FraudDomainError);
+  });
+});
+
+describe('Phase 14 digest authority surface (unit)', () => {
+  it('PersistRiskSnapshotInput source has no caller inputsDigest field', () => {
+    const path = fileURLToPath(new URL('../src/risk-snapshot.ts', import.meta.url));
+    const source = readFileSync(path, 'utf8');
+    expect(source).not.toMatch(/inputsDigest\?:/);
+    expect(source).not.toMatch(/input\.inputsDigest/);
+    expect(source).toMatch(/computeRiskInputsDigest\(input\.ruleVersion,\s*input\.safeInputs\)/);
+  });
+
   it('does not export client score/trust/eligibility setters or ledger writers', async () => {
     const mod = await import('../src/index.js');
     const names = Object.keys(mod);

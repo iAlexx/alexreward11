@@ -1,6 +1,9 @@
 import type { PoolClient } from 'pg';
 
-import { computeRiskInputsDigest } from './canonical.js';
+import {
+  assertSafePersistedJsonObject,
+  computeRiskInputsDigest,
+} from './canonical.js';
 import { FraudDomainError } from './errors.js';
 import type { RiskTier } from './risk-rule.js';
 
@@ -36,8 +39,6 @@ export interface PersistRiskSnapshotInput {
   /** Safe-to-store JSON only (no secrets, exact IP, GPS, private keys). */
   readonly safeInputs: Readonly<Record<string, unknown>>;
   readonly outputs: Readonly<Record<string, unknown>>;
-  /** Optional precomputed digest; otherwise derived from ruleVersion + safeInputs. */
-  readonly inputsDigest?: string;
 }
 
 export interface PersistedRiskSnapshot {
@@ -52,49 +53,6 @@ export interface PersistedRiskSnapshot {
   readonly safeInputs: Readonly<Record<string, unknown>>;
   readonly outputs: Readonly<Record<string, unknown>>;
   readonly calculatedAt: Date;
-}
-
-function assertSafeJsonLeaf(path: string, value: unknown): void {
-  if (value === null) return;
-  const t = typeof value;
-  if (t === 'string' || t === 'boolean') return;
-  if (t === 'number') {
-    if (!Number.isFinite(value) || Number.isNaN(value)) {
-      throw new FraudDomainError('RISK_SNAPSHOT_INVALID', `${path} must be a finite number`);
-    }
-    return;
-  }
-  if (Array.isArray(value)) {
-    value.forEach((item, index) => assertSafeJsonLeaf(`${path}[${index}]`, item));
-    return;
-  }
-  if (t === 'object') {
-    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-      const lower = key.toLowerCase();
-      if (
-        lower.includes('initdata') ||
-        lower.includes('token') ||
-        lower.includes('secret') ||
-        lower.includes('password') ||
-        lower.includes('mnemonic') ||
-        lower.includes('privatekey') ||
-        lower === 'ip' ||
-        lower === 'exact_ip' ||
-        lower === 'gps' ||
-        lower === 'latitude' ||
-        lower === 'longitude'
-      ) {
-        throw new FraudDomainError(
-          'RISK_SNAPSHOT_INVALID',
-          `safeInputs/outputs key ${key} is not allowed`,
-          { key },
-        );
-      }
-      assertSafeJsonLeaf(`${path}.${key}`, child);
-    }
-    return;
-  }
-  throw new FraudDomainError('RISK_SNAPSHOT_INVALID', `${path} has unsupported JSON type`);
 }
 
 function assertReasonCodes(codes: readonly string[]): readonly string[] {
@@ -112,6 +70,7 @@ function assertReasonCodes(codes: readonly string[]): readonly string[] {
 /**
  * Persist an already-produced deterministic risk evaluation as an immutable snapshot.
  * Does not calculate scores — callers supply the server evaluation result.
+ * Digest is always derived internally; callers have no digest authority.
  */
 export async function persistRiskSnapshot(
   client: PoolClient,
@@ -131,14 +90,10 @@ export async function persistRiskSnapshot(
   }
 
   const reasonCodes = assertReasonCodes(input.reasonCodes);
-  assertSafeJsonLeaf('safeInputs', input.safeInputs);
-  assertSafeJsonLeaf('outputs', input.outputs);
+  assertSafePersistedJsonObject('safeInputs', input.safeInputs);
+  assertSafePersistedJsonObject('outputs', input.outputs);
 
-  const inputsDigest =
-    input.inputsDigest ?? computeRiskInputsDigest(input.ruleVersion, input.safeInputs);
-  if (!/^[0-9a-f]{64}$/.test(inputsDigest)) {
-    throw new FraudDomainError('RISK_SNAPSHOT_INVALID', 'inputsDigest must be sha256 hex');
-  }
+  const inputsDigest = computeRiskInputsDigest(input.ruleVersion, input.safeInputs);
 
   const result = await client.query<{
     id: string;
