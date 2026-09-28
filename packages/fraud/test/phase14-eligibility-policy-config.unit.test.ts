@@ -38,6 +38,13 @@ describe('Phase 14 Eligibility policy config parser (unit)', () => {
       'ACCOUNT_STATE',
       'FEATURE_FLAG',
     ]);
+    expect(a.actions.WITHDRAWAL_REQUEST?.riskAllowedActions).toEqual([
+      'ALLOW',
+      'EXTEND_PENDING',
+      'MANUAL_REVIEW',
+      'HELD',
+    ]);
+    expect(a.actions.AD_SESSION_START?.riskAllowedActions).toBeUndefined();
     expect(Object.isFrozen(a)).toBe(true);
     expect(Object.isFrozen(a.actions)).toBe(true);
     expect(Object.isFrozen(a.actions.WITHDRAWAL_REQUEST)).toBe(true);
@@ -132,6 +139,50 @@ describe('Phase 14 Eligibility policy config parser (unit)', () => {
             requiredGates: ['ACCOUNT_STATE'],
             precedence: ['ACCOUNT_STATE'],
             founderBypass: true,
+          },
+        },
+      },
+      {
+        actions: {
+          WITHDRAWAL_REQUEST: {
+            requiredGates: ['ACCOUNT_STATE', 'RISK_POLICY'],
+            precedence: ['RISK_POLICY', 'ACCOUNT_STATE'],
+          },
+        },
+      },
+      {
+        actions: {
+          AD_SESSION_START: {
+            requiredGates: ['ACCOUNT_STATE'],
+            precedence: ['ACCOUNT_STATE'],
+            riskAllowedActions: ['ALLOW'],
+          },
+        },
+      },
+      {
+        actions: {
+          WITHDRAWAL_REQUEST: {
+            requiredGates: ['ACCOUNT_STATE', 'RISK_POLICY'],
+            precedence: ['RISK_POLICY', 'ACCOUNT_STATE'],
+            riskAllowedActions: [],
+          },
+        },
+      },
+      {
+        actions: {
+          WITHDRAWAL_REQUEST: {
+            requiredGates: ['ACCOUNT_STATE', 'RISK_POLICY'],
+            precedence: ['RISK_POLICY', 'ACCOUNT_STATE'],
+            riskAllowedActions: ['ALLOW', 'ALLOW'],
+          },
+        },
+      },
+      {
+        actions: {
+          WITHDRAWAL_REQUEST: {
+            requiredGates: ['ACCOUNT_STATE', 'RISK_POLICY'],
+            precedence: ['RISK_POLICY', 'ACCOUNT_STATE'],
+            riskAllowedActions: ['NOT_A_RISK_ACTION'],
           },
         },
       },

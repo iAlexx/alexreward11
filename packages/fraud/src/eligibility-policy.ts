@@ -4,6 +4,7 @@ import type { EligibilityActionType } from './eligibility-decision.js';
 import type { EligibilityGateCode } from './eligibility-evaluator.js';
 import { FraudDomainError } from './errors.js';
 import { isPlainJsonObject } from './canonical.js';
+import type { RiskActionCode } from './risk-rule.js';
 
 export type EligibilityPolicyStatus = 'DRAFT' | 'ACTIVE' | 'SUPERSEDED' | 'REVOKED';
 
@@ -26,9 +27,23 @@ const GATE_CODE_SET = new Set<string>([
   'FEATURE_FLAG',
 ]);
 
+/** Duplicated RiskActionCode allowlist to keep policy parsing independent of risk action execution. */
+const RISK_ACTION_SET = new Set<string>([
+  'ALLOW',
+  'EXTEND_PENDING',
+  'MANUAL_REVIEW',
+  'HELD',
+  'WITHDRAWAL_BLOCKED',
+  'REJECTED_PRE_BROADCAST',
+  'SUSPEND_EARNING',
+  'FREEZE_ACCOUNT',
+]);
+
 export interface EligibilityActionPolicyConfig {
   readonly requiredGates: readonly EligibilityGateCode[];
   readonly precedence: readonly EligibilityGateCode[];
+  /** Required iff RISK_POLICY is in requiredGates; forbidden otherwise. */
+  readonly riskAllowedActions?: readonly RiskActionCode[];
 }
 
 export interface EligibilityPolicyConfig {
@@ -110,6 +125,32 @@ function parseGateList(
   return out;
 }
 
+function parseRiskAllowedActions(
+  path: string,
+  raw: unknown,
+): RiskActionCode[] {
+  if (!Array.isArray(raw)) {
+    configInvalid(`${path} must be an array`, { path });
+  }
+  if (raw.length === 0) {
+    configInvalid(`${path} must be non-empty`, { path });
+  }
+  const out: RiskActionCode[] = [];
+  const seen = new Set<string>();
+  for (let i = 0; i < raw.length; i += 1) {
+    const code = raw[i];
+    if (typeof code !== 'string' || !RISK_ACTION_SET.has(code)) {
+      configInvalid(`${path}[${i}] is not an allowlisted risk action code`, { path, code });
+    }
+    if (seen.has(code)) {
+      configInvalid(`${path} contains duplicate risk action code ${code}`, { path, code });
+    }
+    seen.add(code);
+    out.push(code as RiskActionCode);
+  }
+  return out;
+}
+
 /**
  * Strict parser for versioned Eligibility action policy configuration.
  * Does not invent defaults, repair malformed input, or define business thresholds.
@@ -158,7 +199,11 @@ export function parseEligibilityPolicyConfig(raw: unknown): EligibilityPolicyCon
       });
     }
     for (const nestedKey of Object.keys(actionCfg)) {
-      if (nestedKey !== 'requiredGates' && nestedKey !== 'precedence') {
+      if (
+        nestedKey !== 'requiredGates' &&
+        nestedKey !== 'precedence' &&
+        nestedKey !== 'riskAllowedActions'
+      ) {
         configInvalid(
           `unknown field ${nestedKey} on policy_config.actions.${actionKey}`,
           { actionKey, nestedKey },
@@ -209,10 +254,39 @@ export function parseEligibilityPolicyConfig(raw: unknown): EligibilityPolicyCon
       }
     }
 
-    actions[actionKey as EligibilityActionType] = {
+    const requiresRiskPolicy = requiredGates.includes('RISK_POLICY');
+    const hasRiskAllowedActions = Object.prototype.hasOwnProperty.call(
+      actionCfg,
+      'riskAllowedActions',
+    );
+
+    if (requiresRiskPolicy && !hasRiskAllowedActions) {
+      configInvalid(
+        `policy_config.actions.${actionKey}.riskAllowedActions is required when RISK_POLICY is required`,
+        { actionKey },
+      );
+    }
+    if (!requiresRiskPolicy && hasRiskAllowedActions) {
+      configInvalid(
+        `policy_config.actions.${actionKey}.riskAllowedActions is forbidden when RISK_POLICY is not required`,
+        { actionKey },
+      );
+    }
+
+    const riskAllowedActions = requiresRiskPolicy
+      ? Object.freeze(
+          parseRiskAllowedActions(
+            `policy_config.actions.${actionKey}.riskAllowedActions`,
+            actionCfg.riskAllowedActions,
+          ),
+        )
+      : undefined;
+
+    actions[actionKey as EligibilityActionType] = Object.freeze({
       requiredGates: Object.freeze([...requiredGates]),
       precedence: Object.freeze([...precedence]),
-    };
+      ...(riskAllowedActions !== undefined ? { riskAllowedActions } : {}),
+    });
   }
 
   return deepFreeze({ actions: Object.freeze({ ...actions }) });
@@ -267,6 +341,68 @@ export async function resolveActiveEligibilityPolicyVersion(
        AND effective_from <= $1::timestamptz
        AND (effective_to IS NULL OR $1::timestamptz < effective_to)
      ORDER BY policy_version ASC`,
+    [at.toISOString()],
+  );
+
+  if (result.rows.length === 0) {
+    throw new FraudDomainError(
+      'ELIGIBILITY_POLICY_NOT_CONFIGURED',
+      'No ACTIVE eligibility policy version applies at the requested time',
+      { at: at.toISOString() },
+    );
+  }
+  if (result.rows.length > 1) {
+    throw new FraudDomainError(
+      'ELIGIBILITY_POLICY_INTEGRITY',
+      'Multiple ACTIVE eligibility policy versions apply at the same instant',
+      {
+        at: at.toISOString(),
+        policyVersions: result.rows.map((row) => row.policy_version),
+      },
+    );
+  }
+
+  const row = result.rows[0]!;
+  if (row.policy_config === null || row.policy_config === undefined) {
+    throw new FraudDomainError(
+      'ELIGIBILITY_POLICY_CONFIG_INVALID',
+      'ACTIVE eligibility policy has NULL policy_config',
+      { policyVersion: row.policy_version },
+    );
+  }
+
+  const mapped = mapRow(row);
+  if (mapped.status !== 'ACTIVE' || mapped.policyConfig === null) {
+    throw new FraudDomainError(
+      'ELIGIBILITY_POLICY_CONFIG_INVALID',
+      'Resolved ACTIVE eligibility policy has unusable policy_config',
+      { policyVersion: mapped.policyVersion },
+    );
+  }
+  return mapped as ResolvedEligibilityPolicyVersion;
+}
+
+/**
+ * Authoritative ACTIVE Eligibility-policy resolution for evaluateAndPersistEligibility.
+ *
+ * Uses server current time only (no caller `at`). Selects the matching ACTIVE
+ * row with FOR SHARE so policy_config remains stable through the caller's
+ * transaction until decision persistence completes.
+ *
+ * Historical unlocked lookup remains resolveActiveEligibilityPolicyVersion(client, { at }).
+ */
+export async function resolveActiveEligibilityPolicyVersionForEvaluation(
+  client: PoolClient,
+): Promise<ResolvedEligibilityPolicyVersion> {
+  const at = new Date();
+  const result = await client.query<EligibilityPolicyRow>(
+    `${POLICY_SELECT}
+     FROM eligibility_policy_versions
+     WHERE status = 'ACTIVE'
+       AND effective_from <= $1::timestamptz
+       AND (effective_to IS NULL OR $1::timestamptz < effective_to)
+     ORDER BY policy_version ASC
+     FOR SHARE`,
     [at.toISOString()],
   );
 

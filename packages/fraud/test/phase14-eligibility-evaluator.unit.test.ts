@@ -263,11 +263,11 @@ describe('Phase 14 Eligibility gate evaluator (unit)', () => {
     expect(source).not.toMatch(/ledger/);
   });
 
-  it('exports evaluateEligibilityGates without authoritative caller-fact persist path', async () => {
+  it('exports evaluateEligibilityGates and Step 11 authoritative persist path', async () => {
     const mod = await import('../src/index.js');
     expect(Object.keys(mod)).toContain('evaluateEligibilityGates');
     expect(Object.keys(mod)).toContain('ELIGIBILITY_GATE_CODES');
-    expect(Object.keys(mod)).not.toContain('evaluateAndPersistEligibility');
+    expect(Object.keys(mod)).toContain('evaluateAndPersistEligibility');
   });
 
   it('binds supplied policyVersion and never invents policy 1', () => {

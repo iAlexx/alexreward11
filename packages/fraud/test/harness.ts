@@ -61,22 +61,24 @@ export async function insertRiskRule(
     readonly effectiveTo?: Date | null;
     readonly thresholds?: unknown;
     readonly signalWeights?: unknown;
+    readonly signalParams?: unknown;
     readonly actions?: unknown;
   },
 ): Promise<string> {
   const result = await pool.query<{ id: string }>(
     `INSERT INTO risk_rule_versions (
-       rule_version, thresholds, signal_weights, actions, status,
+       rule_version, thresholds, signal_weights, signal_params, actions, status,
        effective_from, effective_to, reason
      ) VALUES (
-       $1, $2::jsonb, $3::jsonb, $4::jsonb, $5::rule_version_status,
-       $6::timestamptz, $7::timestamptz, $8
+       $1, $2::jsonb, $3::jsonb, $4::jsonb, $5::jsonb, $6::rule_version_status,
+       $7::timestamptz, $8::timestamptz, $9
      )
      RETURNING id`,
     [
       input.ruleVersion,
       JSON.stringify(input.thresholds ?? TEST_RULE_THRESHOLDS),
       JSON.stringify(input.signalWeights ?? TEST_RULE_WEIGHTS),
+      JSON.stringify(input.signalParams ?? {}),
       JSON.stringify(input.actions ?? TEST_RULE_ACTIONS),
       input.status,
       input.effectiveFrom.toISOString(),
@@ -142,6 +144,7 @@ export const TEST_ELIGIBILITY_POLICY_CONFIG = {
     WITHDRAWAL_REQUEST: {
       requiredGates: ['ACCOUNT_STATE', 'RISK_POLICY', 'FEATURE_FLAG'],
       precedence: ['RISK_POLICY', 'ACCOUNT_STATE', 'FEATURE_FLAG'],
+      riskAllowedActions: ['ALLOW', 'EXTEND_PENDING', 'MANUAL_REVIEW', 'HELD'],
     },
     AD_SESSION_START: {
       requiredGates: ['ACCOUNT_STATE', 'FEATURE_FLAG'],

@@ -1,13 +1,15 @@
 /**
  * Phase 14 fraud / risk / trust / eligibility core.
  *
- * Owns versioned risk rule resolution, risk evaluation + snapshots/profiles,
- * Trust rule-version authority + immutable trust snapshots, Eligibility
- * policy-version authority + immutable reason-coded decision persistence,
- * and a pure deterministic Eligibility gate evaluator with versioned action
- * policy config (requiredGates + precedence). No collectors or app wiring yet.
- * Does not write the ledger, approve payouts, execute adverse actions,
- * invent Trust scoring policy, or invent production Eligibility thresholds.
+ * Owns versioned risk rule resolution (including signal_params), risk evaluation
+ * + snapshots/profiles, Step 3/11 risk signal collectors, Trust rule-version
+ * authority + immutable trust snapshots, Eligibility policy-version authority +
+ * immutable reason-coded decision persistence, a pure deterministic Eligibility
+ * gate evaluator with versioned action policy config (requiredGates + precedence
+ * + riskAllowedActions), and the authoritative evaluateAndPersistEligibility
+ * path. Does not write the ledger, approve payouts, execute adverse actions,
+ * invent Trust scoring policy, invent country authority, or invent production
+ * Eligibility thresholds / production policy seeds.
  */
 
 export { FraudDomainError, type FraudErrorCode } from './errors.js';
@@ -26,15 +28,19 @@ export {
   isValidSignalCode,
   loadRiskRuleVersionByNumber,
   parseRiskActions,
+  parseRiskSignalParams,
   parseRiskSignalWeights,
   parseRiskThresholds,
   resolveActiveRiskRuleVersion,
+  resolveActiveRiskRuleVersionForEvaluation,
   validateRiskRuleConfig,
   type ResolvedRiskRuleVersion,
   type RiskActionCode,
   type RiskActionsConfig,
+  type RiskHistorySignalParams,
   type RiskRuleStatus,
   type RiskRuleVersion,
+  type RiskSignalParamsConfig,
   type RiskSignalWeightsConfig,
   type RiskThresholdsConfig,
   type RiskTier,
@@ -52,10 +58,14 @@ export {
   type RiskSignalFact,
 } from './risk-evaluator.js';
 export {
+  COLLECTOR_SIGNAL_CODES,
+  STEP11_HISTORY_SIGNAL_CODES,
   STEP3_COLLECTOR_SIGNAL_CODES,
   collectConfiguredRiskSignals,
   type CollectConfiguredRiskSignalsInput,
   type CollectConfiguredRiskSignalsResult,
+  type CollectorSignalCode,
+  type Step11HistorySignalCode,
   type Step3CollectorSignalCode,
 } from './risk-signal-collector.js';
 /** Read type only — current risk profile writes go through evaluateAndPersistRisk. */
@@ -82,6 +92,7 @@ export {
   loadEligibilityPolicyVersionByNumber,
   parseEligibilityPolicyConfig,
   resolveActiveEligibilityPolicyVersion,
+  resolveActiveEligibilityPolicyVersionForEvaluation,
   type EligibilityActionPolicyConfig,
   type EligibilityPolicyConfig,
   type EligibilityPolicyStatus,
@@ -111,3 +122,9 @@ export {
   type EligibilityGateFact,
   type EligibilityGateStateEntry,
 } from './eligibility-evaluator.js';
+export {
+  evaluateAndPersistEligibility,
+  type DeploymentEnvironment,
+  type EvaluateAndPersistEligibilityInput,
+  type EvaluateAndPersistEligibilityResult,
+} from './evaluate-and-persist-eligibility.js';

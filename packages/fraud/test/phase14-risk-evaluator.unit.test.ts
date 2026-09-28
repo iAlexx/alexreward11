@@ -35,6 +35,7 @@ function testRule(overrides?: Partial<RiskRuleVersion>): RiskRuleVersion {
     ruleVersion: 1,
     thresholds: TEST_THRESHOLDS,
     signalWeights: TEST_WEIGHTS,
+    signalParams: {},
     actions: TEST_ACTIONS,
     status: 'ACTIVE',
     effectiveFrom: new Date('2020-01-01T00:00:00.000Z'),

@@ -28,6 +28,7 @@ function testRule(signalWeights: Record<string, number>): RiskRuleVersion {
     ruleVersion: 1,
     thresholds: TEST_THRESHOLDS,
     signalWeights,
+    signalParams: {},
     actions: TEST_ACTIONS,
     status: 'ACTIVE',
     effectiveFrom: new Date('2020-01-01T00:00:00.000Z'),
@@ -47,6 +48,20 @@ describe('Phase 14 Step 3 collector registry (unit)', () => {
       'SHARED_DEVICE_SIGNAL',
       'SHARED_NETWORK_SIGNAL',
       'NETWORK_COUNTRY_CHANGED',
+    ]);
+  });
+
+  it('COLLECTOR_SIGNAL_CODES merges Step 3 and Step 11 history codes', async () => {
+    const { COLLECTOR_SIGNAL_CODES, STEP11_HISTORY_SIGNAL_CODES } = await import(
+      '../src/index.js'
+    );
+    expect([...STEP11_HISTORY_SIGNAL_CODES]).toEqual([
+      'AD_REVERSED_REWARD_HISTORY',
+      'REFERRAL_REJECTED_EDGE_HISTORY',
+    ]);
+    expect([...COLLECTOR_SIGNAL_CODES]).toEqual([
+      ...STEP3_COLLECTOR_SIGNAL_CODES,
+      ...STEP11_HISTORY_SIGNAL_CODES,
     ]);
   });
 
@@ -113,7 +128,9 @@ describe('Phase 14 Step 3 collector registry (unit)', () => {
     const source = readFileSync(path, 'utf8');
     expect(source).not.toMatch(/\beval\s*\(/);
     expect(source).not.toMatch(/new Function/);
-    expect(source).not.toMatch(/\$\{.*signal/);
+    // Refuse string-built SQL fragments that interpolate signal identifiers.
+    expect(source).not.toMatch(/`[^`]*\$\{[^}]*signal[^}]*\}[^`]*FROM/i);
+    expect(source).not.toMatch(/query\(\s*`[^`]*\$\{/);
   });
 
   it('RiskSignalFact fixtures remain valid for pure evaluator unit tests', () => {

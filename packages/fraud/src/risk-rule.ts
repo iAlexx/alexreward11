@@ -42,11 +42,31 @@ export type RiskSignalWeightsConfig = Readonly<Record<string, number>>;
 
 export type RiskActionsConfig = Readonly<Record<RiskTier, RiskActionCode>>;
 
+/** History-window parameters for Step 11 parameterized collector signals. */
+export interface RiskHistorySignalParams {
+  readonly minCount: number; // positive int
+  readonly windowDays: number; // positive int
+}
+
+export type RiskSignalParamsConfig = Readonly<
+  Partial<
+    Record<'AD_REVERSED_REWARD_HISTORY' | 'REFERRAL_REJECTED_EDGE_HISTORY', RiskHistorySignalParams>
+  >
+>;
+
+const HISTORY_SIGNAL_PARAM_KEYS = [
+  'AD_REVERSED_REWARD_HISTORY',
+  'REFERRAL_REJECTED_EDGE_HISTORY',
+] as const;
+
+const HISTORY_SIGNAL_PARAM_KEY_SET = new Set<string>(HISTORY_SIGNAL_PARAM_KEYS);
+
 export interface RiskRuleVersion {
   readonly id: string;
   readonly ruleVersion: number;
   readonly thresholds: RiskThresholdsConfig;
   readonly signalWeights: RiskSignalWeightsConfig;
+  readonly signalParams: RiskSignalParamsConfig;
   readonly actions: RiskActionsConfig;
   readonly status: RiskRuleStatus;
   readonly effectiveFrom: Date;
@@ -64,6 +84,7 @@ interface RiskRuleRow {
   readonly rule_version: number;
   readonly thresholds: unknown;
   readonly signal_weights: unknown;
+  readonly signal_params: unknown;
   readonly actions: unknown;
   readonly status: string;
   readonly effective_from: Date;
@@ -71,6 +92,9 @@ interface RiskRuleRow {
   readonly reason: string | null;
   readonly audit_reference: string | null;
 }
+
+const RISK_RULE_SELECT = `SELECT id, rule_version, thresholds, signal_weights, signal_params, actions,
+            status::text AS status, effective_from, effective_to, reason, audit_reference`;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -178,18 +202,107 @@ export function parseRiskActions(raw: unknown): RiskActionsConfig {
   return out;
 }
 
+function assertPositiveInt(label: string, value: unknown): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || Number.isNaN(value) || value <= 0) {
+    throw new FraudDomainError(
+      'RISK_RULE_CONFIG_INVALID',
+      `${label} must be a positive integer`,
+      { label, value },
+    );
+  }
+  return value;
+}
+
+/**
+ * Strict parser for versioned signal_params JSONB.
+ * Only AD_REVERSED_REWARD_HISTORY / REFERRAL_REJECTED_EDGE_HISTORY keys are allowed;
+ * each requires positive-int minCount and windowDays. Empty object is valid.
+ */
+export function parseRiskSignalParams(raw: unknown): RiskSignalParamsConfig {
+  if (!isPlainObject(raw)) {
+    throw new FraudDomainError('RISK_RULE_CONFIG_INVALID', 'signal_params must be an object');
+  }
+  const out: {
+    AD_REVERSED_REWARD_HISTORY?: RiskHistorySignalParams;
+    REFERRAL_REJECTED_EDGE_HISTORY?: RiskHistorySignalParams;
+  } = {};
+
+  for (const [key, value] of Object.entries(raw)) {
+    if (!HISTORY_SIGNAL_PARAM_KEY_SET.has(key)) {
+      throw new FraudDomainError(
+        'RISK_RULE_CONFIG_INVALID',
+        `signal_params has unsupported key ${key}`,
+        { key },
+      );
+    }
+    if (!isPlainObject(value)) {
+      throw new FraudDomainError(
+        'RISK_RULE_CONFIG_INVALID',
+        `signal_params.${key} must be an object`,
+        { key },
+      );
+    }
+    assertNoUnsupportedKeys(`signal_params.${key}`, value, new Set(['minCount', 'windowDays']));
+    if (!Object.prototype.hasOwnProperty.call(value, 'minCount')) {
+      throw new FraudDomainError(
+        'RISK_RULE_CONFIG_INVALID',
+        `signal_params.${key}.minCount is required`,
+        { key },
+      );
+    }
+    if (!Object.prototype.hasOwnProperty.call(value, 'windowDays')) {
+      throw new FraudDomainError(
+        'RISK_RULE_CONFIG_INVALID',
+        `signal_params.${key}.windowDays is required`,
+        { key },
+      );
+    }
+    const params: RiskHistorySignalParams = {
+      minCount: assertPositiveInt(`signal_params.${key}.minCount`, value.minCount),
+      windowDays: assertPositiveInt(`signal_params.${key}.windowDays`, value.windowDays),
+    };
+    if (key === 'AD_REVERSED_REWARD_HISTORY') {
+      out.AD_REVERSED_REWARD_HISTORY = params;
+    } else {
+      out.REFERRAL_REJECTED_EDGE_HISTORY = params;
+    }
+  }
+
+  return out;
+}
+
 export function validateRiskRuleConfig(input: {
   readonly thresholds: unknown;
   readonly signalWeights: unknown;
   readonly actions: unknown;
+  readonly signalParams?: unknown;
 }): {
   readonly thresholds: RiskThresholdsConfig;
   readonly signalWeights: RiskSignalWeightsConfig;
+  readonly signalParams: RiskSignalParamsConfig;
   readonly actions: RiskActionsConfig;
 } {
+  const signalWeights = parseRiskSignalWeights(input.signalWeights);
+  const signalParams = parseRiskSignalParams(
+    input.signalParams === undefined ? {} : input.signalParams,
+  );
+
+  for (const code of HISTORY_SIGNAL_PARAM_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(signalWeights, code)) {
+      if (!Object.prototype.hasOwnProperty.call(signalParams, code)) {
+        throw new FraudDomainError(
+          'RISK_RULE_CONFIG_INVALID',
+          `signal_params.${code} is required when signal_weights configures ${code}`,
+          { code },
+        );
+      }
+    }
+  }
+
   return {
     thresholds: parseRiskThresholds(input.thresholds),
-    signalWeights: parseRiskSignalWeights(input.signalWeights),
+    signalWeights,
+    signalParams,
     actions: parseRiskActions(input.actions),
   };
 }
@@ -198,6 +311,7 @@ function mapRow(row: RiskRuleRow): RiskRuleVersion {
   const config = validateRiskRuleConfig({
     thresholds: row.thresholds,
     signalWeights: row.signal_weights,
+    signalParams: row.signal_params,
     actions: row.actions,
   });
   if (
@@ -213,6 +327,7 @@ function mapRow(row: RiskRuleRow): RiskRuleVersion {
     ruleVersion: row.rule_version,
     thresholds: config.thresholds,
     signalWeights: config.signalWeights,
+    signalParams: config.signalParams,
     actions: config.actions,
     status: row.status,
     effectiveFrom: row.effective_from,
@@ -232,8 +347,7 @@ export async function resolveActiveRiskRuleVersion(
 ): Promise<ResolvedRiskRuleVersion> {
   const at = options?.at ?? new Date();
   const result = await client.query<RiskRuleRow>(
-    `SELECT id, rule_version, thresholds, signal_weights, actions, status::text AS status,
-            effective_from, effective_to, reason, audit_reference
+    `${RISK_RULE_SELECT}
      FROM risk_rule_versions
      WHERE status = 'ACTIVE'
        AND effective_from <= $1::timestamptz
@@ -276,8 +390,7 @@ export async function loadRiskRuleVersionByNumber(
     throw new FraudDomainError('RISK_RULE_CONFIG_INVALID', 'ruleVersion must be a positive integer');
   }
   const result = await client.query<RiskRuleRow>(
-    `SELECT id, rule_version, thresholds, signal_weights, actions, status::text AS status,
-            effective_from, effective_to, reason, audit_reference
+    `${RISK_RULE_SELECT}
      FROM risk_rule_versions
      WHERE rule_version = $1`,
     [ruleVersion],
@@ -305,8 +418,7 @@ export async function resolveActiveRiskRuleVersionForEvaluation(
 ): Promise<ResolvedRiskRuleVersion> {
   const at = new Date();
   const result = await client.query<RiskRuleRow>(
-    `SELECT id, rule_version, thresholds, signal_weights, actions, status::text AS status,
-            effective_from, effective_to, reason, audit_reference
+    `${RISK_RULE_SELECT}
      FROM risk_rule_versions
      WHERE status = 'ACTIVE'
        AND effective_from <= $1::timestamptz

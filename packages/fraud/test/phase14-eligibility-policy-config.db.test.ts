@@ -248,6 +248,7 @@ const ALT_TEST_ELIGIBILITY_POLICY_CONFIG = {
     WITHDRAWAL_REQUEST: {
       requiredGates: ['ACCOUNT_STATE', 'RISK_POLICY'],
       precedence: ['ACCOUNT_STATE', 'RISK_POLICY'],
+      riskAllowedActions: ['ALLOW', 'EXTEND_PENDING', 'MANUAL_REVIEW', 'HELD'],
     },
   },
 } as const;

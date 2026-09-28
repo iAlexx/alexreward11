@@ -2,11 +2,15 @@ import type { PoolClient } from 'pg';
 
 import { FraudDomainError } from './errors.js';
 import type { RiskSignalFact } from './risk-evaluator.js';
-import type { RiskRuleVersion } from './risk-rule.js';
+import type {
+  RiskHistorySignalParams,
+  RiskRuleVersion,
+  RiskSignalParamsConfig,
+} from './risk-rule.js';
 
 /**
  * Phase 14 Step 3/4 threshold-free collector signal codes.
- * Every configured rule signal weight key must map to one of these.
+ * Every configured rule signal weight key must map to a collector implementation.
  */
 export const STEP3_COLLECTOR_SIGNAL_CODES = [
   'OPEN_HIGH_FRAUD_FLAG',
@@ -18,9 +22,24 @@ export const STEP3_COLLECTOR_SIGNAL_CODES = [
   'NETWORK_COUNTRY_CHANGED',
 ] as const;
 
-export type Step3CollectorSignalCode = (typeof STEP3_COLLECTOR_SIGNAL_CODES)[number];
+/** Phase 14 Step 11 parameterized history collector signal codes. */
+export const STEP11_HISTORY_SIGNAL_CODES = [
+  'AD_REVERSED_REWARD_HISTORY',
+  'REFERRAL_REJECTED_EDGE_HISTORY',
+] as const;
 
-const SUPPORTED = new Set<string>(STEP3_COLLECTOR_SIGNAL_CODES);
+export const COLLECTOR_SIGNAL_CODES = [
+  ...STEP3_COLLECTOR_SIGNAL_CODES,
+  ...STEP11_HISTORY_SIGNAL_CODES,
+] as const;
+
+export type Step3CollectorSignalCode = (typeof STEP3_COLLECTOR_SIGNAL_CODES)[number];
+export type Step11HistorySignalCode = (typeof STEP11_HISTORY_SIGNAL_CODES)[number];
+export type CollectorSignalCode = (typeof COLLECTOR_SIGNAL_CODES)[number];
+
+const SUPPORTED = new Set<string>(COLLECTOR_SIGNAL_CODES);
+const STEP3_SET = new Set<string>(STEP3_COLLECTOR_SIGNAL_CODES);
+const HISTORY_SET = new Set<string>(STEP11_HISTORY_SIGNAL_CODES);
 
 export interface CollectConfiguredRiskSignalsInput {
   readonly userId: string;
@@ -45,6 +64,11 @@ interface SourceSnapshot {
   readonly relatedNetworkAccountCount: number;
   readonly observationCountConsidered: number;
   readonly networkCountryChanged: boolean;
+}
+
+interface HistoryCounts {
+  readonly reversedAdRewardCountInWindow: number | null;
+  readonly rejectedReferralCountInWindow: number | null;
 }
 
 /**
@@ -177,7 +201,89 @@ async function loadSourceSnapshot(
   };
 }
 
-function factForCode(code: Step3CollectorSignalCode, source: SourceSnapshot): RiskSignalFact {
+async function loadReversedAdRewardCount(
+  client: PoolClient,
+  userId: string,
+  windowDays: number,
+): Promise<number> {
+  const result = await client.query<{ c: number }>(
+    `SELECT COUNT(*)::int AS c FROM reward_events
+     WHERE user_id = $1::uuid AND source_type = 'AD' AND state = 'REVERSED'
+       AND COALESCE(reversed_at, created_at) >= (now() - ($2::int * INTERVAL '1 day'))`,
+    [userId, windowDays],
+  );
+  const count = result.rows[0]?.c;
+  if (count === undefined) {
+    throw new FraudDomainError('INTERNAL', 'reversed ad reward count query returned no row');
+  }
+  return count;
+}
+
+async function loadRejectedReferralCount(
+  client: PoolClient,
+  userId: string,
+  windowDays: number,
+): Promise<number> {
+  const result = await client.query<{ c: number }>(
+    `SELECT COUNT(*)::int AS c FROM referral_edges
+     WHERE referrer_user_id = $1::uuid AND state = 'REJECTED'
+       AND COALESCE(rejected_at, created_at) >= (now() - ($2::int * INTERVAL '1 day'))`,
+    [userId, windowDays],
+  );
+  const count = result.rows[0]?.c;
+  if (count === undefined) {
+    throw new FraudDomainError('INTERNAL', 'rejected referral count query returned no row');
+  }
+  return count;
+}
+
+function requireHistoryParams(
+  signalParams: RiskSignalParamsConfig,
+  code: Step11HistorySignalCode,
+  ruleVersion: number,
+): RiskHistorySignalParams {
+  const params = signalParams[code];
+  if (params === undefined) {
+    throw new FraudDomainError(
+      'RISK_RULE_CONFIG_INVALID',
+      `history signal ${code} is configured without signal_params`,
+      { code, ruleVersion },
+    );
+  }
+  return params;
+}
+
+async function loadHistoryCounts(
+  client: PoolClient,
+  userId: string,
+  configuredCodes: readonly string[],
+  signalParams: RiskSignalParamsConfig,
+  ruleVersion: number,
+): Promise<HistoryCounts> {
+  let reversedAdRewardCountInWindow: number | null = null;
+  let rejectedReferralCountInWindow: number | null = null;
+
+  if (configuredCodes.includes('AD_REVERSED_REWARD_HISTORY')) {
+    const params = requireHistoryParams(signalParams, 'AD_REVERSED_REWARD_HISTORY', ruleVersion);
+    reversedAdRewardCountInWindow = await loadReversedAdRewardCount(
+      client,
+      userId,
+      params.windowDays,
+    );
+  }
+  if (configuredCodes.includes('REFERRAL_REJECTED_EDGE_HISTORY')) {
+    const params = requireHistoryParams(signalParams, 'REFERRAL_REJECTED_EDGE_HISTORY', ruleVersion);
+    rejectedReferralCountInWindow = await loadRejectedReferralCount(
+      client,
+      userId,
+      params.windowDays,
+    );
+  }
+
+  return { reversedAdRewardCountInWindow, rejectedReferralCountInWindow };
+}
+
+function factForStep3Code(code: Step3CollectorSignalCode, source: SourceSnapshot): RiskSignalFact {
   switch (code) {
     case 'OPEN_HIGH_FRAUD_FLAG': {
       const active = source.openHighCount > 0;
@@ -262,10 +368,69 @@ function factForCode(code: Step3CollectorSignalCode, source: SourceSnapshot): Ri
   }
 }
 
+function factForHistoryCode(
+  code: Step11HistorySignalCode,
+  params: RiskHistorySignalParams,
+  history: HistoryCounts,
+): RiskSignalFact {
+  switch (code) {
+    case 'AD_REVERSED_REWARD_HISTORY': {
+      const count = history.reversedAdRewardCountInWindow;
+      if (count === null) {
+        throw new FraudDomainError('INTERNAL', 'missing reversed ad reward history count');
+      }
+      const active = count >= params.minCount;
+      return {
+        code,
+        active,
+        reasonCode: active ? 'AD_REVERSED_REWARD_HISTORY' : 'NO_AD_REVERSED_REWARD_HISTORY',
+        safeDetails: { reversedAdRewardCount: count },
+      };
+    }
+    case 'REFERRAL_REJECTED_EDGE_HISTORY': {
+      const count = history.rejectedReferralCountInWindow;
+      if (count === null) {
+        throw new FraudDomainError('INTERNAL', 'missing rejected referral history count');
+      }
+      const active = count >= params.minCount;
+      return {
+        code,
+        active,
+        reasonCode: active
+          ? 'REFERRAL_REJECTED_EDGE_HISTORY'
+          : 'NO_REFERRAL_REJECTED_EDGE_HISTORY',
+        safeDetails: { rejectedReferralCount: count },
+      };
+    }
+    default: {
+      const _exhaustive: never = code;
+      throw new FraudDomainError('INTERNAL', `unhandled history collector code ${_exhaustive}`);
+    }
+  }
+}
+
+function factForCode(
+  code: CollectorSignalCode,
+  source: SourceSnapshot,
+  history: HistoryCounts,
+  signalParams: RiskSignalParamsConfig,
+  ruleVersion: number,
+): RiskSignalFact {
+  if (STEP3_SET.has(code)) {
+    return factForStep3Code(code as Step3CollectorSignalCode, source);
+  }
+  if (HISTORY_SET.has(code)) {
+    const historyCode = code as Step11HistorySignalCode;
+    const params = requireHistoryParams(signalParams, historyCode, ruleVersion);
+    return factForHistoryCode(historyCode, params, history);
+  }
+  throw new FraudDomainError('INTERNAL', `unhandled collector code ${code}`);
+}
+
 /**
  * Collect exactly one RiskSignalFact per configured ACTIVE-rule signal weight.
  *
- * Fail closed if any configured code lacks a Step 3–5 collector.
+ * Fail closed if any configured code lacks a Step 3/11 collector.
  * Does not invent thresholds, write source tables, or execute risk actions.
  */
 export async function collectConfiguredRiskSignals(
@@ -280,7 +445,7 @@ export async function collectConfiguredRiskSignals(
     if (!SUPPORTED.has(code)) {
       throw new FraudDomainError(
         'RISK_SIGNAL_COLLECTOR_UNSUPPORTED',
-        `configured signal code ${code} has no Step 3 collector implementation`,
+        `configured signal code ${code} has no collector implementation`,
         { code, ruleVersion: input.rule.ruleVersion },
       );
     }
@@ -295,8 +460,22 @@ export async function collectConfiguredRiskSignals(
     );
   }
 
+  const history = await loadHistoryCounts(
+    client,
+    input.userId,
+    configuredCodes,
+    input.rule.signalParams,
+    input.rule.ruleVersion,
+  );
+
   const signalFacts: RiskSignalFact[] = configuredCodes.map((code) =>
-    factForCode(code as Step3CollectorSignalCode, source),
+    factForCode(
+      code as CollectorSignalCode,
+      source,
+      history,
+      input.rule.signalParams,
+      input.rule.ruleVersion,
+    ),
   );
 
   // Evidence mirrors facts (already code-ascending) for snapshot audit.

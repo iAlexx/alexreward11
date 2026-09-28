@@ -43,11 +43,13 @@ describe('Phase 14 Eligibility core surface (unit)', () => {
       expect(src).not.toMatch(/risk_profiles/);
       expect(src).not.toMatch(/risk_snapshots/);
       expect(src).not.toMatch(/ledger_entries/);
-      expect(src).not.toMatch(/WITHDRAWAL_BLOCKED/);
       expect(src).not.toMatch(/if\s*\(.*TRUSTED.*\)\s*.*ELIGIBLE/i);
       expect(src).not.toMatch(/Founder\s*=>\s*ELIGIBLE/i);
       expect(src).not.toMatch(/evaluateEligibility/);
     }
+    // Decision persistence must not execute adverse withdrawal actions.
+    const decisionSrc = readFileSync(decisionPath, 'utf8');
+    expect(decisionSrc).not.toMatch(/WITHDRAWAL_BLOCKED/);
   });
 
   it('resolveActiveEligibilityPolicyVersion has no latest-version fallback', () => {
