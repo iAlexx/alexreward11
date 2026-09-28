@@ -2,10 +2,11 @@
  * Phase 14 fraud / risk / trust / eligibility core.
  *
  * Owns versioned risk rule resolution, risk evaluation + snapshots/profiles,
- * Trust rule-version authority + immutable trust snapshots, and Eligibility
- * policy-version authority + immutable reason-coded decision persistence.
+ * Trust rule-version authority + immutable trust snapshots, Eligibility
+ * policy-version authority + immutable reason-coded decision persistence,
+ * and a pure deterministic Eligibility gate evaluator (no collectors yet).
  * Does not write the ledger, approve payouts, execute adverse actions,
- * invent Trust scoring policy, or implement Eligibility business evaluation.
+ * invent Trust scoring policy, or invent Eligibility outcome precedence.
  */
 
 export { FraudDomainError, type FraudErrorCode } from './errors.js';
@@ -94,3 +95,12 @@ export {
   type PersistEligibilityDecisionInput,
   type PersistedEligibilityDecision,
 } from './eligibility-decision.js';
+export {
+  ELIGIBILITY_GATE_CODES,
+  evaluateEligibilityGates,
+  type EligibilityEvaluationResult,
+  type EligibilityEvaluatorPolicy,
+  type EligibilityGateCode,
+  type EligibilityGateFact,
+  type EligibilityGateStateEntry,
+} from './eligibility-evaluator.js';
