@@ -31,10 +31,7 @@ export function MoneyAmount({
   return (
     <div className="alex-money">
       <span className="alex-money__label">{label}</span>
-      <span className="alex-money__value">
-        {display}{' '}
-        <span className="alex-money__symbol">{bucket.assetSymbol}</span>
-      </span>
+      <span className="alex-money__value">{display}</span>
       <span className="alex-meta">
         {t('baseUnits')} · {bucket.assetSymbol}
       </span>

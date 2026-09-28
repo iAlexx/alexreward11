@@ -2161,3 +2161,44 @@ a:focus-visible {
     box-shadow: none;
   }
 }
+
+.lootra-unavailable-shell {
+  min-width: 0;
+}
+
+.lootra-unavailable-state {
+  margin: 0;
+  display: inline-flex;
+  width: fit-content;
+  padding: 0.25rem 0.65rem;
+  border-radius: 999px;
+  border: 1px solid rgba(166, 92, 255, 0.28);
+  background: rgba(75, 25, 200, 0.14);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.lootra-unavailable-card {
+  gap: 0.55rem;
+}
+
+/* Step 7 responsive tighten — 320px Telegram compact width */
+@media (max-width: 320px) {
+  .alex-main {
+    padding-inline: 0.75rem;
+  }
+
+  .lootra-bottom-nav__label {
+    font-size: 0.62rem;
+  }
+
+  .lootra-profile-identity,
+  .lootra-wallet-hero,
+  .lootra-earn-hero,
+  .lootra-tasks-hero,
+  .lootra-friends-hero,
+  .lootra-founder-hero,
+  .lootra-support-hero {
+    gap: 0.55rem;
+  }
+}

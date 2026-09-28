@@ -92,7 +92,7 @@ function WalletCard({
 
   return (
     <li className="lootra-wallet-item">
-      <p className="lootra-wallet-address" title={wallet.friendlyAddress}>
+      <p className="lootra-wallet-address" title={wallet.friendlyAddress} dir="ltr">
         <span className="lootra-wallet-address__visual" aria-hidden="true">
           {short}
         </span>

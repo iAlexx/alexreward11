@@ -99,7 +99,9 @@ export function OnboardingGate({ children }: { readonly children: ReactNode }) {
           }}
         >
           {isLast ? t('getStarted') : t('next')}
-          <IconChevron size={18} />
+          <span className="icon-directional" aria-hidden="true">
+            <IconChevron size={18} />
+          </span>
         </button>
       </div>
     </main>

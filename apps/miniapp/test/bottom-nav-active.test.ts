@@ -21,8 +21,14 @@ describe('LOOTRA primary nav active index', () => {
   it('hides the indicator on secondary routes (no fabricated Home)', () => {
     expect(resolvePrimaryNavActiveIndex('/profile')).toBeNull();
     expect(resolvePrimaryNavActiveIndex('/profile/founder')).toBeNull();
+    expect(resolvePrimaryNavActiveIndex('/profile/support')).toBeNull();
+    expect(resolvePrimaryNavActiveIndex('/profile/support/ticket-1')).toBeNull();
     expect(resolvePrimaryNavActiveIndex('/notifications')).toBeNull();
     expect(resolvePrimaryNavActiveIndex('/activity')).toBeNull();
+  });
+
+  it('keeps wallet withdrawal detail under Wallet primary tab', () => {
+    expect(resolvePrimaryNavActiveIndex('/wallet/withdrawals/abc')).toBe(4);
   });
 
   it('does not treat nested paths under / as Home', () => {
