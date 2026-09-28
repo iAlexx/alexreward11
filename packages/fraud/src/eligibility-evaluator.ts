@@ -1,6 +1,6 @@
 import { assertSafePersistedJsonObject } from './canonical.js';
-import type { EligibilityOutcome } from './eligibility-decision.js';
-import type { EligibilityPolicyVersion } from './eligibility-policy.js';
+import type { EligibilityActionType, EligibilityOutcome } from './eligibility-decision.js';
+import type { EligibilityPolicyConfig, EligibilityPolicyVersion } from './eligibility-policy.js';
 import { FraudDomainError } from './errors.js';
 
 /**
@@ -172,6 +172,140 @@ export function evaluateEligibilityGates(
     policyVersion: policy.policyVersion,
     outcome,
     reasonCodes,
+    gateState,
+  };
+}
+
+export interface ConfiguredEligibilityEvaluationResult {
+  readonly policyVersion: number;
+  readonly actionType: EligibilityActionType;
+  readonly outcome: EligibilityOutcome;
+  readonly reasonCodes: readonly string[];
+  readonly primaryBlockedGateCode: EligibilityGateCode | null;
+  readonly gateState: readonly EligibilityGateStateEntry[];
+}
+
+export interface ConfiguredEligibilityEvaluatorPolicy {
+  readonly policyVersion: number;
+  readonly policyConfig: EligibilityPolicyConfig;
+}
+
+/**
+ * Pure configured Eligibility evaluator: required-gate completeness + versioned precedence.
+ * Does NOT collect facts, persist, invent business thresholds, or access the DB.
+ */
+export function evaluateConfiguredEligibility(
+  policy: ConfiguredEligibilityEvaluatorPolicy,
+  actionType: EligibilityActionType,
+  gateFacts: readonly EligibilityGateFact[],
+): ConfiguredEligibilityEvaluationResult {
+  if (!Number.isInteger(policy.policyVersion) || policy.policyVersion <= 0) {
+    throw new FraudDomainError(
+      'ELIGIBILITY_GATE_INVALID',
+      'policy.policyVersion must be a positive integer',
+      { policyVersion: policy.policyVersion },
+    );
+  }
+
+  const actionPolicy = policy.policyConfig.actions[actionType];
+  if (actionPolicy === undefined) {
+    throw new FraudDomainError(
+      'ELIGIBILITY_ACTION_POLICY_NOT_CONFIGURED',
+      `eligibility action ${actionType} is not configured on this policy version`,
+      { actionType, policyVersion: policy.policyVersion },
+    );
+  }
+
+  for (let i = 0; i < gateFacts.length; i += 1) {
+    validateGateFact(gateFacts[i]!, i);
+  }
+
+  const seen = new Set<EligibilityGateCode>();
+  for (const fact of gateFacts) {
+    if (seen.has(fact.code)) {
+      throw new FraudDomainError(
+        'ELIGIBILITY_GATE_DUPLICATE',
+        `duplicate eligibility gate code ${fact.code}`,
+        { code: fact.code },
+      );
+    }
+    seen.add(fact.code);
+  }
+
+  const requiredGateCodes = sortStrings([...actionPolicy.requiredGates]);
+  const providedGateCodes = sortStrings(gateFacts.map((f) => f.code));
+  const requiredSet = new Set(actionPolicy.requiredGates);
+  const providedSet = new Set(gateFacts.map((f) => f.code));
+  const missingGateCodes = sortStrings(
+    actionPolicy.requiredGates.filter((code) => !providedSet.has(code)),
+  );
+  const extraGateCodes = sortStrings(gateFacts.map((f) => f.code).filter((c) => !requiredSet.has(c)));
+
+  if (missingGateCodes.length > 0 || extraGateCodes.length > 0) {
+    throw new FraudDomainError(
+      'ELIGIBILITY_GATE_SET_MISMATCH',
+      'supplied gate facts must equal exactly the action requiredGates set',
+      {
+        requiredGateCodes,
+        providedGateCodes,
+        missingGateCodes,
+        extraGateCodes,
+      },
+    );
+  }
+
+  const canonical = [...gateFacts].sort((a, b) =>
+    a.code < b.code ? -1 : a.code > b.code ? 1 : 0,
+  );
+
+  const gateState: EligibilityGateStateEntry[] = canonical.map((fact) => {
+    const entry: EligibilityGateStateEntry = {
+      code: fact.code,
+      eligible: fact.eligible,
+      reasonCode: fact.reasonCode,
+    };
+    if (fact.safeDetails !== undefined) {
+      return { ...entry, safeDetails: fact.safeDetails };
+    }
+    return entry;
+  });
+
+  const byCode = new Map(canonical.map((fact) => [fact.code, fact]));
+  const failures = canonical.filter((fact) => fact.eligible === false);
+
+  if (failures.length === 0) {
+    return {
+      policyVersion: policy.policyVersion,
+      actionType,
+      outcome: 'ELIGIBLE',
+      reasonCodes: [ALL_PASS_REASON],
+      primaryBlockedGateCode: null,
+      gateState,
+    };
+  }
+
+  let primary: EligibilityGateFact | undefined;
+  for (const code of actionPolicy.precedence) {
+    const fact = byCode.get(code);
+    if (fact !== undefined && fact.eligible === false) {
+      primary = fact;
+      break;
+    }
+  }
+  if (primary === undefined) {
+    throw new FraudDomainError(
+      'ELIGIBILITY_POLICY_CONFIG_INVALID',
+      'precedence did not select a failed required gate',
+      { actionType, policyVersion: policy.policyVersion },
+    );
+  }
+
+  return {
+    policyVersion: policy.policyVersion,
+    actionType,
+    outcome: GATE_BLOCKED_OUTCOME[primary.code],
+    reasonCodes: sortStrings([...new Set(failures.map((f) => f.reasonCode))]),
+    primaryBlockedGateCode: primary.code,
     gateState,
   };
 }

@@ -4,9 +4,10 @@
  * Owns versioned risk rule resolution, risk evaluation + snapshots/profiles,
  * Trust rule-version authority + immutable trust snapshots, Eligibility
  * policy-version authority + immutable reason-coded decision persistence,
- * and a pure deterministic Eligibility gate evaluator (no collectors yet).
+ * and a pure deterministic Eligibility gate evaluator with versioned action
+ * policy config (requiredGates + precedence). No collectors or app wiring yet.
  * Does not write the ledger, approve payouts, execute adverse actions,
- * invent Trust scoring policy, or invent Eligibility outcome precedence.
+ * invent Trust scoring policy, or invent production Eligibility thresholds.
  */
 
 export { FraudDomainError, type FraudErrorCode } from './errors.js';
@@ -79,7 +80,10 @@ export {
 } from './trust-snapshot.js';
 export {
   loadEligibilityPolicyVersionByNumber,
+  parseEligibilityPolicyConfig,
   resolveActiveEligibilityPolicyVersion,
+  type EligibilityActionPolicyConfig,
+  type EligibilityPolicyConfig,
   type EligibilityPolicyStatus,
   type EligibilityPolicyVersion,
   type ResolvedEligibilityPolicyVersion,
@@ -97,7 +101,10 @@ export {
 } from './eligibility-decision.js';
 export {
   ELIGIBILITY_GATE_CODES,
+  evaluateConfiguredEligibility,
   evaluateEligibilityGates,
+  type ConfiguredEligibilityEvaluationResult,
+  type ConfiguredEligibilityEvaluatorPolicy,
   type EligibilityEvaluationResult,
   type EligibilityEvaluatorPolicy,
   type EligibilityGateCode,

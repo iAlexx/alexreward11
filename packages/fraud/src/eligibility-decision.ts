@@ -146,6 +146,13 @@ export async function persistEligibilityDecision(
   assertSafePersistedJsonObject('safeInputs', input.safeInputs);
 
   const policy = await loadEligibilityPolicyVersionByNumber(client, input.policyVersion);
+  if (policy.policyConfig === null) {
+    throw new FraudDomainError(
+      'ELIGIBILITY_POLICY_CONFIG_INVALID',
+      'eligibility policy version has no usable policy_config',
+      { policyVersion: policy.policyVersion },
+    );
+  }
 
   const providerId = input.providerId ?? null;
   const adSessionId = input.adSessionId ?? null;

@@ -136,6 +136,28 @@ export async function insertTrustRule(
   return id;
 }
 
+/** Explicit TEST-ONLY Eligibility policy config — not a production seed. */
+export const TEST_ELIGIBILITY_POLICY_CONFIG = {
+  actions: {
+    WITHDRAWAL_REQUEST: {
+      requiredGates: ['ACCOUNT_STATE', 'RISK_POLICY', 'FEATURE_FLAG'],
+      precedence: ['RISK_POLICY', 'ACCOUNT_STATE', 'FEATURE_FLAG'],
+    },
+    AD_SESSION_START: {
+      requiredGates: ['ACCOUNT_STATE', 'FEATURE_FLAG'],
+      precedence: ['ACCOUNT_STATE', 'FEATURE_FLAG'],
+    },
+    MISSION_CLAIM: {
+      requiredGates: ['ACCOUNT_STATE', 'FEATURE_FLAG'],
+      precedence: ['ACCOUNT_STATE', 'FEATURE_FLAG'],
+    },
+    TASK_CLAIM: {
+      requiredGates: ['ACCOUNT_STATE', 'FEATURE_FLAG'],
+      precedence: ['ACCOUNT_STATE', 'FEATURE_FLAG'],
+    },
+  },
+} as const;
+
 /** Explicit TEST-ONLY Eligibility policy row — not a production seed. */
 export async function insertEligibilityPolicy(
   pool: Pool,
@@ -145,13 +167,20 @@ export async function insertEligibilityPolicy(
     readonly effectiveFrom: Date;
     readonly effectiveTo?: Date | null;
     readonly reason?: string | null;
+    readonly policyConfig?: unknown | null;
   },
 ): Promise<string> {
+  const policyConfig =
+    input.policyConfig !== undefined
+      ? input.policyConfig
+      : input.status === 'ACTIVE'
+        ? TEST_ELIGIBILITY_POLICY_CONFIG
+        : null;
   const result = await pool.query<{ id: string }>(
     `INSERT INTO eligibility_policy_versions (
-       policy_version, status, effective_from, effective_to, reason
+       policy_version, status, effective_from, effective_to, reason, policy_config
      ) VALUES (
-       $1, $2::rule_version_status, $3::timestamptz, $4::timestamptz, $5
+       $1, $2::rule_version_status, $3::timestamptz, $4::timestamptz, $5, $6::jsonb
      )
      RETURNING id`,
     [
@@ -162,6 +191,7 @@ export async function insertEligibilityPolicy(
         ? null
         : input.effectiveTo.toISOString(),
       input.reason ?? 'phase14-eligibility-test-only',
+      policyConfig === null ? null : JSON.stringify(policyConfig),
     ],
   );
   const id = result.rows[0]?.id;
