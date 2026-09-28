@@ -25,6 +25,8 @@ describe('LOOTRA Step 1 shell foundation', () => {
     const nav = await readFile(join(srcRoot, 'components/BottomNav.tsx'), 'utf8');
     expect(nav).toMatch(/AppLink/);
     expect(nav).toMatch(/aria-current/);
+    expect(nav).toMatch(/resolvePrimaryNavActiveIndex/);
+    expect(nav).not.toMatch(/Math\.max/);
     expect(nav).not.toMatch(/next\/link/);
     expect(nav).not.toMatch(/translateX\(-50%\)/);
   });
