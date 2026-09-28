@@ -1,10 +1,10 @@
 /**
- * Phase 14 fraud / risk-rule core.
+ * Phase 14 fraud / risk / trust core.
  *
- * Owns versioned risk rule resolution, deterministic multi-signal evaluation,
- * immutable risk snapshots, and current risk_profiles.
+ * Owns versioned risk rule resolution, risk evaluation + snapshots/profiles,
+ * and Trust rule-version authority + immutable trust snapshots.
  * Does not write the ledger, approve payouts, execute adverse actions,
- * or implement Trust / Eligibility engines.
+ * invent Trust scoring policy, or implement Eligibility engines.
  */
 
 export { FraudDomainError, type FraudErrorCode } from './errors.js';
@@ -62,3 +62,16 @@ export {
   type EvaluateAndPersistRiskInput,
   type EvaluateAndPersistRiskResult,
 } from './evaluate-and-persist.js';
+export {
+  loadTrustRuleVersionByNumber,
+  resolveActiveTrustRuleVersion,
+  type ResolvedTrustRuleVersion,
+  type TrustRuleStatus,
+  type TrustRuleVersion,
+} from './trust-rule.js';
+export {
+  persistTrustSnapshot,
+  type PersistTrustSnapshotInput,
+  type PersistedTrustSnapshot,
+  type TrustState,
+} from './trust-snapshot.js';

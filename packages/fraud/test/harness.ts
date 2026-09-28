@@ -102,3 +102,36 @@ export async function createTestUser(pool: Pool, telegramUserId: string): Promis
   if (id === undefined) throw new Error('user insert failed');
   return id;
 }
+
+/** Explicit TEST-ONLY Trust rule row — not a production seed. */
+export async function insertTrustRule(
+  pool: Pool,
+  input: {
+    readonly ruleVersion: number;
+    readonly status: 'DRAFT' | 'ACTIVE' | 'SUPERSEDED' | 'REVOKED';
+    readonly effectiveFrom: Date;
+    readonly effectiveTo?: Date | null;
+    readonly reason?: string | null;
+  },
+): Promise<string> {
+  const result = await pool.query<{ id: string }>(
+    `INSERT INTO trust_rule_versions (
+       rule_version, status, effective_from, effective_to, reason
+     ) VALUES (
+       $1, $2::rule_version_status, $3::timestamptz, $4::timestamptz, $5
+     )
+     RETURNING id`,
+    [
+      input.ruleVersion,
+      input.status,
+      input.effectiveFrom.toISOString(),
+      input.effectiveTo === undefined || input.effectiveTo === null
+        ? null
+        : input.effectiveTo.toISOString(),
+      input.reason ?? 'phase14-trust-test-only',
+    ],
+  );
+  const id = result.rows[0]?.id;
+  if (id === undefined) throw new Error('trust rule insert failed');
+  return id;
+}

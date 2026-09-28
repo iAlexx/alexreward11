@@ -14,7 +14,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src test",
     "test": "vitest run --fileParallelism=false",
-    "test:phase14": "cross-env PHASE14_FRAUD_TESTS=1 vitest run --fileParallelism=false test/phase14-risk-core.unit.test.ts test/phase14-risk-core.db.test.ts test/phase14-risk-evaluator.unit.test.ts test/phase14-risk-evaluator.db.test.ts test/phase14-risk-signal-collector.unit.test.ts test/phase14-risk-signal-collector.db.test.ts"
+    "test:phase14": "cross-env PHASE14_FRAUD_TESTS=1 vitest run --fileParallelism=false test/phase14-risk-core.unit.test.ts test/phase14-risk-core.db.test.ts test/phase14-risk-evaluator.unit.test.ts test/phase14-risk-evaluator.db.test.ts test/phase14-risk-signal-collector.unit.test.ts test/phase14-risk-signal-collector.db.test.ts test/phase14-trust-core.unit.test.ts test/phase14-trust-core.db.test.ts"
   },
   "dependencies": {
     "pg": "8.23.0"
