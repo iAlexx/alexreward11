@@ -35,6 +35,18 @@ export function formatAtomicAmount(amountAtomic: string): string {
   return value.toString();
 }
 
+/**
+ * Visual thousands grouping only. Every integer digit from the server string is preserved —
+ * no rounding and no decimal/subunit conversion.
+ */
+export function formatAtomicAmountGrouped(amountAtomic: string): string {
+  const value = parseAtomicAmount(amountAtomic);
+  const negative = value < 0n;
+  const digits = (negative ? -value : value).toString();
+  const grouped = digits.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return negative ? `-${grouped}` : grouped;
+}
+
 /** True when the string is a safe atomic amount the UI may render. */
 export function isAtomicAmountString(value: unknown): value is string {
   return typeof value === 'string' && ATOMIC_PATTERN.test(value.trim());
