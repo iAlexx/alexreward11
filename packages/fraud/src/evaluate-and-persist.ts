@@ -29,11 +29,6 @@ export interface EvaluateAndPersistRiskInput {
    * Must not overwrite system fields (ruleVersion / signalState).
    */
   readonly safeContext?: Readonly<Record<string, unknown>>;
-  /**
-   * Instant used for ACTIVE rule effective-window selection.
-   * Defaults to now. Tests may pin this for deterministic version selection.
-   */
-  readonly evaluatedAt?: Date;
 }
 
 export interface EvaluateAndPersistRiskResult {
@@ -46,9 +41,14 @@ export interface EvaluateAndPersistRiskResult {
 /**
  * Authoritative evaluate + persist path.
  *
- * Resolves the ACTIVE risk rule from the DB (never accepts a caller-supplied rule),
- * evaluates signals against that rule, then writes exactly one immutable snapshot and
+ * Resolves the ACTIVE risk rule from the DB using server current time only
+ * (never accepts a caller-supplied rule or evaluation timestamp), evaluates
+ * signals against that rule, then writes exactly one immutable snapshot and
  * one current risk_profiles upsert.
+ *
+ * Historical / effective-window rule lookup remains available only via the
+ * lower-level resolveActiveRiskRuleVersion(client, { at }) helper. Callers
+ * must not regress current risk_profiles by selecting an older evaluation time.
  *
  * Transaction semantics: callers MUST pass a PoolClient already bound to their
  * transaction so snapshot + profile commit/rollback together. This function does
@@ -63,7 +63,7 @@ export async function evaluateAndPersistRisk(
   client: PoolClient,
   input: EvaluateAndPersistRiskInput,
 ): Promise<EvaluateAndPersistRiskResult> {
-  const evaluatedAt = input.evaluatedAt ?? new Date();
+  const evaluatedAt = new Date();
   const context = input.safeContext ?? {};
   assertSafePersistedJsonObject('safeContext', context);
 

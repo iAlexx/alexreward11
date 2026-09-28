@@ -1,7 +1,11 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Pool } from 'pg';
 
-import { FraudDomainError, evaluateAndPersistRisk } from '../src/index.js';
+import {
+  FraudDomainError,
+  evaluateAndPersistRisk,
+  resolveActiveRiskRuleVersion,
+} from '../src/index.js';
 import {
   createPool,
   createTestUser,
@@ -29,6 +33,12 @@ const SIGNAL_WEIGHTS = {
   HEAVY_A: 60,
   HEAVY_B: 50,
 } as const;
+
+function useServerTime(at: Date): void {
+  // Fake Date only so async pg I/O is not stalled by timer mocks.
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(at);
+}
 
 describe.skipIf(phase14DatabaseUrl === '')('Phase 14 evaluateAndPersistRisk DB', () => {
   let pool: Pool;
@@ -64,16 +74,25 @@ describe.skipIf(phase14DatabaseUrl === '')('Phase 14 evaluateAndPersistRisk DB',
     await pool.end();
   });
 
-  it('resolves DB rule versions by evaluatedAt; preserves old snapshot; updates profile', async () => {
+  beforeEach(() => {
+    useServerTime(AFTER_BOUNDARY);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('resolves DB rule versions by server time; preserves old snapshot; updates profile', async () => {
     // One evaluateAndPersistRisk call => exactly one snapshot + one profile upsert.
     // Reevaluation may create a later audit snapshot; there is no global snapshot dedupe.
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
+
+      useServerTime(BEFORE_BOUNDARY);
       const first = await evaluateAndPersistRisk(client, {
         userId,
         decisionScope: 'WITHDRAWAL_REQUEST',
-        evaluatedAt: BEFORE_BOUNDARY,
         signalFacts: [
           { code: 'ACCOUNT_AGE', active: true, reasonCode: 'ACCOUNT_AGE_ACTIVE' },
           { code: 'WALLET_REUSE', active: false, reasonCode: 'WALLET_OK' },
@@ -100,10 +119,10 @@ describe.skipIf(phase14DatabaseUrl === '')('Phase 14 evaluateAndPersistRisk DB',
       });
       const firstSnapshotId = first.snapshot.id;
 
+      useServerTime(AFTER_BOUNDARY);
       const second = await evaluateAndPersistRisk(client, {
         userId,
         decisionScope: 'WITHDRAWAL_REQUEST',
-        evaluatedAt: AFTER_BOUNDARY,
         signalFacts: [
           { code: 'ACCOUNT_AGE', active: true, reasonCode: 'ACCOUNT_AGE_ACTIVE' },
           { code: 'WALLET_REUSE', active: true, reasonCode: 'WALLET_REUSE_ACTIVE' },
@@ -165,7 +184,6 @@ describe.skipIf(phase14DatabaseUrl === '')('Phase 14 evaluateAndPersistRisk DB',
       const result = await evaluateAndPersistRisk(client, {
         userId,
         decisionScope: 'WITHDRAWAL_REQUEST',
-        evaluatedAt: AFTER_BOUNDARY,
         signalFacts: [{ code: 'ACCOUNT_AGE', active: true, reasonCode: 'ACCOUNT_AGE_ACTIVE' }],
         safeContext: {
           ruleVersion: 999,
@@ -197,7 +215,6 @@ describe.skipIf(phase14DatabaseUrl === '')('Phase 14 evaluateAndPersistRisk DB',
       const result = await evaluateAndPersistRisk(client, {
         userId,
         decisionScope: 'WITHDRAWAL_REQUEST',
-        evaluatedAt: AFTER_BOUNDARY,
         signalFacts: [
           { code: 'ACCOUNT_AGE', active: false, reasonCode: 'ACCOUNT_AGE_OK' },
           { code: 'WALLET_REUSE', active: false, reasonCode: 'WALLET_OK' },
@@ -236,7 +253,6 @@ describe.skipIf(phase14DatabaseUrl === '')('Phase 14 evaluateAndPersistRisk DB',
         evaluateAndPersistRisk(client, {
           userId,
           decisionScope: 'WITHDRAWAL_REQUEST',
-          evaluatedAt: AFTER_BOUNDARY,
           signalFacts: [{ code: 'NOT_IN_RULE', active: true, reasonCode: 'UNKNOWN_SIGNAL' }],
         }),
       ).rejects.toBeInstanceOf(FraudDomainError);
@@ -263,11 +279,22 @@ describe.skipIf(phase14DatabaseUrl === '')('Phase 14 evaluateAndPersistRisk DB',
         evaluateAndPersistRisk(client, {
           userId,
           decisionScope: 'WITHDRAWAL_REQUEST',
-          evaluatedAt: AFTER_BOUNDARY,
           signalFacts: [{ code: 'ACCOUNT_AGE', active: true, reasonCode: 'ACCOUNT_AGE_ACTIVE' }],
           safeContext: { access_token: 'nope' },
         }),
       ).rejects.toMatchObject({ code: 'RISK_SNAPSHOT_INVALID' });
+    } finally {
+      client.release();
+    }
+  });
+
+  it('lower-level resolveActiveRiskRuleVersion still accepts explicit historical at', async () => {
+    const client = await pool.connect();
+    try {
+      const historical = await resolveActiveRiskRuleVersion(client, { at: BEFORE_BOUNDARY });
+      expect(historical.ruleVersion).toBe(1);
+      const current = await resolveActiveRiskRuleVersion(client, { at: AFTER_BOUNDARY });
+      expect(current.ruleVersion).toBe(2);
     } finally {
       client.release();
     }
@@ -286,6 +313,10 @@ describe.skipIf(phase14DatabaseUrl === '')('Phase 14 evaluateAndPersistRisk rule
 
   afterAll(async () => {
     await pool.end();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('no ACTIVE rule => RISK_RULE_NOT_CONFIGURED and no writes', async () => {
@@ -349,6 +380,7 @@ describe.skipIf(phase14DatabaseUrl === '')('Phase 14 evaluateAndPersistRisk rule
       [userId],
     );
 
+    useServerTime(new Date('2026-01-01T00:00:00.000Z'));
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -356,7 +388,6 @@ describe.skipIf(phase14DatabaseUrl === '')('Phase 14 evaluateAndPersistRisk rule
         evaluateAndPersistRisk(client, {
           userId,
           decisionScope: 'WITHDRAWAL_REQUEST',
-          evaluatedAt: new Date('2026-01-01T00:00:00.000Z'),
           signalFacts: [{ code: 'ACCOUNT_AGE', active: true, reasonCode: 'ACCOUNT_AGE_ACTIVE' }],
         }),
       ).rejects.toMatchObject({ code: 'RISK_RULE_NOT_CONFIGURED' });
@@ -394,6 +425,7 @@ describe.skipIf(phase14DatabaseUrl === '')('Phase 14 evaluateAndPersistRisk rule
       [userId],
     );
 
+    useServerTime(new Date('2026-01-01T00:00:00.000Z'));
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
@@ -401,7 +433,6 @@ describe.skipIf(phase14DatabaseUrl === '')('Phase 14 evaluateAndPersistRisk rule
         evaluateAndPersistRisk(client, {
           userId,
           decisionScope: 'WITHDRAWAL_REQUEST',
-          evaluatedAt: new Date('2026-01-01T00:00:00.000Z'),
           signalFacts: [{ code: 'ACCOUNT_AGE', active: true, reasonCode: 'ACCOUNT_AGE_ACTIVE' }],
         }),
       ).rejects.toBeInstanceOf(FraudDomainError);

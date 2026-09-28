@@ -232,7 +232,7 @@ describe('Phase 14 authoritative persistence surface (unit)', () => {
     expect(names).toContain('evaluateRiskSignals');
   });
 
-  it('EvaluateAndPersistRiskInput source has no caller rule field', () => {
+  it('EvaluateAndPersistRiskInput has no caller rule or time-authority fields', () => {
     const path = fileURLToPath(new URL('../src/evaluate-and-persist.ts', import.meta.url));
     const source = readFileSync(path, 'utf8');
     const inputBlock = source.match(
@@ -240,7 +240,15 @@ describe('Phase 14 authoritative persistence surface (unit)', () => {
     )?.[0];
     expect(inputBlock).toBeDefined();
     expect(inputBlock).not.toMatch(/^\s*readonly rule:/m);
-    expect(source).toMatch(/resolveActiveRiskRuleVersion\(client/);
+    expect(inputBlock).not.toMatch(/evaluatedAt/);
+    expect(inputBlock).not.toMatch(/effectiveAt/);
+    expect(inputBlock).not.toMatch(/ruleAt/);
+    expect(inputBlock).not.toMatch(/calculatedAt/);
+    expect(inputBlock).not.toMatch(/evaluationTime/);
+    expect(inputBlock).not.toMatch(/timestamp/);
+    expect(source).toMatch(/const evaluatedAt = new Date\(\);/);
+    expect(source).toMatch(/resolveActiveRiskRuleVersion\(client,\s*\{\s*at:\s*evaluatedAt\s*\}\)/);
     expect(source).toMatch(/context,/);
+    expect(source).not.toMatch(/input\.evaluatedAt/);
   });
 });
