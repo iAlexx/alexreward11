@@ -5,7 +5,7 @@ import type { RiskSignalFact } from './risk-evaluator.js';
 import type { RiskRuleVersion } from './risk-rule.js';
 
 /**
- * Phase 14 Step 3 threshold-free collector signal codes.
+ * Phase 14 Step 3/4 threshold-free collector signal codes.
  * Every configured rule signal weight key must map to one of these.
  */
 export const STEP3_COLLECTOR_SIGNAL_CODES = [
@@ -38,7 +38,8 @@ interface SourceSnapshot {
   readonly openHighCount: number;
   readonly openCriticalCount: number;
   readonly confirmedCount: number;
-  readonly sharedPayoutCount: number;
+  /** Distinct other users sharing an active verified primary payout wallet. */
+  readonly relatedPayoutAccountCount: number;
   readonly sharedDeviceCount: number;
   readonly sharedNetworkCount: number;
   readonly observationCountConsidered: number;
@@ -46,8 +47,11 @@ interface SourceSnapshot {
 }
 
 /**
- * Load Step 3 source aggregates in ONE statement so all collectors observe
+ * Load collector source aggregates in ONE statement so all collectors observe
  * the same READ COMMITTED statement snapshot. SQL is static (no dynamic SQL).
+ *
+ * SHARED_PAYOUT_WALLET is derived from live user_wallets truth (verified +
+ * primary + not disabled), not from wallet_relationships.
  */
 async function loadSourceSnapshot(
   client: PoolClient,
@@ -58,7 +62,7 @@ async function loadSourceSnapshot(
     open_high_count: number;
     open_critical_count: number;
     confirmed_count: number;
-    shared_payout_count: number;
+    related_payout_account_count: number;
     shared_device_count: number;
     shared_network_count: number;
     observation_count_considered: number;
@@ -81,11 +85,23 @@ async function loadSourceSnapshot(
        FROM fraud_flags
        WHERE user_id = $1::uuid
      ),
+     payout_reuse AS (
+       SELECT COUNT(DISTINCT other.user_id)::int AS related_payout_account_count
+       FROM user_wallets AS target_wallet
+       INNER JOIN user_wallets AS other
+         ON other.network_id = target_wallet.network_id
+        AND other.raw_address = target_wallet.raw_address
+        AND other.user_id <> target_wallet.user_id
+        AND other.verified = true
+        AND other.is_primary = true
+        AND other.disabled_at IS NULL
+       WHERE target_wallet.user_id = $1::uuid
+         AND target_wallet.verified = true
+         AND target_wallet.is_primary = true
+         AND target_wallet.disabled_at IS NULL
+     ),
      rel_counts AS (
        SELECT
-         COUNT(*) FILTER (
-           WHERE relationship_type = 'SHARED_PAYOUT_WALLET'
-         )::int AS shared_payout_count,
          COUNT(*) FILTER (
            WHERE relationship_type = 'SHARED_DEVICE_SIGNAL'
          )::int AS shared_device_count,
@@ -117,12 +133,13 @@ async function loadSourceSnapshot(
        flag_counts.open_high_count,
        flag_counts.open_critical_count,
        flag_counts.confirmed_count,
-       rel_counts.shared_payout_count,
+       payout_reuse.related_payout_account_count,
        rel_counts.shared_device_count,
        rel_counts.shared_network_count,
        country_agg.observation_count_considered,
        country_agg.network_country_changed
      FROM flag_counts
+     CROSS JOIN payout_reuse
      CROSS JOIN rel_counts
      CROSS JOIN country_agg`,
     [userId],
@@ -138,7 +155,7 @@ async function loadSourceSnapshot(
     openHighCount: row.open_high_count,
     openCriticalCount: row.open_critical_count,
     confirmedCount: row.confirmed_count,
-    sharedPayoutCount: row.shared_payout_count,
+    relatedPayoutAccountCount: row.related_payout_account_count,
     sharedDeviceCount: row.shared_device_count,
     sharedNetworkCount: row.shared_network_count,
     observationCountConsidered: row.observation_count_considered,
@@ -176,12 +193,13 @@ function factForCode(code: Step3CollectorSignalCode, source: SourceSnapshot): Ri
       };
     }
     case 'SHARED_PAYOUT_WALLET': {
-      const active = source.sharedPayoutCount > 0;
+      const relatedAccountCount = source.relatedPayoutAccountCount;
+      const active = relatedAccountCount > 0;
       return {
         code,
         active,
         reasonCode: active ? 'SHARED_PAYOUT_WALLET' : 'NO_SHARED_PAYOUT_WALLET',
-        safeDetails: { relationshipCount: source.sharedPayoutCount },
+        safeDetails: { relatedAccountCount },
       };
     }
     case 'SHARED_DEVICE_SIGNAL': {
@@ -232,7 +250,7 @@ function factForCode(code: Step3CollectorSignalCode, source: SourceSnapshot): Ri
 /**
  * Collect exactly one RiskSignalFact per configured ACTIVE-rule signal weight.
  *
- * Fail closed if any configured code lacks a Step 3 collector.
+ * Fail closed if any configured code lacks a Step 3/4 collector.
  * Does not invent thresholds, write source tables, or execute risk actions.
  */
 export async function collectConfiguredRiskSignals(

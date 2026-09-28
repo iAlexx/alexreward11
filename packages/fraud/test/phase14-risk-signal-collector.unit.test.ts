@@ -121,7 +121,7 @@ describe('Phase 14 Step 3 collector registry (unit)', () => {
       code: 'SHARED_PAYOUT_WALLET',
       active: false,
       reasonCode: 'NO_SHARED_PAYOUT_WALLET',
-      safeDetails: { relationshipCount: 0 },
+      safeDetails: { relatedAccountCount: 0 },
     };
     expect(sample.active).toBe(false);
   });

@@ -123,13 +123,21 @@ describe.skipIf(phase14DatabaseUrl === '')('Phase 14 evaluateAndPersistRisk DB',
       expect(first.snapshot.safeInputs.signalEvidence).toBeTruthy();
       const firstSnapshotId = first.snapshot.id;
 
+      const networkId = (
+        await client.query<{ id: string }>(
+          `SELECT id FROM networks WHERE code = 'TON_TESTNET' LIMIT 1`,
+        )
+      ).rows[0]?.id;
+      if (networkId === undefined) throw new Error('TON_TESTNET fixture missing');
+      const sharedRaw = '0:sharedpayoutwalletaddrstep4aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
       await client.query(
-        `INSERT INTO wallet_relationships (
-           relationship_type, user_id, related_user_id
-         ) VALUES (
-           'SHARED_PAYOUT_WALLET'::wallet_relationship_type, $1::uuid, $2::uuid
-         )`,
-        [userId, relatedUserId],
+        `INSERT INTO user_wallets (
+           user_id, network_id, chain, raw_address, friendly_address,
+           is_primary, verified, verification_method, verified_at, became_primary_at
+         ) VALUES
+         ($1::uuid, $3::uuid, 'TON', $4, 'EQ_SHARED_A', true, true, 'TON_PROOF', now(), now()),
+         ($2::uuid, $3::uuid, 'TON', $4, 'EQ_SHARED_B', true, true, 'TON_PROOF', now(), now())`,
+        [userId, relatedUserId, networkId, sharedRaw],
       );
 
       useServerTime(AFTER_BOUNDARY);
