@@ -62,7 +62,12 @@ function normalizeReasonCodes(codes: readonly string[]): readonly string[] {
  * Persist an already-produced Trust evaluation as an immutable snapshot.
  *
  * Does NOT calculate Trust, invent thresholds, read Membership/Founder,
- * mutate users table trust columns, clear fraud holds, or grant payout benefits.
+ * clear fraud holds, or grant payout benefits. users.trust_state projection
+ * is owned by evaluateAndPersistTrust, not this primitive.
+ *
+ * When the referenced rule carries policy_config it must parse (via
+ * loadTrustRuleVersionForSnapshot). Authoritative evaluation requires a
+ * valid ACTIVE policy_config before calling this helper.
  */
 export async function persistTrustSnapshot(
   client: PoolClient,
@@ -81,7 +86,8 @@ export async function persistTrustSnapshot(
     );
   }
 
-  // Rule version must exist; hold FOR SHARE through caller TX (Step 10).
+  // Rule version must exist; hold FOR SHARE through caller TX (Step 10/12).
+  // policy_config present on the row must parse successfully via mapRow.
   const rule = await loadTrustRuleVersionForSnapshot(client, input.ruleVersion);
   const reasonCodes = normalizeReasonCodes(input.reasonCodes);
   assertSafePersistedJsonObject('signals', input.signals);

@@ -3,13 +3,15 @@
  *
  * Owns versioned risk rule resolution (including signal_params), risk evaluation
  * + snapshots/profiles, Step 3/11 risk signal collectors, Trust rule-version
- * authority + immutable trust snapshots, Eligibility policy-version authority +
- * immutable reason-coded decision persistence, a pure deterministic Eligibility
- * gate evaluator with versioned action policy config (requiredGates + precedence
- * + riskAllowedActions), and the authoritative evaluateAndPersistEligibility
- * path. Does not write the ledger, approve payouts, execute adverse actions,
- * invent Trust scoring policy, invent country authority, or invent production
- * Eligibility thresholds / production policy seeds.
+ * authority + versioned Trust policy_config + collector/evaluator + immutable
+ * trust snapshots + users.trust_state projection, Eligibility policy-version
+ * authority + immutable reason-coded decision persistence, a pure deterministic
+ * Eligibility gate evaluator with versioned action policy config (requiredGates
+ * + precedence + riskAllowedActions), and the authoritative
+ * evaluateAndPersistEligibility path. Does not write the ledger, approve
+ * payouts, execute adverse actions, invent production Trust/Risk thresholds,
+ * invent country authority, or invent production Eligibility policy seeds.
+ * Trust stays separate from Risk and never grants payout benefits.
  */
 
 export { FraudDomainError, type FraudErrorCode } from './errors.js';
@@ -76,11 +78,23 @@ export {
   type EvaluateAndPersistRiskResult,
 } from './evaluate-and-persist.js';
 export {
+  TRUST_SIGNAL_CODES,
   loadTrustRuleVersionByNumber,
+  loadTrustRuleVersionForSnapshot,
+  parseTrustPolicyConfig,
   resolveActiveTrustRuleVersion,
+  resolveActiveTrustRuleVersionForEvaluation,
   type ResolvedTrustRuleVersion,
+  type TrustAccountAgeSignalConfig,
+  type TrustConfirmedPayoutHistorySignalConfig,
+  type TrustPolicyConfig,
+  type TrustPolicySignalsConfig,
+  type TrustRewardedAdHistorySignalConfig,
   type TrustRuleStatus,
   type TrustRuleVersion,
+  type TrustSignalCode,
+  type TrustStateThresholdsConfig,
+  type TrustVerifiedPrimaryWalletAgeSignalConfig,
 } from './trust-rule.js';
 export {
   persistTrustSnapshot,
@@ -88,6 +102,22 @@ export {
   type PersistedTrustSnapshot,
   type TrustState,
 } from './trust-snapshot.js';
+export {
+  evaluateTrustSignals,
+  type TrustEvaluationResult,
+  type TrustSignalContribution,
+  type TrustSignalFact,
+} from './trust-evaluator.js';
+export {
+  collectConfiguredTrustSignals,
+  type CollectConfiguredTrustSignalsInput,
+  type CollectConfiguredTrustSignalsResult,
+} from './trust-signal-collector.js';
+export {
+  evaluateAndPersistTrust,
+  type EvaluateAndPersistTrustInput,
+  type EvaluateAndPersistTrustResult,
+} from './evaluate-and-persist-trust.js';
 export {
   loadEligibilityPolicyVersionByNumber,
   parseEligibilityPolicyConfig,

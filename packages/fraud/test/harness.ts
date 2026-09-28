@@ -105,6 +105,24 @@ export async function createTestUser(pool: Pool, telegramUserId: string): Promis
   return id;
 }
 
+/**
+ * Explicit TEST-ONLY Trust policy fixture — not a production seed.
+ * Used as the ACTIVE default for insertTrustRule when policyConfig is omitted.
+ */
+export const TEST_TRUST_POLICY_CONFIG = {
+  signals: {
+    ACCOUNT_AGE: { weight: 25, minDays: 7 },
+    VERIFIED_PRIMARY_WALLET_AGE: { weight: 25, minDays: 3 },
+    REWARDED_AD_HISTORY: { weight: 25, minCount: 1 },
+    CONFIRMED_PAYOUT_HISTORY: { weight: 25, minCount: 1 },
+  },
+  stateThresholds: {
+    basicMin: 25,
+    establishedMin: 50,
+    trustedMin: 75,
+  },
+} as const;
+
 /** Explicit TEST-ONLY Trust rule row — not a production seed. */
 export async function insertTrustRule(
   pool: Pool,
@@ -114,13 +132,20 @@ export async function insertTrustRule(
     readonly effectiveFrom: Date;
     readonly effectiveTo?: Date | null;
     readonly reason?: string | null;
+    readonly policyConfig?: unknown | null;
   },
 ): Promise<string> {
+  const policyConfig =
+    input.policyConfig !== undefined
+      ? input.policyConfig
+      : input.status === 'ACTIVE'
+        ? TEST_TRUST_POLICY_CONFIG
+        : null;
   const result = await pool.query<{ id: string }>(
     `INSERT INTO trust_rule_versions (
-       rule_version, status, effective_from, effective_to, reason
+       rule_version, status, effective_from, effective_to, reason, policy_config
      ) VALUES (
-       $1, $2::rule_version_status, $3::timestamptz, $4::timestamptz, $5
+       $1, $2::rule_version_status, $3::timestamptz, $4::timestamptz, $5, $6::jsonb
      )
      RETURNING id`,
     [
@@ -131,6 +156,7 @@ export async function insertTrustRule(
         ? null
         : input.effectiveTo.toISOString(),
       input.reason ?? 'phase14-trust-test-only',
+      policyConfig === null ? null : JSON.stringify(policyConfig),
     ],
   );
   const id = result.rows[0]?.id;

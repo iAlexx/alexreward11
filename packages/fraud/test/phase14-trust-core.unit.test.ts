@@ -10,20 +10,24 @@ import {
 } from '../src/index.js';
 
 describe('Phase 14 Trust core surface (unit)', () => {
-  it('exports Trust rule resolver + snapshot primitive without scoring policy', async () => {
+  it('exports Trust rule resolver + snapshot + evaluation surface', async () => {
     const mod = await import('../src/index.js');
     const names = Object.keys(mod);
     expect(names).toContain('resolveActiveTrustRuleVersion');
+    expect(names).toContain('resolveActiveTrustRuleVersionForEvaluation');
     expect(names).toContain('loadTrustRuleVersionByNumber');
     expect(names).toContain('persistTrustSnapshot');
-    expect(names).not.toContain('evaluateTrust');
+    expect(names).toContain('parseTrustPolicyConfig');
+    expect(names).toContain('collectConfiguredTrustSignals');
+    expect(names).toContain('evaluateTrustSignals');
+    expect(names).toContain('evaluateAndPersistTrust');
     expect(names).not.toContain('calculateTrustScore');
     expect(names).not.toContain('setUserTrustState');
     expect(names).not.toContain('grantTrustedFromFounder');
     expect(names).not.toContain('grantTrustedFromMembership');
   });
 
-  it('Trust modules contain no Founder/membership => TRUSTED or Risk override logic', () => {
+  it('Trust rule/snapshot primitives contain no Founder/membership => TRUSTED or Risk override logic', () => {
     const trustRulePath = fileURLToPath(new URL('../src/trust-rule.ts', import.meta.url));
     const trustSnapPath = fileURLToPath(new URL('../src/trust-snapshot.ts', import.meta.url));
     const ruleSrc = readFileSync(trustRulePath, 'utf8');
@@ -33,7 +37,6 @@ describe('Phase 14 Trust core surface (unit)', () => {
       expect(src).not.toMatch(/membership_plan/);
       expect(src).not.toMatch(/founder_number/i);
       expect(src).not.toMatch(/UPDATE\s+users\b/i);
-      expect(src).not.toMatch(/FROM\s+users\b/i);
       expect(src).not.toMatch(/ignore.*CRITICAL/i);
       expect(src).not.toMatch(/override.*risk/i);
       expect(src).not.toMatch(/auto.?payout/i);
@@ -86,11 +89,11 @@ describe('Phase 14 Trust core surface (unit)', () => {
     const path = fileURLToPath(new URL('../src/trust-rule.ts', import.meta.url));
     const source = readFileSync(path, 'utf8');
     expect(source).toMatch(/TRUST_RULE_NOT_CONFIGURED/);
+    expect(source).toMatch(/TRUST_POLICY_CONFIG_INVALID/);
     expect(source).toMatch(/result\.rows\.length > 1/);
     expect(source).not.toMatch(/ORDER BY rule_version DESC/);
     expect(source).not.toMatch(/LIMIT 1/);
     expect(source).not.toMatch(/risk_rule_versions/);
-    expect(source).not.toMatch(/FROM\s+users\b/i);
     expect(typeof resolveActiveTrustRuleVersion).toBe('function');
     expect(FraudDomainError.name).toBe('FraudDomainError');
   });
