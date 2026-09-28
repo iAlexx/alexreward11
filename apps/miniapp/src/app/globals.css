@@ -1660,3 +1660,220 @@ a:focus-visible {
     box-shadow: none;
   }
 }
+
+/* —— LOOTRA Tasks / Friends (Step 5) —— */
+.lootra-tasks,
+.lootra-friends {
+  min-width: 0;
+}
+
+.lootra-tasks-hero,
+.lootra-friends-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.25rem 0 0.5rem;
+}
+
+.lootra-tasks-hero__copy,
+.lootra-friends-hero__copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.lootra-tasks-hero__visual,
+.lootra-friends-hero__visual {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 140px;
+  overflow: hidden;
+}
+
+.lootra-tasks-hero__orbit,
+.lootra-friends-hero__orbit,
+.lootra-engine-unavailable__orbit {
+  position: absolute;
+  width: 140px;
+  height: 140px;
+  border-radius: 50%;
+  border: 1px solid rgba(166, 92, 255, 0.2);
+  box-shadow: 0 0 32px rgba(75, 25, 200, 0.12);
+  pointer-events: none;
+}
+
+.lootra-tasks-hero__art,
+.lootra-friends-hero__art {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 170px);
+  height: auto;
+  object-fit: contain;
+  filter: drop-shadow(0 16px 16px rgba(0, 0, 0, 0.45));
+}
+
+[dir='rtl'] .lootra-tasks-hero__art,
+[dir='rtl'] .lootra-friends-hero__art,
+[dir='rtl'] .lootra-engine-unavailable__art {
+  transform: none;
+}
+
+.lootra-engine-unavailable {
+  display: grid;
+  grid-template-columns: minmax(0, 0.7fr) minmax(0, 1.3fr);
+  gap: 0.85rem;
+  align-items: center;
+  padding: 1rem;
+  border-radius: 1.15rem;
+  border: 1px solid rgba(122, 53, 255, 0.16);
+  background: color-mix(in srgb, var(--lootra-surface-elevated) 82%, transparent);
+}
+
+.lootra-engine-unavailable__visual {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 110px;
+  overflow: hidden;
+}
+
+.lootra-engine-unavailable__art {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 110px);
+  height: auto;
+  object-fit: contain;
+  opacity: 0.92;
+  filter: drop-shadow(0 12px 14px rgba(0, 0, 0, 0.4));
+}
+
+.lootra-engine-unavailable__copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.lootra-tasks-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.lootra-task-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding: 1rem;
+  border-radius: 1.1rem;
+  border: 1px solid rgba(122, 53, 255, 0.14);
+  background: color-mix(in srgb, var(--lootra-surface-elevated) 82%, transparent);
+  min-width: 0;
+}
+
+.lootra-task-row__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.lootra-task-state {
+  flex-shrink: 0;
+  font-size: 0.8rem;
+  font-weight: 650;
+  color: rgba(216, 169, 255, 0.9);
+}
+
+.lootra-task-progress__bar {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+.lootra-task-progress__bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--lootra-purple-deep), var(--lootra-purple-bright));
+}
+
+.lootra-friends-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 1rem;
+  border-radius: 1.15rem;
+  border: 1px solid rgba(122, 53, 255, 0.16);
+  background: color-mix(in srgb, var(--lootra-surface-elevated) 82%, transparent);
+}
+
+.lootra-friends-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.lootra-friends-stats dt {
+  margin: 0;
+  font-size: 0.82rem;
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.lootra-friends-stats dd {
+  margin: 0.2rem 0 0;
+  font-size: 1.25rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.lootra-referral-code {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.lootra-referral-code__value {
+  margin: 0;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+  unicode-bidi: isolate;
+}
+
+.lootra-referral-code .lootra-btn {
+  min-height: 44px;
+  width: fit-content;
+}
+
+@media (max-width: 360px) {
+  .lootra-tasks-hero,
+  .lootra-friends-hero,
+  .lootra-engine-unavailable {
+    grid-template-columns: 1fr;
+  }
+
+  .lootra-tasks-hero__visual,
+  .lootra-friends-hero__visual {
+    order: -1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lootra-tasks-hero__orbit,
+  .lootra-friends-hero__orbit,
+  .lootra-engine-unavailable__orbit {
+    animation: none !important;
+    box-shadow: none;
+  }
+}
