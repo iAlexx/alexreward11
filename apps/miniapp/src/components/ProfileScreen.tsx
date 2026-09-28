@@ -9,24 +9,30 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslations } from 'next-intl';
 import { useState } from 'react';
 
-import { ApiError } from '../lib/api/client';
 import { privacyPolicyUrl, termsOfServiceUrl } from '../lib/env';
+import {
+  profileDisplayName,
+  profileInitials,
+} from '../lib/profile/profile-display';
 import { queryKeys } from '../lib/query/keys';
 import { useAuth } from '../providers/AuthProvider';
 import { AppLink } from './AppLink';
 import { DomainStateView } from './DomainState';
+import { ProfileSkeleton } from './ProfileSkeleton';
 
 const LOCALES: readonly LocaleCode[] = ['ar', 'en', 'ru'];
-
 const PAYOUT_MODES: readonly PublicPayoutIdentityMode[] = ['SHOW_USERNAME', 'HIDE_IDENTITY'];
 
+/**
+ * Profile settings + account surfaces.
+ * Writable settings PATCH only preferredLocale and publicPayoutIdentityMode.
+ * Support ticket flows live under /profile/support.
+ */
 export function ProfileScreen() {
   const t = useTranslations('profile');
   const common = useTranslations('common');
   const { api, signOut, setPreferredLocale, user } = useAuth();
   const queryClient = useQueryClient();
-  const [supportSubject, setSupportSubject] = useState('');
-  const [supportBody, setSupportBody] = useState('');
   const [deletionConfirmed, setDeletionConfirmed] = useState(false);
 
   const termsUrl = termsOfServiceUrl();
@@ -35,11 +41,6 @@ export function ProfileScreen() {
   const settings = useQuery({
     queryKey: queryKeys.settings,
     queryFn: () => api.getSettings(),
-  });
-
-  const tickets = useQuery({
-    queryKey: queryKeys.supportTickets,
-    queryFn: () => api.listSupportTickets(),
   });
 
   const patchSettings = useMutation({
@@ -54,75 +55,86 @@ export function ProfileScreen() {
     },
   });
 
-  const createTicket = useMutation({
-    mutationFn: () => {
-      const subject = supportSubject.trim();
-      const body = supportBody.trim();
-      return api.createSupportTicket({
-        subject,
-        category: 'GENERAL',
-        ...(body === '' ? {} : { body }),
-      });
-    },
-    onSuccess: async () => {
-      setSupportSubject('');
-      setSupportBody('');
-      await queryClient.invalidateQueries({ queryKey: queryKeys.supportTickets });
-    },
-  });
-
   const deletionRequest = useMutation({
     mutationFn: () => api.requestAccountDeletion(),
     onSuccess: async () => {
       setDeletionConfirmed(false);
       await queryClient.invalidateQueries({ queryKey: queryKeys.supportTickets });
+      // Review request only — do not logout, clear session, or mutate balances.
     },
   });
 
-  if (settings.isLoading) return <DomainStateView state="LOADING" />;
+  if (settings.isLoading) return <ProfileSkeleton />;
   if (settings.isError || settings.data === undefined) {
-    return <DomainStateView state="ERROR" onRetry={() => void settings.refetch()} />;
+    return (
+      <div className="alex-stack lootra-profile">
+        <h1 className="alex-title">{t('title')}</h1>
+        <DomainStateView state="ERROR" onRetry={() => void settings.refetch()} />
+      </div>
+    );
   }
 
   const data = settings.data;
+  const rawName = user
+    ? profileDisplayName({
+        username: user.username,
+        firstName: user.firstName,
+        lastName: user.lastName,
+      })
+    : '';
+  const displayName = rawName === '' ? t('identityFallback') : rawName;
+  const initials = user
+    ? profileInitials({
+        username: user.username,
+        firstName: user.firstName,
+        lastName: user.lastName,
+      })
+    : 'L';
 
   return (
-    <div className="alex-stack">
-      <h1 className="alex-title">{t('title')}</h1>
+    <div className="alex-stack lootra-profile">
+      <header className="lootra-profile-identity">
+        <div className="lootra-profile-avatar" aria-hidden="true">
+          {initials}
+        </div>
+        <div className="lootra-profile-identity__copy">
+          <h1 className="alex-title">{t('title')}</h1>
+          <p className="lootra-profile-name">{displayName}</p>
+          <p className="alex-meta">
+            {t('accountStatus')}: {user?.status ?? '—'}
+            {' · '}
+            {t('withdrawalStatusLabel')}: {user?.withdrawalStatus ?? '—'}
+          </p>
+        </div>
+      </header>
 
-      <section className="alex-card">
-        <h2 className="alex-title-sm">{t('accountStatus')}</h2>
-        <p className="alex-muted">
-          {user?.username !== null && user?.username !== undefined && user.username.trim() !== ''
-            ? `@${user.username}`
-            : (user?.firstName ?? '—')}
-        </p>
-        <p className="alex-meta">
-          {user?.status} · {user?.withdrawalStatus}
-        </p>
-      </section>
-
-      <section className="alex-card">
-        <h2 className="alex-title-sm">{t('membershipTitle')}</h2>
-        <AppLink href="/profile/founder" className="alex-chip-link">
-          {t('founderEntry')}
+      <nav className="lootra-profile-nav" aria-label={t('settings')}>
+        <AppLink href="/profile/founder" className="lootra-profile-nav-card">
+          <span className="lootra-profile-nav-card__title">{t('founderEntry')}</span>
+          <span className="alex-muted">{t('founderEntryBody')}</span>
         </AppLink>
-        <p className="alex-muted">{t('founderEntryBody')}</p>
-      </section>
+        <AppLink href="/profile/support" className="lootra-profile-nav-card">
+          <span className="lootra-profile-nav-card__title">{t('support')}</span>
+          <span className="alex-muted">{t('supportNavBody')}</span>
+        </AppLink>
+      </nav>
 
-      <section className="alex-card">
-        <h2 className="alex-title-sm">{t('language')}</h2>
-        <div className="alex-locale-row">
+      <section className="lootra-profile-card" aria-labelledby="lootra-language">
+        <h2 id="lootra-language" className="alex-title-sm">
+          {t('language')}
+        </h2>
+        <div className="lootra-profile-chip-row" role="group" aria-label={t('language')}>
           {LOCALES.map((locale) => (
             <button
               key={locale}
               type="button"
               className={
                 data.preferredLocale === locale
-                  ? 'alex-button alex-button--ghost is-active'
-                  : 'alex-button alex-button--ghost'
+                  ? 'lootra-btn lootra-btn--ghost is-active'
+                  : 'lootra-btn lootra-btn--ghost'
               }
               disabled={patchSettings.isPending}
+              aria-pressed={data.preferredLocale === locale}
               onClick={() => {
                 if (!isLocaleCode(locale)) return;
                 patchSettings.mutate({ preferredLocale: locale });
@@ -132,32 +144,37 @@ export function ProfileScreen() {
             </button>
           ))}
         </div>
-        {patchSettings.isPending ? <p className="alex-muted">{t('languageSaving')}</p> : null}
+        {patchSettings.isPending && patchSettings.variables?.preferredLocale !== undefined ? (
+          <p className="alex-muted">{t('languageSaving')}</p>
+        ) : null}
         {patchSettings.isSuccess && patchSettings.variables?.preferredLocale !== undefined ? (
-          <p className="alex-banner alex-banner--ok" role="status">
+          <p className="alex-banner alex-banner--ok" role="status" aria-live="polite">
             {t('languageSaved')}
           </p>
         ) : null}
-        {patchSettings.isError ? (
-          <p className="alex-banner alex-banner--error" role="alert">
+        {patchSettings.isError && patchSettings.variables?.preferredLocale !== undefined ? (
+          <p className="alex-banner alex-banner--warn" role="alert">
             {t('languageError')}
           </p>
         ) : null}
       </section>
 
-      <section className="alex-card">
-        <h2 className="alex-title-sm">{t('payoutPrivacyTitle')}</h2>
-        <div className="alex-locale-row">
+      <section className="lootra-profile-card" aria-labelledby="lootra-privacy">
+        <h2 id="lootra-privacy" className="alex-title-sm">
+          {t('payoutPrivacyTitle')}
+        </h2>
+        <div className="lootra-profile-chip-row" role="group" aria-label={t('payoutPrivacyTitle')}>
           {PAYOUT_MODES.map((mode) => (
             <button
               key={mode}
               type="button"
               className={
                 data.publicPayoutIdentityMode === mode
-                  ? 'alex-button alex-button--ghost is-active'
-                  : 'alex-button alex-button--ghost'
+                  ? 'lootra-btn lootra-btn--ghost is-active'
+                  : 'lootra-btn lootra-btn--ghost'
               }
               disabled={patchSettings.isPending}
+              aria-pressed={data.publicPayoutIdentityMode === mode}
               onClick={() => {
                 patchSettings.mutate({ publicPayoutIdentityMode: mode });
               }}
@@ -170,39 +187,53 @@ export function ProfileScreen() {
         </div>
         {patchSettings.isSuccess &&
         patchSettings.variables?.publicPayoutIdentityMode !== undefined ? (
-          <p className="alex-banner alex-banner--ok" role="status">
+          <p className="alex-banner alex-banner--ok" role="status" aria-live="polite">
             {t('payoutPrivacySaved')}
           </p>
         ) : null}
         {patchSettings.isError &&
         patchSettings.variables?.publicPayoutIdentityMode !== undefined ? (
-          <p className="alex-banner alex-banner--error" role="alert">
+          <p className="alex-banner alex-banner--warn" role="alert">
             {t('payoutPrivacyError')}
           </p>
         ) : null}
       </section>
 
-      <section className="alex-card">
-        <h2 className="alex-title-sm">{t('notificationsTitle')}</h2>
-        <dl className="alex-kv">
+      <section className="lootra-profile-card" aria-labelledby="lootra-notifications">
+        <h2 id="lootra-notifications" className="alex-title-sm">
+          {t('notificationsTitle')}
+        </h2>
+        {/* Read-only status — no writable toggles; marketing/security are not PATCH fields. */}
+        <dl className="lootra-profile-status-list">
           <div>
             <dt>{t('notificationsMarketing')}</dt>
-            <dd>{data.marketingNotificationsEnabled ? common('on') : common('off')}</dd>
+            <dd>
+              {data.marketingNotificationsEnabled ? common('on') : common('off')}
+              <span className="alex-meta"> — {t('notificationsMarketingReadonly')}</span>
+            </dd>
           </div>
           <div>
             <dt>{t('notificationsSecurity')}</dt>
             <dd>
-              {common('on')} — {t('notificationsSecurityLocked')}
+              {common('on')}
+              <span className="alex-meta"> — {t('notificationsSecurityLocked')}</span>
             </dd>
           </div>
         </dl>
       </section>
 
-      <section className="alex-card">
-        <h2 className="alex-title-sm">{t('legalTitle')}</h2>
-        <div className="alex-locale-row">
+      <section className="lootra-profile-card" aria-labelledby="lootra-legal">
+        <h2 id="lootra-legal" className="alex-title-sm">
+          {t('legalTitle')}
+        </h2>
+        <div className="lootra-profile-chip-row">
           {termsUrl !== null ? (
-            <a className="alex-chip-link" href={termsUrl} target="_blank" rel="noreferrer">
+            <a
+              className="lootra-btn lootra-btn--ghost"
+              href={termsUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
               {t('terms')}
             </a>
           ) : (
@@ -211,7 +242,12 @@ export function ProfileScreen() {
             </p>
           )}
           {privacyUrl !== null ? (
-            <a className="alex-chip-link" href={privacyUrl} target="_blank" rel="noreferrer">
+            <a
+              className="lootra-btn lootra-btn--ghost"
+              href={privacyUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
               {t('privacy')}
             </a>
           ) : (
@@ -222,71 +258,10 @@ export function ProfileScreen() {
         </div>
       </section>
 
-      <section className="alex-card">
-        <h2 className="alex-title-sm">{t('support')}</h2>
-        <p className="alex-muted">{t('supportHelp')}</p>
-        <label className="alex-field">
-          <span>{t('supportSubject')}</span>
-          <input
-            type="text"
-            value={supportSubject}
-            maxLength={200}
-            onChange={(event) => {
-              setSupportSubject(event.target.value);
-            }}
-          />
-        </label>
-        <label className="alex-field">
-          <span>{t('supportBody')}</span>
-          <textarea
-            value={supportBody}
-            maxLength={4000}
-            rows={3}
-            onChange={(event) => {
-              setSupportBody(event.target.value);
-            }}
-          />
-        </label>
-        <button
-          type="button"
-          className="alex-button"
-          disabled={createTicket.isPending || supportSubject.trim() === ''}
-          onClick={() => {
-            createTicket.mutate();
-          }}
-        >
-          {createTicket.isPending ? t('supportSubmitting') : t('supportSubmit')}
-        </button>
-        {createTicket.isSuccess ? (
-          <p className="alex-banner alex-banner--ok" role="status">
-            {t('supportCreated', { publicId: createTicket.data.ticket.publicId })}
-          </p>
-        ) : null}
-        {createTicket.isError ? (
-          <p className="alex-banner alex-banner--error" role="alert">
-            {createTicket.error instanceof ApiError ? t('supportError') : t('supportError')}
-          </p>
-        ) : null}
-
-        <h3 className="alex-title-sm">{t('supportTicketsTitle')}</h3>
-        {tickets.isLoading ? <p className="alex-muted">{common('loading')}</p> : null}
-        {tickets.isError ? (
-          <p className="alex-banner alex-banner--error" role="alert">
-            {t('supportError')}
-          </p>
-        ) : null}
-        {tickets.data !== undefined && tickets.data.tickets.length === 0 ? (
-          <p className="alex-muted">{t('supportTicketsEmpty')}</p>
-        ) : null}
-        {tickets.data?.tickets.map((ticket) => (
-          <p key={ticket.id} className="alex-meta">
-            {ticket.publicId} · {ticket.state} · {ticket.subject}
-          </p>
-        ))}
-      </section>
-
-      <section className="alex-card">
-        <h2 className="alex-title-sm">{t('deletionTitle')}</h2>
+      <section className="lootra-profile-card" aria-labelledby="lootra-deletion">
+        <h2 id="lootra-deletion" className="alex-title-sm">
+          {t('deletionTitle')}
+        </h2>
         <p className="alex-muted">{t('deletionBody')}</p>
         <label className="alex-field alex-field--row">
           <input
@@ -300,7 +275,7 @@ export function ProfileScreen() {
         </label>
         <button
           type="button"
-          className="alex-button alex-button--ghost"
+          className="lootra-btn lootra-btn--ghost"
           disabled={!deletionConfirmed || deletionRequest.isPending}
           onClick={() => {
             deletionRequest.mutate();
@@ -309,14 +284,14 @@ export function ProfileScreen() {
           {deletionRequest.isPending ? t('deletionSubmitting') : t('deletionSubmit')}
         </button>
         {deletionRequest.isSuccess ? (
-          <p className="alex-banner alex-banner--ok" role="status">
+          <p className="alex-banner alex-banner--ok" role="status" aria-live="polite">
             {deletionRequest.data.created
               ? t('deletionCreated', { publicId: deletionRequest.data.ticket.publicId })
               : t('deletionExisting', { publicId: deletionRequest.data.ticket.publicId })}
           </p>
         ) : null}
         {deletionRequest.isError ? (
-          <p className="alex-banner alex-banner--error" role="alert">
+          <p className="alex-banner alex-banner--warn" role="alert">
             {t('deletionError')}
           </p>
         ) : null}
@@ -324,7 +299,7 @@ export function ProfileScreen() {
 
       <button
         type="button"
-        className="alex-button alex-button--ghost"
+        className="lootra-btn lootra-btn--ghost lootra-profile-logout"
         onClick={() => {
           void signOut();
         }}

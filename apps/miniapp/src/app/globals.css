@@ -1877,3 +1877,287 @@ a:focus-visible {
     box-shadow: none;
   }
 }
+
+/* —— LOOTRA Profile / Founder / Support (Step 6) —— */
+.lootra-profile,
+.lootra-founder,
+.lootra-support {
+  min-width: 0;
+}
+
+.lootra-profile-identity {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  min-width: 0;
+}
+
+.lootra-profile-avatar {
+  flex-shrink: 0;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  font-size: 1.2rem;
+  color: #f4ecff;
+  background:
+    radial-gradient(circle at 30% 30%, rgba(216, 169, 255, 0.35), transparent 55%),
+    linear-gradient(160deg, #2a1458, #12091f);
+  border: 1px solid rgba(166, 92, 255, 0.35);
+}
+
+.lootra-profile-identity__copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.lootra-profile-name {
+  margin: 0;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.lootra-profile-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.lootra-profile-nav-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 1rem;
+  min-height: 44px;
+  border-radius: 1.1rem;
+  border: 1px solid rgba(122, 53, 255, 0.16);
+  background: color-mix(in srgb, var(--lootra-surface-elevated) 82%, transparent);
+  text-decoration: none;
+  color: inherit;
+}
+
+.lootra-profile-nav-card__title {
+  font-weight: 750;
+}
+
+.lootra-profile-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 1rem;
+  border-radius: 1.15rem;
+  border: 1px solid rgba(122, 53, 255, 0.16);
+  background: color-mix(in srgb, var(--lootra-surface-elevated) 82%, transparent);
+  min-width: 0;
+}
+
+.lootra-profile-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.lootra-profile-chip-row .lootra-btn {
+  min-height: 44px;
+}
+
+.lootra-profile-chip-row .is-active {
+  border-color: rgba(166, 92, 255, 0.45);
+  background: rgba(75, 25, 200, 0.18);
+}
+
+.lootra-profile-status-list {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.lootra-profile-status-list dt {
+  margin: 0;
+  font-weight: 650;
+}
+
+.lootra-profile-status-list dd {
+  margin: 0.2rem 0 0;
+}
+
+.lootra-profile-logout {
+  width: 100%;
+  min-height: 44px;
+}
+
+.lootra-founder-hero,
+.lootra-support-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.lootra-founder-hero__copy,
+.lootra-support-hero__copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.lootra-founder-eyebrow {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(216, 169, 255, 0.9);
+}
+
+.lootra-founder-hero__visual,
+.lootra-support-hero__visual {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 120px;
+  overflow: hidden;
+}
+
+.lootra-founder-hero__orbit,
+.lootra-support-hero__orbit {
+  position: absolute;
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  border: 1px solid rgba(166, 92, 255, 0.22);
+  box-shadow: 0 0 28px rgba(75, 25, 200, 0.14);
+  pointer-events: none;
+}
+
+.lootra-founder-hero__art,
+.lootra-support-hero__art {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 130px);
+  height: auto;
+  object-fit: contain;
+  filter: drop-shadow(0 14px 14px rgba(0, 0, 0, 0.4));
+}
+
+[dir='rtl'] .lootra-founder-hero__art,
+[dir='rtl'] .lootra-support-hero__art {
+  transform: none;
+}
+
+.lootra-founder-badge {
+  margin: 0;
+  display: inline-flex;
+  width: fit-content;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid rgba(166, 92, 255, 0.35);
+  background: rgba(75, 25, 200, 0.18);
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+
+.lootra-entitlement-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.lootra-entitlement-item {
+  min-width: 0;
+}
+
+.lootra-ticket-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.lootra-ticket-link {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.7rem 0.1rem;
+  min-height: 44px;
+  text-decoration: none;
+  color: inherit;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.lootra-ticket-id {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  unicode-bidi: isolate;
+}
+
+.lootra-ticket-subject {
+  overflow-wrap: anywhere;
+}
+
+.lootra-support-messages {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.lootra-support-message {
+  padding: 0.75rem 0.85rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(12, 8, 23, 0.55);
+  min-width: 0;
+}
+
+.lootra-support-message--user {
+  border-color: rgba(122, 53, 255, 0.22);
+}
+
+.lootra-support-message--admin {
+  border-color: rgba(166, 92, 255, 0.28);
+  background: rgba(42, 20, 88, 0.28);
+}
+
+.lootra-support-message--system {
+  opacity: 0.9;
+}
+
+.lootra-support-message__body {
+  margin: 0.35rem 0 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 360px) {
+  .lootra-founder-hero,
+  .lootra-support-hero {
+    grid-template-columns: 1fr;
+  }
+
+  .lootra-founder-hero__visual,
+  .lootra-support-hero__visual {
+    order: -1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lootra-founder-hero__orbit,
+  .lootra-support-hero__orbit {
+    animation: none !important;
+    box-shadow: none;
+  }
+}

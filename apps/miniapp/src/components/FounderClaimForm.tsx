@@ -7,6 +7,7 @@ import { useTranslations } from 'next-intl';
 import { ApiError } from '../lib/api/client';
 import { queryKeys } from '../lib/query/keys';
 import { useAuth } from '../providers/AuthProvider';
+import { AppLink } from './AppLink';
 import { DomainStateView } from './DomainState';
 
 /**
@@ -35,6 +36,7 @@ export function FounderClaimForm() {
       clearCode();
       setError(null);
       setMessage(t('claimSuccess'));
+      // Founder claim is not a reward payout (moneyIssued: false / ledgerPostings: 0).
       await queryClient.invalidateQueries({ queryKey: queryKeys.membership });
       await queryClient.invalidateQueries({ queryKey: queryKeys.entitlements });
       await queryClient.invalidateQueries({ queryKey: queryKeys.home });
@@ -61,7 +63,7 @@ export function FounderClaimForm() {
   }, []);
 
   return (
-    <section className="alex-card" aria-label={t('claimRegion')}>
+    <section className="lootra-profile-card" aria-label={t('claimRegion')}>
       <h2 className="alex-title-sm">{t('claim')}</h2>
       <p className="alex-muted">{t('claimCodeHelp')}</p>
       <form
@@ -82,6 +84,7 @@ export function FounderClaimForm() {
             autoComplete="off"
             autoCorrect="off"
             spellCheck={false}
+            dir="ltr"
             value={claimCode}
             disabled={mutation.isPending}
             onChange={(event) => {
@@ -91,17 +94,21 @@ export function FounderClaimForm() {
             }}
           />
         </label>
-        <button type="submit" className="alex-button" disabled={mutation.isPending || claimCode.trim() === ''}>
+        <button
+          type="submit"
+          className="lootra-btn lootra-btn--primary"
+          disabled={mutation.isPending || claimCode.trim() === ''}
+        >
           {mutation.isPending ? t('claimSubmitting') : t('claimSubmit')}
         </button>
       </form>
       {message !== null ? (
-        <p className="alex-banner alex-banner--ok" role="status">
+        <p className="alex-banner alex-banner--ok" role="status" aria-live="polite">
           {message}
         </p>
       ) : null}
       {error !== null ? (
-        <p className="alex-banner alex-banner--error" role="alert">
+        <p className="alex-banner alex-banner--warn" role="alert">
           {error}
         </p>
       ) : null}
@@ -111,7 +118,6 @@ export function FounderClaimForm() {
 
 export function FounderStatusPanel() {
   const t = useTranslations('founder');
-  const common = useTranslations('common');
   const { api } = useAuth();
 
   const membership = useQuery({
@@ -136,12 +142,33 @@ export function FounderStatusPanel() {
   }
 
   return (
-    <div className="alex-stack">
-      <section className="alex-card">
-        <h2 className="alex-title-sm">{t('statusTitle')}</h2>
+    <div className="alex-stack lootra-founder">
+      <header className="lootra-founder-hero">
+        <div className="lootra-founder-hero__copy">
+          <p className="lootra-founder-eyebrow">{t('badge')}</p>
+          <h1 className="alex-title">{t('title')}</h1>
+          <p className="alex-muted">{t('securityNote')}</p>
+        </div>
+        <div className="lootra-founder-hero__visual" aria-hidden="true">
+          <span className="lootra-founder-hero__orbit" />
+          {/* eslint-disable-next-line @next/next/no-img-element -- static brand accent */}
+          <img
+            className="lootra-founder-hero__art"
+            src="/brand/lootra/l-accent.png"
+            alt=""
+            width={140}
+            height={140}
+          />
+        </div>
+      </header>
+
+      <section className="lootra-profile-card" aria-labelledby="lootra-founder-status">
+        <h2 id="lootra-founder-status" className="alex-title-sm">
+          {t('statusTitle')}
+        </h2>
         {view.isFounder ? (
           <>
-            <p className="alex-badge">{t('badge')}</p>
+            <p className="lootra-founder-badge">{t('badge')}</p>
             {view.founderNumber !== null ? (
               <p className="alex-title">{t('number', { number: view.founderNumber })}</p>
             ) : null}
@@ -167,16 +194,14 @@ export function FounderStatusPanel() {
             <p className="alex-muted">{t('notFounderBody')}</p>
           </>
         )}
-        <p className="alex-muted">{t('securityNote')}</p>
-        <p className="alex-meta">
-          securityBypass: {common('no')} ({String(view.securityBypass)})
-        </p>
       </section>
 
       {!view.isFounder ? <FounderClaimForm /> : null}
 
-      <section className="alex-card">
-        <h2 className="alex-title-sm">{t('entitlementsTitle')}</h2>
+      <section className="lootra-profile-card" aria-labelledby="lootra-entitlements">
+        <h2 id="lootra-entitlements" className="alex-title-sm">
+          {t('entitlementsTitle')}
+        </h2>
         {entitlements.isLoading ? (
           <DomainStateView state="LOADING" />
         ) : entitlements.isError ? (
@@ -188,19 +213,35 @@ export function FounderStatusPanel() {
         ) : entitlements.data !== undefined && entitlements.data.entitlements.length === 0 ? (
           <DomainStateView state="EMPTY" emptyTitle={t('entitlementsEmpty')} />
         ) : (
-          <ul className="alex-list">
+          <ul className="lootra-entitlement-list">
             {(entitlements.data?.entitlements ?? []).map((item) => (
-              <li key={item.code}>
+              <li key={item.code} className="lootra-entitlement-item">
                 <strong>{item.name}</strong>
                 {item.description !== null ? (
-                  <span className="alex-muted"> — {item.description}</span>
+                  <p className="alex-muted">{item.description}</p>
                 ) : null}
+                <p className="alex-meta" dir="ltr">
+                  {item.code}
+                </p>
               </li>
             ))}
           </ul>
         )}
         <p className="alex-muted">{t('benefitsNote')}</p>
       </section>
+    </div>
+  );
+}
+
+export function FounderScreen() {
+  const common = useTranslations('common');
+
+  return (
+    <div className="alex-stack lootra-founder">
+      <AppLink href="/profile" className="alex-chip-link">
+        ← {common('back')}
+      </AppLink>
+      <FounderStatusPanel />
     </div>
   );
 }

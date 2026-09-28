@@ -25,6 +25,7 @@ describe('Phase 12 miniapp smoke', () => {
     }
     const profile = await readdir(join(appGroup, 'profile'), { withFileTypes: true });
     expect(profile.some((entry) => entry.name === 'founder')).toBe(true);
+    expect(profile.some((entry) => entry.name === 'support')).toBe(true);
   });
 
   it('formats atomic amounts with BigInt and rejects non-integers', () => {
