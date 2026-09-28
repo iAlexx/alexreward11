@@ -893,7 +893,7 @@ describe.skipIf(phase14DatabaseUrl === '')('Phase 14 Step 4 live primary payout-
     expect((await payoutFact(userA)).safeDetails).toEqual({ relatedAccountCount: 1 });
   });
 
-  it('SHARED_DEVICE_SIGNAL / SHARED_NETWORK_SIGNAL still use wallet_relationships', async () => {
+  it('SHARED_DEVICE_SIGNAL still uses wallet_relationships; SHARED_NETWORK ignores relationship rows', async () => {
     await pool.query(`DELETE FROM risk_rule_versions`);
     await insertRiskRule(pool, {
       ruleVersion: 2,
@@ -927,7 +927,9 @@ describe.skipIf(phase14DatabaseUrl === '')('Phase 14 Step 4 live primary payout-
       const byCode = Object.fromEntries(collected.signalFacts.map((f) => [f.code, f]));
       expect(byCode.SHARED_PAYOUT_WALLET?.active).toBe(false);
       expect(byCode.SHARED_DEVICE_SIGNAL?.active).toBe(true);
-      expect(byCode.SHARED_NETWORK_SIGNAL?.active).toBe(true);
+      // Stale SHARED_NETWORK_SIGNAL relationship row must not activate session-based signal.
+      expect(byCode.SHARED_NETWORK_SIGNAL?.active).toBe(false);
+      expect(byCode.SHARED_NETWORK_SIGNAL?.safeDetails).toEqual({ relatedAccountCount: 0 });
     } finally {
       client.release();
     }
@@ -943,5 +945,259 @@ describe.skipIf(phase14DatabaseUrl === '')('Phase 14 Step 4 live primary payout-
       signalWeights: { SHARED_PAYOUT_WALLET: 15 },
       actions: STEP3_ACTIONS,
     });
+  });
+});
+
+describe.skipIf(phase14DatabaseUrl === '')('Phase 14 Step 5 live shared network from session truth', () => {
+  let pool: Pool;
+  let userA: string;
+  let userB: string;
+  let userC: string;
+  let sessionSeq = 0;
+
+  beforeAll(async () => {
+    await resetAndMigrate(phase14DatabaseUrl);
+    pool = createPool(phase14DatabaseUrl);
+    userA = await createTestUser(pool, '14000050');
+    userB = await createTestUser(pool, '14000051');
+    userC = await createTestUser(pool, '14000052');
+    await insertRiskRule(pool, {
+      ruleVersion: 1,
+      status: 'ACTIVE',
+      effectiveFrom: new Date('2020-01-01T00:00:00.000Z'),
+      effectiveTo: null,
+      thresholds: TEST_RULE_THRESHOLDS,
+      signalWeights: { SHARED_NETWORK_SIGNAL: 12 },
+      actions: STEP3_ACTIONS,
+    });
+  }, 120_000);
+
+  afterAll(async () => {
+    await pool.end();
+  });
+
+  beforeEach(() => {
+    useServerTime(SERVER_NOW);
+  });
+
+  afterEach(async () => {
+    vi.useRealTimers();
+    await pool.query(`DELETE FROM user_sessions WHERE user_id = ANY($1::uuid[])`, [
+      [userA, userB, userC],
+    ]);
+    await pool.query(
+      `DELETE FROM wallet_relationships WHERE user_id = ANY($1::uuid[]) OR related_user_id = ANY($1::uuid[])`,
+      [[userA, userB, userC]],
+    );
+    await pool.query(`DELETE FROM risk_profiles WHERE user_id = ANY($1::uuid[])`, [
+      [userA, userB, userC],
+    ]);
+  });
+
+  async function insertSession(input: {
+    userId: string;
+    ipHash: string | null;
+    expiresAt: Date;
+    createdAt?: Date;
+    revokedAt?: Date | null;
+    revokedReason?: 'USER_LOGOUT' | 'ROTATED' | 'EXPIRED' | 'ADMIN_REVOKED' | 'SECURITY_EVENT' | null;
+  }): Promise<string> {
+    sessionSeq += 1;
+    const secretHash = `sess_secret_${sessionSeq}_${input.userId.slice(0, 8)}`;
+    const refreshHash = `sess_refresh_${sessionSeq}_${input.userId.slice(0, 8)}`;
+    const createdAt = input.createdAt ?? new Date('2026-01-01T00:00:00.000Z');
+    const result = await pool.query<{ id: string }>(
+      `INSERT INTO user_sessions (
+         user_id, session_secret_hash, refresh_token_hash, ip_hash,
+         created_at, last_seen_at, expires_at, revoked_at, revoked_reason
+       ) VALUES (
+         $1::uuid, $2, $3, $4,
+         $5::timestamptz, $5::timestamptz, $6::timestamptz, $7::timestamptz,
+         $8::session_revocation_reason
+       )
+       RETURNING id`,
+      [
+        input.userId,
+        secretHash,
+        refreshHash,
+        input.ipHash,
+        createdAt.toISOString(),
+        input.expiresAt.toISOString(),
+        input.revokedAt === undefined || input.revokedAt === null
+          ? null
+          : input.revokedAt.toISOString(),
+        input.revokedReason ?? null,
+      ],
+    );
+    return result.rows[0]!.id;
+  }
+
+  async function networkFact(userId: string) {
+    const client = await pool.connect();
+    try {
+      const rule = await resolveActiveRiskRuleVersion(client, { at: SERVER_NOW });
+      const collected = await collectConfiguredRiskSignals(client, { userId, rule });
+      return collected.signalFacts.find((f) => f.code === 'SHARED_NETWORK_SIGNAL')!;
+    } finally {
+      client.release();
+    }
+  }
+
+  const FUTURE = new Date('2099-01-01T00:00:00.000Z');
+  const PAST_CREATED = new Date('2020-01-01T00:00:00.000Z');
+  const PAST_EXPIRED = new Date('2020-06-01T00:00:00.000Z');
+  const HASH_X = 'aa'.repeat(32);
+  const HASH_Y = 'bb'.repeat(32);
+
+  it('two active sessions / different users / same hash => active', async () => {
+    await insertSession({ userId: userA, ipHash: HASH_X, expiresAt: FUTURE });
+    await insertSession({ userId: userB, ipHash: HASH_X, expiresAt: FUTURE });
+    const factA = await networkFact(userA);
+    const factB = await networkFact(userB);
+    expect(factA.active).toBe(true);
+    expect(factB.active).toBe(true);
+    expect(factA.safeDetails).toEqual({ relatedAccountCount: 1 });
+    expect(factB.safeDetails).toEqual({ relatedAccountCount: 1 });
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const result = await evaluateAndPersistRisk(client, {
+        userId: userA,
+        decisionScope: 'WITHDRAWAL_REQUEST',
+      });
+      expect(result.evaluation.score).toBe(12);
+      const serialized = JSON.stringify(result.snapshot.safeInputs);
+      expect(serialized).not.toContain(HASH_X);
+      expect(serialized).not.toMatch(/"ip_hash"/);
+      expect(serialized).not.toContain(userB);
+      expect(serialized).not.toMatch(/"session_secret_hash"/);
+      expect(serialized).not.toMatch(/"refresh_token_hash"/);
+      expect(result.signalFacts[0]?.safeDetails).toEqual({ relatedAccountCount: 1 });
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  });
+
+  it('same user multiple sessions / same hash => inactive', async () => {
+    await insertSession({ userId: userA, ipHash: HASH_X, expiresAt: FUTURE });
+    await insertSession({ userId: userA, ipHash: HASH_X, expiresAt: FUTURE });
+    const fact = await networkFact(userA);
+    expect(fact.active).toBe(false);
+    expect(fact.safeDetails).toEqual({ relatedAccountCount: 0 });
+  });
+
+  it('different users / different hashes => inactive', async () => {
+    await insertSession({ userId: userA, ipHash: HASH_X, expiresAt: FUTURE });
+    await insertSession({ userId: userB, ipHash: HASH_Y, expiresAt: FUTURE });
+    expect((await networkFact(userA)).active).toBe(false);
+  });
+
+  it('other user matching session expired => inactive', async () => {
+    await insertSession({ userId: userA, ipHash: HASH_X, expiresAt: FUTURE });
+    await insertSession({
+      userId: userB,
+      ipHash: HASH_X,
+      createdAt: PAST_CREATED,
+      expiresAt: PAST_EXPIRED,
+    });
+    expect((await networkFact(userA)).active).toBe(false);
+  });
+
+  it('other user matching session revoked => inactive', async () => {
+    await insertSession({ userId: userA, ipHash: HASH_X, expiresAt: FUTURE });
+    await insertSession({
+      userId: userB,
+      ipHash: HASH_X,
+      expiresAt: FUTURE,
+      revokedAt: new Date('2026-06-01T00:00:00.000Z'),
+      revokedReason: 'USER_LOGOUT',
+    });
+    expect((await networkFact(userA)).active).toBe(false);
+  });
+
+  it('null ip_hash sessions never match', async () => {
+    await insertSession({ userId: userA, ipHash: null, expiresAt: FUTURE });
+    await insertSession({ userId: userB, ipHash: null, expiresAt: FUTURE });
+    expect((await networkFact(userA)).active).toBe(false);
+  });
+
+  it('distinct relatedAccountCount; weight applied once; multi-session same other user counts once', async () => {
+    await insertSession({ userId: userA, ipHash: HASH_X, expiresAt: FUTURE });
+    await insertSession({ userId: userA, ipHash: HASH_Y, expiresAt: FUTURE });
+    await insertSession({ userId: userB, ipHash: HASH_X, expiresAt: FUTURE });
+    await insertSession({ userId: userB, ipHash: HASH_Y, expiresAt: FUTURE });
+    expect((await networkFact(userA)).safeDetails).toEqual({ relatedAccountCount: 1 });
+
+    await insertSession({ userId: userC, ipHash: HASH_X, expiresAt: FUTURE });
+    const fact = await networkFact(userA);
+    expect(fact.safeDetails).toEqual({ relatedAccountCount: 2 });
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const result = await evaluateAndPersistRisk(client, {
+        userId: userA,
+        decisionScope: 'WITHDRAWAL_REQUEST',
+      });
+      expect(result.evaluation.score).toBe(12);
+      expect(result.evaluation.contributions).toEqual([
+        {
+          code: 'SHARED_NETWORK_SIGNAL',
+          active: true,
+          configuredWeight: 12,
+          contribution: 12,
+        },
+      ]);
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  });
+
+  it('revoking other user matching session clears signal without cache', async () => {
+    await insertSession({ userId: userA, ipHash: HASH_X, expiresAt: FUTURE });
+    const bSessionId = await insertSession({
+      userId: userB,
+      ipHash: HASH_X,
+      expiresAt: FUTURE,
+    });
+    expect((await networkFact(userA)).active).toBe(true);
+
+    await pool.query(
+      `UPDATE user_sessions
+       SET revoked_at = now(), revoked_reason = 'USER_LOGOUT'::session_revocation_reason
+       WHERE id = $1::uuid`,
+      [bSessionId],
+    );
+    expect((await networkFact(userA)).active).toBe(false);
+  });
+
+  it('stale SHARED_NETWORK wallet_relationship ignored; live sessions activate without relationship row', async () => {
+    await insertRelationship(pool, {
+      type: 'SHARED_NETWORK_SIGNAL',
+      userId: userA,
+      relatedUserId: userB,
+    });
+    expect((await networkFact(userA)).active).toBe(false);
+
+    await insertSession({ userId: userA, ipHash: HASH_X, expiresAt: FUTURE });
+    await insertSession({ userId: userB, ipHash: HASH_X, expiresAt: FUTURE });
+    const relCount = await pool.query<{ cnt: string }>(
+      `SELECT count(*)::text AS cnt FROM wallet_relationships
+       WHERE relationship_type = 'SHARED_NETWORK_SIGNAL'
+         AND (user_id = $1::uuid OR related_user_id = $1::uuid)`,
+      [userA],
+    );
+    expect(relCount.rows[0]?.cnt).toBe('1'); // stale fixture only
+    expect((await networkFact(userA)).active).toBe(true);
+    expect((await networkFact(userA)).safeDetails).toEqual({ relatedAccountCount: 1 });
   });
 });

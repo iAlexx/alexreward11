@@ -41,7 +41,8 @@ interface SourceSnapshot {
   /** Distinct other users sharing an active verified primary payout wallet. */
   readonly relatedPayoutAccountCount: number;
   readonly sharedDeviceCount: number;
-  readonly sharedNetworkCount: number;
+  /** Distinct other users sharing a current active session ip_hash. */
+  readonly relatedNetworkAccountCount: number;
   readonly observationCountConsidered: number;
   readonly networkCountryChanged: boolean;
 }
@@ -50,8 +51,9 @@ interface SourceSnapshot {
  * Load collector source aggregates in ONE statement so all collectors observe
  * the same READ COMMITTED statement snapshot. SQL is static (no dynamic SQL).
  *
- * SHARED_PAYOUT_WALLET is derived from live user_wallets truth (verified +
- * primary + not disabled), not from wallet_relationships.
+ * SHARED_PAYOUT_WALLET — live user_wallets (verified + primary + not disabled).
+ * SHARED_NETWORK_SIGNAL — live user_sessions (non-null ip_hash + active).
+ * SHARED_DEVICE_SIGNAL — wallet_relationships (unchanged; no device fingerprinting).
  */
 async function loadSourceSnapshot(
   client: PoolClient,
@@ -64,7 +66,7 @@ async function loadSourceSnapshot(
     confirmed_count: number;
     related_payout_account_count: number;
     shared_device_count: number;
-    shared_network_count: number;
+    related_network_account_count: number;
     observation_count_considered: number;
     network_country_changed: boolean;
   }>(
@@ -100,14 +102,25 @@ async function loadSourceSnapshot(
          AND target_wallet.is_primary = true
          AND target_wallet.disabled_at IS NULL
      ),
+     network_reuse AS (
+       SELECT COUNT(DISTINCT other.user_id)::int AS related_network_account_count
+       FROM user_sessions AS target_session
+       INNER JOIN user_sessions AS other
+         ON other.ip_hash = target_session.ip_hash
+        AND other.user_id <> target_session.user_id
+        AND other.ip_hash IS NOT NULL
+        AND other.revoked_at IS NULL
+        AND other.expires_at > now()
+       WHERE target_session.user_id = $1::uuid
+         AND target_session.ip_hash IS NOT NULL
+         AND target_session.revoked_at IS NULL
+         AND target_session.expires_at > now()
+     ),
      rel_counts AS (
        SELECT
          COUNT(*) FILTER (
            WHERE relationship_type = 'SHARED_DEVICE_SIGNAL'
-         )::int AS shared_device_count,
-         COUNT(*) FILTER (
-           WHERE relationship_type = 'SHARED_NETWORK_SIGNAL'
-         )::int AS shared_network_count
+         )::int AS shared_device_count
        FROM wallet_relationships
        WHERE user_id = $1::uuid OR related_user_id = $1::uuid
      ),
@@ -135,11 +148,12 @@ async function loadSourceSnapshot(
        flag_counts.confirmed_count,
        payout_reuse.related_payout_account_count,
        rel_counts.shared_device_count,
-       rel_counts.shared_network_count,
+       network_reuse.related_network_account_count,
        country_agg.observation_count_considered,
        country_agg.network_country_changed
      FROM flag_counts
      CROSS JOIN payout_reuse
+     CROSS JOIN network_reuse
      CROSS JOIN rel_counts
      CROSS JOIN country_agg`,
     [userId],
@@ -157,7 +171,7 @@ async function loadSourceSnapshot(
     confirmedCount: row.confirmed_count,
     relatedPayoutAccountCount: row.related_payout_account_count,
     sharedDeviceCount: row.shared_device_count,
-    sharedNetworkCount: row.shared_network_count,
+    relatedNetworkAccountCount: row.related_network_account_count,
     observationCountConsidered: row.observation_count_considered,
     networkCountryChanged: row.network_country_changed,
   };
@@ -212,12 +226,13 @@ function factForCode(code: Step3CollectorSignalCode, source: SourceSnapshot): Ri
       };
     }
     case 'SHARED_NETWORK_SIGNAL': {
-      const active = source.sharedNetworkCount > 0;
+      const relatedAccountCount = source.relatedNetworkAccountCount;
+      const active = relatedAccountCount > 0;
       return {
         code,
         active,
         reasonCode: active ? 'SHARED_NETWORK_SIGNAL' : 'NO_SHARED_NETWORK_SIGNAL',
-        safeDetails: { relationshipCount: source.sharedNetworkCount },
+        safeDetails: { relatedAccountCount },
       };
     }
     case 'NETWORK_COUNTRY_CHANGED': {
@@ -250,7 +265,7 @@ function factForCode(code: Step3CollectorSignalCode, source: SourceSnapshot): Ri
 /**
  * Collect exactly one RiskSignalFact per configured ACTIVE-rule signal weight.
  *
- * Fail closed if any configured code lacks a Step 3/4 collector.
+ * Fail closed if any configured code lacks a Step 3–5 collector.
  * Does not invent thresholds, write source tables, or execute risk actions.
  */
 export async function collectConfiguredRiskSignals(
