@@ -48,6 +48,13 @@ export {
   type RiskSignalContribution,
   type RiskSignalFact,
 } from './risk-evaluator.js';
+export {
+  STEP3_COLLECTOR_SIGNAL_CODES,
+  collectConfiguredRiskSignals,
+  type CollectConfiguredRiskSignalsInput,
+  type CollectConfiguredRiskSignalsResult,
+  type Step3CollectorSignalCode,
+} from './risk-signal-collector.js';
 /** Read type only — current risk profile writes go through evaluateAndPersistRisk. */
 export type { PersistedRiskProfile } from './risk-profile.js';
 export {

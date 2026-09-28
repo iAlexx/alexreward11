@@ -1,0 +1,278 @@
+import type { PoolClient } from 'pg';
+
+import { FraudDomainError } from './errors.js';
+import type { RiskSignalFact } from './risk-evaluator.js';
+import type { RiskRuleVersion } from './risk-rule.js';
+
+/**
+ * Phase 14 Step 3 threshold-free collector signal codes.
+ * Every configured rule signal weight key must map to one of these.
+ */
+export const STEP3_COLLECTOR_SIGNAL_CODES = [
+  'OPEN_HIGH_FRAUD_FLAG',
+  'OPEN_CRITICAL_FRAUD_FLAG',
+  'CONFIRMED_FRAUD_FLAG',
+  'SHARED_PAYOUT_WALLET',
+  'SHARED_DEVICE_SIGNAL',
+  'SHARED_NETWORK_SIGNAL',
+  'NETWORK_COUNTRY_CHANGED',
+] as const;
+
+export type Step3CollectorSignalCode = (typeof STEP3_COLLECTOR_SIGNAL_CODES)[number];
+
+const SUPPORTED = new Set<string>(STEP3_COLLECTOR_SIGNAL_CODES);
+
+export interface CollectConfiguredRiskSignalsInput {
+  readonly userId: string;
+  readonly rule: RiskRuleVersion;
+}
+
+export interface CollectConfiguredRiskSignalsResult {
+  readonly signalFacts: readonly RiskSignalFact[];
+  /** Deterministic safe evidence for snapshot audit (no sensitive raw fields). */
+  readonly signalEvidence: readonly RiskSignalFact[];
+}
+
+interface SourceSnapshot {
+  readonly userExists: boolean;
+  readonly openHighCount: number;
+  readonly openCriticalCount: number;
+  readonly confirmedCount: number;
+  readonly sharedPayoutCount: number;
+  readonly sharedDeviceCount: number;
+  readonly sharedNetworkCount: number;
+  readonly observationCountConsidered: number;
+  readonly networkCountryChanged: boolean;
+}
+
+/**
+ * Load Step 3 source aggregates in ONE statement so all collectors observe
+ * the same READ COMMITTED statement snapshot. SQL is static (no dynamic SQL).
+ */
+async function loadSourceSnapshot(
+  client: PoolClient,
+  userId: string,
+): Promise<SourceSnapshot> {
+  const result = await client.query<{
+    user_exists: boolean;
+    open_high_count: number;
+    open_critical_count: number;
+    confirmed_count: number;
+    shared_payout_count: number;
+    shared_device_count: number;
+    shared_network_count: number;
+    observation_count_considered: number;
+    network_country_changed: boolean;
+  }>(
+    `WITH target AS (
+       SELECT id FROM users WHERE id = $1::uuid
+     ),
+     flag_counts AS (
+       SELECT
+         COUNT(*) FILTER (
+           WHERE status = 'OPEN' AND severity = 'HIGH'
+         )::int AS open_high_count,
+         COUNT(*) FILTER (
+           WHERE status = 'OPEN' AND severity = 'CRITICAL'
+         )::int AS open_critical_count,
+         COUNT(*) FILTER (
+           WHERE status = 'CONFIRMED'
+         )::int AS confirmed_count
+       FROM fraud_flags
+       WHERE user_id = $1::uuid
+     ),
+     rel_counts AS (
+       SELECT
+         COUNT(*) FILTER (
+           WHERE relationship_type = 'SHARED_PAYOUT_WALLET'
+         )::int AS shared_payout_count,
+         COUNT(*) FILTER (
+           WHERE relationship_type = 'SHARED_DEVICE_SIGNAL'
+         )::int AS shared_device_count,
+         COUNT(*) FILTER (
+           WHERE relationship_type = 'SHARED_NETWORK_SIGNAL'
+         )::int AS shared_network_count
+       FROM wallet_relationships
+       WHERE user_id = $1::uuid OR related_user_id = $1::uuid
+     ),
+     recent_countries AS (
+       SELECT country_code
+       FROM network_signals
+       WHERE user_id = $1::uuid
+         AND country_code IS NOT NULL
+       ORDER BY observed_at DESC, id DESC
+       LIMIT 2
+     ),
+     country_agg AS (
+       SELECT
+         COUNT(*)::int AS observation_count_considered,
+         (
+           COUNT(*) = 2
+           AND MIN(country_code) IS DISTINCT FROM MAX(country_code)
+         ) AS network_country_changed
+       FROM recent_countries
+     )
+     SELECT
+       EXISTS (SELECT 1 FROM target) AS user_exists,
+       flag_counts.open_high_count,
+       flag_counts.open_critical_count,
+       flag_counts.confirmed_count,
+       rel_counts.shared_payout_count,
+       rel_counts.shared_device_count,
+       rel_counts.shared_network_count,
+       country_agg.observation_count_considered,
+       country_agg.network_country_changed
+     FROM flag_counts
+     CROSS JOIN rel_counts
+     CROSS JOIN country_agg`,
+    [userId],
+  );
+
+  const row = result.rows[0];
+  if (row === undefined) {
+    throw new FraudDomainError('INTERNAL', 'risk signal source snapshot returned no row');
+  }
+
+  return {
+    userExists: row.user_exists,
+    openHighCount: row.open_high_count,
+    openCriticalCount: row.open_critical_count,
+    confirmedCount: row.confirmed_count,
+    sharedPayoutCount: row.shared_payout_count,
+    sharedDeviceCount: row.shared_device_count,
+    sharedNetworkCount: row.shared_network_count,
+    observationCountConsidered: row.observation_count_considered,
+    networkCountryChanged: row.network_country_changed,
+  };
+}
+
+function factForCode(code: Step3CollectorSignalCode, source: SourceSnapshot): RiskSignalFact {
+  switch (code) {
+    case 'OPEN_HIGH_FRAUD_FLAG': {
+      const active = source.openHighCount > 0;
+      return {
+        code,
+        active,
+        reasonCode: active ? 'OPEN_HIGH_FRAUD_FLAG' : 'NO_OPEN_HIGH_FRAUD_FLAG',
+        safeDetails: { matchingCount: source.openHighCount },
+      };
+    }
+    case 'OPEN_CRITICAL_FRAUD_FLAG': {
+      const active = source.openCriticalCount > 0;
+      return {
+        code,
+        active,
+        reasonCode: active ? 'OPEN_CRITICAL_FRAUD_FLAG' : 'NO_OPEN_CRITICAL_FRAUD_FLAG',
+        safeDetails: { matchingCount: source.openCriticalCount },
+      };
+    }
+    case 'CONFIRMED_FRAUD_FLAG': {
+      const active = source.confirmedCount > 0;
+      return {
+        code,
+        active,
+        reasonCode: active ? 'CONFIRMED_FRAUD_FLAG' : 'NO_CONFIRMED_FRAUD_FLAG',
+        safeDetails: { matchingCount: source.confirmedCount },
+      };
+    }
+    case 'SHARED_PAYOUT_WALLET': {
+      const active = source.sharedPayoutCount > 0;
+      return {
+        code,
+        active,
+        reasonCode: active ? 'SHARED_PAYOUT_WALLET' : 'NO_SHARED_PAYOUT_WALLET',
+        safeDetails: { relationshipCount: source.sharedPayoutCount },
+      };
+    }
+    case 'SHARED_DEVICE_SIGNAL': {
+      const active = source.sharedDeviceCount > 0;
+      return {
+        code,
+        active,
+        reasonCode: active ? 'SHARED_DEVICE_SIGNAL' : 'NO_SHARED_DEVICE_SIGNAL',
+        safeDetails: { relationshipCount: source.sharedDeviceCount },
+      };
+    }
+    case 'SHARED_NETWORK_SIGNAL': {
+      const active = source.sharedNetworkCount > 0;
+      return {
+        code,
+        active,
+        reasonCode: active ? 'SHARED_NETWORK_SIGNAL' : 'NO_SHARED_NETWORK_SIGNAL',
+        safeDetails: { relationshipCount: source.sharedNetworkCount },
+      };
+    }
+    case 'NETWORK_COUNTRY_CHANGED': {
+      const active = source.networkCountryChanged;
+      const count = source.observationCountConsidered;
+      if (count !== 0 && count !== 1 && count !== 2) {
+        throw new FraudDomainError(
+          'INTERNAL',
+          'observationCountConsidered must be 0, 1, or 2',
+          { count },
+        );
+      }
+      return {
+        code,
+        active,
+        reasonCode: active ? 'NETWORK_COUNTRY_CHANGED' : 'NO_NETWORK_COUNTRY_CHANGE',
+        safeDetails: {
+          observationCountConsidered: count,
+          changed: active,
+        },
+      };
+    }
+    default: {
+      const _exhaustive: never = code;
+      throw new FraudDomainError('INTERNAL', `unhandled collector code ${_exhaustive}`);
+    }
+  }
+}
+
+/**
+ * Collect exactly one RiskSignalFact per configured ACTIVE-rule signal weight.
+ *
+ * Fail closed if any configured code lacks a Step 3 collector.
+ * Does not invent thresholds, write source tables, or execute risk actions.
+ */
+export async function collectConfiguredRiskSignals(
+  client: PoolClient,
+  input: CollectConfiguredRiskSignalsInput,
+): Promise<CollectConfiguredRiskSignalsResult> {
+  const configuredCodes = Object.keys(input.rule.signalWeights).sort((a, b) =>
+    a < b ? -1 : a > b ? 1 : 0,
+  );
+
+  for (const code of configuredCodes) {
+    if (!SUPPORTED.has(code)) {
+      throw new FraudDomainError(
+        'RISK_SIGNAL_COLLECTOR_UNSUPPORTED',
+        `configured signal code ${code} has no Step 3 collector implementation`,
+        { code, ruleVersion: input.rule.ruleVersion },
+      );
+    }
+  }
+
+  const source = await loadSourceSnapshot(client, input.userId);
+  if (!source.userExists) {
+    throw new FraudDomainError(
+      'RISK_SIGNAL_SOURCE_NOT_FOUND',
+      'userId does not identify an existing user',
+      { userId: input.userId },
+    );
+  }
+
+  const signalFacts: RiskSignalFact[] = configuredCodes.map((code) =>
+    factForCode(code as Step3CollectorSignalCode, source),
+  );
+
+  // Evidence mirrors facts (already code-ascending) for snapshot audit.
+  const signalEvidence = signalFacts.map((fact) => ({
+    code: fact.code,
+    active: fact.active,
+    reasonCode: fact.reasonCode,
+    ...(fact.safeDetails !== undefined ? { safeDetails: fact.safeDetails } : {}),
+  }));
+
+  return { signalFacts, signalEvidence };
+}

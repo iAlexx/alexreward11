@@ -14,6 +14,7 @@ import {
   resolveActiveRiskRuleVersion,
   type ResolvedRiskRuleVersion,
 } from './risk-rule.js';
+import { collectConfiguredRiskSignals } from './risk-signal-collector.js';
 import {
   persistRiskSnapshot,
   type PersistedRiskSnapshot,
@@ -23,16 +24,16 @@ import {
 export interface EvaluateAndPersistRiskInput {
   readonly userId: string;
   readonly decisionScope: RiskDecisionScope;
-  readonly signalFacts: readonly RiskSignalFact[];
   /**
    * Optional safe audit context nested under safeInputs.context.
-   * Must not overwrite system fields (ruleVersion / signalState).
+   * Must not overwrite system fields (ruleVersion / signalState / signalEvidence).
    */
   readonly safeContext?: Readonly<Record<string, unknown>>;
 }
 
 export interface EvaluateAndPersistRiskResult {
   readonly rule: ResolvedRiskRuleVersion;
+  readonly signalFacts: readonly RiskSignalFact[];
   readonly evaluation: RiskEvaluationResult;
   readonly snapshot: PersistedRiskSnapshot;
   readonly profile: PersistedRiskProfile;
@@ -41,14 +42,16 @@ export interface EvaluateAndPersistRiskResult {
 /**
  * Authoritative evaluate + persist path.
  *
- * Resolves the ACTIVE risk rule from the DB using server current time only
- * (never accepts a caller-supplied rule or evaluation timestamp), evaluates
- * signals against that rule, then writes exactly one immutable snapshot and
- * one current risk_profiles upsert.
+ * Resolves the ACTIVE risk rule from the DB using server current time only,
+ * collects configured risk signals from server-authoritative DB sources,
+ * evaluates those collected facts, then writes exactly one immutable snapshot
+ * and one current risk_profiles upsert.
+ *
+ * Callers supply only userId / decisionScope / optional safeContext.
+ * They must not choose signal facts, weights, score, tier, action, rule, or time.
  *
  * Historical / effective-window rule lookup remains available only via the
- * lower-level resolveActiveRiskRuleVersion(client, { at }) helper. Callers
- * must not regress current risk_profiles by selecting an older evaluation time.
+ * lower-level resolveActiveRiskRuleVersion(client, { at }) helper.
  *
  * Transaction semantics: callers MUST pass a PoolClient already bound to their
  * transaction so snapshot + profile commit/rollback together. This function does
@@ -68,7 +71,11 @@ export async function evaluateAndPersistRisk(
   assertSafePersistedJsonObject('safeContext', context);
 
   const rule = await resolveActiveRiskRuleVersion(client, { at: evaluatedAt });
-  const evaluation = evaluateRiskSignals(rule, input.signalFacts);
+  const collected = await collectConfiguredRiskSignals(client, {
+    userId: input.userId,
+    rule,
+  });
+  const evaluation = evaluateRiskSignals(rule, collected.signalFacts);
 
   const signalState = evaluation.contributions.map((item) => ({
     code: item.code,
@@ -81,6 +88,7 @@ export async function evaluateAndPersistRisk(
   const safeInputs: Record<string, unknown> = {
     ruleVersion: evaluation.ruleVersion,
     signalState,
+    signalEvidence: collected.signalEvidence,
     context,
   };
 
@@ -110,5 +118,11 @@ export async function evaluateAndPersistRisk(
     calculatedAt: snapshot.calculatedAt,
   });
 
-  return { rule, evaluation, snapshot, profile };
+  return {
+    rule,
+    signalFacts: collected.signalFacts,
+    evaluation,
+    snapshot,
+    profile,
+  };
 }
