@@ -266,9 +266,89 @@ export async function seedPhase8Base(pool: Pool): Promise<{
     seedLockedInitialWithdrawalRules(client, { assetId, networkId }),
   );
   await ensureTestHotWallet(pool);
+  await seedPhase14WithdrawalPoliciesForPhase8(pool);
   const { adminUserId } = await createOwnerAdmin(pool);
   const destinations = await seedAllControlCenterDestinations(pool);
   return { adminUserId, assetId, networkId, destinations };
+}
+
+/**
+ * TEST ONLY — NOT PRODUCTION.
+ * Phase 14 preflight requires ACTIVE Risk + Eligibility policies before
+ * createWithdrawalFromQuote can succeed.
+ */
+export async function seedPhase14WithdrawalPoliciesForPhase8(pool: Pool): Promise<void> {
+  const riskVersion = 8_014;
+  const eligibilityVersion = 8_014;
+  const existingRisk = await pool.query<{ c: string }>(
+    `SELECT count(*)::text AS c FROM risk_rule_versions WHERE rule_version = $1`,
+    [riskVersion],
+  );
+  if (Number(existingRisk.rows[0]?.c ?? '0') === 0) {
+    await pool.query(
+      `INSERT INTO risk_rule_versions (
+         rule_version, thresholds, signal_weights, signal_params, actions, status,
+         effective_from, reason
+       ) VALUES (
+         $1,
+         '{"lowMax":20,"mediumMax":50,"highMax":75}'::jsonb,
+         '{}'::jsonb,
+         '{}'::jsonb,
+         '{"LOW":"MANUAL_REVIEW","MEDIUM":"MANUAL_REVIEW","HIGH":"HELD","CRITICAL":"WITHDRAWAL_BLOCKED"}'::jsonb,
+         'ACTIVE'::rule_version_status,
+         now() - interval '1 hour',
+         'phase8-phase14-bridge-test-only-NOT-PRODUCTION'
+       )`,
+      [riskVersion],
+    );
+  }
+  const existingElig = await pool.query<{ c: string }>(
+    `SELECT count(*)::text AS c FROM eligibility_policy_versions WHERE policy_version = $1`,
+    [eligibilityVersion],
+  );
+  if (Number(existingElig.rows[0]?.c ?? '0') === 0) {
+    await pool.query(
+      `INSERT INTO eligibility_policy_versions (
+         policy_version, status, effective_from, reason, policy_config
+       ) VALUES (
+         $1,
+         'ACTIVE'::rule_version_status,
+         now() - interval '1 hour',
+         'phase8-phase14-bridge-test-only-NOT-PRODUCTION',
+         $2::jsonb
+       )`,
+      [
+        eligibilityVersion,
+        JSON.stringify({
+          actions: {
+            WITHDRAWAL_REQUEST: {
+              requiredGates: ['ACCOUNT_STATE', 'RISK_POLICY', 'FEATURE_FLAG'],
+              precedence: ['RISK_POLICY', 'ACCOUNT_STATE', 'FEATURE_FLAG'],
+              riskAllowedActions: ['ALLOW', 'EXTEND_PENDING', 'MANUAL_REVIEW', 'HELD'],
+            },
+            AD_SESSION_START: {
+              requiredGates: ['ACCOUNT_STATE', 'FEATURE_FLAG'],
+              precedence: ['ACCOUNT_STATE', 'FEATURE_FLAG'],
+            },
+            MISSION_CLAIM: {
+              requiredGates: ['ACCOUNT_STATE', 'FEATURE_FLAG'],
+              precedence: ['ACCOUNT_STATE', 'FEATURE_FLAG'],
+            },
+            TASK_CLAIM: {
+              requiredGates: ['ACCOUNT_STATE', 'FEATURE_FLAG'],
+              precedence: ['ACCOUNT_STATE', 'FEATURE_FLAG'],
+            },
+          },
+        }),
+      ],
+    );
+  }
+  await pool.query(
+    `INSERT INTO feature_flags (flag_key, environment, enabled, description)
+     VALUES ('WITHDRAWAL_REQUESTS_PAUSE', 'LOCAL', false, 'phase8-phase14-test pause flag')
+     ON CONFLICT (flag_key, environment) DO UPDATE
+       SET enabled = false, updated_at = now()`,
+  );
 }
 
 /** Create MANUAL_REVIEW withdrawal ready for Owner Telegram decide. */
@@ -332,6 +412,21 @@ export async function truncatePhase8Tables(pool: Pool): Promise<void> {
       admin_users,
       users
     RESTART IDENTITY CASCADE
+  `);
+  // M0: TRUNCATE admin_users CASCADE removes admin_owner_authority seat row.
+  await pool.query(`
+    DO $m0_restore_seat$
+    BEGIN
+      IF to_regclass('public.admin_owner_authority') IS NOT NULL THEN
+        INSERT INTO admin_owner_authority (seat) VALUES (1)
+        ON CONFLICT (seat) DO UPDATE
+          SET holder_admin_user_id = NULL,
+              active_binding_id = NULL,
+              claimed_at = NULL,
+              updated_at = now();
+      END IF;
+    END
+    $m0_restore_seat$
   `);
 }
 

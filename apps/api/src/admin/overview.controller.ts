@@ -47,8 +47,7 @@ export class OverviewController {
         },
         {
           key: 'fraud_engine',
-          status: 'ENGINE_NOT_ENABLED',
-          reasonCode: 'ENGINE_NOT_ENABLED',
+          status: 'READY',
         },
       ],
     };

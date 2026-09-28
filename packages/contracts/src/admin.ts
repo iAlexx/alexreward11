@@ -629,11 +629,108 @@ export interface AdminReferralFoundationResponse {
   readonly data: null;
 }
 
+/** Safe aggregate counts only — never linked user PII, IP, wallet, or initData. */
+export interface AdminFraudSafeAggregateEvidence {
+  readonly relatedPayoutAccountCount?: number;
+  readonly relatedNetworkAccountCount?: number;
+  readonly reversedAdRewardCount?: number;
+  readonly rejectedReferralCount?: number;
+  readonly signalCodesPresent: readonly string[];
+}
+
+export interface AdminFraudRiskProfileView {
+  readonly score: number;
+  readonly riskTier: string;
+  readonly ruleVersion: number;
+  readonly reasonCodes: readonly string[];
+  readonly calculatedAt: string;
+}
+
+export interface AdminFraudRiskSnapshotMeta {
+  readonly id: string;
+  readonly decisionScope: string;
+  readonly score: number;
+  readonly riskTier: string;
+  readonly ruleVersion: number;
+  readonly reasonCodes: readonly string[];
+  readonly calculatedAt: string;
+  readonly safeAggregates: AdminFraudSafeAggregateEvidence;
+}
+
+export interface AdminFraudTrustCurrentView {
+  readonly trustState: string;
+}
+
+export interface AdminFraudTrustSnapshotMeta {
+  readonly id: string;
+  readonly trustState: string;
+  readonly trustScore: number;
+  readonly ruleVersion: number;
+  readonly reasonCodes: readonly string[];
+  readonly calculatedAt: string;
+}
+
+export interface AdminFraudEligibilityDecisionView {
+  readonly id: string;
+  readonly actionType: string;
+  readonly policyVersion: number | null;
+  readonly outcome: string;
+  readonly reasonCodes: readonly string[];
+  readonly decidedAt: string;
+}
+
+export interface AdminFraudFlagView {
+  readonly id: string;
+  readonly flagType: string;
+  readonly status: string;
+  readonly severity: string;
+  readonly createdAt: string;
+}
+
+export interface AdminFraudReviewCaseView {
+  readonly id: string;
+  readonly caseType: string;
+  readonly resourceType: string;
+  readonly resourceId: string;
+  readonly priority: string;
+  readonly state: string;
+  readonly summary: string | null;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+/** READY evidence envelope for Admin fraud read visibility (Phase 14 Step 14). */
+export interface AdminFraudEvidenceData {
+  readonly userId: string | null;
+  readonly riskProfile: AdminFraudRiskProfileView | null;
+  readonly latestRiskSnapshot: AdminFraudRiskSnapshotMeta | null;
+  readonly trustCurrent: AdminFraudTrustCurrentView | null;
+  readonly latestTrustSnapshot: AdminFraudTrustSnapshotMeta | null;
+  readonly recentEligibilityDecisions: readonly AdminFraudEligibilityDecisionView[];
+  readonly openOrConfirmedFraudFlags: readonly AdminFraudFlagView[];
+  readonly liveFraudReviewCases: readonly AdminFraudReviewCaseView[];
+}
+
 export interface AdminFraudReadResponse {
   readonly contractVersion: typeof ADMIN_API_CONTRACT_VERSION;
-  readonly existingRisk: DomainEnvelope<Record<string, unknown>>;
+  readonly status: 'READY' | 'EMPTY';
+  readonly data: AdminFraudEvidenceData | null;
+  readonly errorCode?: 'NO_DATA';
   readonly phase14Engine: {
-    readonly status: 'UNAVAILABLE';
-    readonly reasonCode: 'ENGINE_NOT_ENABLED';
+    readonly status: 'READY';
   };
+}
+
+export interface AdminFraudEnsureReviewRequest {
+  readonly reason: string;
+  readonly expectedVersion: string;
+  readonly confirmationId: string;
+  readonly summary?: string;
+}
+
+export interface AdminFraudEnsureReviewResponse {
+  readonly contractVersion: typeof ADMIN_API_CONTRACT_VERSION;
+  readonly reviewCase: AdminFraudReviewCaseView;
+  readonly createdOrReused: 'CREATED' | 'REUSED';
+  readonly ledgerWrite: false;
 }

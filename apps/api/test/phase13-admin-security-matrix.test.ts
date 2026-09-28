@@ -49,7 +49,8 @@ describe('Phase 13 Admin security matrix 12–52', () => {
     const fraud = overview.domains.find((d) => d.key === 'fraud_engine');
     expect(missions?.status).toBe('ENGINE_NOT_ENABLED');
     expect(referrals?.status).toBe('ENGINE_NOT_ENABLED');
-    expect(fraud?.status).toBe('ENGINE_NOT_ENABLED');
+    expect(fraud?.status).toBe('READY');
+    expect(fraud).not.toHaveProperty('reasonCode');
     for (const domain of overview.domains) {
       expect(domain).not.toHaveProperty('amountAtomic');
     }
@@ -376,10 +377,14 @@ describe('Phase 13 Admin security matrix 12–52', () => {
     expect(result).toEqual({ ok: false, reason: 'EXPIRED' });
   });
 
-  it('M42 fraud admin marks Phase 14 unavailable', () => {
+  it('M42 fraud admin marks Phase 14 READY with evidence envelope', () => {
     const source = readFileSync(join(adminSrc, 'fraud-admin.controller.ts'), 'utf8');
-    expect(source).toContain('ENGINE_NOT_ENABLED');
+    expect(source).toContain("status: 'READY'");
     expect(source).toContain('phase14Engine');
+    expect(source).not.toContain('ENGINE_NOT_ENABLED');
+    expect(source).not.toMatch(/\bevaluateAndPersist(Risk|Trust|Eligibility)?\s*\(/);
+    expect(source).not.toMatch(/['"]mark[_-]?safe['"]|fraud\.mark_safe|action:\s*['"]MARK_SAFE['"]/i);
+    expect(source).toContain('ensureReviewCase');
   });
 
   it('M43 audit controller is append-only read', () => {

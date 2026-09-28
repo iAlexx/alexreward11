@@ -227,6 +227,9 @@ for (const name of financialShells) {
     if (/from\s+['"]@alex-rewards\/withdrawals['"]/.test(source)) {
       failures.push(`${path}: packages/fraud must not import @alex-rewards/withdrawals`);
     }
+    if (/from\s+['"]@alex-rewards\/control-center['"]/.test(source)) {
+      failures.push(`${path}: packages/fraud must not import @alex-rewards/control-center`);
+    }
     if (/from\s+['"]@alex-rewards\/signing['"]/.test(source)) {
       failures.push(`${path}: packages/fraud must not import @alex-rewards/signing`);
     }
@@ -260,6 +263,25 @@ for (const rootPath of phase8BoundaryRoots) {
       /from\s+['"]@alex-rewards\/ledger['"]/.test(source)
     ) {
       failures.push(`${path}: control-center src must not import ledger`);
+    }
+  }
+}
+
+// Phase 14 Step 14: Admin SPA must not import the fraud package (API + SQL evidence only).
+{
+  const adminFiles = (await walk('apps/admin/')).filter((path) => {
+    const normalized = path.replaceAll('\\', '/');
+    return (
+      /\.(?:ts|tsx|js|mjs)$/.test(normalized) &&
+      !normalized.includes('/dist/') &&
+      !normalized.includes('/node_modules/') &&
+      !normalized.includes('/.next/')
+    );
+  });
+  for (const path of adminFiles) {
+    const source = await readFile(new URL(path, root), 'utf8');
+    if (/from\s+['"]@alex-rewards\/fraud['"]/.test(source)) {
+      failures.push(`${path}: apps/admin must not import @alex-rewards/fraud`);
     }
   }
 }

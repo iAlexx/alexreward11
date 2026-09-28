@@ -169,6 +169,70 @@ export interface AdminPolicyRuleSummary {
   readonly status: string | null;
 }
 
+export interface AdminFraudSafeAggregateEvidence {
+  readonly relatedPayoutAccountCount?: number;
+  readonly relatedNetworkAccountCount?: number;
+  readonly reversedAdRewardCount?: number;
+  readonly rejectedReferralCount?: number;
+  readonly signalCodesPresent: readonly string[];
+}
+
+export interface AdminFraudEvidenceData {
+  readonly userId: string | null;
+  readonly riskProfile: {
+    readonly score: number;
+    readonly riskTier: string;
+    readonly ruleVersion: number;
+    readonly reasonCodes: readonly string[];
+    readonly calculatedAt: string;
+  } | null;
+  readonly latestRiskSnapshot: {
+    readonly id: string;
+    readonly decisionScope: string;
+    readonly score: number;
+    readonly riskTier: string;
+    readonly ruleVersion: number;
+    readonly reasonCodes: readonly string[];
+    readonly calculatedAt: string;
+    readonly safeAggregates: AdminFraudSafeAggregateEvidence;
+  } | null;
+  readonly trustCurrent: { readonly trustState: string } | null;
+  readonly latestTrustSnapshot: {
+    readonly id: string;
+    readonly trustState: string;
+    readonly trustScore: number;
+    readonly ruleVersion: number;
+    readonly reasonCodes: readonly string[];
+    readonly calculatedAt: string;
+  } | null;
+  readonly recentEligibilityDecisions: readonly {
+    readonly id: string;
+    readonly actionType: string;
+    readonly policyVersion: number | null;
+    readonly outcome: string;
+    readonly reasonCodes: readonly string[];
+    readonly decidedAt: string;
+  }[];
+  readonly openOrConfirmedFraudFlags: readonly {
+    readonly id: string;
+    readonly flagType: string;
+    readonly status: string;
+    readonly severity: string;
+    readonly createdAt: string;
+  }[];
+  readonly liveFraudReviewCases: readonly {
+    readonly id: string;
+    readonly caseType: string;
+    readonly resourceType: string;
+    readonly resourceId: string;
+    readonly priority: string;
+    readonly state: string;
+    readonly summary: string | null;
+    readonly createdAt: string;
+    readonly updatedAt: string;
+  }[];
+}
+
 export interface AdminDiffField {
   readonly path: string;
   readonly oldValue: unknown;

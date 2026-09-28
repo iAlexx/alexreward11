@@ -55,15 +55,19 @@ export async function createPasskeyCredential(
       },
       challenge: base64UrlToBuffer(options.challenge as string),
       pubKeyCredParams: options.pubKeyCredParams as PublicKeyCredentialParameters[],
-      timeout: options.timeout as number | undefined,
-      attestation: options.attestation as AttestationConveyancePreference | undefined,
-      authenticatorSelection: options.authenticatorSelection as
-        AuthenticatorSelectionCriteria | undefined,
       excludeCredentials: exclude.map((c) => ({
         id: base64UrlToBuffer(c.id),
         type: c.type as PublicKeyCredentialType,
       })),
     };
+    if (typeof options.timeout === 'number') publicKey.timeout = options.timeout;
+    if (typeof options.attestation === 'string') {
+      publicKey.attestation = options.attestation as AttestationConveyancePreference;
+    }
+    if (options.authenticatorSelection !== undefined && options.authenticatorSelection !== null) {
+      publicKey.authenticatorSelection =
+        options.authenticatorSelection as AuthenticatorSelectionCriteria;
+    }
 
     const credential = (await navigator.credentials.create({
       publicKey,
@@ -112,14 +116,16 @@ export async function getPasskeyAssertion(
       (options.allowCredentials as Array<{ id: string; type: string }> | undefined) ?? [];
     const publicKey: PublicKeyCredentialRequestOptions = {
       challenge: base64UrlToBuffer(options.challenge as string),
-      timeout: options.timeout as number | undefined,
-      rpId: options.rpId as string | undefined,
-      userVerification: options.userVerification as UserVerificationRequirement | undefined,
       allowCredentials: allow.map((c) => ({
         id: base64UrlToBuffer(c.id),
         type: c.type as PublicKeyCredentialType,
       })),
     };
+    if (typeof options.timeout === 'number') publicKey.timeout = options.timeout;
+    if (typeof options.rpId === 'string') publicKey.rpId = options.rpId;
+    if (typeof options.userVerification === 'string') {
+      publicKey.userVerification = options.userVerification as UserVerificationRequirement;
+    }
 
     const credential = (await navigator.credentials.get({
       publicKey,

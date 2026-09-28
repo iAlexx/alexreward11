@@ -4,6 +4,7 @@ import type {
   AdminDomainEnvelope,
   AdminEconomicsSnapshot,
   AdminFeatureFlagsListData,
+  AdminFraudEvidenceData,
   AdminHotWalletPublicView,
   AdminListPage,
   AdminListQuery,
@@ -364,9 +365,32 @@ export function createAdminApiClient(options: AdminApiClientOptions) {
     },
 
     getFraud(
-      query: AdminListQuery = {},
-    ): Promise<AdminDomainEnvelope<AdminListPage<Record<string, unknown>>>> {
-      return fetchDomain(`/v1/admin/fraud${toQuery(query)}`);
+      query: { readonly userId?: string } = {},
+    ): Promise<AdminDomainEnvelope<AdminFraudEvidenceData>> {
+      return fetchDomain<AdminFraudEvidenceData>(`/v1/admin/fraud${toQuery(query)}`);
+    },
+
+    ensureFraudReview(body: {
+      readonly userId: string;
+      readonly reason: string;
+      readonly expectedVersion: string;
+      readonly confirmationId: string;
+      readonly summary?: string;
+    }): Promise<{
+      readonly contractVersion: string;
+      readonly reviewCase: AdminFraudEvidenceData['liveFraudReviewCases'][number];
+      readonly createdOrReused: 'CREATED' | 'REUSED';
+      readonly ledgerWrite: false;
+    }> {
+      return request(`/v1/admin/fraud/${encodeURIComponent(body.userId)}/ensure-review`, {
+        method: 'POST',
+        body: JSON.stringify({
+          reason: body.reason,
+          expectedVersion: body.expectedVersion,
+          confirmationId: body.confirmationId,
+          summary: body.summary,
+        }),
+      });
     },
 
     getReferral(
