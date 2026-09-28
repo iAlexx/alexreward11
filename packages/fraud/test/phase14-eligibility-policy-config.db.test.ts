@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 
 import {
   persistEligibilityDecision,
@@ -531,5 +531,243 @@ describe.skipIf(phase14DatabaseUrl === '')(
       expect(row.rows[0]?.effective_from.toISOString()).toBe('2026-02-01T00:00:00.000Z');
       expect(row.rows[0]?.effective_to.toISOString()).toBe('2026-07-01T00:00:00.000Z');
     });
+  },
+);
+
+describe.skipIf(phase14DatabaseUrl === '')(
+  'Phase 14 Eligibility first-reference concurrency lock',
+  () => {
+    let pool: Pool;
+    let userId: string;
+
+    beforeAll(async () => {
+      await resetAndMigrate(phase14DatabaseUrl);
+      pool = createPool(phase14DatabaseUrl);
+      userId = await createTestUser(pool, '14000093');
+    }, 120_000);
+
+    afterAll(async () => {
+      await pool.end();
+    });
+
+    async function waitForBlockedOnHolder(
+      watcher: PoolClient,
+      holderPid: number,
+      timeoutMs = 10_000,
+    ): Promise<boolean> {
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline) {
+        const waiting = await watcher.query<{ c: number }>(
+          `SELECT count(*)::int AS c
+           FROM pg_locks blocked
+           JOIN pg_locks holder
+             ON holder.locktype = blocked.locktype
+            AND holder.database IS NOT DISTINCT FROM blocked.database
+            AND holder.relation IS NOT DISTINCT FROM blocked.relation
+            AND holder.page IS NOT DISTINCT FROM blocked.page
+            AND holder.tuple IS NOT DISTINCT FROM blocked.tuple
+            AND holder.virtualxid IS NOT DISTINCT FROM blocked.virtualxid
+            AND holder.transactionid IS NOT DISTINCT FROM blocked.transactionid
+            AND holder.classid IS NOT DISTINCT FROM blocked.classid
+            AND holder.objid IS NOT DISTINCT FROM blocked.objid
+            AND holder.objsubid IS NOT DISTINCT FROM blocked.objsubid
+            AND holder.pid <> blocked.pid
+           WHERE NOT blocked.granted
+             AND holder.granted
+             AND holder.pid = $1`,
+          [holderPid],
+        );
+        if ((waiting.rows[0]?.c ?? 0) > 0) return true;
+        await new Promise((r) => setTimeout(r, 25));
+      }
+      return false;
+    }
+
+    it('decision-first: open insert FOR SHARE blocks then 0038 rejects concurrent config rewrite', async () => {
+      const policyVersion = 970;
+      await insertEligibilityPolicy(pool, {
+        policyVersion,
+        status: 'DRAFT',
+        effectiveFrom: new Date('2020-01-01T00:00:00.000Z'),
+        effectiveTo: null,
+        reason: 'phase14-eligibility-ref-lock',
+        policyConfig: TEST_ELIGIBILITY_POLICY_CONFIG,
+      });
+
+      const original = await pool.query<{ policy_config: unknown }>(
+        `SELECT policy_config FROM eligibility_policy_versions WHERE policy_version = $1`,
+        [policyVersion],
+      );
+
+      const clientA = await pool.connect();
+      const clientB = await pool.connect();
+      const watcher = await pool.connect();
+      try {
+        await clientA.query('BEGIN');
+        await persistEligibilityDecision(clientA, {
+          userId,
+          actionType: 'AD_SESSION_START',
+          outcome: 'ELIGIBLE',
+          policyVersion,
+          reasonCodes: ['ELIGIBLE_BASELINE'],
+          safeInputs: { fixture: 'decision-first' },
+        });
+        const holderPid = (
+          await clientA.query<{ pid: number }>(`SELECT pg_backend_pid() AS pid`)
+        ).rows[0]!.pid;
+
+        const updatePromise = clientB.query(
+          `UPDATE eligibility_policy_versions
+           SET policy_config = $1::jsonb
+           WHERE policy_version = $2`,
+          [JSON.stringify(ALT_TEST_ELIGIBILITY_POLICY_CONFIG), policyVersion],
+        );
+
+        expect(await waitForBlockedOnHolder(watcher, holderPid)).toBe(true);
+
+        await clientA.query('COMMIT');
+        await expect(updatePromise).rejects.toMatchObject({ code: RESTRICT_VIOLATION });
+
+        const after = await pool.query<{ policy_config: unknown; c: string }>(
+          `SELECT p.policy_config, (SELECT count(*)::text FROM eligibility_decisions d
+             WHERE d.policy_version = p.policy_version) AS c
+           FROM eligibility_policy_versions p
+           WHERE p.policy_version = $1`,
+          [policyVersion],
+        );
+        expect(after.rows[0]?.c).toBe('1');
+        expect(after.rows[0]?.policy_config).toEqual(original.rows[0]?.policy_config);
+      } finally {
+        try {
+          await clientA.query('ROLLBACK');
+        } catch {
+          /* ignore */
+        }
+        clientA.release();
+        clientB.release();
+        watcher.release();
+      }
+    }, 60_000);
+
+    it('policy-update-first: open config UPDATE blocks decision insert until commit; insert sees new config', async () => {
+      const policyVersion = 971;
+      await insertEligibilityPolicy(pool, {
+        policyVersion,
+        status: 'DRAFT',
+        effectiveFrom: new Date('2020-01-01T00:00:00.000Z'),
+        effectiveTo: null,
+        reason: 'phase14-eligibility-ref-lock-update-first',
+        policyConfig: TEST_ELIGIBILITY_POLICY_CONFIG,
+      });
+
+      const clientA = await pool.connect();
+      const clientB = await pool.connect();
+      const watcher = await pool.connect();
+      try {
+        await clientA.query('BEGIN');
+        await clientA.query(
+          `UPDATE eligibility_policy_versions
+           SET policy_config = $1::jsonb
+           WHERE policy_version = $2`,
+          [JSON.stringify(ALT_TEST_ELIGIBILITY_POLICY_CONFIG), policyVersion],
+        );
+        const holderPid = (
+          await clientA.query<{ pid: number }>(`SELECT pg_backend_pid() AS pid`)
+        ).rows[0]!.pid;
+
+        const insertPromise = persistEligibilityDecision(clientB, {
+          userId,
+          actionType: 'WITHDRAWAL_REQUEST',
+          outcome: 'ELIGIBLE',
+          policyVersion,
+          reasonCodes: ['ELIGIBLE_BASELINE'],
+          safeInputs: { fixture: 'update-first' },
+        });
+
+        expect(await waitForBlockedOnHolder(watcher, holderPid)).toBe(true);
+
+        await clientA.query('COMMIT');
+        const decision = await insertPromise;
+        expect(decision.policyVersion).toBe(policyVersion);
+
+        const row = await pool.query<{ policy_config: unknown }>(
+          `SELECT policy_config FROM eligibility_policy_versions WHERE policy_version = $1`,
+          [policyVersion],
+        );
+        expect(row.rows[0]?.policy_config).toEqual(ALT_TEST_ELIGIBILITY_POLICY_CONFIG);
+      } finally {
+        try {
+          await clientA.query('ROLLBACK');
+        } catch {
+          /* ignore */
+        }
+        clientA.release();
+        clientB.release();
+        watcher.release();
+      }
+    }, 60_000);
+
+    it('raw INSERT also acquires parent policy FOR SHARE against concurrent config rewrite', async () => {
+      const policyVersion = 972;
+      await insertEligibilityPolicy(pool, {
+        policyVersion,
+        status: 'DRAFT',
+        effectiveFrom: new Date('2020-01-01T00:00:00.000Z'),
+        effectiveTo: null,
+        reason: 'phase14-eligibility-ref-lock-raw',
+        policyConfig: TEST_ELIGIBILITY_POLICY_CONFIG,
+      });
+      const original = await pool.query<{ policy_config: unknown }>(
+        `SELECT policy_config FROM eligibility_policy_versions WHERE policy_version = $1`,
+        [policyVersion],
+      );
+
+      const digest = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+      const clientA = await pool.connect();
+      const clientB = await pool.connect();
+      const watcher = await pool.connect();
+      try {
+        await clientA.query('BEGIN');
+        await clientA.query(
+          `INSERT INTO eligibility_decisions (
+             user_id, action_type, outcome, reason_codes, policy_version, inputs_digest, safe_inputs
+           ) VALUES (
+             $1::uuid, 'AD_SESSION_START'::eligibility_action_type, 'ELIGIBLE'::eligibility_outcome,
+             ARRAY['ELIGIBLE_BASELINE']::text[], $2, $3, '{}'::jsonb
+           )`,
+          [userId, policyVersion, digest],
+        );
+        const holderPid = (
+          await clientA.query<{ pid: number }>(`SELECT pg_backend_pid() AS pid`)
+        ).rows[0]!.pid;
+
+        const updatePromise = clientB.query(
+          `UPDATE eligibility_policy_versions
+           SET policy_config = $1::jsonb
+           WHERE policy_version = $2`,
+          [JSON.stringify(ALT_TEST_ELIGIBILITY_POLICY_CONFIG), policyVersion],
+        );
+
+        expect(await waitForBlockedOnHolder(watcher, holderPid)).toBe(true);
+
+        await clientA.query('COMMIT');
+        await expect(updatePromise).rejects.toMatchObject({ code: RESTRICT_VIOLATION });
+
+        const after = await pool.query<{ policy_config: unknown }>(
+          `SELECT policy_config FROM eligibility_policy_versions WHERE policy_version = $1`,
+          [policyVersion],
+        );
+        expect(after.rows[0]?.policy_config).toEqual(original.rows[0]?.policy_config);
+      } finally {
+        try {
+          await clientA.query('ROLLBACK');
+        } catch {
+          /* ignore */
+        }
+        clientA.release();
+        clientB.release();
+        watcher.release();
+      }
+    }, 60_000);
   },
 );
