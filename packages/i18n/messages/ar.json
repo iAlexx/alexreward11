@@ -1,8 +1,10 @@
 {
   "app": {
-    "brand": "ALEx Rewards",
+    "brand": "LOOTRA",
+    "tagline": "اربح. اجمع. اسحب.",
     "skipToContent": "تخطَّ إلى المحتوى الرئيسي",
     "openProfile": "افتح الملف الشخصي",
+    "openNotifications": "افتح الإشعارات",
     "mainLabel": "المحتوى الرئيسي"
   },
   "nav": {
@@ -271,13 +273,36 @@
   },
   "auth": {
     "loading": "جارٍ تسجيل دخولك…",
-    "unauthorized": "افتح ALEx Rewards من تيليجرام للمتابعة.",
+    "unauthorized": "افتح LOOTRA من تيليجرام للمتابعة.",
     "expired": "انتهت جلستك. افتح التطبيق مرة أخرى.",
     "unavailable": "تسجيل الدخول غير متاح مؤقتًا.",
     "unauthorizedTitle": "افتح من تيليجرام",
     "expiredTitle": "انتهت الجلسة",
     "unavailableTitle": "تسجيل الدخول غير متاح",
     "retry": "أعد المحاولة"
+  },
+  "onboarding": {
+    "ariaLabel": "مرحبًا بك في LOOTRA",
+    "eyebrow": "LOOTRA · 0{step}",
+    "step1Title": "اربح المكافآت",
+    "step1Body": "أكمل الفرص المتاحة واحصل على مكافآت رقمية متغيرة.",
+    "step2Title": "أكمل المهام والفرص",
+    "step2Body": "أنهِ المهام الموثقة واستلم مكافآت إضافية.",
+    "step3Title": "اربط المحفظة واسحب",
+    "step3Body": "تحقق من محفظة TON وأدر عمليات السحب المؤكدة من الخادم بأمان.",
+    "skip": "تخطي",
+    "next": "التالي",
+    "getStarted": "ابدأ"
+  },
+  "activity": {
+    "title": "النشاط",
+    "state": "غير متاح",
+    "body": "النشاط غير متاح بعد."
+  },
+  "notifications": {
+    "title": "الإشعارات",
+    "state": "غير متاح",
+    "body": "الإشعارات غير متاحة بعد."
   },
   "a11y": {
     "primaryNav": "التنقل الرئيسي",

@@ -25,3 +25,5 @@ test-pages/**/.vercel/
 .vercel
 .env*
 !.env.example
+# Local design-export extraction (never commit)
+.tmp-lootra-design/

@@ -10,8 +10,8 @@ import { AppProviders } from '../providers/AppProviders';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'ALEx Rewards',
-  description: 'ALEx Rewards Telegram Mini App',
+  title: 'LOOTRA',
+  description: 'LOOTRA Rewards Mini App',
 };
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {

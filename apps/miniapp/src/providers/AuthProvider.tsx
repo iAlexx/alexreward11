@@ -25,6 +25,7 @@ import {
   type StoredAuth,
 } from '../lib/auth/session-store';
 import { resolveAuthInitData } from '../lib/auth/telegram';
+import { AuthSplash } from '../components/AuthSplash';
 import { webConfig } from '../lib/env';
 import { useLocaleMessages } from './LocaleMessagesProvider';
 
@@ -246,11 +247,7 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
   );
 
   if (status === 'LOADING') {
-    return (
-      <div className="alex-screen alex-screen--center" role="status" aria-live="polite">
-        <p className="alex-muted">{t('loading')}</p>
-      </div>
-    );
+    return <AuthSplash />;
   }
 
   if (status !== 'READY') {
@@ -263,10 +260,10 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
     const bodyKey =
       status === 'UNAUTHORIZED' ? 'unauthorized' : status === 'EXPIRED' ? 'expired' : 'unavailable';
     return (
-      <div className="alex-screen alex-screen--center" role="alert">
+      <div className="alex-screen alex-screen--center lootra-auth-error" role="alert">
         <h1 className="alex-title">{t(titleKey)}</h1>
         <p className="alex-muted">{t(bodyKey)}</p>
-        <button type="button" className="alex-button" onClick={retry}>
+        <button type="button" className="alex-button lootra-btn lootra-btn--primary" onClick={retry}>
           {t('retry')}
         </button>
       </div>

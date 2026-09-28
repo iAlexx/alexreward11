@@ -36,6 +36,9 @@ describe('Phase 12 miniapp i18n', () => {
       'profile',
       'founder',
       'auth',
+      'onboarding',
+      'activity',
+      'notifications',
     ] as const) {
       expect(en[key]).toBeTypeOf('object');
     }

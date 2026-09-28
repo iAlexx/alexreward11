@@ -1,8 +1,10 @@
 {
   "app": {
-    "brand": "ALEx Rewards",
+    "brand": "LOOTRA",
+    "tagline": "Earn. Collect. Withdraw.",
     "skipToContent": "Skip to main content",
     "openProfile": "Open profile",
+    "openNotifications": "Open notifications",
     "mainLabel": "Main content"
   },
   "nav": {
@@ -271,13 +273,36 @@
   },
   "auth": {
     "loading": "Signing you in…",
-    "unauthorized": "You need to open ALEx Rewards from Telegram to continue.",
+    "unauthorized": "You need to open LOOTRA from Telegram to continue.",
     "expired": "Your session expired. Please open the app again.",
     "unavailable": "Sign-in is temporarily unavailable.",
     "unauthorizedTitle": "Open from Telegram",
     "expiredTitle": "Session expired",
     "unavailableTitle": "Sign-in unavailable",
     "retry": "Try again"
+  },
+  "onboarding": {
+    "ariaLabel": "Welcome to LOOTRA",
+    "eyebrow": "LOOTRA · 0{step}",
+    "step1Title": "Earn rewards",
+    "step1Body": "Complete available opportunities and receive variable digital rewards.",
+    "step2Title": "Complete tasks and opportunities",
+    "step2Body": "Finish verified missions and claim additional rewards.",
+    "step3Title": "Connect wallet and withdraw",
+    "step3Body": "Verify a TON wallet and manage server-confirmed withdrawals securely.",
+    "skip": "Skip",
+    "next": "Next",
+    "getStarted": "Get Started"
+  },
+  "activity": {
+    "title": "Activity",
+    "state": "Unavailable",
+    "body": "Activity is not available yet."
+  },
+  "notifications": {
+    "title": "Notifications",
+    "state": "Unavailable",
+    "body": "Notifications are not available yet."
   },
   "a11y": {
     "primaryNav": "Primary",

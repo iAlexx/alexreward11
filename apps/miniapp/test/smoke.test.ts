@@ -20,7 +20,7 @@ describe('Phase 12 miniapp smoke', () => {
     const names = new Set(entries.map((entry) => entry.name));
     expect(names.has('page.tsx')).toBe(true);
     expect(names.has('layout.tsx')).toBe(true);
-    for (const route of ['earn', 'tasks', 'friends', 'wallet', 'profile']) {
+    for (const route of ['earn', 'tasks', 'friends', 'wallet', 'profile', 'activity', 'notifications']) {
       expect(names.has(route)).toBe(true);
     }
     const profile = await readdir(join(appGroup, 'profile'), { withFileTypes: true });
