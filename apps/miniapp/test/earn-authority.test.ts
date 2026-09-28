@@ -68,6 +68,30 @@ describe('LOOTRA Step 3 Earn authority', () => {
     expect(gate.reason).toBe('blocked_monetary');
   });
 
+  it('A2 — SUSPENDED monetary status blocks even when monetaryEligible=true', () => {
+    const gate = resolveEarnAttemptGate(
+      baseProvider({
+        productionMonetaryStatus: 'SUSPENDED',
+        monetaryEligible: true,
+        health: { status: 'HEALTHY', observedAt: '2026-09-28T00:00:00.000Z' },
+        rewardedUseAllowed: true,
+      }),
+    );
+    expect(gate.canStart).toBe(false);
+    expect(gate.reason).toBe('monetary_suspended');
+  });
+
+  it('A3 — APPROVED + eligible still passes when other gates are clear', () => {
+    const gate = resolveEarnAttemptGate(
+      baseProvider({
+        productionMonetaryStatus: 'APPROVED',
+        monetaryEligible: true,
+      }),
+    );
+    expect(gate.canStart).toBe(true);
+    expect(gate.reason).toBeNull();
+  });
+
   it('B — monetaryEligible=false blocks attempt', () => {
     expect(
       resolveEarnAttemptGate(baseProvider({ monetaryEligible: false })).canStart,

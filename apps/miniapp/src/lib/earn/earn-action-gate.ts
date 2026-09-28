@@ -2,6 +2,7 @@ import type { EarnOpportunityLimitDto, EarnProviderCardDto } from '@alex-rewards
 
 export type EarnAttemptBlockReason =
   | 'blocked_monetary'
+  | 'monetary_suspended'
   | 'rewarded_use_disallowed'
   | 'health_unavailable'
   | 'health_suspended'
@@ -29,9 +30,13 @@ export function isAtConfiguredLimit(limit: EarnOpportunityLimitDto): boolean {
 
 /**
  * Server-truth gate for starting a rewarded attempt.
- * BLOCKED / ineligible must not yield an enabled Watch CTA.
+ * BLOCKED / SUSPENDED / ineligible must not yield an enabled Watch CTA.
+ * SUSPENDED is blocked independently of monetaryEligible (defense in depth).
  */
 export function resolveEarnAttemptGate(provider: EarnProviderCardDto): EarnAttemptGate {
+  if (provider.productionMonetaryStatus === 'SUSPENDED') {
+    return { canStart: false, reason: 'monetary_suspended' };
+  }
   if (
     provider.productionMonetaryStatus === 'BLOCKED' ||
     provider.monetaryEligible === false

@@ -81,7 +81,9 @@ export function WatchEarnCard({ provider }: { readonly provider: EarnProviderCar
   const gate = useMemo(() => resolveEarnAttemptGate(provider), [provider]);
 
   const [phase, setPhase] = useState<WatchUiPhase>(() => {
-    if (gate.reason === 'blocked_monetary') return 'BLOCKED';
+    if (gate.reason === 'blocked_monetary' || gate.reason === 'monetary_suspended') {
+      return 'BLOCKED';
+    }
     if (gate.reason === 'request_limit' || gate.reason === 'success_limit') return 'LIMIT_REACHED';
     if (
       gate.reason === 'health_unavailable' ||
@@ -193,6 +195,11 @@ export function WatchEarnCard({ provider }: { readonly provider: EarnProviderCar
         setStatusMessage(t('productionRewardUnavailable'));
         return;
       }
+      if (liveGate.reason === 'monetary_suspended') {
+        setPhase('BLOCKED');
+        setStatusMessage(t('monetarySuspendedBody'));
+        return;
+      }
       if (liveGate.reason === 'request_limit' || liveGate.reason === 'success_limit') {
         setPhase('LIMIT_REACHED');
         setStatusMessage(t('dailyLimitReached'));
@@ -260,6 +267,7 @@ export function WatchEarnCard({ provider }: { readonly provider: EarnProviderCar
 
   const unavailablePrimary =
     gate.reason === 'blocked_monetary' ||
+    gate.reason === 'monetary_suspended' ||
     gate.reason === 'request_limit' ||
     gate.reason === 'success_limit' ||
     gate.reason === 'health_unavailable' ||
@@ -270,10 +278,20 @@ export function WatchEarnCard({ provider }: { readonly provider: EarnProviderCar
 
   return (
     <section className="lootra-watch-card" aria-label={t('statusRegion')}>
-      {gate.reason === 'blocked_monetary' || phase === 'BLOCKED' ? (
+      {gate.reason === 'blocked_monetary' ||
+      gate.reason === 'monetary_suspended' ||
+      phase === 'BLOCKED' ? (
         <div className="alex-banner alex-banner--warn lootra-earn-policy" role="status">
-          <p className="alex-title-sm">{t('monetaryBlockedTitle')}</p>
-          <p className="alex-muted">{t('monetaryBlockedBody')}</p>
+          <p className="alex-title-sm">
+            {gate.reason === 'monetary_suspended'
+              ? t('monetarySuspendedTitle')
+              : t('monetaryBlockedTitle')}
+          </p>
+          <p className="alex-muted">
+            {gate.reason === 'monetary_suspended'
+              ? t('monetarySuspendedBody')
+              : t('monetaryBlockedBody')}
+          </p>
           {provider.reasonCodes.length > 0 ? (
             <p className="alex-meta">
               {common('reasonCodes')}: {provider.reasonCodes.join(', ')}
@@ -444,7 +462,7 @@ export function WatchEarnCard({ provider }: { readonly provider: EarnProviderCar
         </AdsGramRewardedBridge>
       ) : unavailablePrimary || !gate.canStart ? (
         <button type="button" className="lootra-btn lootra-btn--ghost lootra-earn-cta" disabled>
-          {gate.reason === 'blocked_monetary'
+          {gate.reason === 'blocked_monetary' || gate.reason === 'monetary_suspended'
             ? t('unavailableAction')
             : gate.reason === 'request_limit' || gate.reason === 'success_limit'
               ? t('limitReachedAction')

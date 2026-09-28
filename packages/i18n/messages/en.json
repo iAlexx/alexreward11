@@ -136,6 +136,8 @@
     "technicalError": "Something went wrong with the ad provider. Try again later.",
     "monetaryBlockedTitle": "Monetary rewards unavailable",
     "monetaryBlockedBody": "The server refuses production money for this provider, so a completed view earns nothing today. Nothing is credited unless the server says so.",
+    "monetarySuspendedTitle": "Monetary rewards suspended",
+    "monetarySuspendedBody": "Rewards for this provider are suspended. New attempts are not available until the server lifts the suspension.",
     "notConfiguredTitle": "Watch & Earn is not configured here",
     "notConfiguredBody": "This deployment has not published the ad placement this screen needs, so no attempt can be started.",
     "noPlacement": "The server did not publish an ad placement for this provider.",
