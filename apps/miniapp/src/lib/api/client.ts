@@ -361,11 +361,25 @@ export function createApiClient(options: ApiClientOptions) {
       return request<WithdrawalsListResponse>('/v1/withdrawals');
     },
 
+    getWithdrawal(id: string): Promise<WithdrawalListItem> {
+      return request<WithdrawalListItem>(`/v1/withdrawals/${encodeURIComponent(id)}`);
+    },
+
     createWithdrawalQuote(amountAtomic: string): Promise<WithdrawalQuoteResponse> {
       return request<WithdrawalQuoteResponse>('/v1/withdrawals/quote', {
         method: 'POST',
         body: JSON.stringify({ amountAtomic }),
       });
+    },
+
+    cancelWithdrawalQuote(id: string): Promise<WithdrawalQuoteResponse> {
+      return request<WithdrawalQuoteResponse>(
+        `/v1/withdrawal-quotes/${encodeURIComponent(id)}/cancel`,
+        {
+          method: 'POST',
+          body: JSON.stringify({}),
+        },
+      );
     },
 
     createWithdrawal(body: CreateWithdrawalRequest): Promise<WithdrawalListItem> {

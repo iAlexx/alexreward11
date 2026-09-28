@@ -9,6 +9,7 @@ export const queryKeys = {
   referrals: ['referrals', 'summary'] as const,
   wallets: ['wallets'] as const,
   withdrawals: ['withdrawals'] as const,
+  withdrawal: (id: string) => ['withdrawals', id] as const,
   supportTickets: ['support', 'tickets'] as const,
   supportTicket: (id: string) => ['support', 'tickets', id] as const,
 } as const;

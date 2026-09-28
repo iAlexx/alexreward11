@@ -3,7 +3,7 @@
 import type { BalanceBucketDto } from '@alex-rewards/contracts';
 import { useTranslations } from 'next-intl';
 
-import { formatAtomicAmount, isAtomicAmountString } from '../lib/money/format';
+import { formatAtomicAmountGrouped, isAtomicAmountString } from '../lib/money/format';
 
 export function MoneyAmount({
   bucket,
@@ -25,7 +25,7 @@ export function MoneyAmount({
   }
 
   const display = isAtomicAmountString(bucket.amountAtomic)
-    ? formatAtomicAmount(bucket.amountAtomic)
+    ? formatAtomicAmountGrouped(bucket.amountAtomic)
     : '—';
 
   return (
@@ -35,7 +35,9 @@ export function MoneyAmount({
         {display}{' '}
         <span className="alex-money__symbol">{bucket.assetSymbol}</span>
       </span>
-      <span className="alex-meta">{t('baseUnits')}</span>
+      <span className="alex-meta">
+        {t('baseUnits')} · {bucket.assetSymbol}
+      </span>
     </div>
   );
 }
