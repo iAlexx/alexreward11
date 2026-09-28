@@ -48,11 +48,8 @@ export {
   type RiskSignalContribution,
   type RiskSignalFact,
 } from './risk-evaluator.js';
-export {
-  upsertRiskProfile,
-  type PersistedRiskProfile,
-  type UpsertRiskProfileInput,
-} from './risk-profile.js';
+/** Read type only — current risk profile writes go through evaluateAndPersistRisk. */
+export type { PersistedRiskProfile } from './risk-profile.js';
 export {
   evaluateAndPersistRisk,
   type EvaluateAndPersistRiskInput,

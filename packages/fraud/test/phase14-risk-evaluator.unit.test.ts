@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -51,7 +54,7 @@ function fact(
 }
 
 describe('Phase 14 evaluateRiskSignals scoring (unit)', () => {
-  it('zero active signals => score 0 / LOW / ALLOW', () => {
+  it('zero active signals => score 0 / LOW / ALLOW / NO_ACTIVE_SIGNALS', () => {
     const result = evaluateRiskSignals(testRule(), [
       fact('ACCOUNT_AGE', false, 'ACCOUNT_AGE_OK'),
       fact('WALLET_REUSE', false, 'WALLET_OK'),
@@ -60,7 +63,14 @@ describe('Phase 14 evaluateRiskSignals scoring (unit)', () => {
     expect(result.riskTier).toBe('LOW');
     expect(result.action).toBe('ALLOW');
     expect(result.activeSignals).toEqual([]);
+    expect(result.reasonCodes).toEqual(['NO_ACTIVE_SIGNALS']);
     expect(result.neverAutoBan).toBe(true);
+  });
+
+  it('empty signal facts => score 0 and NO_ACTIVE_SIGNALS', () => {
+    const result = evaluateRiskSignals(testRule(), []);
+    expect(result.score).toBe(0);
+    expect(result.reasonCodes).toEqual(['NO_ACTIVE_SIGNALS']);
   });
 
   it('one active signal => exact configured weight', () => {
@@ -208,5 +218,29 @@ describe('Phase 14 evaluateRiskSignals determinism and fail-closed (unit)', () =
     expect('tier' in sample).toBe(false);
     expect('action' in sample).toBe(false);
     expect('contribution' in sample).toBe(false);
+  });
+});
+
+describe('Phase 14 authoritative persistence surface (unit)', () => {
+  it('does not export arbitrary current risk profile writers', async () => {
+    const mod = await import('../src/index.js');
+    const names = Object.keys(mod);
+    expect(names).not.toContain('upsertRiskProfile');
+    expect(names).not.toContain('UpsertRiskProfileInput');
+    expect(names).not.toContain('upsertRiskProfileFromEvaluation');
+    expect(names).toContain('evaluateAndPersistRisk');
+    expect(names).toContain('evaluateRiskSignals');
+  });
+
+  it('EvaluateAndPersistRiskInput source has no caller rule field', () => {
+    const path = fileURLToPath(new URL('../src/evaluate-and-persist.ts', import.meta.url));
+    const source = readFileSync(path, 'utf8');
+    const inputBlock = source.match(
+      /export interface EvaluateAndPersistRiskInput \{[\s\S]*?\n\}/,
+    )?.[0];
+    expect(inputBlock).toBeDefined();
+    expect(inputBlock).not.toMatch(/^\s*readonly rule:/m);
+    expect(source).toMatch(/resolveActiveRiskRuleVersion\(client/);
+    expect(source).toMatch(/context,/);
   });
 });

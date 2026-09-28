@@ -1,9 +1,19 @@
 import type { PoolClient } from 'pg';
 
 import { assertSafePersistedJsonObject } from './canonical.js';
-import { evaluateRiskSignals, type RiskEvaluationResult, type RiskSignalFact } from './risk-evaluator.js';
-import { upsertRiskProfile, type PersistedRiskProfile } from './risk-profile.js';
-import type { RiskRuleVersion } from './risk-rule.js';
+import {
+  evaluateRiskSignals,
+  type RiskEvaluationResult,
+  type RiskSignalFact,
+} from './risk-evaluator.js';
+import {
+  upsertRiskProfileFromEvaluation,
+  type PersistedRiskProfile,
+} from './risk-profile.js';
+import {
+  resolveActiveRiskRuleVersion,
+  type ResolvedRiskRuleVersion,
+} from './risk-rule.js';
 import {
   persistRiskSnapshot,
   type PersistedRiskSnapshot,
@@ -13,24 +23,39 @@ import {
 export interface EvaluateAndPersistRiskInput {
   readonly userId: string;
   readonly decisionScope: RiskDecisionScope;
-  readonly rule: RiskRuleVersion;
   readonly signalFacts: readonly RiskSignalFact[];
-  /** Additional safe audit context merged into snapshot safeInputs. */
+  /**
+   * Optional safe audit context nested under safeInputs.context.
+   * Must not overwrite system fields (ruleVersion / signalState).
+   */
   readonly safeContext?: Readonly<Record<string, unknown>>;
+  /**
+   * Instant used for ACTIVE rule effective-window selection.
+   * Defaults to now. Tests may pin this for deterministic version selection.
+   */
+  readonly evaluatedAt?: Date;
 }
 
 export interface EvaluateAndPersistRiskResult {
+  readonly rule: ResolvedRiskRuleVersion;
   readonly evaluation: RiskEvaluationResult;
   readonly snapshot: PersistedRiskSnapshot;
   readonly profile: PersistedRiskProfile;
 }
 
 /**
- * One evaluation call => exactly one immutable snapshot + one current profile upsert.
+ * Authoritative evaluate + persist path.
  *
- * Snapshots are chronological audit rows: reevaluation with the same inputs may create a
- * later snapshot. There is no global snapshot dedupe. Callers should pass a PoolClient
- * already bound to their transaction; this function does not open nested financial txns.
+ * Resolves the ACTIVE risk rule from the DB (never accepts a caller-supplied rule),
+ * evaluates signals against that rule, then writes exactly one immutable snapshot and
+ * one current risk_profiles upsert.
+ *
+ * Transaction semantics: callers MUST pass a PoolClient already bound to their
+ * transaction so snapshot + profile commit/rollback together. This function does
+ * not open nested transactions and does not write ledger / user status.
+ *
+ * Snapshots are chronological audit rows: reevaluation may create a later snapshot.
+ * There is no global snapshot dedupe.
  *
  * Never mutates users.status / withdrawal_status / ledger. Actions are returned, not executed.
  */
@@ -38,11 +63,12 @@ export async function evaluateAndPersistRisk(
   client: PoolClient,
   input: EvaluateAndPersistRiskInput,
 ): Promise<EvaluateAndPersistRiskResult> {
-  if (input.safeContext !== undefined) {
-    assertSafePersistedJsonObject('safeContext', input.safeContext);
-  }
+  const evaluatedAt = input.evaluatedAt ?? new Date();
+  const context = input.safeContext ?? {};
+  assertSafePersistedJsonObject('safeContext', context);
 
-  const evaluation = evaluateRiskSignals(input.rule, input.signalFacts);
+  const rule = await resolveActiveRiskRuleVersion(client, { at: evaluatedAt });
+  const evaluation = evaluateRiskSignals(rule, input.signalFacts);
 
   const signalState = evaluation.contributions.map((item) => ({
     code: item.code,
@@ -51,10 +77,11 @@ export async function evaluateAndPersistRisk(
     contribution: item.contribution,
   }));
 
+  // Nest caller context so it cannot overwrite authoritative audit fields.
   const safeInputs: Record<string, unknown> = {
     ruleVersion: evaluation.ruleVersion,
     signalState,
-    ...(input.safeContext ?? {}),
+    context,
   };
 
   const outputs: Record<string, unknown> = {
@@ -72,20 +99,16 @@ export async function evaluateAndPersistRisk(
     score: evaluation.score,
     riskTier: evaluation.riskTier,
     ruleVersion: evaluation.ruleVersion,
-    reasonCodes:
-      evaluation.reasonCodes.length > 0 ? evaluation.reasonCodes : ['NO_ACTIVE_SIGNALS'],
+    reasonCodes: evaluation.reasonCodes,
     safeInputs,
     outputs,
   });
 
-  const profile = await upsertRiskProfile(client, {
+  const profile = await upsertRiskProfileFromEvaluation(client, {
     userId: input.userId,
-    score: evaluation.score,
-    riskTier: evaluation.riskTier,
-    ruleVersion: evaluation.ruleVersion,
-    reasonCodes: snapshot.reasonCodes,
+    evaluation,
     calculatedAt: snapshot.calculatedAt,
   });
 
-  return { evaluation, snapshot, profile };
+  return { rule, evaluation, snapshot, profile };
 }

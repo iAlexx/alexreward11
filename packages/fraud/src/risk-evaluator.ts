@@ -139,6 +139,11 @@ export function evaluateRiskSignals(
   // Stable reason-code ordering for reproducibility.
   reasonCodes.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 
+  // Deterministic safe system reason when no active signal contributed.
+  // Persistence must store exactly this evaluator result (no substitution later).
+  const finalReasonCodes =
+    reasonCodes.length > 0 ? reasonCodes : (['NO_ACTIVE_SIGNALS'] as const);
+
   const score = Math.min(sum, 100);
   const riskTier = resolveRiskTier(score, rule.thresholds);
   const action = rule.actions[riskTier];
@@ -148,7 +153,7 @@ export function evaluateRiskSignals(
     riskTier,
     action,
     activeSignals,
-    reasonCodes,
+    reasonCodes: finalReasonCodes,
     contributions,
     neverAutoBan: true,
     ruleVersion: rule.ruleVersion,

@@ -1,16 +1,8 @@
 import type { PoolClient } from 'pg';
 
 import { FraudDomainError } from './errors.js';
+import type { RiskEvaluationResult } from './risk-evaluator.js';
 import type { RiskTier } from './risk-rule.js';
-
-export interface UpsertRiskProfileInput {
-  readonly userId: string;
-  readonly score: number;
-  readonly riskTier: RiskTier;
-  readonly ruleVersion: number;
-  readonly reasonCodes: readonly string[];
-  readonly calculatedAt?: Date;
-}
 
 export interface PersistedRiskProfile {
   readonly id: string;
@@ -23,19 +15,35 @@ export interface PersistedRiskProfile {
   readonly updatedAt: Date;
 }
 
+export interface UpsertRiskProfileFromEvaluationInput {
+  readonly userId: string;
+  /** Score/tier/ruleVersion/reasonCodes are taken exclusively from this evaluation. */
+  readonly evaluation: RiskEvaluationResult;
+  readonly calculatedAt?: Date;
+}
+
 /**
- * Upsert current normalized risk state for a user.
+ * Internal current-profile writer.
+ * Copies score/tier/ruleVersion/reasonCodes from RiskEvaluationResult only —
+ * callers cannot independently invent current risk state fields.
  * Does not mutate users.status / users.withdrawal_status / ledger.
  */
-export async function upsertRiskProfile(
+export async function upsertRiskProfileFromEvaluation(
   client: PoolClient,
-  input: UpsertRiskProfileInput,
+  input: UpsertRiskProfileFromEvaluationInput,
 ): Promise<PersistedRiskProfile> {
-  if (!Number.isInteger(input.score) || input.score < 0 || input.score > 100) {
+  const { evaluation } = input;
+  if (!Number.isInteger(evaluation.score) || evaluation.score < 0 || evaluation.score > 100) {
     throw new FraudDomainError('RISK_PROFILE_PERSIST_FAILED', 'score must be integer 0..100');
   }
-  if (!Number.isInteger(input.ruleVersion) || input.ruleVersion <= 0) {
+  if (!Number.isInteger(evaluation.ruleVersion) || evaluation.ruleVersion <= 0) {
     throw new FraudDomainError('RISK_PROFILE_PERSIST_FAILED', 'ruleVersion must be positive integer');
+  }
+  if (evaluation.reasonCodes.length === 0) {
+    throw new FraudDomainError(
+      'RISK_PROFILE_PERSIST_FAILED',
+      'evaluation.reasonCodes must be non-empty',
+    );
   }
 
   const calculatedAt = input.calculatedAt ?? new Date();
@@ -63,10 +71,10 @@ export async function upsertRiskProfile(
      RETURNING id, score, risk_tier, rule_version, reason_codes, calculated_at, updated_at`,
     [
       input.userId,
-      input.score,
-      input.riskTier,
-      input.ruleVersion,
-      input.reasonCodes,
+      evaluation.score,
+      evaluation.riskTier,
+      evaluation.ruleVersion,
+      evaluation.reasonCodes,
       calculatedAt.toISOString(),
     ],
   );
