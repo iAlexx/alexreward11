@@ -83,6 +83,8 @@ export interface RewardRuleRecord {
   readonly status: RuleVersionStatus;
   readonly validFrom: string;
   readonly validTo: string | null;
+  /** NULL = historical unconfigured; fail closed when activating new ACTIVE rows. */
+  readonly referralEligible: boolean | null;
 }
 
 export interface ResolveRewardRuleContext {
@@ -112,6 +114,8 @@ export interface CreateRewardRuleVersionCommand {
   readonly sourceReference?: string | null;
   readonly createdByAdminId?: string | null;
   readonly activate?: boolean;
+  /** Required when activate/ACTIVE; NULL allowed only for non-ACTIVE (historical/DRAFT). */
+  readonly referralEligible?: boolean | null;
 }
 
 export interface CreateRewardBudgetPeriodCommand {

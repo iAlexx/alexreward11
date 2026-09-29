@@ -12,7 +12,15 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint src",
-    "test": "vitest run --passWithNoTests"
+    "lint": "eslint src test",
+    "test": "vitest run --fileParallelism=false",
+    "test:phase15": "cross-env PHASE15_REFERRAL_TESTS=1 vitest run --fileParallelism=false test/phase15-referral-rule.unit.test.ts test/phase15-referral-rule.db.test.ts"
+  },
+  "dependencies": {
+    "pg": "8.23.0"
+  },
+  "devDependencies": {
+    "@alex-rewards/db": "workspace:*",
+    "@types/pg": "8.23.1"
   }
 }

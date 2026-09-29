@@ -382,6 +382,7 @@ export async function createAdRewardRule(
       validFrom: new Date(Date.now() - 86_400_000),
       reason: 'Phase 11 certification AD rule',
       activate: true,
+      referralEligible: false,
     });
     return { ruleId: rule.id, code };
   });

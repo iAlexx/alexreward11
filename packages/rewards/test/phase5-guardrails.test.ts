@@ -132,6 +132,7 @@ describe.skipIf(phase5DatabaseUrl === '')('Phase 5 guardrails', () => {
         maxRewardAtomic: '100000',
         quoteTtlSeconds: 60,
         activate: true,
+        referralEligible: false,
       });
       await createExposureLimitVersion(client, {
         limitCode: 'MIN_EXPECTED_MARGIN_BPS',

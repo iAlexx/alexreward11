@@ -92,10 +92,12 @@ async function insertReferralEdge(
   if (codeId === undefined) throw new Error('referral code insert failed');
   await pool.query(
     `INSERT INTO referral_edges (
-       referrer_user_id, referred_user_id, code_id, state, created_at, rejected_at, attributed_at
+       referrer_user_id, referred_user_id, code_id, state, created_at, rejected_at,
+       rejection_reason, attributed_at, activated_at, activation_rule_version
      ) VALUES (
        $1::uuid, $2::uuid, $3::uuid, $4::referral_edge_state,
-       $5::timestamptz, $6::timestamptz, $5::timestamptz
+       $5::timestamptz, $6::timestamptz,
+       $7, $5::timestamptz, $8::timestamptz, $9
      )`,
     [
       input.referrerUserId,
@@ -110,6 +112,11 @@ async function insertReferralEdge(
         : input.rejectedAt === null
           ? null
           : input.rejectedAt.toISOString(),
+      input.state === 'REJECTED' ? 'phase14-test-rejected' : null,
+      input.state === 'ACTIVE' ? input.createdAt.toISOString() : null,
+      // ACTIVE edges require activation_rule_version; fixture uses a synthetic version
+      // only when a matching referral_rule_versions row exists (Phase 15+). PENDING/REJECTED stay NULL.
+      null,
     ],
   );
 }

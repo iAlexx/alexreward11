@@ -588,7 +588,18 @@ importers:
         specifier: 10.3.1
         version: 10.3.1
 
-  packages/referrals: {}
+  packages/referrals:
+    dependencies:
+      pg:
+        specifier: 8.23.0
+        version: 8.23.0
+    devDependencies:
+      '@alex-rewards/db':
+        specifier: workspace:*
+        version: link:../db
+      '@types/pg':
+        specifier: 8.23.1
+        version: 8.23.1
 
   packages/rewards:
     dependencies:

@@ -44,6 +44,7 @@ describe.skipIf(phase5DatabaseUrl === '')('Phase 5 reward rules', () => {
         fixedRewardAtomic: '100',
         quoteTtlSeconds: 60,
         activate: true,
+        referralEligible: false,
       });
     });
 
@@ -74,6 +75,7 @@ describe.skipIf(phase5DatabaseUrl === '')('Phase 5 reward rules', () => {
         fixedRewardAtomic: '100',
         quoteTtlSeconds: 60,
         activate: true,
+        referralEligible: false,
       });
       await createRewardRuleVersion(client, {
         code: 'test-only-rule-y',
@@ -82,6 +84,7 @@ describe.skipIf(phase5DatabaseUrl === '')('Phase 5 reward rules', () => {
         fixedRewardAtomic: '200',
         quoteTtlSeconds: 60,
         activate: true,
+        referralEligible: false,
       });
     });
 
@@ -104,6 +107,7 @@ describe.skipIf(phase5DatabaseUrl === '')('Phase 5 reward rules', () => {
         fixedRewardAtomic: '100',
         quoteTtlSeconds: 60,
         activate: true,
+        referralEligible: false,
       }),
     );
 
@@ -121,6 +125,7 @@ describe.skipIf(phase5DatabaseUrl === '')('Phase 5 reward rules', () => {
         fixedRewardAtomic: '100',
         quoteTtlSeconds: 60,
         activate: true,
+        referralEligible: false,
       }),
     );
     const second = await withLedgerTransaction(pool, (client) =>
@@ -131,6 +136,7 @@ describe.skipIf(phase5DatabaseUrl === '')('Phase 5 reward rules', () => {
         fixedRewardAtomic: '250',
         quoteTtlSeconds: 60,
         activate: false,
+        referralEligible: false,
       }),
     );
     expect(second.status).toBe('DRAFT');

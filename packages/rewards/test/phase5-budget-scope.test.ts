@@ -309,6 +309,7 @@ describe.skipIf(phase5DatabaseUrl === '')('Phase 5 base budget scope authority',
         providerId: provider.id,
         fixedRewardAtomic: '50',
         activate: true,
+        referralEligible: false,
         validFrom: new Date(Date.now() - 86_400_000),
       });
       return rule.id;

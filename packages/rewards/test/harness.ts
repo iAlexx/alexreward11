@@ -122,6 +122,7 @@ export async function createTestOnlyPromotionRule(
       validFrom: new Date(Date.now() - 86_400_000),
       reason: 'test-only Phase 5 rule',
       activate: true,
+      referralEligible: false,
     });
     return { ruleId: rule.id, code, providerId: provider.id };
   });
