@@ -1167,3 +1167,50 @@ describe('Phase 10 Testnet provision config', () => {
     expect(config.PHASE10_TESTNET_PROVISION_REQUIRED_DATABASE_NAME).toBe('');
   });
 });
+
+describe('TELEGRAM_PUBLIC_BOT_USERNAME', () => {
+  it('is optional on ApiConfig and BotConfig; rejects leading @', () => {
+    const api = loadApiConfig({
+      ...common,
+      ...apiAuth,
+      DATABASE_URL: 'postgresql://alex:local@localhost:5432/db',
+      REDIS_URL: 'redis://localhost:6379',
+      TEMPORAL_ADDRESS: 'localhost:7233',
+    });
+    expect(api.TELEGRAM_PUBLIC_BOT_USERNAME).toBeUndefined();
+
+    const apiNamed = loadApiConfig({
+      ...common,
+      ...apiAuth,
+      DATABASE_URL: 'postgresql://alex:local@localhost:5432/db',
+      REDIS_URL: 'redis://localhost:6379',
+      TEMPORAL_ADDRESS: 'localhost:7233',
+      TELEGRAM_PUBLIC_BOT_USERNAME: 'ExampleBot',
+    });
+    expect(apiNamed.TELEGRAM_PUBLIC_BOT_USERNAME).toBe('ExampleBot');
+
+    expect(() =>
+      loadApiConfig({
+        ...common,
+        ...apiAuth,
+        DATABASE_URL: 'postgresql://alex:local@localhost:5432/db',
+        REDIS_URL: 'redis://localhost:6379',
+        TEMPORAL_ADDRESS: 'localhost:7233',
+        TELEGRAM_PUBLIC_BOT_USERNAME: '@ExampleBot',
+      }),
+    ).toThrow(/TELEGRAM_PUBLIC_BOT_USERNAME/);
+
+    const bot = loadBotConfig({
+      ...common,
+      BOT_TRANSPORT_MODE: 'disabled',
+    });
+    expect(bot.TELEGRAM_PUBLIC_BOT_USERNAME).toBeUndefined();
+
+    const botNamed = loadBotConfig({
+      ...common,
+      BOT_TRANSPORT_MODE: 'disabled',
+      TELEGRAM_PUBLIC_BOT_USERNAME: 'ExampleBot',
+    });
+    expect(botNamed.TELEGRAM_PUBLIC_BOT_USERNAME).toBe('ExampleBot');
+  });
+});

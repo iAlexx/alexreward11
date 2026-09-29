@@ -25,6 +25,16 @@ export {
   type ReferralStartParamParseResult,
 } from './start-param.js';
 export {
+  TELEGRAM_START_MAX_LENGTH,
+  REFERRAL_CODE_MAX_TELEGRAM_LENGTH,
+  REFERRAL_CODE_MIN_LENGTH,
+  buildReferralStartPayload,
+  buildReferralBotStartLink,
+  buildReferralMiniAppLaunchLink,
+  isTelegramSafeReferralCodeAlphabetChar,
+  type ReferralStartPayloadResult,
+} from './telegram-links.js';
+export {
   attributeReferralCode,
   type ReferralAttributionOutcome,
 } from './attribution.js';

@@ -346,7 +346,7 @@ describe.skipIf(phase15DatabaseUrl === '')('Phase 15 evaluateReferralActivation'
     expect(after.rows[0]?.c).toBe(before.rows[0]?.c);
   });
 
-  it('fraud-first then activation rejects OPEN CRITICAL', async () => {
+  it('fraud-first uncommitted OPEN CRITICAL blocks activation then REJECTED', async () => {
     const invitee = await makeInvitee('15310014', 100_000);
     await seedAvailableAds(invitee, 5);
     const edgeId = await insertPendingEdge(pool, {
@@ -365,18 +365,44 @@ describe.skipIf(phase15DatabaseUrl === '')('Phase 15 evaluateReferralActivation'
          VALUES ($1::uuid, 'phase15-fraud-first', 'CRITICAL'::severity_level, 'OPEN'::fraud_flag_status)`,
         [invitee],
       );
-      await clientFraud.query('COMMIT');
+      // Hold the users-row FK lock — do NOT commit yet.
+      const holderPid = (
+        await clientFraud.query<{ pid: number }>(`SELECT pg_backend_pid() AS pid`)
+      ).rows[0]!.pid;
 
       await clientAct.query('BEGIN');
-      const result = await evaluateReferralActivation(clientAct, { edgeId });
-      await clientAct.query('COMMIT');
+      const activationPromise = evaluateReferralActivation(clientAct, { edgeId });
+      expect(await waitForBlockedOnHolder(watcher, holderPid)).toBe(true);
+
+      await clientFraud.query('COMMIT');
+      const result = await activationPromise;
       expect(result.outcome).toBe('REJECTED');
+      if (result.outcome === 'REJECTED') {
+        expect(result.rejectionReason).toBe(CRITICAL_FRAUD_REJECTION_REASON);
+      }
+      await clientAct.query('COMMIT');
+
+      const state = await pool.query<{ state: string }>(
+        `SELECT state::text AS state FROM referral_edges WHERE id = $1`,
+        [edgeId],
+      );
+      expect(state.rows[0]?.state).toBe('REJECTED');
     } finally {
+      try {
+        await clientFraud.query('ROLLBACK');
+      } catch {
+        /* ignore */
+      }
+      try {
+        await clientAct.query('ROLLBACK');
+      } catch {
+        /* ignore */
+      }
       clientFraud.release();
       clientAct.release();
       watcher.release();
     }
-  });
+  }, 60_000);
 
   it('activation-first FOR UPDATE blocks concurrent fraud INSERT until commit', async () => {
     const invitee = await makeInvitee('15310015', 100_000);

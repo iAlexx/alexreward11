@@ -56,6 +56,9 @@ describe('Phase 15 code policy entropy (pure)', () => {
     expect(() =>
       assertReferralCodePolicyShape({ alphabet: 'aabb', codeLength: 40 }),
     ).toThrow(ReferralDomainError);
+    expect(() =>
+      assertReferralCodePolicyShape({ alphabet: TEST_ALPHABET, codeLength: 61 }),
+    ).toThrow(ReferralDomainError);
   });
 });
 
@@ -282,4 +285,48 @@ describe.skipIf(phase15DatabaseUrl === '')('Phase 15 referral code policy DB', (
       watcher.release();
     }
   }, 60_000);
+
+  it('DB rejects code_length > 60 and Telegram-unsafe alphabet via raw SQL', async () => {
+    await expect(
+      pool.query(
+        `INSERT INTO referral_code_policy_versions (
+           policy_version, code_length, alphabet, status, effective_from, reason
+         ) VALUES (901, 61, $1, 'ACTIVE', now() - interval '1 hour', 'db-overlength')`,
+        [TEST_ALPHABET],
+      ),
+    ).rejects.toThrow();
+
+    await expect(
+      pool.query(
+        `INSERT INTO referral_code_policy_versions (
+           policy_version, code_length, alphabet, status, effective_from, reason
+         ) VALUES (902, 64, $1, 'ACTIVE', now() - interval '1 hour', 'db-overlength-64')`,
+        [TEST_ALPHABET],
+      ),
+    ).rejects.toThrow();
+
+    await expect(
+      pool.query(
+        `INSERT INTO referral_code_policy_versions (
+           policy_version, code_length, alphabet, status, effective_from, reason
+         ) VALUES (903, 40, $1, 'ACTIVE', now() - interval '1 hour', 'db-dot-alphabet')`,
+        [`${TEST_ALPHABET}.`],
+      ),
+    ).rejects.toThrow();
+
+    await expect(
+      pool.query(
+        `INSERT INTO referral_code_policy_versions (
+           policy_version, code_length, alphabet, status, effective_from, reason
+         ) VALUES (904, 40, $1, 'ACTIVE', now() - interval '1 hour', 'db-plus-alphabet')`,
+        [`${TEST_ALPHABET}+`],
+      ),
+    ).rejects.toThrow();
+
+    const seeded = await pool.query<{ c: string }>(
+      `SELECT count(*)::text AS c FROM referral_code_policy_versions
+       WHERE reason ILIKE '%production%' OR reason ILIKE '%seed%'`,
+    );
+    expect(Number(seeded.rows[0]?.c ?? '0')).toBe(0);
+  });
 });

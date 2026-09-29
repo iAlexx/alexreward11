@@ -18,6 +18,7 @@
     "@alex-rewards/control-center": "workspace:*",
     "@alex-rewards/db": "workspace:*",
     "@alex-rewards/observability": "workspace:*",
+    "@alex-rewards/referrals": "workspace:*",
     "@alex-rewards/withdrawals": "workspace:*",
     "fastify": "5.12.1",
     "grammy": "1.46.0",

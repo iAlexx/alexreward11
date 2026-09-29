@@ -13,6 +13,7 @@ import { createShutdownCoordinator, initializeObservability } from '@alex-reward
 import { withdrawalEngineConfigFromValidatedApi } from '@alex-rewards/withdrawals';
 
 import { createGrammyApprovalsSender } from './approvals-telegram-sender.js';
+import { resolveReferralStartBridge } from './referral-start.js';
 import { shouldStartTelegramControlCenter } from './telegram-control-center-gate.js';
 
 const OWNER_REVIEW_POLL_INTERVAL_MS = 2_000;
@@ -73,6 +74,24 @@ try {
     pool = new Pool({ connectionString: config.DATABASE_URL });
     bot = new Bot(config.TELEGRAM_BOT_TOKEN);
     const approvalsSender = createGrammyApprovalsSender(bot.api);
+
+    // Public Referral transport bridge only — no attribution / no financial authority.
+    bot.command('start', async (ctx) => {
+      const payload = typeof ctx.match === 'string' ? ctx.match : '';
+      const bridge = resolveReferralStartBridge({
+        startPayload: payload,
+        botUsername: config.TELEGRAM_PUBLIC_BOT_USERNAME,
+      });
+      if (bridge.kind !== 'LAUNCH') {
+        return;
+      }
+      await ctx.reply('Open LOOTRA to continue.', {
+        reply_markup: {
+          inline_keyboard: [[{ text: 'Open LOOTRA', url: bridge.launchUrl }]],
+        },
+      });
+    });
+
     bot.on('callback_query:data', async (ctx) => {
       const data = ctx.callbackQuery.data;
       const fromId = ctx.from?.id;

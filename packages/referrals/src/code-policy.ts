@@ -1,14 +1,18 @@
 /**
  * Versioned referral code format policy + server-side code generation.
  * No production alphabet/length defaults. No Math.random.
+ * Alphabet must be Telegram start-param safe: [A-Za-z0-9_-] only; length 8..60.
  */
 import { randomInt } from 'node:crypto';
 
 import type { PoolClient } from 'pg';
 
 import { ReferralDomainError } from './errors.js';
-
-const FORBIDDEN_ALPHABET_CHARS = new Set([' ', '\t', '\n', '\r', '&', '=', '?', '#', '/']);
+import {
+  isTelegramSafeReferralCodeAlphabetChar,
+  REFERRAL_CODE_MAX_TELEGRAM_LENGTH,
+  REFERRAL_CODE_MIN_LENGTH,
+} from './telegram-links.js';
 
 export interface ReferralCodePolicyVersion {
   readonly id: string;
@@ -40,10 +44,10 @@ export function assertReferralCodePolicyShape(input: {
   }
   const seen = new Set<string>();
   for (const ch of alphabetChars) {
-    if (FORBIDDEN_ALPHABET_CHARS.has(ch)) {
+    if (!isTelegramSafeReferralCodeAlphabetChar(ch)) {
       throw new ReferralDomainError(
         'REFERRAL_CODE_POLICY_INVALID',
-        'alphabet contains deep-link-unsafe characters',
+        'alphabet must contain only Telegram-safe characters [A-Za-z0-9_-]',
       );
     }
     if (seen.has(ch)) {
@@ -54,10 +58,14 @@ export function assertReferralCodePolicyShape(input: {
     }
     seen.add(ch);
   }
-  if (!Number.isInteger(input.codeLength) || input.codeLength < 8 || input.codeLength > 64) {
+  if (
+    !Number.isInteger(input.codeLength) ||
+    input.codeLength < REFERRAL_CODE_MIN_LENGTH ||
+    input.codeLength > REFERRAL_CODE_MAX_TELEGRAM_LENGTH
+  ) {
     throw new ReferralDomainError(
       'REFERRAL_CODE_POLICY_INVALID',
-      'codeLength must be an integer between 8 and 64',
+      `codeLength must be an integer between ${REFERRAL_CODE_MIN_LENGTH} and ${REFERRAL_CODE_MAX_TELEGRAM_LENGTH}`,
     );
   }
   const bits = referralCodeEntropyBits(alphabetChars.length, input.codeLength);
@@ -65,7 +73,7 @@ export function assertReferralCodePolicyShape(input: {
     throw new ReferralDomainError(
       'REFERRAL_CODE_POLICY_INVALID',
       'code policy entropy must be at least 96 bits',
-      { bits, alphabetSize: alphabet.length, codeLength: input.codeLength },
+      { bits, alphabetSize: alphabetChars.length, codeLength: input.codeLength },
     );
   }
 }

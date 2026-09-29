@@ -232,6 +232,9 @@ importers:
       '@alex-rewards/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@alex-rewards/referrals':
+        specifier: workspace:*
+        version: link:../../packages/referrals
       '@alex-rewards/withdrawals':
         specifier: workspace:*
         version: link:../../packages/withdrawals

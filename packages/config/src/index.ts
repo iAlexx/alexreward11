@@ -154,6 +154,20 @@ const apiSchema = serviceSchema
       z.enum(['0.0.0.0', '::']).optional(),
     ),
     TELEGRAM_BOT_TOKEN: z.string().min(20),
+    /**
+     * Optional public bot username for Referral share / Mini App launch deep links.
+     * Canonical form without leading @. No production default.
+     */
+    TELEGRAM_PUBLIC_BOT_USERNAME: z.preprocess(
+      (value) => (value === '' || value === undefined || value === null ? undefined : value),
+      z
+        .string()
+        .regex(
+          /^[A-Za-z][A-Za-z0-9_]{3,30}[A-Za-z0-9]$/,
+          'TELEGRAM_PUBLIC_BOT_USERNAME must be a canonical Telegram username without @',
+        )
+        .optional(),
+    ),
     SESSION_ACCESS_SECRET: z.string().min(32),
     // No Zod defaults: staging/production must supply these explicitly (fail closed).
     SESSION_ACCESS_TTL_SECONDS: z.coerce.number().int().min(60).max(3600),
@@ -288,6 +302,20 @@ const botSchema = commonSchema
     ),
     BOT_TRANSPORT_MODE: z.enum(['disabled', 'polling']).default('disabled'),
     TELEGRAM_BOT_TOKEN: optionalSecret,
+    /**
+     * Optional public bot username for Referral /start → Mini App launch bridge.
+     * Canonical form without leading @. No production default.
+     */
+    TELEGRAM_PUBLIC_BOT_USERNAME: z.preprocess(
+      (value) => (value === '' || value === undefined || value === null ? undefined : value),
+      z
+        .string()
+        .regex(
+          /^[A-Za-z][A-Za-z0-9_]{3,30}[A-Za-z0-9]$/,
+          'TELEGRAM_PUBLIC_BOT_USERNAME must be a canonical Telegram username without @',
+        )
+        .optional(),
+    ),
     DATABASE_URL: postgresUrl.optional(),
     REDIS_URL: redisUrl.optional(),
     CONTROL_CENTER_OWNER_TELEGRAM_USER_IDS: z.string().default(''),

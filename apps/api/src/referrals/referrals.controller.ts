@@ -7,6 +7,7 @@ import type {
 } from '@alex-rewards/contracts';
 import type { Pool } from '@alex-rewards/db';
 import {
+  buildReferralBotStartLink,
   ensureReferralCode,
   readReferralSummary,
   ReferralDomainError,
@@ -19,24 +20,17 @@ import {
 } from '../auth/access-session.guard.js';
 import { API_CONFIG, DATABASE_POOL } from '../tokens.js';
 
-function publicBotUsername(config: ApiConfig): string | null {
-  const raw = (config as { TELEGRAM_PUBLIC_BOT_USERNAME?: string }).TELEGRAM_PUBLIC_BOT_USERNAME;
-  if (typeof raw !== 'string') return null;
-  const trimmed = raw.trim().replace(/^@/, '');
-  return trimmed === '' ? null : trimmed;
-}
-
 function deepLinkFor(config: ApiConfig, code: string | null): string | null {
   if (code === null || code === '') return null;
-  const bot = publicBotUsername(config);
-  if (bot === null) return null;
-  return `https://t.me/${bot}?start=ref_${encodeURIComponent(code)}`;
+  const bot = config.TELEGRAM_PUBLIC_BOT_USERNAME;
+  if (bot === undefined) return null;
+  return buildReferralBotStartLink(bot, code);
 }
 
 /**
  * Referral read/ensure surface (Phase 15).
  * Counts and codes are server-authoritative. No client-selected codes.
- * Deep links require an approved public bot username in config (none hardcoded).
+ * Deep links require typed TELEGRAM_PUBLIC_BOT_USERNAME + Telegram-safe code.
  */
 @Controller('v1/referrals')
 @UseGuards(AccessSessionGuard)
