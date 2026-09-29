@@ -16,6 +16,7 @@ import {
   createTestUser,
   phase15DatabaseUrl,
   resetAndMigrate,
+  waitForBlockedOnHolder,
   withClient,
 } from './harness.js';
 
@@ -164,4 +165,121 @@ describe.skipIf(phase15DatabaseUrl === '')('Phase 15 referral code policy DB', (
     expect(summary.activatedCount).toBe(1);
     expect(summary.referralCode).not.toBeNull();
   });
+
+  it('referenced effective_to closure requires after MAX(code.created_at); rejects rewrite/reopen', async () => {
+    const RESTRICT_VIOLATION = '23001';
+    await seedActivePolicy(pool, { version: 7 });
+    const userId = await createTestUser(pool, String(17_000_300 + seq));
+    const ensured = await withClient(pool, (client) =>
+      ensureReferralCode(client, { userId }),
+    );
+    expect(ensured.created).toBe(true);
+
+    const createdAt = await pool.query<{ created_at: Date }>(
+      `SELECT created_at FROM referral_codes WHERE id = $1`,
+      [ensured.codeId],
+    );
+    const maxCreated = createdAt.rows[0]!.created_at;
+    const tooEarly = new Date(maxCreated.getTime());
+    await expect(
+      pool.query(
+        `UPDATE referral_code_policy_versions SET effective_to = $1::timestamptz WHERE policy_version = 7`,
+        [tooEarly.toISOString()],
+      ),
+    ).rejects.toMatchObject({ code: RESTRICT_VIOLATION });
+
+    const safeClosure = new Date(maxCreated.getTime() + 60_000);
+    await pool.query(
+      `UPDATE referral_code_policy_versions SET effective_to = $1::timestamptz WHERE policy_version = 7`,
+      [safeClosure.toISOString()],
+    );
+
+    await expect(
+      pool.query(
+        `UPDATE referral_code_policy_versions SET effective_to = $1::timestamptz WHERE policy_version = 7`,
+        [new Date(safeClosure.getTime() + 60_000).toISOString()],
+      ),
+    ).rejects.toMatchObject({ code: RESTRICT_VIOLATION });
+
+    await expect(
+      pool.query(
+        `UPDATE referral_code_policy_versions SET effective_to = NULL WHERE policy_version = 7`,
+      ),
+    ).rejects.toMatchObject({ code: RESTRICT_VIOLATION });
+  });
+
+  it('first-reference FOR SHARE blocks concurrent premature effective_to closure', async () => {
+    const RESTRICT_VIOLATION = '23001';
+    await seedActivePolicy(pool, { version: 8 });
+    const userId = await createTestUser(pool, String(17_000_400 + seq));
+
+    const clientA = await pool.connect();
+    const clientB = await pool.connect();
+    const watcher = await pool.connect();
+    try {
+      await clientA.query('BEGIN');
+      await clientB.query('BEGIN');
+      // First-reference path: ensureReferralCode locks policy FOR SHARE then inserts code.
+      const ensurePromise = ensureReferralCode(clientA, { userId });
+      await new Promise((r) => setTimeout(r, 30));
+      const holderPid = (
+        await clientA.query<{ pid: number }>(`SELECT pg_backend_pid() AS pid`)
+      ).rows[0]!.pid;
+
+      // Concurrent closure attempt against referenced-in-progress policy.
+      const closePromise = clientB.query(
+        `UPDATE referral_code_policy_versions
+         SET effective_to = now() - interval '1 second'
+         WHERE policy_version = 8`,
+      );
+      // May block on FOR SHARE vs UPDATE, or fail after commit on created_at gate.
+      const blocked = await waitForBlockedOnHolder(watcher, holderPid, 3_000);
+      const ensured = await ensurePromise;
+      expect(ensured.created).toBe(true);
+      await clientA.query('COMMIT');
+
+      if (blocked) {
+        await expect(closePromise).rejects.toMatchObject({ code: RESTRICT_VIOLATION });
+        await clientB.query('ROLLBACK');
+      } else {
+        try {
+          await closePromise;
+          await clientB.query('COMMIT');
+        } catch {
+          try {
+            await clientB.query('ROLLBACK');
+          } catch {
+            /* ignore */
+          }
+        }
+        // After first reference exists, closure at/before created_at must fail.
+        const createdAt = await pool.query<{ created_at: Date }>(
+          `SELECT created_at FROM referral_codes WHERE id = $1`,
+          [ensured.codeId],
+        );
+        await expect(
+          pool.query(
+            `UPDATE referral_code_policy_versions
+             SET effective_to = $1::timestamptz
+             WHERE policy_version = 8 AND effective_to IS NULL`,
+            [createdAt.rows[0]!.created_at.toISOString()],
+          ),
+        ).rejects.toMatchObject({ code: RESTRICT_VIOLATION });
+      }
+    } finally {
+      try {
+        await clientA.query('ROLLBACK');
+      } catch {
+        /* ignore */
+      }
+      try {
+        await clientB.query('ROLLBACK');
+      } catch {
+        /* ignore */
+      }
+      clientA.release();
+      clientB.release();
+      watcher.release();
+    }
+  }, 60_000);
 });

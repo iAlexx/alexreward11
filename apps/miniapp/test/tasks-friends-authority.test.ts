@@ -144,7 +144,9 @@ describe('LOOTRA Step 5 Friends / referral authority', () => {
     expect(screen).toMatch(/data\.invitedCount/);
     expect(screen).toMatch(/data\.activatedCount/);
     expect(screen).toMatch(/data\.referralCode/);
-    expect(screen).toMatch(/navigator\.clipboard\.writeText\(data\.referralCode\)/);
+    expect(screen).toMatch(/getReferralCode/);
+    expect(screen).toMatch(/NOT_CONFIGURED/);
+    expect(screen).toMatch(/navigator\.clipboard\.writeText\(shareValue\)/);
   });
 
   it('Q — no Telegram deep link is fabricated from hardcoded business assumptions', async () => {

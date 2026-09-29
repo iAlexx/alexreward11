@@ -50,6 +50,7 @@ provider business behaviour is implemented here.
 | `0046_phase15_referral_rate_provenance.sql`          | Phase 15 Step 4: `referral_reward_events` rate_source + membership entitlement provenance (no seeds / no money)                                                                                                                                              |
 | `0047_phase15_referral_reward_issuance.sql`          | Phase 15 Step 5: `referral_reward_decisions` + `referral_bonus_exposure_reservations` (no production budget seed / no money)                                                                                                                                 |
 | `0048_phase15_referral_code_policy.sql`              | Phase 15 Step 7: `referral_code_policy_versions` + `referral_codes.generation_policy_version` (no production alphabet/length seed)                                                                                                                          |
+| `0049_phase15_referral_remediation.sql`              | Phase 15 remediation: referenced code-policy effective_to safe closure; `referral_reward_decisions` rule/membership provenance columns (no production seeds / no money)                                                                                    |
 
 Migrations `0001`–`0026` remain immutable. Signer login isolation is added only by
 forward migration `0027` (local provision script sets password; ops credential rotation

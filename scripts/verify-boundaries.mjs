@@ -275,6 +275,12 @@ for (const name of financialShells) {
     if (/from\s+['"]@alex-rewards\/auth['"]/.test(source)) {
       failures.push(`${path}: packages/referrals must not import @alex-rewards/auth`);
     }
+    if (/from\s+['"]@alex-rewards\/rewards['"]/.test(source)) {
+      failures.push(`${path}: packages/referrals must not import @alex-rewards/rewards`);
+    }
+    if (/from\s+['"]@alex-rewards\/worker['"]/.test(source) || /from\s+['"]@alex-rewards\/worker\//.test(source)) {
+      failures.push(`${path}: packages/referrals must not import @alex-rewards/worker`);
+    }
     if (/\beval\s*\(/.test(source) || /\bnew\s+Function\s*\(/.test(source)) {
       failures.push(`${path}: packages/referrals must not use eval/Function executable rules`);
     }

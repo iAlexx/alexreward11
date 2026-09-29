@@ -632,10 +632,10 @@ export interface AdminReferralFoundationResponse {
       readonly active: number;
       readonly rejected: number;
     };
-    readonly productionPolicySeeds: {
-      readonly referralRule: 'NOT_SEEDED' | 'SEEDED';
-      readonly codePolicy: 'NOT_SEEDED' | 'SEEDED';
-      readonly maxReferralBonusDaily: 'NOT_SEEDED' | 'SEEDED';
+    readonly activeConfigPresence: {
+      readonly referralRule: boolean;
+      readonly codePolicy: boolean;
+      readonly maxReferralBonusDaily: boolean;
     };
   } | null;
 }

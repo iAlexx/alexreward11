@@ -28,10 +28,19 @@ describe('Phase 15 integration gate invariants', () => {
 
   it('referrals package source never imports ledger', () => {
     const srcRoot = join(repoRoot, 'packages/referrals/src');
-    const files = ['index.ts', 'code-policy.ts', 'effective-rate.ts', 'activation.ts', 'attribution.ts'];
+    const files = [
+      'index.ts',
+      'code-policy.ts',
+      'effective-rate.ts',
+      'activation.ts',
+      'attribution.ts',
+      'runtime.ts',
+    ];
     for (const file of files) {
       const text = readFileSync(join(srcRoot, file), 'utf8');
       expect(text).not.toMatch(/@alex-rewards\/ledger/);
+      expect(text).not.toMatch(/@alex-rewards\/rewards/);
+      expect(text).not.toMatch(/@alex-rewards\/worker/);
     }
   });
 
@@ -42,6 +51,7 @@ describe('Phase 15 integration gate invariants', () => {
       '0046_phase15_referral_rate_provenance.sql',
       '0047_phase15_referral_reward_issuance.sql',
       '0048_phase15_referral_code_policy.sql',
+      '0049_phase15_referral_remediation.sql',
     ]) {
       const sql = readFileSync(join(repoRoot, 'migrations', name), 'utf8');
       expect(sql).not.toMatch(/base_rate_bps\s*,\s*500\b|VALUES\s*\([^)]*\b500\b/);

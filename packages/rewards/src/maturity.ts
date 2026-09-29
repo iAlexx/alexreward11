@@ -6,7 +6,6 @@ import {
 } from '@alex-rewards/ledger';
 
 import { RewardDomainError } from './errors.js';
-import { maybeIssueReferralRewardAfterMaturity } from './issue-referral.js';
 import { insertOutboxEvent } from './outbox.js';
 import type { MatureRewardEventCommand, MatureRewardEventResult } from './types.js';
 
@@ -15,17 +14,13 @@ import type { MatureRewardEventCommand, MatureRewardEventResult } from './types.
  * Idempotent and concurrent-safe (row lock + ledger idempotency).
  * Business reference: reward-maturity/{rewardEventId}
  *
- * After a successful AD maturity commit, referral bonus issuance runs in a
- * separate transaction so budget rejection cannot roll back invitee maturity.
+ * Referral bonus issuance is not triggered here — use processReferralIssuanceBatch.
  */
 export async function matureRewardEvent(
   db: LedgerDb,
   command: MatureRewardEventCommand,
 ): Promise<MatureRewardEventResult> {
-  let maturedSourceType: string | null = null;
-  let newlyMatured = false;
-
-  const result = await withLedgerTransaction(db, async (client) => {
+  return withLedgerTransaction(db, async (client) => {
     const asOf = command.asOf ?? new Date();
     const locked = await client.query<{
       id: string;
@@ -52,8 +47,6 @@ export async function matureRewardEvent(
         details: { rewardEventId: command.rewardEventId },
       });
     }
-
-    maturedSourceType = event.source_type;
 
     if (event.state === 'AVAILABLE' && event.maturity_ledger_transaction_id !== null) {
       return {
@@ -191,7 +184,6 @@ export async function matureRewardEvent(
       },
     });
 
-    newlyMatured = true;
     return {
       rewardEventId: event.id,
       ledgerTransactionId: ledger.id,
@@ -200,19 +192,4 @@ export async function matureRewardEvent(
       availableAt: asOf.toISOString(),
     };
   });
-
-  if (newlyMatured && maturedSourceType === 'AD') {
-    try {
-      await maybeIssueReferralRewardAfterMaturity(db, {
-        sourceRewardEventId: result.rewardEventId,
-        environment: command.environment ?? 'LOCAL',
-        sourceType: maturedSourceType,
-      });
-    } catch {
-      // Invitee maturity already committed. Referral failures must not undo it;
-      // retries / worker outbox can re-drive issueReferralReward idempotently.
-    }
-  }
-
-  return result;
 }

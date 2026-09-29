@@ -361,7 +361,7 @@ describe.skipIf(phase15Url === '')('Phase 15 referral reward issuance', () => {
     expect(ledger.rows.some((r) => r.account_type === 'USER_PENDING_LIABILITY')).toBe(true);
   });
 
-  it('skips PENDING / REJECTED edges and non-eligible sources', async () => {
+  it('defers PENDING edges without durable EDGE_NOT_ACTIVE decision', async () => {
     const { referrerId, referredId } = await pair();
     await insertPendingEdge(pool, referrerId, referredId);
     await seedDailyReferralBudget(pool, assetId, 1_000_000n);
@@ -378,6 +378,12 @@ describe.skipIf(phase15Url === '')('Phase 15 referral reward issuance', () => {
     });
     expect(pending.kind).toBe('skipped');
     expect(pending.reasonCode).toBe('EDGE_NOT_ACTIVE');
+    expect(pending.decisionId).toBeNull();
+    const decisions = await pool.query<{ c: string }>(
+      `SELECT count(*)::text AS c FROM referral_reward_decisions WHERE source_reward_event_id = $1`,
+      [rewardEventId],
+    );
+    expect(decisions.rows[0]?.c).toBe('0');
 
     // New invitee with rejected-style skip via no edge after truncate of edges only —
     // referral_eligible false

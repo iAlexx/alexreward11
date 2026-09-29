@@ -7,6 +7,7 @@ export const queryKeys = {
   earnSummary: (provider: string) => ['ads', 'earn-summary', provider] as const,
   tasks: ['tasks'] as const,
   referrals: ['referrals', 'summary'] as const,
+  referralCode: ['referrals', 'code'] as const,
   wallets: ['wallets'] as const,
   withdrawals: ['withdrawals'] as const,
   withdrawal: (id: string) => ['withdrawals', id] as const,

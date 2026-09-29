@@ -48,3 +48,9 @@ export {
   type EnsureReferralCodeResult,
   type ReferralCodePolicyVersion,
 } from './code-policy.js';
+export {
+  processPendingReferralActivationBatch,
+  type PendingReferralActivationBatchItem,
+  type ProcessPendingReferralActivationBatchOptions,
+  type ProcessPendingReferralActivationBatchResult,
+} from './runtime.js';

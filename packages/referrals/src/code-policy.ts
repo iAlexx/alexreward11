@@ -31,14 +31,15 @@ export function assertReferralCodePolicyShape(input: {
   readonly codeLength: number;
 }): void {
   const alphabet = input.alphabet;
-  if (typeof alphabet !== 'string' || alphabet.length < 2) {
+  const alphabetChars = Array.from(alphabet);
+  if (typeof alphabet !== 'string' || alphabetChars.length < 2) {
     throw new ReferralDomainError(
       'REFERRAL_CODE_POLICY_INVALID',
       'alphabet must contain at least 2 characters',
     );
   }
   const seen = new Set<string>();
-  for (const ch of alphabet) {
+  for (const ch of alphabetChars) {
     if (FORBIDDEN_ALPHABET_CHARS.has(ch)) {
       throw new ReferralDomainError(
         'REFERRAL_CODE_POLICY_INVALID',
@@ -59,7 +60,7 @@ export function assertReferralCodePolicyShape(input: {
       'codeLength must be an integer between 8 and 64',
     );
   }
-  const bits = referralCodeEntropyBits(alphabet.length, input.codeLength);
+  const bits = referralCodeEntropyBits(alphabetChars.length, input.codeLength);
   if (bits < 96) {
     throw new ReferralDomainError(
       'REFERRAL_CODE_POLICY_INVALID',
@@ -126,10 +127,11 @@ export async function resolveActiveReferralCodePolicy(
 }
 
 function generateCodeFromPolicy(policy: ReferralCodePolicyVersion): string {
+  const alphabetChars = Array.from(policy.alphabet);
   const chars: string[] = [];
   for (let i = 0; i < policy.codeLength; i += 1) {
-    const idx = randomInt(0, policy.alphabet.length);
-    chars.push(policy.alphabet[idx]!);
+    const idx = randomInt(0, alphabetChars.length);
+    chars.push(alphabetChars[idx]!);
   }
   return chars.join('');
 }

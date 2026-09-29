@@ -20,6 +20,7 @@ import {
   RewardDomainError,
   withLedgerTransaction as withRewardTx,
 } from '../src/index.js';
+import { reverseRewardEventOnClient } from '../src/reverse-reward.js';
 import {
   createTestUser,
   phase5DatabaseUrl,
@@ -257,13 +258,14 @@ describe.skipIf(phase15Url === '')('Phase 15 referral-safe reward reversal', () 
     });
     expect(issued.referrerRewardEventId).not.toBeNull();
 
-    // Reverse origin only — leave referral PENDING to prove maturity guard.
-    await reverseRewardEvent(pool, {
-      rewardEventId: sourceId,
-      reason: 'block-maturity',
-      skipReferralCascade: true,
-    });
-
+    // Internal non-cascade reverse of origin only — leave referral PENDING to prove maturity guard.
+    await withLedgerTransaction(pool, (client) =>
+      reverseRewardEventOnClient(
+        client,
+        { rewardEventId: sourceId, reason: 'block-maturity' },
+        { cascadeReferral: false },
+      ),
+    );
     const referralState = await pool.query<{ state: string }>(
       `SELECT state::text AS state FROM reward_events WHERE id = $1`,
       [issued.referrerRewardEventId],

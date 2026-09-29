@@ -17,9 +17,15 @@ import {
 import { createWithdrawalActivities } from './activities.js';
 import { buildWorkerHealth } from './health.js';
 import { createWithdrawalOutboxPoller, startWithdrawalOutboxRelay } from './outbox-relay.js';
+import {
+  createReferralMaintenanceCycle,
+  mapDeploymentEnvToRewardEnvironment,
+  startReferralMaintenanceLoop,
+} from './referral-maintenance.js';
 import { withdrawalEngineConfigFromWorker } from './withdrawal-engine-config.js';
 
 const OUTBOX_POLL_INTERVAL_MS = 2_000;
+const REFERRAL_MAINTENANCE_INTERVAL_MS = 5_000;
 
 const config = loadWorkerConfig();
 const withdrawalConfig = withdrawalEngineConfigFromWorker(config);
@@ -58,6 +64,7 @@ let ready = false;
 let dbPool: Pool | undefined;
 let temporalClient: Client | undefined;
 let outboxPollTimer: ReturnType<typeof setInterval> | undefined;
+let referralMaintenanceTimer: ReturnType<typeof setInterval> | undefined;
 
 const health = (readyForTraffic: boolean): HealthResponse =>
   buildWorkerHealth({
@@ -134,6 +141,34 @@ try {
     observability.logger.info({ outboxRelayEnabled: false }, 'withdrawal outbox relay disabled');
   }
 
+  let referralMaintenanceEnabled = true;
+  try {
+    mapDeploymentEnvToRewardEnvironment(config.DEPLOYMENT_ENV);
+  } catch (error) {
+    referralMaintenanceEnabled = false;
+    observability.logger.warn(
+      { err: error, deploymentEnv: config.DEPLOYMENT_ENV },
+      'referral maintenance disabled: DEPLOYMENT_ENV unmapped (fail closed)',
+    );
+  }
+
+  if (referralMaintenanceEnabled && dbPool !== undefined) {
+    const cycle = createReferralMaintenanceCycle({
+      pool: dbPool,
+      deploymentEnv: config.DEPLOYMENT_ENV,
+    });
+    referralMaintenanceTimer = startReferralMaintenanceLoop({
+      enabled: true,
+      intervalMs: REFERRAL_MAINTENANCE_INTERVAL_MS,
+      poll: async () => {
+        await cycle();
+      },
+      onError: (error) => {
+        observability.logger.warn({ err: error }, 'referral maintenance batch failed');
+      },
+    });
+  }
+
   observability.logger.info(
     {
       port: config.WORKER_PORT,
@@ -142,6 +177,7 @@ try {
       fakeChainEnabled: withdrawalConfig.fakeChainEnabled,
       realChainEnabled: phase10Config.realChainEnabled,
       outboxRelayEnabled: config.WORKER_OUTBOX_RELAY_ENABLED,
+      referralMaintenanceEnabled,
     },
     'worker listening',
   );
@@ -162,6 +198,12 @@ const shutdown = createShutdownCoordinator(observability.logger, 'worker', [
     if (outboxPollTimer !== undefined) {
       clearInterval(outboxPollTimer);
       outboxPollTimer = undefined;
+    }
+  },
+  () => {
+    if (referralMaintenanceTimer !== undefined) {
+      clearInterval(referralMaintenanceTimer);
+      referralMaintenanceTimer = undefined;
     }
   },
   () => worker?.shutdown(),

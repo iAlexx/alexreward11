@@ -345,4 +345,91 @@ describe.skipIf(phase15DatabaseUrl === '')('Phase 15 evaluateReferralActivation'
     );
     expect(after.rows[0]?.c).toBe(before.rows[0]?.c);
   });
+
+  it('fraud-first then activation rejects OPEN CRITICAL', async () => {
+    const invitee = await makeInvitee('15310014', 100_000);
+    await seedAvailableAds(invitee, 5);
+    const edgeId = await insertPendingEdge(pool, {
+      referrerUserId: referrerId,
+      referredUserId: invitee,
+      codeId,
+    });
+
+    const clientFraud = await pool.connect();
+    const clientAct = await pool.connect();
+    const watcher = await pool.connect();
+    try {
+      await clientFraud.query('BEGIN');
+      await clientFraud.query(
+        `INSERT INTO fraud_flags (user_id, flag_type, severity, status)
+         VALUES ($1::uuid, 'phase15-fraud-first', 'CRITICAL'::severity_level, 'OPEN'::fraud_flag_status)`,
+        [invitee],
+      );
+      await clientFraud.query('COMMIT');
+
+      await clientAct.query('BEGIN');
+      const result = await evaluateReferralActivation(clientAct, { edgeId });
+      await clientAct.query('COMMIT');
+      expect(result.outcome).toBe('REJECTED');
+    } finally {
+      clientFraud.release();
+      clientAct.release();
+      watcher.release();
+    }
+  });
+
+  it('activation-first FOR UPDATE blocks concurrent fraud INSERT until commit', async () => {
+    const invitee = await makeInvitee('15310015', 100_000);
+    await seedAvailableAds(invitee, 5);
+    const edgeId = await insertPendingEdge(pool, {
+      referrerUserId: referrerId,
+      referredUserId: invitee,
+      codeId,
+    });
+
+    const clientAct = await pool.connect();
+    const clientFraud = await pool.connect();
+    const watcher = await pool.connect();
+    try {
+      await clientAct.query('BEGIN');
+      await clientFraud.query('BEGIN');
+      // Hold user FOR UPDATE via activation path before fraud insert.
+      const activationPromise = evaluateReferralActivation(clientAct, { edgeId });
+      // Wait briefly so activation acquires user lock, then attempt fraud insert.
+      await new Promise((r) => setTimeout(r, 50));
+      const holderPid = (
+        await clientAct.query<{ pid: number }>(`SELECT pg_backend_pid() AS pid`)
+      ).rows[0]!.pid;
+      const fraudPromise = clientFraud.query(
+        `INSERT INTO fraud_flags (user_id, flag_type, severity, status)
+         VALUES ($1::uuid, 'phase15-act-first', 'CRITICAL'::severity_level, 'OPEN'::fraud_flag_status)`,
+        [invitee],
+      );
+      expect(await waitForBlockedOnHolder(watcher, holderPid)).toBe(true);
+      const activated = await activationPromise;
+      expect(activated.outcome).toBe('ACTIVATED');
+      await clientAct.query('COMMIT');
+      await fraudPromise;
+      await clientFraud.query('COMMIT');
+      const state = await pool.query<{ state: string }>(
+        `SELECT state::text AS state FROM referral_edges WHERE id = $1`,
+        [edgeId],
+      );
+      expect(state.rows[0]?.state).toBe('ACTIVE');
+    } finally {
+      try {
+        await clientAct.query('ROLLBACK');
+      } catch {
+        /* ignore */
+      }
+      try {
+        await clientFraud.query('ROLLBACK');
+      } catch {
+        /* ignore */
+      }
+      clientAct.release();
+      clientFraud.release();
+      watcher.release();
+    }
+  }, 60_000);
 });

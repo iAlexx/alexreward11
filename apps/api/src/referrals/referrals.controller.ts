@@ -30,7 +30,7 @@ function deepLinkFor(config: ApiConfig, code: string | null): string | null {
   if (code === null || code === '') return null;
   const bot = publicBotUsername(config);
   if (bot === null) return null;
-  return `https://t.me/${bot}?start=ref_${code}`;
+  return `https://t.me/${bot}?start=ref_${encodeURIComponent(code)}`;
 }
 
 /**

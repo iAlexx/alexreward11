@@ -117,11 +117,13 @@ export async function evaluateReferralActivation(
 
   const rule = await resolveActiveReferralRuleVersionForEvaluation(client);
 
+  // FOR UPDATE (not FOR SHARE): serializes against concurrent fraud_flags INSERT
+  // (FK takes FOR KEY SHARE on users) before age / ads / fraud reads.
   const ageRow = await client.query<{ account_age_seconds: string }>(
     `SELECT FLOOR(EXTRACT(EPOCH FROM (now() - created_at)))::bigint::text AS account_age_seconds
      FROM users
      WHERE id = $1::uuid
-     FOR SHARE`,
+     FOR UPDATE`,
     [edge.referred_user_id],
   );
   if (ageRow.rows[0] === undefined) {

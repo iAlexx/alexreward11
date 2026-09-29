@@ -139,16 +139,21 @@ async function recordDecision(
     readonly exposurePeriodId?: string | null;
     readonly rateBps?: number | null;
     readonly rateSource?: string | null;
+    readonly referralRuleVersion?: number | null;
+    readonly userMembershipId?: string | null;
+    readonly entitlementRuleVersionId?: string | null;
   },
 ): Promise<string> {
   const inserted = await client.query<{ id: string }>(
     `INSERT INTO referral_reward_decisions (
        source_reward_event_id, referral_edge_id, outcome, reason_code, amount_atomic,
        referrer_reward_event_id, referral_reward_event_id,
-       exposure_limit_id, exposure_period_id, rate_bps, rate_source
+       exposure_limit_id, exposure_period_id, rate_bps, rate_source,
+       referral_rule_version, user_membership_id, entitlement_rule_version_id
      ) VALUES (
        $1::uuid, $2::uuid, $3::referral_reward_decision_outcome, $4, $5::bigint,
-       $6::uuid, $7::uuid, $8::uuid, $9::uuid, $10, $11::referral_rate_source
+       $6::uuid, $7::uuid, $8::uuid, $9::uuid, $10, $11::referral_rate_source,
+       $12, $13::uuid, $14::uuid
      )
      RETURNING id`,
     [
@@ -163,6 +168,9 @@ async function recordDecision(
       input.exposurePeriodId ?? null,
       input.rateBps ?? null,
       input.rateSource ?? null,
+      input.referralRuleVersion ?? null,
+      input.userMembershipId ?? null,
+      input.entitlementRuleVersionId ?? null,
     ],
   );
   const id = inserted.rows[0]?.id;
@@ -324,6 +332,12 @@ export async function issueReferralReward(
       });
       return softResult('skipped', sourceId, 'NO_REFERRAL_EDGE', { decisionId });
     }
+    // PENDING edges must not receive a durable EDGE_NOT_ACTIVE skip — redrive after activation.
+    if (edge.state === 'PENDING') {
+      return softResult('skipped', sourceId, 'EDGE_NOT_ACTIVE', {
+        referralEdgeId: edge.id,
+      });
+    }
     if (edge.state !== 'ACTIVE' || edge.activated_at === null) {
       const reason = edge.state === 'REJECTED' ? 'EDGE_REJECTED' : 'EDGE_NOT_ACTIVE';
       const decisionId = await recordDecision(client, {
@@ -385,6 +399,9 @@ export async function issueReferralReward(
         reasonCode: 'ZERO_AMOUNT',
         rateBps: rate.effectiveRateBps,
         rateSource: rate.rateSource,
+        referralRuleVersion: rate.referralRuleVersion,
+        userMembershipId: rate.userMembershipId,
+        entitlementRuleVersionId: rate.entitlementRuleVersionId,
       });
       return softResult('skipped', sourceId, 'ZERO_AMOUNT', {
         decisionId,
@@ -425,6 +442,9 @@ export async function issueReferralReward(
         reasonCode: 'MAX_REFERRAL_BONUS_DAILY_MISSING',
         rateBps: rate.effectiveRateBps,
         rateSource: rate.rateSource,
+        referralRuleVersion: rate.referralRuleVersion,
+        userMembershipId: rate.userMembershipId,
+        entitlementRuleVersionId: rate.entitlementRuleVersionId,
       });
       return softResult('rejected_budget', sourceId, 'MAX_REFERRAL_BONUS_DAILY_MISSING', {
         decisionId,
@@ -439,6 +459,9 @@ export async function issueReferralReward(
         reasonCode: 'MAX_REFERRAL_BONUS_DAILY_AMBIGUOUS',
         rateBps: rate.effectiveRateBps,
         rateSource: rate.rateSource,
+        referralRuleVersion: rate.referralRuleVersion,
+        userMembershipId: rate.userMembershipId,
+        entitlementRuleVersionId: rate.entitlementRuleVersionId,
       });
       return softResult('rejected_budget', sourceId, 'MAX_REFERRAL_BONUS_DAILY_AMBIGUOUS', {
         decisionId,
@@ -456,6 +479,9 @@ export async function issueReferralReward(
         exposureLimitId: limit.id,
         rateBps: rate.effectiveRateBps,
         rateSource: rate.rateSource,
+        referralRuleVersion: rate.referralRuleVersion,
+        userMembershipId: rate.userMembershipId,
+        entitlementRuleVersionId: rate.entitlementRuleVersionId,
       });
       return softResult('rejected_budget', sourceId, 'MAX_REFERRAL_BONUS_DAILY_INVALID', {
         decisionId,
@@ -481,6 +507,9 @@ export async function issueReferralReward(
         exposurePeriodId: period.id,
         rateBps: rate.effectiveRateBps,
         rateSource: rate.rateSource,
+        referralRuleVersion: rate.referralRuleVersion,
+        userMembershipId: rate.userMembershipId,
+        entitlementRuleVersionId: rate.entitlementRuleVersionId,
       });
       return softResult('rejected_budget', sourceId, 'MAX_REFERRAL_BONUS_DAILY_EXHAUSTED', {
         decisionId,
@@ -546,6 +575,9 @@ export async function issueReferralReward(
         referrerUserId: edge.referrer_user_id,
         rateBps: rate.effectiveRateBps,
         rateSource: rate.rateSource,
+        referralRuleVersion: rate.referralRuleVersion,
+        userMembershipId: rate.userMembershipId,
+        entitlementRuleVersionId: rate.entitlementRuleVersionId,
       },
     });
 
@@ -642,6 +674,9 @@ export async function issueReferralReward(
       exposurePeriodId: period.id,
       rateBps: rate.effectiveRateBps,
       rateSource: rate.rateSource,
+      referralRuleVersion: rate.referralRuleVersion,
+      userMembershipId: rate.userMembershipId,
+      entitlementRuleVersionId: rate.entitlementRuleVersionId,
     });
 
     await insertOutboxEvent(client, {
@@ -667,28 +702,5 @@ export async function issueReferralReward(
       referralRewardEventId,
       ledgerTransactionId: ledger.id,
     });
-  });
-}
-
-/**
- * After an invitee AD reward matures, attempt referral issuance in a separate transaction.
- * Never throws for soft business outcomes; unexpected errors are rethrown to the caller
- * only when the caller opts in — maturity callers should catch.
- */
-export async function maybeIssueReferralRewardAfterMaturity(
-  db: LedgerDb,
-  input: {
-    readonly sourceRewardEventId: string;
-    readonly environment: EnvironmentName;
-    readonly sourceType?: string;
-  },
-): Promise<IssueReferralRewardResult | null> {
-  if (input.sourceType !== undefined && input.sourceType !== 'AD') {
-    return null;
-  }
-  return issueReferralReward(db, {
-    sourceRewardEventId: input.sourceRewardEventId,
-    environment: input.environment,
-    idempotencyKey: `referral-after-maturity/${input.sourceRewardEventId}`,
   });
 }

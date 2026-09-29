@@ -60,7 +60,6 @@ export { issueSimulatedReward } from './issuance.js';
 export { issueAdReward } from './issue-ad.js';
 export {
   issueReferralReward,
-  maybeIssueReferralRewardAfterMaturity,
   referralBonusSourceIdFromOrigin,
 } from './issue-referral.js';
 export type {
@@ -74,6 +73,18 @@ export type {
   ReverseRewardEventResult,
 } from './reverse-reward.js';
 export { matureRewardEvent } from './maturity.js';
+export {
+  processDueReferralMaturityBatch,
+  processReferralIssuanceBatch,
+} from './referral-maintenance.js';
+export type {
+  ProcessDueReferralMaturityBatchOptions,
+  ProcessDueReferralMaturityBatchResult,
+  ProcessReferralIssuanceBatchOptions,
+  ProcessReferralIssuanceBatchResult,
+  ReferralIssuanceBatchItem,
+  ReferralMaturityBatchItem,
+} from './referral-maintenance.js';
 
 export {
   createExposureLimitVersion,

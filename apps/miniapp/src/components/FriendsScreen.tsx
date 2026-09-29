@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 
-import type { ReferralsSummaryData } from '@alex-rewards/contracts';
+import type { ReferralCodeResponse, ReferralsSummaryData } from '@alex-rewards/contracts';
 
 import { queryKeys } from '../lib/query/keys';
 import { useAuth } from '../providers/AuthProvider';
@@ -36,16 +36,41 @@ function FriendsHero() {
   );
 }
 
-function ReferralReadySummary({ data }: { readonly data: ReferralsSummaryData }) {
+function ReferralReadySummary({
+  data,
+  codeResponse,
+}: {
+  readonly data: ReferralsSummaryData;
+  readonly codeResponse: ReferralCodeResponse | undefined;
+}) {
   const t = useTranslations('friends');
   const common = useTranslations('common');
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
 
-  const shareValue =
+  const resolvedCode =
+    data.referralCode !== null && data.referralCode !== ''
+      ? data.referralCode
+      : codeResponse?.status === 'READY' && codeResponse.code !== null && codeResponse.code !== ''
+        ? codeResponse.code
+        : null;
+  const resolvedDeepLink =
     data.referralDeepLink !== null && data.referralDeepLink !== ''
       ? data.referralDeepLink
-      : data.referralCode;
+      : codeResponse?.status === 'READY' &&
+          codeResponse.deepLink !== null &&
+          codeResponse.deepLink !== ''
+        ? codeResponse.deepLink
+        : null;
+
+  const codeNotConfigured =
+    resolvedCode === null &&
+    (codeResponse?.status === 'UNAVAILABLE' && codeResponse.reasonCode === 'NOT_CONFIGURED');
+
+  const shareValue =
+    resolvedDeepLink !== null && resolvedDeepLink !== ''
+      ? resolvedDeepLink
+      : resolvedCode;
 
   async function copyCode() {
     if (shareValue === null || shareValue === '') return;
@@ -78,15 +103,15 @@ function ReferralReadySummary({ data }: { readonly data: ReferralsSummaryData })
         </div>
       </dl>
 
-      {data.referralCode !== null && data.referralCode !== '' ? (
+      {resolvedCode !== null && resolvedCode !== '' ? (
         <div className="lootra-referral-code">
           <p className="alex-meta">{t('referralCode')}</p>
           <p className="lootra-referral-code__value" dir="ltr">
-            {data.referralCode}
+            {resolvedCode}
           </p>
-          {data.referralDeepLink !== null && data.referralDeepLink !== '' ? (
+          {resolvedDeepLink !== null && resolvedDeepLink !== '' ? (
             <p className="alex-meta" dir="ltr">
-              {data.referralDeepLink}
+              {resolvedDeepLink}
             </p>
           ) : null}
           <button type="button" className="lootra-btn lootra-btn--ghost" onClick={() => void copyCode()}>
@@ -103,6 +128,10 @@ function ReferralReadySummary({ data }: { readonly data: ReferralsSummaryData })
             </p>
           ) : null}
         </div>
+      ) : codeNotConfigured ? (
+        <p className="alex-muted" data-reason="NOT_CONFIGURED">
+          {t('codeNotConfigured')}
+        </p>
       ) : (
         <p className="alex-muted">{t('codeNotConfigured')}</p>
       )}
@@ -114,6 +143,7 @@ function ReferralReadySummary({ data }: { readonly data: ReferralsSummaryData })
  * Friends / Referrals screen.
  * ENGINE_NOT_ENABLED must not invent zeros, people, earnings, or invite links.
  * READY summary shows only server invitedCount / activatedCount / referralCode.
+ * When summary is READY with null referralCode, call GET /v1/referrals/code once.
  */
 export function FriendsScreen() {
   const t = useTranslations('friends');
@@ -122,6 +152,21 @@ export function FriendsScreen() {
   const referrals = useQuery({
     queryKey: queryKeys.referrals,
     queryFn: () => api.getReferralsSummary(),
+  });
+
+  const needsCodeFetch =
+    referrals.data?.status === 'READY' &&
+    referrals.data.data !== null &&
+    (referrals.data.data.referralCode === null || referrals.data.data.referralCode === '');
+
+  const referralCode = useQuery({
+    queryKey: queryKeys.referralCode,
+    queryFn: () => api.getReferralCode(),
+    enabled: needsCodeFetch,
+    retry: false,
+    staleTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 
   if (referrals.isLoading) return <FriendsSkeleton />;
@@ -154,7 +199,7 @@ export function FriendsScreen() {
           onRetry={() => void referrals.refetch()}
         />
       ) : data.status === 'READY' && data.data !== null ? (
-        <ReferralReadySummary data={data.data} />
+        <ReferralReadySummary data={data.data} codeResponse={referralCode.data} />
       ) : data.status === 'READY' ? (
         <DomainStateView state="EMPTY" emptyTitle={t('empty')} />
       ) : (

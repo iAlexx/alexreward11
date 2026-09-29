@@ -8,6 +8,7 @@ import type {
   PostSupportMessageRequest,
   PostSupportMessageResponse,
   ReferralsSummaryResponse,
+  ReferralCodeResponse,
   SupportTicketDetailDto,
   SupportTicketsListResponse,
   TasksListResponse,
@@ -337,6 +338,10 @@ export function createApiClient(options: ApiClientOptions) {
 
     getReferralsSummary(): Promise<ReferralsSummaryResponse> {
       return request<ReferralsSummaryResponse>('/v1/referrals/summary');
+    },
+
+    getReferralCode(): Promise<ReferralCodeResponse> {
+      return request<ReferralCodeResponse>('/v1/referrals/code');
     },
 
     getWallets(): Promise<WalletSummaryResponse> {

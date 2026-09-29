@@ -230,8 +230,6 @@ export interface MatureRewardEventCommand {
   readonly rewardEventId: string;
   readonly asOf?: Date;
   readonly idempotencyKey?: string;
-  /** Used for post-maturity referral issuance exposure authority (default LOCAL). */
-  readonly environment?: EnvironmentName;
 }
 
 export interface MatureRewardEventResult {
