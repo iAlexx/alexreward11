@@ -79,6 +79,54 @@ export async function matureRewardEvent(
       });
     }
 
+    // Referral maturity: require linked referral_reward_events + safe originating reward.
+    if (event.source_type === 'REFERRAL') {
+      const link = await client.query<{
+        source_reward_event_id: string;
+        source_state: string;
+      }>(
+        `SELECT rre.source_reward_event_id,
+                src.state::text AS source_state
+         FROM referral_reward_events rre
+         JOIN reward_events src ON src.id = rre.source_reward_event_id
+         WHERE rre.referrer_reward_event_id = $1::uuid
+         FOR SHARE OF rre, src`,
+        [event.id],
+      );
+      const referralLink = link.rows[0];
+      if (referralLink === undefined) {
+        throw new RewardDomainError(
+          'MATURITY_INVALID_STATE',
+          'REFERRAL reward event missing referral_reward_events link',
+          { details: { rewardEventId: event.id } },
+        );
+      }
+      if (referralLink.source_state === 'REVERSED') {
+        throw new RewardDomainError(
+          'MATURITY_INVALID_STATE',
+          'originating reward is REVERSED; referral cannot mature',
+          {
+            details: {
+              rewardEventId: event.id,
+              sourceRewardEventId: referralLink.source_reward_event_id,
+            },
+          },
+        );
+      }
+      if (referralLink.source_state !== 'AVAILABLE') {
+        throw new RewardDomainError(
+          'MATURITY_INVALID_STATE',
+          'originating reward is not AVAILABLE; referral cannot mature',
+          {
+            details: {
+              rewardEventId: event.id,
+              sourceState: referralLink.source_state,
+            },
+          },
+        );
+      }
+    }
+
     const pending = await getOrCreateLedgerAccount(client, {
       accountType: 'USER_PENDING_LIABILITY',
       assetId: event.asset_id,

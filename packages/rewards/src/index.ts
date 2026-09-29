@@ -68,6 +68,11 @@ export type {
   IssueReferralRewardResult,
   ReferralIssuanceKind,
 } from './issue-referral.js';
+export { reverseRewardEvent } from './reverse-reward.js';
+export type {
+  ReverseRewardEventCommand,
+  ReverseRewardEventResult,
+} from './reverse-reward.js';
 export { matureRewardEvent } from './maturity.js';
 
 export {
