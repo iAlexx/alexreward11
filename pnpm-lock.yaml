@@ -447,6 +447,9 @@ importers:
       '@alex-rewards/db':
         specifier: workspace:*
         version: link:../db
+      '@alex-rewards/referrals':
+        specifier: workspace:*
+        version: link:../referrals
       '@alex-rewards/telegram':
         specifier: workspace:*
         version: link:../telegram

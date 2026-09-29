@@ -92,13 +92,17 @@ export async function insertReferralRule(
 
 export async function insertReferralCode(
   pool: Pool,
-  input: { readonly userId: string; readonly code: string },
+  input: {
+    readonly userId: string;
+    readonly code: string;
+    readonly status?: 'ACTIVE' | 'DISABLED';
+  },
 ): Promise<string> {
   const result = await pool.query<{ id: string }>(
-    `INSERT INTO referral_codes (user_id, code)
-     VALUES ($1::uuid, $2)
+    `INSERT INTO referral_codes (user_id, code, status)
+     VALUES ($1::uuid, $2, $3::activation_status)
      RETURNING id`,
-    [input.userId, input.code],
+    [input.userId, input.code, input.status ?? 'ACTIVE'],
   );
   const id = result.rows[0]?.id;
   if (id === undefined) throw new Error('referral code insert failed');

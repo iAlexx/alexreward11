@@ -34,7 +34,7 @@ const financialShells = [
   // ton + wallets are implemented in Phase 6 (TON Connect wallet ownership).
   // withdrawals is implemented in Phase 7 (Withdrawal Engine + fake chain).
   // control-center is implemented in Phase 8 (Telegram Owner Control Center).
-  // referrals rule-version core is implemented in Phase 15 Step 1 (no money / attribution).
+  // referrals: Phase 15 rule authority + PENDING attribution (no money / activation).
   'tasks',
 ];
 
@@ -245,7 +245,7 @@ for (const name of financialShells) {
   }
 }
 
-// Phase 15 Step 1: referrals owns rule-version resolution only — never money, payout, or chain.
+// Phase 15: referrals may resolve rules + PENDING attribution — never money, payout, or chain.
 {
   const referralFiles = (await walk('packages/referrals/')).filter((path) => {
     const normalized = path.replaceAll('\\', '/');
@@ -271,6 +271,9 @@ for (const name of financialShells) {
     }
     if (/from\s+['"]@alex-rewards\/control-center['"]/.test(source)) {
       failures.push(`${path}: packages/referrals must not import @alex-rewards/control-center`);
+    }
+    if (/from\s+['"]@alex-rewards\/auth['"]/.test(source)) {
+      failures.push(`${path}: packages/referrals must not import @alex-rewards/auth`);
     }
     if (/\beval\s*\(/.test(source) || /\bnew\s+Function\s*\(/.test(source)) {
       failures.push(`${path}: packages/referrals must not use eval/Function executable rules`);

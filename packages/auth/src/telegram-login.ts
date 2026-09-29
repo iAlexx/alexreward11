@@ -1,4 +1,9 @@
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
+import {
+  attributeReferralCode,
+  parseReferralStartParam,
+  type ReferralAttributionOutcome,
+} from '@alex-rewards/referrals';
 import {
   InitDataValidationError,
   validateTelegramInitData,
@@ -27,10 +32,18 @@ export interface AuthenticatedUser {
   readonly created: boolean;
 }
 
+/** Internal login-time referral outcome for tests/orchestration — not a public HTTP field. */
+export type TelegramLoginReferralResult =
+  | { readonly outcome: 'NO_REFERRAL' }
+  | { readonly outcome: 'INVALID_REFERRAL_START_PARAM' }
+  | ReferralAttributionOutcome;
+
 export interface TelegramLoginResult {
   readonly user: AuthenticatedUser;
   readonly session: SessionTokens;
   readonly telegram: ValidatedTelegramUser;
+  /** Present only when this login established a new user (created=true). */
+  readonly referral?: TelegramLoginReferralResult;
 }
 
 function mapLocale(languageCode: string | null): PreferredLocale {
@@ -40,10 +53,35 @@ function mapLocale(languageCode: string | null): PreferredLocale {
   return 'en';
 }
 
+async function maybeAttributeReferral(
+  client: PoolClient,
+  created: boolean,
+  startParam: string | null,
+  referredUserId: string,
+): Promise<TelegramLoginReferralResult | undefined> {
+  if (!created) {
+    return undefined;
+  }
+  const parsed = parseReferralStartParam(startParam);
+  if (parsed.kind === 'NONE') {
+    return { outcome: 'NO_REFERRAL' };
+  }
+  if (parsed.kind === 'INVALID_REFERRAL_START_PARAM') {
+    return { outcome: 'INVALID_REFERRAL_START_PARAM' };
+  }
+  return attributeReferralCode(client, {
+    referredUserId,
+    code: parsed.code,
+  });
+}
+
 /**
  * Race-safe Telegram login. Concurrent first logins for the same telegram_user_id
  * resolve to one users row via UNIQUE(telegram_user_id) + ON CONFLICT DO UPDATE.
  * Security/account fields and user-chosen preferred_locale are never overwritten.
+ *
+ * User establishment, optional PENDING referral attribution, and session creation
+ * commit in a single transaction after HMAC validation.
  */
 export async function authenticateWithTelegramInitData(
   pool: Pool,
@@ -74,78 +112,108 @@ export async function authenticateWithTelegramInitData(
   }
 
   const preferredLocale = mapLocale(validated.languageCode);
-  const upsert = await pool.query<{
-    id: string;
-    telegram_user_id: string;
-    username: string | null;
-    first_name: string | null;
-    last_name: string | null;
-    preferred_locale: PreferredLocale;
-    status: string;
-    withdrawal_status: string;
-    was_inserted: boolean;
-  }>(
-    `INSERT INTO users (
-       telegram_user_id, username, first_name, last_name, telegram_language_code,
-       preferred_locale, last_active_at
-     ) VALUES ($1::bigint, $2, $3, $4, $5, $6, now())
-     ON CONFLICT (telegram_user_id) DO UPDATE SET
-       username = EXCLUDED.username,
-       first_name = EXCLUDED.first_name,
-       last_name = EXCLUDED.last_name,
-       telegram_language_code = EXCLUDED.telegram_language_code,
-       last_active_at = now()
-     RETURNING
-       id,
-       telegram_user_id::text AS telegram_user_id,
-       username,
-       first_name,
-       last_name,
-       preferred_locale,
-       status,
-       withdrawal_status,
-       (xmax = 0) AS was_inserted`,
-    [
-      validated.telegramUserId,
-      validated.username,
-      validated.firstName,
-      validated.lastName,
-      validated.languageCode,
-      preferredLocale,
-    ],
-  );
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    try {
+      const upsert = await client.query<{
+        id: string;
+        telegram_user_id: string;
+        username: string | null;
+        first_name: string | null;
+        last_name: string | null;
+        preferred_locale: PreferredLocale;
+        status: string;
+        withdrawal_status: string;
+        was_inserted: boolean;
+      }>(
+        `INSERT INTO users (
+           telegram_user_id, username, first_name, last_name, telegram_language_code,
+           preferred_locale, last_active_at
+         ) VALUES ($1::bigint, $2, $3, $4, $5, $6, now())
+         ON CONFLICT (telegram_user_id) DO UPDATE SET
+           username = EXCLUDED.username,
+           first_name = EXCLUDED.first_name,
+           last_name = EXCLUDED.last_name,
+           telegram_language_code = EXCLUDED.telegram_language_code,
+           last_active_at = now()
+         RETURNING
+           id,
+           telegram_user_id::text AS telegram_user_id,
+           username,
+           first_name,
+           last_name,
+           preferred_locale,
+           status,
+           withdrawal_status,
+           (xmax = 0) AS was_inserted`,
+        [
+          validated.telegramUserId,
+          validated.username,
+          validated.firstName,
+          validated.lastName,
+          validated.languageCode,
+          preferredLocale,
+        ],
+      );
 
-  const row = upsert.rows[0];
-  if (row === undefined) throw new AuthDomainError('INTERNAL', 'Failed to create user');
-  const created = row.was_inserted === true;
+      const row = upsert.rows[0];
+      if (row === undefined) throw new AuthDomainError('INTERNAL', 'Failed to create user');
+      const created = row.was_inserted === true;
 
-  await pool.query(
-    `INSERT INTO user_profiles (user_id, display_name)
-     VALUES ($1, $2)
-     ON CONFLICT (user_id) DO UPDATE
-       SET display_name = COALESCE(EXCLUDED.display_name, user_profiles.display_name)`,
-    [row.id, validated.firstName ?? validated.username ?? null],
-  );
-  // Locale settings are created once; never overwrite a user-chosen locale on re-login.
-  await pool.query(
-    `INSERT INTO user_settings (user_id, locale)
-     VALUES ($1, $2)
-     ON CONFLICT (user_id) DO NOTHING`,
-    [row.id, preferredLocale],
-  );
+      await client.query(
+        `INSERT INTO user_profiles (user_id, display_name)
+         VALUES ($1, $2)
+         ON CONFLICT (user_id) DO UPDATE
+           SET display_name = COALESCE(EXCLUDED.display_name, user_profiles.display_name)`,
+        [row.id, validated.firstName ?? validated.username ?? null],
+      );
+      // Locale settings are created once; never overwrite a user-chosen locale on re-login.
+      await client.query(
+        `INSERT INTO user_settings (user_id, locale)
+         VALUES ($1, $2)
+         ON CONFLICT (user_id) DO NOTHING`,
+        [row.id, preferredLocale],
+      );
 
-  const user: AuthenticatedUser = {
-    id: row.id,
-    telegramUserId: row.telegram_user_id,
-    username: row.username,
-    firstName: row.first_name,
-    lastName: row.last_name,
-    preferredLocale: row.preferred_locale,
-    status: row.status,
-    withdrawalStatus: row.withdrawal_status,
-    created,
-  };
+      const referral = await maybeAttributeReferral(
+        client,
+        created,
+        validated.startParam,
+        row.id,
+      );
 
-  const session = await createUserSession(pool, input.session, user.id, input.meta ?? {});
-  return { user, session, telegram: validated };
+      const user: AuthenticatedUser = {
+        id: row.id,
+        telegramUserId: row.telegram_user_id,
+        username: row.username,
+        firstName: row.first_name,
+        lastName: row.last_name,
+        preferredLocale: row.preferred_locale,
+        status: row.status,
+        withdrawalStatus: row.withdrawal_status,
+        created,
+      };
+
+      const session = await createUserSession(
+        client,
+        input.session,
+        user.id,
+        input.meta ?? {},
+      );
+
+      await client.query('COMMIT');
+      return {
+        user,
+        session,
+        telegram: validated,
+        ...(referral === undefined ? {} : { referral }),
+      };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    }
+  } finally {
+    client.release();
+  }
 }

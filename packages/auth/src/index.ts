@@ -153,6 +153,7 @@ export {
   authenticateWithTelegramInitData,
   type AuthenticatedUser,
   type PreferredLocale,
+  type TelegramLoginReferralResult,
   type TelegramLoginResult,
 } from './telegram-login.js';
 export {

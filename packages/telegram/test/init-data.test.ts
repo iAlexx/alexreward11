@@ -141,4 +141,104 @@ describe('validateTelegramInitData', () => {
     expect(typeof validateTelegramInitData).toBe('function');
     expect('validateInitDataUnsafe' in globalThis).toBe(false);
   });
+
+  it('returns HMAC-validated start_param exactly', () => {
+    const raw = buildSignedInitDataForTests(BOT, {
+      user: JSON.stringify({
+        id: 4242424242,
+        first_name: 'Alex',
+        username: 'alex_founder',
+        language_code: 'en',
+      }),
+      auth_date: String(Math.floor(Date.now() / 1000)),
+      start_param: 'ref_TEST123',
+    });
+    const result = validateTelegramInitData(raw, {
+      botToken: BOT,
+      maxAgeSeconds: 86_400,
+    });
+    expect(result.startParam).toBe('ref_TEST123');
+  });
+
+  it('returns null start_param when absent', () => {
+    const result = validateTelegramInitData(signedUser(), {
+      botToken: BOT,
+      maxAgeSeconds: 86_400,
+    });
+    expect(result.startParam).toBeNull();
+  });
+
+  it('rejects tampered start_param after signing', () => {
+    const valid = buildSignedInitDataForTests(BOT, {
+      user: JSON.stringify({
+        id: 4242424242,
+        first_name: 'Alex',
+        username: 'alex_founder',
+        language_code: 'en',
+      }),
+      auth_date: String(Math.floor(Date.now() / 1000)),
+      start_param: 'ref_ORIGINAL',
+    });
+    const hash = valid.split('&hash=')[1] ?? '';
+    const tamperedBody = buildSignedInitDataForTests(BOT, {
+      user: JSON.stringify({
+        id: 4242424242,
+        first_name: 'Alex',
+        username: 'alex_founder',
+        language_code: 'en',
+      }),
+      auth_date: String(Math.floor(Date.now() / 1000)),
+      start_param: 'ref_TAMPERED',
+    }).split('&hash=')[0];
+    expectCode(
+      () =>
+        validateTelegramInitData(`${tamperedBody}&hash=${hash}`, {
+          botToken: BOT,
+          maxAgeSeconds: 86_400,
+        }),
+      'INVALID_SIGNATURE',
+    );
+  });
+
+  it('rejects duplicate start_param keys as MALFORMED', () => {
+    const base = buildSignedInitDataForTests(BOT, {
+      user: JSON.stringify({
+        id: 4242424242,
+        first_name: 'Alex',
+        username: 'alex_founder',
+        language_code: 'en',
+      }),
+      auth_date: String(Math.floor(Date.now() / 1000)),
+      start_param: 'ref_ONE',
+    });
+    const withoutHash = base.split('&hash=')[0] ?? '';
+    const hash = base.split('&hash=')[1] ?? '';
+    const duplicated = `${withoutHash}&start_param=ref_TWO&hash=${hash}`;
+    expectCode(
+      () =>
+        validateTelegramInitData(duplicated, {
+          botToken: BOT,
+          maxAgeSeconds: 86_400,
+        }),
+      'MALFORMED',
+    );
+  });
+
+  it('preserves unrelated signed start_param for transport consumers', () => {
+    const raw = buildSignedInitDataForTests(BOT, {
+      user: JSON.stringify({
+        id: 4242424242,
+        first_name: 'Alex',
+        username: 'alex_founder',
+        language_code: 'en',
+      }),
+      auth_date: String(Math.floor(Date.now() / 1000)),
+      start_param: 'campaign_test',
+    });
+    const result = validateTelegramInitData(raw, {
+      botToken: BOT,
+      maxAgeSeconds: 86_400,
+    });
+    expect(result.startParam).toBe('campaign_test');
+  });
 });
