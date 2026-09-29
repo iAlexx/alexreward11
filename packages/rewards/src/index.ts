@@ -69,6 +69,7 @@ export type {
 } from './issue-referral.js';
 export {
   issueMissionReward,
+  issueMissionRewardOnClient,
   missionRewardSourceIdFromClaim,
 } from './issue-mission.js';
 export type {
@@ -76,7 +77,7 @@ export type {
   IssueMissionRewardResult,
   MissionIssuanceKind,
 } from './issue-mission.js';
-export { reverseRewardEvent } from './reverse-reward.js';
+export { reverseRewardEvent, reverseRewardEventOnClient } from './reverse-reward.js';
 export type {
   ReverseRewardEventCommand,
   ReverseRewardEventResult,

@@ -14,6 +14,7 @@ import type { FastifyRequest } from 'fastify';
 import type { VerifiedAdminSession } from '@alex-rewards/auth';
 import type { ApiConfig } from '@alex-rewards/config';
 import type { Pool } from '@alex-rewards/db';
+import type { PoolClient } from 'pg';
 import {
   MissionDomainError,
   parseMissionEligibilityPolicy,
@@ -53,11 +54,11 @@ function parseRequiredIsoTimestamp(value: unknown, field: string): Date {
 }
 
 async function assertMissionRewardRuleActivatable(
-  pool: Pool,
+  client: PoolClient | Pool,
   rewardRuleId: string,
   versionStartAt: Date,
 ): Promise<void> {
-  const rule = await pool.query<{
+  const rule = await client.query<{
     source_type: string;
     fixed_reward_atomic: string | null;
     status: string;
@@ -425,127 +426,172 @@ export class MissionsAdminController {
       enforceAdminMutationCsrf(request, this.config);
       const gated = gateHighImpactMutation(session, body);
 
-      const current = await this.pool.query<{
+      // Pre-read binds high-impact confirmation only — not final activation authority.
+      const preview = await this.pool.query<{
         id: string;
         mission_definition_id: string;
         mission_version: number;
-        condition_type: string;
-        status: string;
-        reward_rule_id: string | null;
-        reward_source_type: string;
-        eligibility_policy: unknown;
-        reset_policy: string;
         start_at: Date | null;
+        status: string;
       }>(
-        `SELECT id, mission_definition_id, mission_version,
-                condition_type::text AS condition_type, status::text AS status,
-                reward_rule_id, reward_source_type::text AS reward_source_type,
-                eligibility_policy, reset_policy::text AS reset_policy, start_at
+        `SELECT id, mission_definition_id, mission_version, start_at, status::text AS status
          FROM mission_versions WHERE id = $1::uuid`,
         [versionId],
       );
-      const row = current.rows[0];
-      if (row === undefined) {
+      const previewRow = preview.rows[0];
+      if (previewRow === undefined) {
         throw Object.assign(new Error('mission version not found'), { code: 'NOT_FOUND' });
       }
-      if (String(row.mission_version) !== gated.expectedVersion) {
+      if (String(previewRow.mission_version) !== gated.expectedVersion) {
         throw Object.assign(new Error('expectedVersion mismatch'), {
           code: 'VERSION_CONFLICT',
           details: {
             expectedVersion: gated.expectedVersion,
-            actualVersion: row.mission_version,
+            actualVersion: previewRow.mission_version,
           },
         });
       }
-      if (!ALLOWED_ADMIN_CONDITIONS.has(row.condition_type)) {
-        throw Object.assign(new Error('conditionType not allowlisted'), { code: 'VALIDATION' });
-      }
-      if (row.reset_policy === 'WEEKLY') {
-        throw Object.assign(new Error('WEEKLY reset is OWNER_POLICY_REQUIRED'), {
-          code: 'OWNER_POLICY_REQUIRED',
-        });
-      }
-      const eligibility = parseMissionEligibilityPolicy(row.eligibility_policy);
-      if (eligibility.countryGroup !== null) {
-        throw Object.assign(new Error('countryGroup activation blocked'), {
-          code: 'OWNER_POLICY_REQUIRED',
-        });
-      }
-      if (
-        row.condition_type === 'VALID_AD_COUNT' &&
-        row.reward_rule_id !== null &&
-        this.config.DEPLOYMENT_ENV === 'production'
-      ) {
-        throw Object.assign(
-          new Error(
-            'PRODUCTION monetary VALID_AD_COUNT activation blocked: post-grant AD reversal OWNER_POLICY_REQUIRED',
-          ),
-          { code: 'OWNER_POLICY_REQUIRED' },
-        );
-      }
-      if (row.reward_rule_id !== null && row.reward_source_type !== 'MISSION') {
-        throw Object.assign(new Error('reward source must be MISSION'), { code: 'VALIDATION' });
-      }
-      if (row.status !== 'DRAFT') {
-        throw Object.assign(new Error('only DRAFT mission versions may be activated'), {
-          code: 'VALIDATION',
-        });
-      }
-      if (row.start_at === null) {
-        throw Object.assign(new Error('mission version start_at is not configured'), {
-          code: 'MISSION_START_AT_NOT_CONFIGURED',
-        });
-      }
-      const effectiveStartAt = row.start_at;
-      if (row.reward_rule_id !== null) {
-        await assertMissionRewardRuleActivatable(
-          this.pool,
-          row.reward_rule_id,
-          effectiveStartAt,
-        );
-      }
+      const confirmationStartAt =
+        previewRow.start_at !== null
+          ? previewRow.start_at.toISOString()
+          : null;
 
       await requireConsumedConfirmation(this.pool, session, body.confirmationId, {
-        action: 'MISSION_VERSION_ACTIVATE',
+        action: 'missions.version_activate',
         resourceType: 'mission_version',
         resourceId: versionId,
         expectedVersion: gated.expectedVersion,
         payload: {
           versionId,
           reason: gated.reason,
-          startAt: effectiveStartAt.toISOString(),
+          startAt: confirmationStartAt,
         },
       });
 
       const client = await this.pool.connect();
       try {
         await client.query('BEGIN');
+
         await client.query(
           `SELECT id FROM mission_definitions WHERE id = $1::uuid FOR UPDATE`,
-          [row.mission_definition_id],
+          [previewRow.mission_definition_id],
         );
-        await client.query(
-          `SELECT id FROM mission_versions WHERE id = $1::uuid FOR UPDATE`,
+
+        const lockedTarget = await client.query<{
+          id: string;
+          mission_definition_id: string;
+          mission_version: number;
+          condition_type: string;
+          status: string;
+          reward_rule_id: string | null;
+          reward_source_type: string;
+          eligibility_policy: unknown;
+          reset_policy: string;
+          start_at: Date | null;
+        }>(
+          `SELECT id, mission_definition_id, mission_version,
+                  condition_type::text AS condition_type, status::text AS status,
+                  reward_rule_id, reward_source_type::text AS reward_source_type,
+                  eligibility_policy, reset_policy::text AS reset_policy, start_at
+           FROM mission_versions
+           WHERE id = $1::uuid
+           FOR UPDATE`,
           [versionId],
         );
+        const row = lockedTarget.rows[0];
+        if (row === undefined) {
+          throw Object.assign(new Error('mission version not found'), { code: 'NOT_FOUND' });
+        }
+        if (String(row.mission_version) !== gated.expectedVersion) {
+          throw Object.assign(new Error('expectedVersion mismatch'), {
+            code: 'VERSION_CONFLICT',
+            details: {
+              expectedVersion: gated.expectedVersion,
+              actualVersion: row.mission_version,
+            },
+          });
+        }
+        if (row.status !== 'DRAFT') {
+          throw Object.assign(new Error('only DRAFT mission versions may be activated'), {
+            code: 'VERSION_CONFLICT',
+          });
+        }
+        if (row.start_at === null) {
+          throw Object.assign(new Error('mission version start_at is not configured'), {
+            code: 'MISSION_START_AT_NOT_CONFIGURED',
+          });
+        }
+        if (!ALLOWED_ADMIN_CONDITIONS.has(row.condition_type)) {
+          throw Object.assign(new Error('conditionType not allowlisted'), { code: 'VALIDATION' });
+        }
+        if (row.reset_policy === 'WEEKLY') {
+          throw Object.assign(new Error('WEEKLY reset is OWNER_POLICY_REQUIRED'), {
+            code: 'OWNER_POLICY_REQUIRED',
+          });
+        }
+        const eligibility = parseMissionEligibilityPolicy(row.eligibility_policy);
+        if (eligibility.countryGroup !== null) {
+          throw Object.assign(new Error('countryGroup activation blocked'), {
+            code: 'OWNER_POLICY_REQUIRED',
+          });
+        }
+        if (
+          row.condition_type === 'VALID_AD_COUNT' &&
+          row.reward_rule_id !== null &&
+          this.config.DEPLOYMENT_ENV === 'production'
+        ) {
+          throw Object.assign(
+            new Error(
+              'PRODUCTION monetary VALID_AD_COUNT activation blocked: post-grant AD reversal OWNER_POLICY_REQUIRED',
+            ),
+            { code: 'OWNER_POLICY_REQUIRED' },
+          );
+        }
+        if (row.reward_rule_id !== null && row.reward_source_type !== 'MISSION') {
+          throw Object.assign(new Error('reward source must be MISSION'), { code: 'VALIDATION' });
+        }
+
+        const effectiveStartAt = row.start_at;
+        if (row.reward_rule_id !== null) {
+          await assertMissionRewardRuleActivatable(
+            client,
+            row.reward_rule_id,
+            effectiveStartAt,
+          );
+        }
+
+        const siblings = await client.query<{ id: string }>(
+          `SELECT id
+           FROM mission_versions
+           WHERE mission_definition_id = $1::uuid
+             AND status = 'ACTIVE'::rule_version_status
+             AND id <> $2::uuid
+           ORDER BY mission_version ASC, id ASC
+           FOR UPDATE`,
+          [row.mission_definition_id, versionId],
+        );
+
         await client.query(
           `UPDATE mission_definitions
            SET status = 'ACTIVE'::content_status, updated_at = now()
            WHERE id = $1::uuid`,
           [row.mission_definition_id],
         );
-        await client.query(
-          `UPDATE mission_versions
-           SET status = 'SUPERSEDED'::rule_version_status,
-               end_at = COALESCE(end_at, $2::timestamptz),
-               updated_at = now()
-           WHERE mission_definition_id = $1::uuid
-             AND status = 'ACTIVE'
-             AND id <> $3::uuid
-             AND end_at IS NULL`,
-          [row.mission_definition_id, effectiveStartAt.toISOString(), versionId],
-        );
-        await client.query(
+
+        if (siblings.rows.length > 0) {
+          await client.query(
+            `UPDATE mission_versions
+             SET status = 'SUPERSEDED'::rule_version_status,
+                 end_at = COALESCE(end_at, $2::timestamptz),
+                 updated_at = now()
+             WHERE id = ANY($1::uuid[])
+               AND status = 'ACTIVE'::rule_version_status
+               AND end_at IS NULL`,
+            [siblings.rows.map((s) => s.id), effectiveStartAt.toISOString()],
+          );
+        }
+
+        const activated = await client.query(
           `UPDATE mission_versions
            SET status = 'ACTIVE'::rule_version_status,
                updated_at = now()
@@ -553,6 +599,12 @@ export class MissionsAdminController {
              AND status = 'DRAFT'::rule_version_status`,
           [versionId],
         );
+        if (activated.rowCount !== 1) {
+          throw Object.assign(new Error('mission version activation race'), {
+            code: 'VERSION_CONFLICT',
+          });
+        }
+
         await client.query(
           `INSERT INTO audit_logs (
              admin_user_id, actor_type, action_type, resource_type, resource_id,
@@ -564,7 +616,7 @@ export class MissionsAdminController {
           [
             session.adminUserId,
             versionId,
-            JSON.stringify({ status: row.status }),
+            JSON.stringify({ status: 'DRAFT' }),
             JSON.stringify({ status: 'ACTIVE', startAt: effectiveStartAt.toISOString() }),
             gated.reason,
           ],

@@ -307,11 +307,10 @@ export function validatePinnedRewardRuleLifecycle(
  * Issue a monetary Mission reward for a PENDING claim.
  * Soft blocks keep the claim PENDING for worker redrive.
  */
-export async function issueMissionReward(
-  db: LedgerDb,
+export async function issueMissionRewardOnClient(
+  client: PoolClient,
   command: IssueMissionRewardCommand,
 ): Promise<IssueMissionRewardResult> {
-  return withLedgerTransaction(db, async (client) => {
     const asOf = command.asOf ?? new Date();
     const claimId = command.missionClaimId;
 
@@ -1076,5 +1075,11 @@ export async function issueMissionReward(
       rewardEventId,
       ledgerTransactionId: ledger.id,
     });
-  });
+}
+
+export async function issueMissionReward(
+  db: LedgerDb,
+  command: IssueMissionRewardCommand,
+): Promise<IssueMissionRewardResult> {
+  return withLedgerTransaction(db, (client) => issueMissionRewardOnClient(client, command));
 }

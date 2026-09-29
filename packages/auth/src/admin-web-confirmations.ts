@@ -29,6 +29,7 @@ export const ADMIN_WEB_CONFIRMATION_ACTION_PREFIXES = [
   'reward_rules.',
   'withdrawal.',
   'review_queue.',
+  'missions.',
 ] as const;
 
 export function isAllowedAdminWebConfirmationAction(actionType: string): boolean {

@@ -59,6 +59,7 @@ describe('Phase 16 integration gate invariants', () => {
       '0052_phase16_mission_lifecycle_hardening.sql',
       '0053_phase16_mission_reward_issuance.sql',
       '0054_phase16_mission_runtime_financial_hardening.sql',
+      '0055_phase16_final_integrity.sql',
     ]) {
       const sql = readFileSync(join(repoRoot, 'migrations', name), 'utf8').toLowerCase();
       expect(sql).not.toMatch(/insert into mission_definitions\b/);

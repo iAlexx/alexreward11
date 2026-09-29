@@ -33,6 +33,7 @@ describe('P13-01 admin web confirmations — policy', () => {
     expect(isAllowedAdminWebConfirmationAction('ads.monetary_status')).toBe(true);
     expect(isAllowedAdminWebConfirmationAction('providers.limit_change')).toBe(true);
     expect(isAllowedAdminWebConfirmationAction('withdrawal.approve')).toBe(true);
+    expect(isAllowedAdminWebConfirmationAction('missions.version_activate')).toBe(true);
     expect(isAllowedAdminWebConfirmationAction('evil.drop_table')).toBe(false);
     expect(isAllowedAdminWebConfirmationAction('')).toBe(false);
   });

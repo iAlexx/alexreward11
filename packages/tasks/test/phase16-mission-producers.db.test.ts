@@ -354,7 +354,7 @@ describe.skipIf(phase16DatabaseUrl === '')('Phase 16 Step 3 source producers (DB
     expect(await countEvents()).toBe(beforeIdle);
   });
 
-  it('VALID_AD batch limit=3 eventually processes all actionable ads', async () => {
+  it('VALID_AD batch limit=3 eventually processes all actionable ads when target >= evidence', async () => {
     const userId = await createTestUser(pool, '16301002');
     const defId = await insertMissionDefinition(pool, {
       code: 'P16REM_AD_STARVE',
@@ -364,9 +364,9 @@ describe.skipIf(phase16DatabaseUrl === '')('Phase 16 Step 3 source producers (DB
       missionDefinitionId: defId,
       missionVersion: 1,
       status: 'ACTIVE',
-      startAt: new Date('2020-01-01T00:00:00.000Z'),
+      startAt: new Date('2010-01-01T00:00:00.000Z'),
       endAt: null,
-      target: 1,
+      target: 8,
       conditionType: 'VALID_AD_COUNT',
       resetPolicy: 'NONE',
     });
@@ -375,7 +375,7 @@ describe.skipIf(phase16DatabaseUrl === '')('Phase 16 Step 3 source producers (DB
       await insertAdReward(pool, {
         userId,
         state: 'AVAILABLE',
-        availableAt: new Date(`2026-09-${String(i + 1).padStart(2, '0')}T12:00:00.000Z`),
+        availableAt: new Date(`2015-01-${String(i + 1).padStart(2, '0')}T12:00:00.000Z`),
       });
     }
 
@@ -390,7 +390,7 @@ describe.skipIf(phase16DatabaseUrl === '')('Phase 16 Step 3 source producers (DB
       return row.rows[0]?.c ?? 0;
     };
 
-    for (let round = 0; round < 20; round += 1) {
+    for (let round = 0; round < 100; round += 1) {
       await processValidAdMissionContributionsBatch(pool, { limit: 3 });
       if ((await countAdEvents()) >= 8) break;
     }
@@ -399,6 +399,185 @@ describe.skipIf(phase16DatabaseUrl === '')('Phase 16 Step 3 source producers (DB
     const beforeIdle = await countAdEvents();
     await processValidAdMissionContributionsBatch(pool, { limit: 3 });
     expect(await countAdEvents()).toBe(beforeIdle);
+  });
+
+  it('DAILY_LOGIN target=1 NONE: terminal LIFETIME excludes later login days', async () => {
+    const userId = await createTestUser(pool, '16302001');
+    const defId = await insertMissionDefinition(pool, {
+      code: 'P16FIN_LOGIN_TERM',
+      status: 'ACTIVE',
+    });
+    const versionId = await insertMissionVersion(pool, {
+      missionDefinitionId: defId,
+      missionVersion: 1,
+      status: 'ACTIVE',
+      startAt: new Date('2020-01-01T00:00:00.000Z'),
+      endAt: null,
+      target: 1,
+      conditionType: 'DAILY_LOGIN',
+      resetPolicy: 'NONE',
+    });
+
+    for (let d = 1; d <= 5; d += 1) {
+      await insertSession(pool, userId, new Date(`2026-11-0${d}T12:00:00.000Z`));
+    }
+
+    let ignoredTotal = 0;
+    for (let round = 0; round < 10; round += 1) {
+      const batch = await processDailyLoginMissionContributionsBatch(pool, { limit: 3 });
+      ignoredTotal += batch.ignored;
+      if (batch.examined === 0) break;
+    }
+
+    const events = await pool.query<{ c: number }>(
+      `SELECT count(*)::int AS c
+       FROM mission_progress_events mpe
+       INNER JOIN mission_progress mp ON mp.id = mpe.mission_progress_id
+       WHERE mp.mission_version_id = $1::uuid AND mp.user_id = $2::uuid`,
+      [versionId, userId],
+    );
+    expect(events.rows[0]?.c).toBe(1);
+    expect(ignoredTotal).toBe(0);
+
+    const idle = await processDailyLoginMissionContributionsBatch(pool, { limit: 3 });
+    expect(idle.examined).toBe(0);
+    expect(idle.ignored).toBe(0);
+  });
+
+  it('VALID_AD target=1 NONE: terminal LIFETIME excludes remaining ADs', async () => {
+    const userId = await createTestUser(pool, '16302002');
+    const defId = await insertMissionDefinition(pool, {
+      code: 'P16FIN_AD_TERM',
+      status: 'ACTIVE',
+    });
+    const versionId = await insertMissionVersion(pool, {
+      missionDefinitionId: defId,
+      missionVersion: 1,
+      status: 'ACTIVE',
+      startAt: new Date('2010-01-01T00:00:00.000Z'),
+      endAt: null,
+      target: 1,
+      conditionType: 'VALID_AD_COUNT',
+      resetPolicy: 'NONE',
+    });
+
+    for (let i = 0; i < 8; i += 1) {
+      await insertAdReward(pool, {
+        userId,
+        state: 'AVAILABLE',
+        availableAt: new Date(`2016-02-${String(i + 1).padStart(2, '0')}T12:00:00.000Z`),
+      });
+    }
+
+    let ignoredTotal = 0;
+    for (let round = 0; round < 20; round += 1) {
+      const batch = await processValidAdMissionContributionsBatch(pool, { limit: 3 });
+      ignoredTotal += batch.ignored;
+      if (batch.examined === 0) break;
+    }
+
+    const events = await pool.query<{ c: number }>(
+      `SELECT count(*)::int AS c
+       FROM mission_progress_events mpe
+       INNER JOIN mission_progress mp ON mp.id = mpe.mission_progress_id
+       WHERE mp.mission_version_id = $1::uuid AND mp.user_id = $2::uuid`,
+      [versionId, userId],
+    );
+    expect(events.rows[0]?.c).toBe(1);
+    expect(ignoredTotal).toBe(0);
+
+    const idle = await processValidAdMissionContributionsBatch(pool, { limit: 3 });
+    expect(idle.examined).toBe(0);
+  });
+
+  it('cross-user: terminal DAILY_LOGIN evidence does not starve actionable user B', async () => {
+    const userA = await createTestUser(pool, '16302003');
+    const userB = await createTestUser(pool, '16302004');
+    const defId = await insertMissionDefinition(pool, {
+      code: 'P16FIN_LOGIN_XUSER',
+      status: 'ACTIVE',
+    });
+    const versionId = await insertMissionVersion(pool, {
+      missionDefinitionId: defId,
+      missionVersion: 1,
+      status: 'ACTIVE',
+      startAt: new Date('2020-01-01T00:00:00.000Z'),
+      endAt: null,
+      target: 1,
+      conditionType: 'DAILY_LOGIN',
+      resetPolicy: 'NONE',
+    });
+
+    for (let d = 1; d <= 10; d += 1) {
+      await insertSession(pool, userA, new Date(`2026-12-${String(d).padStart(2, '0')}T08:00:00.000Z`));
+    }
+    await processDailyLoginMissionContributionsBatch(pool, { limit: 3 });
+
+    await insertSession(pool, userB, new Date('2026-12-15T08:00:00.000Z'));
+
+    let sawB = false;
+    for (let round = 0; round < 20; round += 1) {
+      await processDailyLoginMissionContributionsBatch(pool, { limit: 2 });
+      const b = await pool.query<{ c: number }>(
+        `SELECT count(*)::int AS c FROM mission_progress
+         WHERE mission_version_id = $1::uuid AND user_id = $2::uuid`,
+        [versionId, userB],
+      );
+      if ((b.rows[0]?.c ?? 0) > 0) {
+        sawB = true;
+        break;
+      }
+    }
+    expect(sawB).toBe(true);
+  });
+
+  it('cross-user: terminal VALID_AD evidence does not starve actionable user B', async () => {
+    const userA = await createTestUser(pool, '16302005');
+    const userB = await createTestUser(pool, '16302006');
+    const defId = await insertMissionDefinition(pool, {
+      code: 'P16FIN_AD_XUSER',
+      status: 'ACTIVE',
+    });
+    const versionId = await insertMissionVersion(pool, {
+      missionDefinitionId: defId,
+      missionVersion: 1,
+      status: 'ACTIVE',
+      startAt: new Date('2010-01-01T00:00:00.000Z'),
+      endAt: null,
+      target: 1,
+      conditionType: 'VALID_AD_COUNT',
+      resetPolicy: 'NONE',
+    });
+
+    for (let i = 0; i < 10; i += 1) {
+      await insertAdReward(pool, {
+        userId: userA,
+        state: 'AVAILABLE',
+        availableAt: new Date(`2017-03-${String(i + 1).padStart(2, '0')}T12:00:00.000Z`),
+      });
+    }
+    await processValidAdMissionContributionsBatch(pool, { limit: 3 });
+
+    await insertAdReward(pool, {
+      userId: userB,
+      state: 'AVAILABLE',
+      availableAt: new Date('2017-04-01T12:00:00.000Z'),
+    });
+
+    let sawB = false;
+    for (let round = 0; round < 20; round += 1) {
+      await processValidAdMissionContributionsBatch(pool, { limit: 2 });
+      const b = await pool.query<{ c: number }>(
+        `SELECT count(*)::int AS c FROM mission_progress
+         WHERE mission_version_id = $1::uuid AND user_id = $2::uuid`,
+        [versionId, userB],
+      );
+      if ((b.rows[0]?.c ?? 0) > 0) {
+        sawB = true;
+        break;
+      }
+    }
+    expect(sawB).toBe(true);
   });
 
   it('STREAK batch limit=3 eventually evaluates all users with login evidence', async () => {

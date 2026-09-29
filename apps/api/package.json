@@ -9,7 +9,7 @@
     "start": "node dist/main.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src test",
-    "test": "vitest run",
+    "test": "vitest run --fileParallelism=false",
     "test:phase12": "cross-env PHASE12_API_TESTS=1 vitest run --fileParallelism=false test/phase12-read-models.test.ts test/phase12-read-apis-db.test.ts test/phase12-settings-privacy.test.ts",
     "test:phase14": "vitest run --fileParallelism=false test/phase14-fraud-admin.test.ts test/phase14-fraud-admin.db.test.ts",
     "test:phase13": "vitest run --fileParallelism=false test/phase13-admin-auth.test.ts test/phase13-admin-apis.test.ts test/phase13-admin-security-matrix.test.ts"
