@@ -28,11 +28,10 @@ export type DeploymentEnvironment = 'LOCAL' | 'DEV' | 'STAGING' | 'PRODUCTION';
 
 const DEPLOYMENT_ENVIRONMENTS = new Set<string>(['LOCAL', 'DEV', 'STAGING', 'PRODUCTION']);
 
-const UNIMPLEMENTED_GATES = new Set<EligibilityGateCode>([
-  'COUNTRY_POLICY',
-  'MEMBERSHIP',
-  'PROVIDER_LIMIT',
-]);
+/** Gates still without any collector (mission collectors cover MEMBERSHIP / COUNTRY_POLICY). */
+const UNIMPLEMENTED_GATES = new Set<EligibilityGateCode>(['PROVIDER_LIMIT']);
+
+const EXCLUSIVE_MISSION_ACCESS_CODE = 'EXCLUSIVE_MISSION_ACCESS';
 
 export interface EvaluateAndPersistEligibilityInput {
   readonly userId: string;
@@ -40,6 +39,12 @@ export interface EvaluateAndPersistEligibilityInput {
   readonly serverContext: {
     readonly deploymentEnvironment: DeploymentEnvironment;
   };
+  /**
+   * Server-only mission resource context for MISSION_CLAIM (and any gate that
+   * needs mission version authority). Callers must never accept this from clients
+   * as an independent authority — load it from locked mission progress/version.
+   */
+  readonly missionVersionId?: string | null;
 }
 
 export interface EvaluateAndPersistEligibilityResult {
@@ -55,6 +60,66 @@ type AccountStateClass =
   | 'COOLDOWN'
   | 'RESTRICTED'
   | 'ACTIVE_ALLOWED';
+
+interface MissionVersionEligibilityContext {
+  readonly id: string;
+  readonly requiredMembershipPlanId: string | null;
+  readonly rewardRuleId: string | null;
+  readonly countryGroup: string | null;
+}
+
+async function loadMissionVersionEligibilityContext(
+  client: PoolClient,
+  missionVersionId: string,
+): Promise<MissionVersionEligibilityContext> {
+  const result = await client.query<{
+    id: string;
+    required_membership_plan_id: string | null;
+    reward_rule_id: string | null;
+    country_group: string | null;
+  }>(
+    `SELECT id,
+            required_membership_plan_id,
+            reward_rule_id,
+            NULLIF(btrim(eligibility_policy->>'countryGroup'), '') AS country_group
+     FROM mission_versions
+     WHERE id = $1::uuid
+     FOR SHARE`,
+    [missionVersionId],
+  );
+  const row = result.rows[0];
+  if (row === undefined) {
+    throw new FraudDomainError(
+      'ELIGIBILITY_GATE_SOURCE_UNAVAILABLE',
+      'missionVersionId does not identify an existing mission version',
+      { missionVersionId },
+    );
+  }
+  return {
+    id: row.id,
+    requiredMembershipPlanId: row.required_membership_plan_id,
+    rewardRuleId: row.reward_rule_id,
+    countryGroup: row.country_group,
+  };
+}
+
+async function requireMissionContext(
+  client: PoolClient,
+  input: {
+    readonly actionType: EligibilityActionType;
+    readonly gateCode: EligibilityGateCode;
+    readonly missionVersionId: string | null | undefined;
+  },
+): Promise<MissionVersionEligibilityContext> {
+  if (input.missionVersionId === null || input.missionVersionId === undefined) {
+    throw new FraudDomainError(
+      'ELIGIBILITY_GATE_SOURCE_UNAVAILABLE',
+      `eligibility gate ${input.gateCode} requires server missionVersionId resource context`,
+      { gateCode: input.gateCode, actionType: input.actionType },
+    );
+  }
+  return loadMissionVersionEligibilityContext(client, input.missionVersionId);
+}
 
 async function collectAccountStateGate(
   client: PoolClient,
@@ -126,21 +191,89 @@ async function collectAccountStateGate(
 
 async function collectFeatureFlagGate(
   client: PoolClient,
-  deploymentEnvironment: DeploymentEnvironment,
+  input: {
+    readonly deploymentEnvironment: DeploymentEnvironment;
+    readonly actionType: EligibilityActionType;
+    readonly missionVersionId: string | null | undefined;
+  },
 ): Promise<EligibilityGateFact> {
+  if (input.actionType === 'MISSION_CLAIM') {
+    const mission = await requireMissionContext(client, {
+      actionType: input.actionType,
+      gateCode: 'FEATURE_FLAG',
+      missionVersionId: input.missionVersionId,
+    });
+
+    // Non-monetary missions (null reward_rule_id) do not require MISSION_REWARD_PAUSE.
+    if (mission.rewardRuleId === null) {
+      return {
+        code: 'FEATURE_FLAG',
+        eligible: true,
+        reasonCode: 'FEATURE_FLAG_NOT_REQUIRED',
+        safeDetails: {
+          flagKey: 'MISSION_REWARD_PAUSE',
+          monetary: false,
+          deploymentEnvironment: input.deploymentEnvironment,
+        },
+      };
+    }
+
+    const result = await client.query<{ enabled: boolean }>(
+      `SELECT enabled
+       FROM feature_flags
+       WHERE flag_key = 'MISSION_REWARD_PAUSE'
+         AND environment = $1::environment_name`,
+      [input.deploymentEnvironment],
+    );
+    const row = result.rows[0];
+    if (row === undefined) {
+      throw new FraudDomainError(
+        'ELIGIBILITY_GATE_SOURCE_UNAVAILABLE',
+        'MISSION_REWARD_PAUSE feature flag is missing for deployment environment',
+        { deploymentEnvironment: input.deploymentEnvironment },
+      );
+    }
+
+    if (row.enabled === true) {
+      return {
+        code: 'FEATURE_FLAG',
+        eligible: false,
+        reasonCode: 'FEATURE_FLAG_DISABLED',
+        safeDetails: {
+          flagKey: 'MISSION_REWARD_PAUSE',
+          enabled: true,
+          monetary: true,
+          deploymentEnvironment: input.deploymentEnvironment,
+        },
+      };
+    }
+
+    return {
+      code: 'FEATURE_FLAG',
+      eligible: true,
+      reasonCode: 'FEATURE_FLAG_OK',
+      safeDetails: {
+        flagKey: 'MISSION_REWARD_PAUSE',
+        enabled: false,
+        monetary: true,
+        deploymentEnvironment: input.deploymentEnvironment,
+      },
+    };
+  }
+
   const result = await client.query<{ enabled: boolean }>(
     `SELECT enabled
      FROM feature_flags
      WHERE flag_key = 'WITHDRAWAL_REQUESTS_PAUSE'
        AND environment = $1::environment_name`,
-    [deploymentEnvironment],
+    [input.deploymentEnvironment],
   );
   const row = result.rows[0];
   if (row === undefined) {
     throw new FraudDomainError(
       'ELIGIBILITY_GATE_SOURCE_UNAVAILABLE',
       'WITHDRAWAL_REQUESTS_PAUSE feature flag is missing for deployment environment',
-      { deploymentEnvironment },
+      { deploymentEnvironment: input.deploymentEnvironment },
     );
   }
 
@@ -152,7 +285,7 @@ async function collectFeatureFlagGate(
       safeDetails: {
         flagKey: 'WITHDRAWAL_REQUESTS_PAUSE',
         enabled: true,
-        deploymentEnvironment,
+        deploymentEnvironment: input.deploymentEnvironment,
       },
     };
   }
@@ -164,9 +297,170 @@ async function collectFeatureFlagGate(
     safeDetails: {
       flagKey: 'WITHDRAWAL_REQUESTS_PAUSE',
       enabled: false,
-      deploymentEnvironment,
+      deploymentEnvironment: input.deploymentEnvironment,
     },
   };
+}
+
+async function collectMembershipGate(
+  client: PoolClient,
+  input: {
+    readonly userId: string;
+    readonly actionType: EligibilityActionType;
+    readonly missionVersionId: string | null | undefined;
+  },
+): Promise<EligibilityGateFact> {
+  const mission = await requireMissionContext(client, {
+    actionType: input.actionType,
+    gateCode: 'MEMBERSHIP',
+    missionVersionId: input.missionVersionId,
+  });
+
+  if (mission.requiredMembershipPlanId === null) {
+    return {
+      code: 'MEMBERSHIP',
+      eligible: true,
+      reasonCode: 'MEMBERSHIP_NOT_REQUIRED',
+      safeDetails: {
+        requiredMembershipPlanId: null,
+      },
+    };
+  }
+
+  const nowResult = await client.query<{ now: Date }>(`SELECT now() AS now`);
+  const at = nowResult.rows[0]?.now;
+  if (at === undefined) {
+    throw new FraudDomainError('INTERNAL', 'failed to read server now() for MEMBERSHIP gate');
+  }
+
+  const membership = await client.query<{
+    user_membership_id: string;
+    entitlement_rule_version_id: string;
+  }>(
+    `SELECT um.id AS user_membership_id,
+            mbr.id AS entitlement_rule_version_id
+     FROM user_memberships um
+     JOIN membership_plans mp ON mp.id = um.membership_plan_id
+     JOIN membership_plan_entitlements mpe ON mpe.membership_plan_id = mp.id
+     JOIN entitlements e ON e.id = mpe.entitlement_id
+     JOIN membership_benefit_rule_versions mbr
+       ON mbr.id = mpe.rule_version_id
+      AND mbr.entitlement_id = mpe.entitlement_id
+      AND (mbr.membership_plan_id IS NULL OR mbr.membership_plan_id = mp.id)
+     WHERE um.user_id = $1::uuid
+       AND um.membership_plan_id = $2::uuid
+       AND um.status = 'ACTIVE'
+       AND (um.expires_at IS NULL OR um.expires_at > $3::timestamptz)
+       AND um.revoked_at IS NULL
+       AND mp.status = 'ACTIVE'
+       AND mpe.status = 'ACTIVE'
+       AND mpe.valid_from <= $3::timestamptz
+       AND (mpe.valid_to IS NULL OR mpe.valid_to > $3::timestamptz)
+       AND e.code = $4
+       AND e.value_type = 'BOOLEAN'
+       AND mbr.status = 'ACTIVE'
+       AND mbr.effective_from <= $3::timestamptz
+       AND (mbr.effective_to IS NULL OR mbr.effective_to > $3::timestamptz)
+       AND mbr.value_boolean IS TRUE
+     FOR SHARE OF um, mpe, mbr`,
+    [
+      input.userId,
+      mission.requiredMembershipPlanId,
+      at.toISOString(),
+      EXCLUSIVE_MISSION_ACCESS_CODE,
+    ],
+  );
+
+  if (membership.rows.length === 0) {
+    // Distinguish missing membership vs missing entitlement for audit, without
+    // special-casing Founder plan codes.
+    const planMembership = await client.query<{ id: string }>(
+      `SELECT um.id
+       FROM user_memberships um
+       WHERE um.user_id = $1::uuid
+         AND um.membership_plan_id = $2::uuid
+         AND um.status = 'ACTIVE'
+         AND (um.expires_at IS NULL OR um.expires_at > $3::timestamptz)
+         AND um.revoked_at IS NULL
+       FOR SHARE`,
+      [input.userId, mission.requiredMembershipPlanId, at.toISOString()],
+    );
+    const reasonCode =
+      planMembership.rows.length === 0
+        ? 'MEMBERSHIP_PLAN_NOT_ACTIVE'
+        : 'EXCLUSIVE_MISSION_ACCESS_MISSING';
+    return {
+      code: 'MEMBERSHIP',
+      eligible: false,
+      reasonCode,
+      safeDetails: {
+        requiredMembershipPlanId: mission.requiredMembershipPlanId,
+        entitlementCode: EXCLUSIVE_MISSION_ACCESS_CODE,
+      },
+    };
+  }
+
+  if (membership.rows.length > 1) {
+    throw new FraudDomainError(
+      'ELIGIBILITY_GATE_SOURCE_UNAVAILABLE',
+      'Ambiguous EXCLUSIVE_MISSION_ACCESS entitlement mappings for required plan',
+      {
+        requiredMembershipPlanId: mission.requiredMembershipPlanId,
+        candidateCount: membership.rows.length,
+      },
+    );
+  }
+
+  const row = membership.rows[0]!;
+  return {
+    code: 'MEMBERSHIP',
+    eligible: true,
+    reasonCode: 'MEMBERSHIP_OK',
+    safeDetails: {
+      requiredMembershipPlanId: mission.requiredMembershipPlanId,
+      userMembershipId: row.user_membership_id,
+      entitlementRuleVersionId: row.entitlement_rule_version_id,
+      entitlementCode: EXCLUSIVE_MISSION_ACCESS_CODE,
+    },
+  };
+}
+
+async function collectCountryPolicyGate(
+  client: PoolClient,
+  input: {
+    readonly actionType: EligibilityActionType;
+    readonly missionVersionId: string | null | undefined;
+  },
+): Promise<EligibilityGateFact> {
+  const mission = await requireMissionContext(client, {
+    actionType: input.actionType,
+    gateCode: 'COUNTRY_POLICY',
+    missionVersionId: input.missionVersionId,
+  });
+
+  if (mission.countryGroup === null) {
+    return {
+      code: 'COUNTRY_POLICY',
+      eligible: true,
+      reasonCode: 'COUNTRY_POLICY_NOT_REQUIRED',
+      safeDetails: {
+        countryGroup: null,
+      },
+    };
+  }
+
+  // No approved authoritative country collector exists. Fail closed — do not
+  // infer from IP, Telegram language, locale, or profile.
+  throw new FraudDomainError(
+    'ELIGIBILITY_GATE_SOURCE_UNAVAILABLE',
+    'COUNTRY_AUTHORITY_UNAVAILABLE: mission countryGroup is set but no country collector is approved',
+    {
+      gateCode: 'COUNTRY_POLICY',
+      reasonCode: 'COUNTRY_AUTHORITY_UNAVAILABLE',
+      countryGroup: mission.countryGroup,
+      missionVersionId: mission.id,
+    },
+  );
 }
 
 async function collectRiskPolicyGate(
@@ -221,8 +515,9 @@ async function collectRiskPolicyGate(
  * sources, evaluates via evaluateConfiguredEligibility, then persists one
  * immutable eligibility_decisions row.
  *
- * Callers supply only userId / actionType / serverContext.deploymentEnvironment.
- * They must not supply gate facts, outcome, policy version, or risk results.
+ * Callers supply only userId / actionType / serverContext.deploymentEnvironment
+ * and optional server-derived missionVersionId. They must not supply gate facts,
+ * outcome, policy version, or risk results.
  *
  * Transaction semantics: callers MUST pass a PoolClient already bound to their
  * transaction so risk snapshot/profile + eligibility decision commit/rollback
@@ -242,6 +537,8 @@ export async function evaluateAndPersistEligibility(
     );
   }
 
+  const missionVersionId = input.missionVersionId ?? null;
+
   const policy = await resolveActiveEligibilityPolicyVersionForEvaluation(client);
   const actionPolicy = policy.policyConfig.actions[input.actionType];
   if (actionPolicy === undefined) {
@@ -259,7 +556,7 @@ export async function evaluateAndPersistEligibility(
     if (UNIMPLEMENTED_GATES.has(gateCode)) {
       throw new FraudDomainError(
         'ELIGIBILITY_GATE_SOURCE_UNAVAILABLE',
-        `eligibility gate ${gateCode} has no Step 11 collector authority`,
+        `eligibility gate ${gateCode} has no collector authority`,
         { gateCode, actionType: input.actionType },
       );
     }
@@ -270,7 +567,13 @@ export async function evaluateAndPersistEligibility(
         break;
       }
       case 'FEATURE_FLAG': {
-        gateFacts.push(await collectFeatureFlagGate(client, deploymentEnvironment));
+        gateFacts.push(
+          await collectFeatureFlagGate(client, {
+            deploymentEnvironment,
+            actionType: input.actionType,
+            missionVersionId,
+          }),
+        );
         break;
       }
       case 'RISK_POLICY': {
@@ -281,6 +584,25 @@ export async function evaluateAndPersistEligibility(
         });
         gateFacts.push(collected.fact);
         risk = collected.risk;
+        break;
+      }
+      case 'MEMBERSHIP': {
+        gateFacts.push(
+          await collectMembershipGate(client, {
+            userId: input.userId,
+            actionType: input.actionType,
+            missionVersionId,
+          }),
+        );
+        break;
+      }
+      case 'COUNTRY_POLICY': {
+        gateFacts.push(
+          await collectCountryPolicyGate(client, {
+            actionType: input.actionType,
+            missionVersionId,
+          }),
+        );
         break;
       }
       default: {
@@ -308,6 +630,7 @@ export async function evaluateAndPersistEligibility(
     riskSnapshotId: risk?.snapshot.id ?? null,
     riskConfiguredAction: risk?.evaluation.action ?? null,
     deploymentEnvironment,
+    missionVersionId,
   };
   assertSafePersistedJsonObject('safeInputs', safeInputs);
 
@@ -318,6 +641,7 @@ export async function evaluateAndPersistEligibility(
     policyVersion: evaluation.policyVersion,
     reasonCodes: evaluation.reasonCodes,
     safeInputs,
+    missionVersionId,
   });
 
   return {

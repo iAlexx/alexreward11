@@ -1,7 +1,7 @@
 /**
  * Phase 16 mission package.
  *
- * Step 3: V1 source producers (daily login / valid ads / streak) — no money.
+ * Step 4: secure claim preparation / eligibility — no money.
  */
 
 export { MissionDomainError, type MissionErrorCode } from './errors.js';
@@ -54,3 +54,9 @@ export {
   streakGapAllowsContinuation,
 } from './producers-streak.js';
 export type { MissionProducerBatchResult } from './producer-shared.js';
+export {
+  prepareMissionClaim,
+  type PrepareMissionClaimInput,
+  type PrepareMissionClaimOutcome,
+  type PrepareMissionClaimResult,
+} from './prepare-claim.js';

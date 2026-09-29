@@ -702,6 +702,9 @@ importers:
 
   packages/tasks:
     dependencies:
+      '@alex-rewards/fraud':
+        specifier: workspace:*
+        version: link:../fraud
       pg:
         specifier: 8.23.0
         version: 8.23.0

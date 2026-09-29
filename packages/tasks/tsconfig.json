@@ -6,5 +6,5 @@
     "composite": true
   },
   "include": ["src/**/*.ts", "test/**/*.ts"],
-  "references": [{ "path": "../db" }]
+  "references": [{ "path": "../db" }, { "path": "../fraud" }]
 }
