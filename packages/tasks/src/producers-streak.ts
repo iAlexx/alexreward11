@@ -5,7 +5,10 @@ import { parseMissionEligibilityPolicy } from './eligibility-policy.js';
 import { formatUtcDayKey, utcDayWindow } from './period.js';
 import {
   emptyProducerBatchResult,
+  PRODUCER_MISSION_VERSION_STATUS_SQL,
+  selectStreakProducerUserIds,
   tallyContributeOutcome,
+  touchStreakProducerCheckpoint,
   withMissionProducerTx,
   type MissionProducerBatchResult,
 } from './producer-shared.js';
@@ -29,7 +32,6 @@ function utcDayNumber(asOf: Date): number {
 }
 
 function parseDayKeyToDate(dayKey: string): Date {
-  // DAY:YYYY-MM-DD
   const raw = dayKey.startsWith('DAY:') ? dayKey.slice(4) : dayKey;
   const [y, m, d] = raw.split('-').map((part) => Number(part));
   return new Date(Date.UTC(y!, m! - 1, d!));
@@ -98,22 +100,13 @@ export async function processStreakMissionContributionsBatch(
          INNER JOIN mission_definitions md ON md.id = mv.mission_definition_id
          WHERE md.status = 'ACTIVE'
            AND mv.condition_type = 'STREAK_MILESTONE'
-           AND mv.status = 'ACTIVE'`,
+           AND ${PRODUCER_MISSION_VERSION_STATUS_SQL}`,
       )
     ).rows;
   });
   if (versions.length === 0) {
     return result;
   }
-
-  const users = await withMissionProducerTx(pool, async (client) => {
-    return (
-      await client.query<{ user_id: string }>(
-        `SELECT DISTINCT user_id FROM user_sessions ORDER BY user_id LIMIT $1`,
-        [limit],
-      )
-    ).rows;
-  });
 
   for (const version of versions) {
     let streakPolicy;
@@ -124,7 +117,6 @@ export async function processStreakMissionContributionsBatch(
       continue;
     }
     if (streakPolicy === null) {
-      // Missing explicit streak config — fail closed, no progress.
       continue;
     }
     if (streakPolicy.timeZone !== 'UTC' || streakPolicy.source !== 'AUTHENTICATED_LOGIN_DAY') {
@@ -133,11 +125,18 @@ export async function processStreakMissionContributionsBatch(
     const graceDays = streakPolicy.graceDays;
     const maxGapDays = graceDays + 1;
 
-    for (const user of users) {
+    const userIds = await withMissionProducerTx(pool, async (client) =>
+      selectStreakProducerUserIds(client, version.id, limit),
+    );
+
+    for (const userId of userIds) {
       try {
         await withMissionProducerTx(pool, async (client) => {
-          const days = await loadUserLoginDays(client, user.user_id);
-          if (days.length === 0) return;
+          const days = await loadUserLoginDays(client, userId);
+          if (days.length === 0) {
+            await touchStreakProducerCheckpoint(client, version.id, userId);
+            return;
+          }
 
           let sequenceStart = parseDayKeyToDate(days[0]!.day_key);
           let previousDay = sequenceStart;
@@ -145,13 +144,12 @@ export async function processStreakMissionContributionsBatch(
 
           for (const day of days) {
             const dayDate = parseDayKeyToDate(day.day_key);
-            // Window gate for version.
             if (version.start_at !== null && day.occurred_at < version.start_at) continue;
             if (version.end_at !== null && !(day.occurred_at < version.end_at)) continue;
 
             const gap = utcDayNumber(dayDate) - utcDayNumber(previousDay);
             if (gap > maxGapDays) {
-              await expireOpenStreakProgress(client, version.id, user.user_id, periodKey);
+              await expireOpenStreakProgress(client, version.id, userId, periodKey);
               sequenceStart = dayDate;
               periodKey = streakPeriodKey(sequenceStart);
             }
@@ -159,7 +157,7 @@ export async function processStreakMissionContributionsBatch(
 
             const outcome = await contributeMissionProgress(client, {
               missionVersionId: version.id,
-              userId: user.user_id,
+              userId,
               sourceKind: 'STREAK_DAY',
               sourceKey: day.day_key,
               occurredAt: day.occurred_at,
@@ -167,6 +165,7 @@ export async function processStreakMissionContributionsBatch(
             });
             tallyContributeOutcome(result, outcome.outcome);
           }
+          await touchStreakProducerCheckpoint(client, version.id, userId);
         });
       } catch {
         result.examined += 1;

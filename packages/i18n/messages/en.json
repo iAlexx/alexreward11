@@ -168,6 +168,7 @@
     "comingSoon": "Tasks are coming soon.",
     "taskNameFallback": "Task",
     "rewardServerNote": "Task rewards, when available, are confirmed by the server.",
+    "rewardPendingHold": "Pending hold: {seconds}s after grant",
     "engineTitle": "Tasks are not available yet",
     "engineBody": "The mission engine is not active yet. This is not an empty task list.",
     "state_NOT_STARTED": "Not started",

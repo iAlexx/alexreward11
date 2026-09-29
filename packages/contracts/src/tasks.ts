@@ -9,6 +9,13 @@ export type TaskProgressStateDto =
 
 export type TaskClaimStatusDto = 'PENDING' | 'GRANTED' | 'REJECTED';
 
+export interface TaskRewardDisplayDto {
+  readonly amountAtomic: string;
+  readonly assetCode: string;
+  readonly assetDecimals: number;
+  readonly pendingHoldSeconds: number;
+}
+
 export interface TaskListItemDto {
   readonly taskCode: string;
   readonly missionVersionId: string;
@@ -23,6 +30,7 @@ export interface TaskListItemDto {
   readonly claimStatus: TaskClaimStatusDto | null;
   readonly claimable: boolean;
   readonly rewardAtomic: string | null;
+  readonly reward: TaskRewardDisplayDto | null;
   readonly endsAt: string | null;
 }
 

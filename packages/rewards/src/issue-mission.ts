@@ -194,7 +194,7 @@ async function isMissionRewardPaused(
   return row.enabled === true ? 'paused' : 'ok';
 }
 
-async function assertValidAdEvidence(
+async function assertValidAdEvidenceLocked(
   client: PoolClient,
   input: {
     readonly progressId: string;
@@ -203,17 +203,104 @@ async function assertValidAdEvidence(
   },
 ): Promise<boolean> {
   if (input.conditionType !== 'VALID_AD_COUNT') return true;
-  const valid = await client.query<{ c: number }>(
-    `SELECT count(*)::int AS c
+  const locked = await client.query<{ state: string; source_type: string }>(
+    `SELECT re.state::text AS state, re.source_type::text AS source_type
      FROM mission_progress_events mpe
      INNER JOIN reward_events re ON re.id = mpe.source_key::uuid
      WHERE mpe.mission_progress_id = $1::uuid
        AND mpe.source_kind = 'REWARD_EVENT'
-       AND re.source_type = 'AD'
-       AND re.state = 'AVAILABLE'`,
+     ORDER BY re.id ASC
+     FOR SHARE OF re`,
     [input.progressId],
   );
-  return (valid.rows[0]?.c ?? 0) >= input.target;
+  let available = 0;
+  for (const row of locked.rows) {
+    if (row.source_type === 'AD' && row.state === 'AVAILABLE') {
+      available += 1;
+    }
+  }
+  return available >= input.target;
+}
+
+interface ExposureLimitToEnforce {
+  readonly id: string;
+  readonly limit_atomic: string;
+}
+
+export function resolveMissionBonusDailyLimits(
+  rows: readonly {
+    readonly id: string;
+    readonly limit_atomic: string | null;
+    readonly scope_reference_id: string | null;
+    readonly country_group: string | null;
+  }[],
+  missionVersionId: string,
+):
+  | { readonly kind: 'ok'; readonly limits: readonly ExposureLimitToEnforce[] }
+  | { readonly kind: 'missing' }
+  | { readonly kind: 'ambiguous' }
+  | { readonly kind: 'invalid' } {
+  const applicable = rows.filter((row) => row.country_group === null);
+  if (applicable.length === 0) return { kind: 'missing' };
+  const globals = applicable.filter((row) => row.scope_reference_id === null);
+  const missionScoped = applicable.filter((row) => row.scope_reference_id === missionVersionId);
+  if (globals.length > 1 || missionScoped.length > 1) return { kind: 'ambiguous' };
+  const limits: ExposureLimitToEnforce[] = [];
+  for (const row of [...globals, ...missionScoped]) {
+    if (row.limit_atomic === null) return { kind: 'invalid' };
+    limits.push({ id: row.id, limit_atomic: row.limit_atomic });
+  }
+  if (limits.length === 0) return { kind: 'missing' };
+  return { kind: 'ok', limits };
+}
+
+async function recordDecisionExposurePeriods(
+  client: PoolClient,
+  decisionId: string,
+  periods: readonly {
+    readonly exposureLimitId: string;
+    readonly exposurePeriodId: string;
+    readonly amountAtomic: string;
+  }[],
+): Promise<void> {
+  for (const period of periods) {
+    await client.query(
+      `INSERT INTO mission_reward_decision_exposure_periods (
+         mission_reward_decision_id, exposure_limit_id, exposure_period_id, amount_atomic
+       ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::bigint)`,
+      [decisionId, period.exposureLimitId, period.exposurePeriodId, period.amountAtomic],
+    );
+  }
+}
+
+type RewardRuleLifecycleBlock =
+  | 'ok'
+  | 'DRAFT'
+  | 'REVOKED'
+  | 'OUTSIDE_VALIDITY';
+
+export function validatePinnedRewardRuleLifecycle(
+  rule: {
+    readonly status: string;
+    readonly valid_from: Date;
+    readonly valid_to: Date | null;
+  },
+  claimedAt: Date,
+): RewardRuleLifecycleBlock {
+  if (rule.status === 'DRAFT' || rule.status === 'REVOKED') {
+    return rule.status;
+  }
+  if (rule.status === 'ACTIVE') {
+    if (claimedAt < rule.valid_from) return 'OUTSIDE_VALIDITY';
+    if (rule.valid_to !== null && !(claimedAt < rule.valid_to)) return 'OUTSIDE_VALIDITY';
+    return 'ok';
+  }
+  if (rule.status === 'SUPERSEDED') {
+    if (claimedAt < rule.valid_from) return 'OUTSIDE_VALIDITY';
+    if (rule.valid_to === null || !(claimedAt < rule.valid_to)) return 'OUTSIDE_VALIDITY';
+    return 'ok';
+  }
+  return 'OUTSIDE_VALIDITY';
 }
 
 /**
@@ -227,6 +314,55 @@ export async function issueMissionReward(
   return withLedgerTransaction(db, async (client) => {
     const asOf = command.asOf ?? new Date();
     const claimId = command.missionClaimId;
+
+    const claimProbe = await client.query<{
+      id: string;
+      mission_version_id: string;
+      mission_progress_id: string;
+      user_id: string;
+      period_key: string;
+      status: string;
+      reward_event_id: string | null;
+      claimed_at: Date;
+    }>(
+      `SELECT id, mission_version_id, mission_progress_id, user_id, period_key,
+              status::text AS status, reward_event_id, claimed_at
+       FROM mission_claims
+       WHERE id = $1::uuid`,
+      [claimId],
+    );
+    const claimPreview = claimProbe.rows[0];
+    if (claimPreview === undefined) {
+      throw new RewardDomainError('VALIDATION', 'mission claim not found', {
+        details: { missionClaimId: claimId },
+      });
+    }
+
+    await client.query(
+      `SELECT id FROM users WHERE id = $1::uuid FOR SHARE`,
+      [claimPreview.user_id],
+    );
+
+    const definitionProbe = await client.query<{ mission_definition_id: string }>(
+      `SELECT mission_definition_id FROM mission_versions WHERE id = $1::uuid`,
+      [claimPreview.mission_version_id],
+    );
+    const definitionId = definitionProbe.rows[0]?.mission_definition_id;
+    if (definitionId !== undefined) {
+      await client.query(
+        `SELECT id FROM mission_definitions WHERE id = $1::uuid FOR SHARE`,
+        [definitionId],
+      );
+    }
+
+    await client.query(
+      `SELECT id FROM mission_versions WHERE id = $1::uuid FOR SHARE`,
+      [claimPreview.mission_version_id],
+    );
+    await client.query(
+      `SELECT id FROM mission_progress WHERE id = $1::uuid FOR SHARE`,
+      [claimPreview.mission_progress_id],
+    );
 
     const claimLocked = await client.query<{
       id: string;
@@ -371,47 +507,6 @@ export async function issueMissionReward(
       });
     }
 
-    if (!(await assertValidAdEvidence(client, {
-      progressId: prog.id,
-      conditionType: mv.condition_type,
-      target: prog.target,
-    }))) {
-      const decisionId = await recordDecision(client, {
-        missionClaimId: claimId,
-        missionProgressId: prog.id,
-        missionVersionId: mv.id,
-        outcome: 'SOURCE_EVIDENCE_INVALID',
-        reasonCode: 'MISSION_SOURCE_EVIDENCE_NO_LONGER_VALID',
-      });
-      return softResult('source_evidence_invalid', claimId, 'MISSION_SOURCE_EVIDENCE_NO_LONGER_VALID', {
-        decisionId,
-      });
-    }
-
-    const pause = await isMissionRewardPaused(client, command.environment);
-    if (pause === 'missing') {
-      const decisionId = await recordDecision(client, {
-        missionClaimId: claimId,
-        missionProgressId: prog.id,
-        missionVersionId: mv.id,
-        outcome: 'CONFIGURATION_MISSING',
-        reasonCode: 'MISSION_REWARD_PAUSE_MISSING',
-      });
-      return softResult('configuration_missing', claimId, 'MISSION_REWARD_PAUSE_MISSING', {
-        decisionId,
-      });
-    }
-    if (pause === 'paused') {
-      const decisionId = await recordDecision(client, {
-        missionClaimId: claimId,
-        missionProgressId: prog.id,
-        missionVersionId: mv.id,
-        outcome: 'BLOCKED_PAUSE',
-        reasonCode: 'MISSION_REWARD_PAUSE',
-      });
-      return softResult('blocked_pause', claimId, 'MISSION_REWARD_PAUSE', { decisionId });
-    }
-
     if (mv.reward_source_type !== 'MISSION' || mv.reward_rule_id === null) {
       const decisionId = await recordDecision(client, {
         missionClaimId: claimId,
@@ -433,10 +528,12 @@ export async function issueMissionReward(
       fixed_reward_atomic: string | null;
       pending_hold_seconds: number;
       status: string;
+      valid_from: Date;
+      valid_to: Date | null;
     }>(
       `SELECT id, rule_version, source_type::text AS source_type, asset_id,
               fixed_reward_atomic::text AS fixed_reward_atomic, pending_hold_seconds,
-              status::text AS status
+              status::text AS status, valid_from, valid_to
        FROM reward_rules
        WHERE id = $1::uuid
        FOR SHARE`,
@@ -462,10 +559,95 @@ export async function issueMissionReward(
       });
     }
 
+    const ruleLifecycle = validatePinnedRewardRuleLifecycle(rewardRule, claim.claimed_at);
+    if (ruleLifecycle === 'DRAFT' || ruleLifecycle === 'REVOKED') {
+      const decisionId = await recordDecision(client, {
+        missionClaimId: claimId,
+        missionProgressId: prog.id,
+        missionVersionId: mv.id,
+        outcome: 'CONFIGURATION_MISSING',
+        reasonCode: `MISSION_REWARD_RULE_${ruleLifecycle}`,
+        rewardRuleId: rewardRule.id,
+        rewardRuleVersion: rewardRule.rule_version,
+        assetId: rewardRule.asset_id,
+      });
+      return softResult('configuration_missing', claimId, `MISSION_REWARD_RULE_${ruleLifecycle}`, {
+        decisionId,
+      });
+    }
+    if (ruleLifecycle === 'OUTSIDE_VALIDITY') {
+      const decisionId = await recordDecision(client, {
+        missionClaimId: claimId,
+        missionProgressId: prog.id,
+        missionVersionId: mv.id,
+        outcome: 'CONFIGURATION_MISSING',
+        reasonCode: 'MISSION_REWARD_RULE_OUTSIDE_CLAIM_WINDOW',
+        rewardRuleId: rewardRule.id,
+        rewardRuleVersion: rewardRule.rule_version,
+        assetId: rewardRule.asset_id,
+      });
+      return softResult(
+        'configuration_missing',
+        claimId,
+        'MISSION_REWARD_RULE_OUTSIDE_CLAIM_WINDOW',
+        { decisionId },
+      );
+    }
+
+    if (!(await assertValidAdEvidenceLocked(client, {
+      progressId: prog.id,
+      conditionType: mv.condition_type,
+      target: prog.target,
+    }))) {
+      const decisionId = await recordDecision(client, {
+        missionClaimId: claimId,
+        missionProgressId: prog.id,
+        missionVersionId: mv.id,
+        outcome: 'SOURCE_EVIDENCE_INVALID',
+        reasonCode: 'MISSION_SOURCE_EVIDENCE_NO_LONGER_VALID',
+        rewardRuleId: rewardRule.id,
+        rewardRuleVersion: rewardRule.rule_version,
+        assetId: rewardRule.asset_id,
+      });
+      return softResult('source_evidence_invalid', claimId, 'MISSION_SOURCE_EVIDENCE_NO_LONGER_VALID', {
+        decisionId,
+      });
+    }
+
+    const pause = await isMissionRewardPaused(client, command.environment);
+    if (pause === 'missing') {
+      const decisionId = await recordDecision(client, {
+        missionClaimId: claimId,
+        missionProgressId: prog.id,
+        missionVersionId: mv.id,
+        outcome: 'CONFIGURATION_MISSING',
+        reasonCode: 'MISSION_REWARD_PAUSE_MISSING',
+        rewardRuleId: rewardRule.id,
+        rewardRuleVersion: rewardRule.rule_version,
+        assetId: rewardRule.asset_id,
+      });
+      return softResult('configuration_missing', claimId, 'MISSION_REWARD_PAUSE_MISSING', {
+        decisionId,
+      });
+    }
+    if (pause === 'paused') {
+      const decisionId = await recordDecision(client, {
+        missionClaimId: claimId,
+        missionProgressId: prog.id,
+        missionVersionId: mv.id,
+        outcome: 'BLOCKED_PAUSE',
+        reasonCode: 'MISSION_REWARD_PAUSE',
+        rewardRuleId: rewardRule.id,
+        rewardRuleVersion: rewardRule.rule_version,
+        assetId: rewardRule.asset_id,
+      });
+      return softResult('blocked_pause', claimId, 'MISSION_REWARD_PAUSE', { decisionId });
+    }
+
     const amountText = rewardRule.fixed_reward_atomic;
     const amount = BigInt(amountText);
 
-    // Fresh eligibility (account/risk/membership/pause/country).
+    // Fresh eligibility (account/risk/membership/country) with authoritative row locks held.
     const eligibility = await evaluateAndPersistEligibility(client, {
       userId: claim.user_id,
       actionType: 'MISSION_CLAIM',
@@ -581,8 +763,8 @@ export async function issueMissionReward(
        FOR SHARE`,
       [command.environment, asOf.toISOString(), rewardRule.asset_id, mv.id],
     );
-    const applicable = limits.rows.filter((row) => row.country_group === null);
-    if (applicable.length === 0) {
+    const resolvedLimits = resolveMissionBonusDailyLimits(limits.rows, mv.id);
+    if (resolvedLimits.kind === 'missing') {
       const decisionId = await recordDecision(client, {
         missionClaimId: claimId,
         missionProgressId: prog.id,
@@ -599,40 +781,30 @@ export async function issueMissionReward(
         decisionId,
       });
     }
-    if (applicable.length > 1) {
-      // Prefer exact mission-version scope if present; else global null scope.
-      const exact = applicable.filter((r) => r.scope_reference_id === mv.id);
-      const global = applicable.filter((r) => r.scope_reference_id === null);
-      const chosen = exact.length === 1 ? exact : global.length === 1 ? global : null;
-      if (chosen === null) {
-        const decisionId = await recordDecision(client, {
-          missionClaimId: claimId,
-          missionProgressId: prog.id,
-          missionVersionId: mv.id,
-          outcome: 'BLOCKED_EXPOSURE',
-          reasonCode: 'MAX_MISSION_BONUS_DAILY_AMBIGUOUS',
-          budgetPeriodId: budget.id,
-          eligibilityDecisionId: eligibility.decision.id,
-          rewardRuleId: rewardRule.id,
-          rewardRuleVersion: rewardRule.rule_version,
-          assetId: rewardRule.asset_id,
-        });
-        return softResult('blocked_exposure', claimId, 'MAX_MISSION_BONUS_DAILY_AMBIGUOUS', {
-          decisionId,
-        });
-      }
-      applicable.length = 0;
-      applicable.push(chosen[0]!);
+    if (resolvedLimits.kind === 'ambiguous') {
+      const decisionId = await recordDecision(client, {
+        missionClaimId: claimId,
+        missionProgressId: prog.id,
+        missionVersionId: mv.id,
+        outcome: 'BLOCKED_EXPOSURE',
+        reasonCode: 'MAX_MISSION_BONUS_DAILY_AMBIGUOUS',
+        budgetPeriodId: budget.id,
+        eligibilityDecisionId: eligibility.decision.id,
+        rewardRuleId: rewardRule.id,
+        rewardRuleVersion: rewardRule.rule_version,
+        assetId: rewardRule.asset_id,
+      });
+      return softResult('blocked_exposure', claimId, 'MAX_MISSION_BONUS_DAILY_AMBIGUOUS', {
+        decisionId,
+      });
     }
-    const limit = applicable[0]!;
-    if (limit.limit_atomic === null) {
+    if (resolvedLimits.kind === 'invalid') {
       const decisionId = await recordDecision(client, {
         missionClaimId: claimId,
         missionProgressId: prog.id,
         missionVersionId: mv.id,
         outcome: 'BLOCKED_EXPOSURE',
         reasonCode: 'MAX_MISSION_BONUS_DAILY_INVALID',
-        exposureLimitId: limit.id,
         budgetPeriodId: budget.id,
         eligibilityDecisionId: eligibility.decision.id,
         rewardRuleId: rewardRule.id,
@@ -645,32 +817,52 @@ export async function issueMissionReward(
     }
 
     const window = utcDayWindow(asOf);
-    const period = await lockOrCreateExposurePeriod(client, {
-      exposureLimitId: limit.id,
-      limitAtomic: BigInt(limit.limit_atomic),
-      window,
-    });
-    const exposureRemaining =
-      BigInt(period.limit_atomic) - BigInt(period.reserved_atomic) - BigInt(period.consumed_atomic);
-    if (amount > exposureRemaining) {
-      const decisionId = await recordDecision(client, {
-        missionClaimId: claimId,
-        missionProgressId: prog.id,
-        missionVersionId: mv.id,
-        outcome: 'BLOCKED_EXPOSURE',
-        reasonCode: 'MAX_MISSION_BONUS_DAILY_EXHAUSTED',
+    const lockedExposurePeriods: {
+      limit: ExposureLimitToEnforce;
+      period: Awaited<ReturnType<typeof lockOrCreateExposurePeriod>>;
+    }[] = [];
+    for (const limit of resolvedLimits.limits) {
+      const period = await lockOrCreateExposurePeriod(client, {
         exposureLimitId: limit.id,
-        exposurePeriodId: period.id,
-        budgetPeriodId: budget.id,
-        eligibilityDecisionId: eligibility.decision.id,
-        rewardRuleId: rewardRule.id,
-        rewardRuleVersion: rewardRule.rule_version,
-        assetId: rewardRule.asset_id,
+        limitAtomic: BigInt(limit.limit_atomic),
+        window,
       });
-      return softResult('blocked_exposure', claimId, 'MAX_MISSION_BONUS_DAILY_EXHAUSTED', {
-        decisionId,
-      });
+      const exposureRemaining =
+        BigInt(period.limit_atomic) -
+        BigInt(period.reserved_atomic) -
+        BigInt(period.consumed_atomic);
+      if (amount > exposureRemaining) {
+        const decisionId = await recordDecision(client, {
+          missionClaimId: claimId,
+          missionProgressId: prog.id,
+          missionVersionId: mv.id,
+          outcome: 'BLOCKED_EXPOSURE',
+          reasonCode: 'MAX_MISSION_BONUS_DAILY_EXHAUSTED',
+          exposureLimitId: limit.id,
+          exposurePeriodId: period.id,
+          budgetPeriodId: budget.id,
+          eligibilityDecisionId: eligibility.decision.id,
+          rewardRuleId: rewardRule.id,
+          rewardRuleVersion: rewardRule.rule_version,
+          assetId: rewardRule.asset_id,
+        });
+        await recordDecisionExposurePeriods(
+          client,
+          decisionId,
+          lockedExposurePeriods.map((entry) => ({
+            exposureLimitId: entry.limit.id,
+            exposurePeriodId: entry.period.id,
+            amountAtomic: amountText,
+          })),
+        );
+        return softResult('blocked_exposure', claimId, 'MAX_MISSION_BONUS_DAILY_EXHAUSTED', {
+          decisionId,
+        });
+      }
+      lockedExposurePeriods.push({ limit, period });
     }
+
+    const primaryExposure = lockedExposurePeriods[0]!;
 
     // Reserve budget + exposure.
     await client.query(
@@ -692,23 +884,27 @@ export async function issueMissionReward(
       throw new RewardDomainError('INTERNAL', 'mission budget reservation insert failed');
     }
 
-    await client.query(
-      `UPDATE economic_exposure_periods
-       SET reserved_atomic = reserved_atomic + $2::bigint,
-           updated_at = now()
-       WHERE id = $1::uuid`,
-      [period.id, amountText],
-    );
-    const exposureRes = await client.query<{ id: string }>(
-      `INSERT INTO mission_bonus_exposure_reservations (
-         mission_claim_id, exposure_period_id, amount_atomic, state
-       ) VALUES ($1::uuid, $2::uuid, $3::bigint, 'ACTIVE')
-       RETURNING id`,
-      [claimId, period.id, amountText],
-    );
-    const exposureReservationId = exposureRes.rows[0]?.id;
-    if (exposureReservationId === undefined) {
-      throw new RewardDomainError('INTERNAL', 'mission exposure reservation insert failed');
+    const exposureReservationIds: string[] = [];
+    for (const entry of lockedExposurePeriods) {
+      await client.query(
+        `UPDATE economic_exposure_periods
+         SET reserved_atomic = reserved_atomic + $2::bigint,
+             updated_at = now()
+         WHERE id = $1::uuid`,
+        [entry.period.id, amountText],
+      );
+      const exposureRes = await client.query<{ id: string }>(
+        `INSERT INTO mission_bonus_exposure_reservations (
+           mission_claim_id, exposure_period_id, amount_atomic, state
+         ) VALUES ($1::uuid, $2::uuid, $3::bigint, 'ACTIVE')
+         RETURNING id`,
+        [claimId, entry.period.id, amountText],
+      );
+      const exposureReservationId = exposureRes.rows[0]?.id;
+      if (exposureReservationId === undefined) {
+        throw new RewardDomainError('INTERNAL', 'mission exposure reservation insert failed');
+      }
+      exposureReservationIds.push(exposureReservationId);
     }
 
     const expense = await getOrCreateLedgerAccount(client, {
@@ -803,20 +999,24 @@ export async function issueMissionReward(
       [budgetReservationId, asOf.toISOString()],
     );
 
-    await client.query(
-      `UPDATE economic_exposure_periods
-       SET reserved_atomic = reserved_atomic - $2::bigint,
-           consumed_atomic = consumed_atomic + $2::bigint,
-           updated_at = now()
-       WHERE id = $1::uuid`,
-      [period.id, amountText],
-    );
-    await client.query(
-      `UPDATE mission_bonus_exposure_reservations
-       SET state = 'CONSUMED', consumed_at = $2::timestamptz, updated_at = now()
-       WHERE id = $1::uuid`,
-      [exposureReservationId, asOf.toISOString()],
-    );
+    for (let i = 0; i < lockedExposurePeriods.length; i += 1) {
+      const entry = lockedExposurePeriods[i]!;
+      const exposureReservationId = exposureReservationIds[i]!;
+      await client.query(
+        `UPDATE economic_exposure_periods
+         SET reserved_atomic = reserved_atomic - $2::bigint,
+             consumed_atomic = consumed_atomic + $2::bigint,
+             updated_at = now()
+         WHERE id = $1::uuid`,
+        [entry.period.id, amountText],
+      );
+      await client.query(
+        `UPDATE mission_bonus_exposure_reservations
+         SET state = 'CONSUMED', consumed_at = $2::timestamptz, updated_at = now()
+         WHERE id = $1::uuid`,
+        [exposureReservationId, asOf.toISOString()],
+      );
+    }
 
     await client.query(
       `UPDATE mission_claims
@@ -841,10 +1041,20 @@ export async function issueMissionReward(
       assetId: rewardRule.asset_id,
       eligibilityDecisionId: eligibility.decision.id,
       budgetPeriodId: budget.id,
-      exposureLimitId: limit.id,
-      exposurePeriodId: period.id,
+      exposureLimitId: primaryExposure.limit.id,
+      exposurePeriodId: primaryExposure.period.id,
       ledgerTransactionId: ledger.id,
     });
+
+    await recordDecisionExposurePeriods(
+      client,
+      decisionId,
+      lockedExposurePeriods.map((entry) => ({
+        exposureLimitId: entry.limit.id,
+        exposurePeriodId: entry.period.id,
+        amountAtomic: amountText,
+      })),
+    );
 
     await insertOutboxEvent(client, {
       aggregateType: 'reward_event',

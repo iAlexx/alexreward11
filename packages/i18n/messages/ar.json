@@ -168,6 +168,7 @@
     "comingSoon": "المهام قادمة قريبًا.",
     "taskNameFallback": "مهمة",
     "rewardServerNote": "مكافآت المهام، عند توفرها، يؤكدها الخادم.",
+    "rewardPendingHold": "فترة انتظار: {seconds} ثانية بعد المنح",
     "engineTitle": "المهام غير متاحة بعد",
     "engineBody": "محرّك المهمات غير نشط بعد. هذه ليست قائمة مهام فارغة.",
     "state_NOT_STARTED": "لم تبدأ",

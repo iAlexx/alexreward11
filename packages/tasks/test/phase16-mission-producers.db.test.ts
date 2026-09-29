@@ -309,4 +309,177 @@ describe.skipIf(phase16DatabaseUrl === '')('Phase 16 Step 3 source producers (DB
     const expired = seq.rows.find((r) => r.period_key === 'STREAK:2026-07-01');
     expect(expired?.state).toBe('EXPIRED');
   });
+
+  it('daily login batch limit=3 eventually processes all actionable days', async () => {
+    const userId = await createTestUser(pool, '16301001');
+    const defId = await insertMissionDefinition(pool, {
+      code: 'P16REM_LOGIN_STARVE',
+      status: 'ACTIVE',
+    });
+    const versionId = await insertMissionVersion(pool, {
+      missionDefinitionId: defId,
+      missionVersion: 1,
+      status: 'ACTIVE',
+      startAt: new Date('2020-01-01T00:00:00.000Z'),
+      endAt: null,
+      target: 1,
+      conditionType: 'DAILY_LOGIN',
+      resetPolicy: 'DAILY',
+    });
+
+    for (let d = 1; d <= 10; d += 1) {
+      const day = String(d).padStart(2, '0');
+      await insertSession(pool, userId, new Date(`2026-08-${day}T12:00:00.000Z`));
+    }
+
+    const countEvents = async (): Promise<number> => {
+      const row = await pool.query<{ c: number }>(
+        `SELECT count(*)::int AS c
+         FROM mission_progress_events mpe
+         INNER JOIN mission_progress mp ON mp.id = mpe.mission_progress_id
+         WHERE mp.mission_version_id = $1::uuid AND mp.user_id = $2::uuid`,
+        [versionId, userId],
+      );
+      return row.rows[0]?.c ?? 0;
+    };
+
+    for (let round = 0; round < 20; round += 1) {
+      await processDailyLoginMissionContributionsBatch(pool, { limit: 3 });
+      if ((await countEvents()) >= 10) break;
+    }
+    expect(await countEvents()).toBe(10);
+
+    const beforeIdle = await countEvents();
+    await processDailyLoginMissionContributionsBatch(pool, { limit: 3 });
+    expect(await countEvents()).toBe(beforeIdle);
+  });
+
+  it('VALID_AD batch limit=3 eventually processes all actionable ads', async () => {
+    const userId = await createTestUser(pool, '16301002');
+    const defId = await insertMissionDefinition(pool, {
+      code: 'P16REM_AD_STARVE',
+      status: 'ACTIVE',
+    });
+    const versionId = await insertMissionVersion(pool, {
+      missionDefinitionId: defId,
+      missionVersion: 1,
+      status: 'ACTIVE',
+      startAt: new Date('2020-01-01T00:00:00.000Z'),
+      endAt: null,
+      target: 1,
+      conditionType: 'VALID_AD_COUNT',
+      resetPolicy: 'NONE',
+    });
+
+    for (let i = 0; i < 8; i += 1) {
+      await insertAdReward(pool, {
+        userId,
+        state: 'AVAILABLE',
+        availableAt: new Date(`2026-09-${String(i + 1).padStart(2, '0')}T12:00:00.000Z`),
+      });
+    }
+
+    const countAdEvents = async (): Promise<number> => {
+      const row = await pool.query<{ c: number }>(
+        `SELECT count(*)::int AS c
+         FROM mission_progress_events mpe
+         INNER JOIN mission_progress mp ON mp.id = mpe.mission_progress_id
+         WHERE mp.mission_version_id = $1::uuid AND mp.user_id = $2::uuid`,
+        [versionId, userId],
+      );
+      return row.rows[0]?.c ?? 0;
+    };
+
+    for (let round = 0; round < 20; round += 1) {
+      await processValidAdMissionContributionsBatch(pool, { limit: 3 });
+      if ((await countAdEvents()) >= 8) break;
+    }
+    expect(await countAdEvents()).toBe(8);
+
+    const beforeIdle = await countAdEvents();
+    await processValidAdMissionContributionsBatch(pool, { limit: 3 });
+    expect(await countAdEvents()).toBe(beforeIdle);
+  });
+
+  it('STREAK batch limit=3 eventually evaluates all users with login evidence', async () => {
+    const defId = await insertMissionDefinition(pool, {
+      code: 'P16REM_STREAK_USERS',
+      status: 'ACTIVE',
+    });
+    const versionId = await insertMissionVersion(pool, {
+      missionDefinitionId: defId,
+      missionVersion: 1,
+      status: 'ACTIVE',
+      startAt: new Date('2020-01-01T00:00:00.000Z'),
+      endAt: null,
+      target: 1,
+      conditionType: 'STREAK_MILESTONE',
+      resetPolicy: 'NONE',
+      eligibilityPolicy: {
+        streak: { source: 'AUTHENTICATED_LOGIN_DAY', timeZone: 'UTC', graceDays: 0 },
+      },
+    });
+
+    const userIds: string[] = [];
+    for (let u = 0; u < 8; u += 1) {
+      const userId = await createTestUser(pool, `1630101${u}`);
+      userIds.push(userId);
+      await insertSession(pool, userId, new Date(`2026-10-${String(u + 1).padStart(2, '0')}T10:00:00.000Z`));
+    }
+
+    const touched = new Set<string>();
+    for (let round = 0; round < 30; round += 1) {
+      await processStreakMissionContributionsBatch(pool, { limit: 3 });
+      const rows = await pool.query<{ user_id: string }>(
+        `SELECT user_id FROM mission_streak_producer_checkpoints
+         WHERE mission_version_id = $1::uuid`,
+        [versionId],
+      );
+      for (const row of rows.rows) {
+        if (userIds.includes(row.user_id)) touched.add(row.user_id);
+      }
+      if (touched.size >= userIds.length) break;
+    }
+    expect(userIds.every((id) => touched.has(id))).toBe(true);
+  });
+
+  it('historical SUPERSEDED version redrive contributes unprocessed evidence', async () => {
+    const userId = await createTestUser(pool, '16301003');
+    const defId = await insertMissionDefinition(pool, {
+      code: 'P16REM_SUPERSEDED',
+      status: 'ACTIVE',
+    });
+    const v1 = await insertMissionVersion(pool, {
+      missionDefinitionId: defId,
+      missionVersion: 1,
+      status: 'SUPERSEDED',
+      startAt: new Date('2026-01-01T00:00:00.000Z'),
+      endAt: new Date('2026-06-01T00:00:00.000Z'),
+      target: 1,
+      conditionType: 'DAILY_LOGIN',
+      resetPolicy: 'DAILY',
+    });
+    await insertMissionVersion(pool, {
+      missionDefinitionId: defId,
+      missionVersion: 2,
+      status: 'ACTIVE',
+      startAt: new Date('2026-06-01T00:00:00.000Z'),
+      endAt: null,
+      target: 1,
+      conditionType: 'DAILY_LOGIN',
+      resetPolicy: 'DAILY',
+    });
+
+    await insertSession(pool, userId, new Date('2026-03-15T12:00:00.000Z'));
+
+    const batch = await processDailyLoginMissionContributionsBatch(pool, { limit: 10 });
+    expect(batch.contributed).toBeGreaterThanOrEqual(1);
+
+    const onV1 = await pool.query<{ c: number }>(
+      `SELECT count(*)::int AS c FROM mission_progress
+       WHERE mission_version_id = $1::uuid AND user_id = $2::uuid`,
+      [v1, userId],
+    );
+    expect(onV1.rows[0]?.c).toBe(1);
+  });
 });

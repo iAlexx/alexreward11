@@ -81,7 +81,7 @@ describe('LOOTRA Step 5 Tasks authority', () => {
     expect(screen).toMatch(/item\.target/);
     expect(screen).toMatch(/item\.state/);
     expect(screen).toMatch(/item\.claimable/);
-    expect(screen).toMatch(/item\.rewardAtomic/);
+    expect(screen).toMatch(/item\.reward/);
     expect(screen).not.toMatch(/rewardAmount|taskUrl|expiresAt/);
   });
 
@@ -95,7 +95,7 @@ describe('LOOTRA Step 5 Tasks authority', () => {
   it('G — no task reward amount is fabricated', async () => {
     const screen = await readSrc('components/TasksScreen.tsx');
     expect(screen).toMatch(/rewardServerNote/);
-    expect(screen).toMatch(/item\.rewardAtomic/);
+    expect(screen).toMatch(/item\.reward/);
     expect(screen).not.toMatch(/\+0\.02|\+500/);
   });
 
@@ -114,6 +114,7 @@ describe('LOOTRA Step 5 Tasks authority', () => {
       claimStatus: null,
       claimable: false,
       rewardAtomic: null,
+      reward: null,
       endsAt: null,
     };
     const p = safeTaskProgress(item.progressCount, item.target);

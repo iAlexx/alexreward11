@@ -8,6 +8,13 @@ import { parseMissionEligibilityPolicy } from './eligibility-policy.js';
 import { resolveMissionPeriod } from './period.js';
 import { mapMissionVersionRow, type MissionResetPolicy } from './mission-version.js';
 
+export interface UserMissionRewardDisplay {
+  readonly amountAtomic: string;
+  readonly assetCode: string;
+  readonly assetDecimals: number;
+  readonly pendingHoldSeconds: number;
+}
+
 export interface UserMissionListItem {
   readonly taskCode: string;
   readonly missionVersionId: string;
@@ -22,6 +29,7 @@ export interface UserMissionListItem {
   readonly claimStatus: 'PENDING' | 'GRANTED' | 'REJECTED' | null;
   readonly claimable: boolean;
   readonly rewardAtomic: string | null;
+  readonly reward: UserMissionRewardDisplay | null;
   readonly endsAt: string | null;
 }
 
@@ -55,6 +63,9 @@ export async function listUserMissions(
     created_at: Date;
     code: string;
     fixed_reward_atomic: string | null;
+    asset_symbol: string | null;
+    asset_decimals: number | null;
+    pending_hold_seconds: number | null;
   }>(
     `SELECT mv.id, mv.mission_definition_id, mv.mission_version,
             mv.name_key, mv.description_key, mv.condition_type::text AS condition_type,
@@ -62,12 +73,18 @@ export async function listUserMissions(
             mv.required_membership_plan_id, mv.reward_source_type::text AS reward_source_type,
             mv.reward_rule_id, mv.status::text AS status, mv.start_at, mv.end_at, mv.created_at,
             md.code,
-            rr.fixed_reward_atomic::text AS fixed_reward_atomic
+            rr.fixed_reward_atomic::text AS fixed_reward_atomic,
+            a.symbol AS asset_symbol,
+            a.decimals AS asset_decimals,
+            rr.pending_hold_seconds
      FROM mission_versions mv
      INNER JOIN mission_definitions md ON md.id = mv.mission_definition_id
      LEFT JOIN reward_rules rr
        ON rr.id = mv.reward_rule_id
       AND rr.source_type = 'MISSION'
+      AND rr.fixed_reward_atomic IS NOT NULL
+      AND rr.fixed_reward_atomic > 0
+     LEFT JOIN assets a ON a.id = rr.asset_id
      WHERE md.status = 'ACTIVE'
        AND mv.status = 'ACTIVE'
        AND (mv.start_at IS NULL OR mv.start_at <= $1::timestamptz)
@@ -79,7 +96,6 @@ export async function listUserMissions(
   const items: UserMissionListItem[] = [];
   for (const row of versions.rows) {
     const version = mapMissionVersionRow(row);
-    // Fail closed on invalid typed eligibility — skip projection rather than invent.
     try {
       parseMissionEligibilityPolicy(version.eligibilityPolicy);
     } catch {
@@ -124,9 +140,19 @@ export async function listUserMissions(
       (claimStatus === null || claimStatus === 'PENDING') &&
       progressId !== null;
 
-    const rewardAtomic =
-      version.rewardRuleId !== null && row.fixed_reward_atomic !== null
-        ? row.fixed_reward_atomic
+    const reward =
+      version.rewardRuleId !== null &&
+      row.fixed_reward_atomic !== null &&
+      row.asset_symbol !== null &&
+      row.asset_decimals !== null &&
+      row.pending_hold_seconds !== null &&
+      BigInt(row.fixed_reward_atomic) > 0n
+        ? {
+            amountAtomic: row.fixed_reward_atomic,
+            assetCode: row.asset_symbol,
+            assetDecimals: row.asset_decimals,
+            pendingHoldSeconds: row.pending_hold_seconds,
+          }
         : null;
 
     items.push({
@@ -142,7 +168,8 @@ export async function listUserMissions(
       periodKey: period.periodKey,
       claimStatus,
       claimable,
-      rewardAtomic,
+      rewardAtomic: reward?.amountAtomic ?? null,
+      reward,
       endsAt: version.endAt?.toISOString() ?? null,
     });
   }

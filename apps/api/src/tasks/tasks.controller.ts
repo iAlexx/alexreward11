@@ -64,6 +64,7 @@ export class TasksController {
         claimStatus: item.claimStatus,
         claimable: item.claimable,
         rewardAtomic: item.rewardAtomic,
+        reward: item.reward,
         endsAt: item.endsAt,
       })),
     };

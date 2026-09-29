@@ -55,6 +55,8 @@ provider business behaviour is implemented here.
 | `0051_phase16_mission_integrity.sql`                 | Phase 16 Step 1: mission_* authority + semantic freeze, ACTIVE GiST exclusion, safe end_at, progress/claims integrity + append-only events; task_reward_events append-only (no seeds / no money)                                                          |
 | `0052_phase16_mission_lifecycle_hardening.sql`       | Phase 16 Step 1.1: started_at one-shot; progress-event FOR SHARE + `[start_at,end_at)` window; safe end_at includes contribution occurred_at; claim-event actor provenance (no seeds / no money)                                                           |
 | `0053_phase16_mission_reward_issuance.sql`           | Phase 16 Step 5: `mission_reward_decisions` + mission budget/exposure reservations (no production budget seed / no money)                                                                                                                                   |
+| `0054_phase16_mission_runtime_financial_hardening.sql` | Phase 16 remediation: multi-exposure reservations + decision provenance; streak producer checkpoints (no production seeds / no money)                                                                                                                    |
+| `0054_phase16_mission_runtime_financial_hardening.sql` | Phase 16 MEGA remediation: multi-exposure reservations per claim, decision↔exposure provenance, streak producer fairness checkpoints (no seeds / no money)                                                                                                  |
 
 Migrations `0001`–`0026` remain immutable. Signer login isolation is added only by
 forward migration `0027` (local provision script sets password; ops credential rotation

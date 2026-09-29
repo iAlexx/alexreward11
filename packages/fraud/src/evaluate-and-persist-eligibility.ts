@@ -362,7 +362,7 @@ async function collectMembershipGate(
        AND mbr.effective_from <= $3::timestamptz
        AND (mbr.effective_to IS NULL OR mbr.effective_to > $3::timestamptz)
        AND mbr.value_boolean IS TRUE
-     FOR SHARE OF um, mpe, mbr`,
+     FOR SHARE OF um, mp, mpe, mbr`,
     [
       input.userId,
       mission.requiredMembershipPlanId,

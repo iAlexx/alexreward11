@@ -1,18 +1,13 @@
 import type { Pool } from 'pg';
 
 import { contributeMissionProgress } from './contribute.js';
-import { formatUtcDayKey } from './period.js';
 import {
   emptyProducerBatchResult,
+  selectDailyLoginContributionCandidates,
   tallyContributeOutcome,
   withMissionProducerTx,
   type MissionProducerBatchResult,
 } from './producer-shared.js';
-
-interface LoginDayEvidence {
-  readonly user_id: string;
-  readonly occurred_at: Date;
-}
 
 /**
  * Bounded redrive: authenticated login-day evidence → DAILY_LOGIN missions.
@@ -23,57 +18,32 @@ export async function processDailyLoginMissionContributionsBatch(
   options: { readonly limit: number },
 ): Promise<MissionProducerBatchResult> {
   const limit = Math.max(1, Math.min(options.limit, 500));
-  const result = emptyProducerBatchResult();
-  const mutable = { ...result };
+  const result = { ...emptyProducerBatchResult() };
 
-  const versions = await withMissionProducerTx(pool, async (client) => {
-    return (
-      await client.query<{ id: string }>(
-        `SELECT mv.id
-         FROM mission_versions mv
-         INNER JOIN mission_definitions md ON md.id = mv.mission_definition_id
-         WHERE md.status = 'ACTIVE'
-           AND mv.condition_type = 'DAILY_LOGIN'
-           AND mv.status = 'ACTIVE'`,
-      )
-    ).rows;
-  });
-  if (versions.length === 0) {
-    return mutable;
+  const candidates = await withMissionProducerTx(pool, async (client) =>
+    selectDailyLoginContributionCandidates(client, limit),
+  );
+  if (candidates.length === 0) {
+    return result;
   }
 
-  const evidence = await withMissionProducerTx(pool, async (client) => {
-    return (
-      await client.query<LoginDayEvidence>(
-        `SELECT s.user_id, MIN(s.created_at) AS occurred_at
-         FROM user_sessions s
-         GROUP BY s.user_id, ((s.created_at AT TIME ZONE 'UTC')::date)
-         ORDER BY MIN(s.created_at) ASC
-         LIMIT $1`,
-        [limit],
-      )
-    ).rows;
-  });
-
-  for (const day of evidence) {
-    for (const version of versions) {
-      try {
-        await withMissionProducerTx(pool, async (client) => {
-          const outcome = await contributeMissionProgress(client, {
-            missionVersionId: version.id,
-            userId: day.user_id,
-            sourceKind: 'AUTHENTICATED_LOGIN_DAY',
-            sourceKey: formatUtcDayKey(day.occurred_at),
-            occurredAt: day.occurred_at,
-          });
-          tallyContributeOutcome(mutable, outcome.outcome);
+  for (const candidate of candidates) {
+    try {
+      await withMissionProducerTx(pool, async (client) => {
+        const outcome = await contributeMissionProgress(client, {
+          missionVersionId: candidate.mission_version_id,
+          userId: candidate.user_id,
+          sourceKind: 'AUTHENTICATED_LOGIN_DAY',
+          sourceKey: candidate.day_key,
+          occurredAt: candidate.occurred_at,
         });
-      } catch {
-        mutable.examined += 1;
-        mutable.errors += 1;
-      }
+        tallyContributeOutcome(result, outcome.outcome);
+      });
+    } catch {
+      result.examined += 1;
+      result.errors += 1;
     }
   }
 
-  return mutable;
+  return result;
 }

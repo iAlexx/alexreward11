@@ -65,7 +65,13 @@ export async function processPendingMissionRewardClaimsBatch(
      INNER JOIN mission_versions mv ON mv.id = mc.mission_version_id
      WHERE mc.status = 'PENDING'::mission_claim_status
        AND mv.reward_rule_id IS NOT NULL
-     ORDER BY mc.claimed_at ASC, mc.id ASC
+     ORDER BY COALESCE(
+       (SELECT MAX(mrd.decided_at)
+        FROM mission_reward_decisions mrd
+        WHERE mrd.mission_claim_id = mc.id),
+       mc.claimed_at
+     ) ASC,
+     mc.id ASC
      LIMIT $1`,
     [limit],
   );

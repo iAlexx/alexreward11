@@ -21,6 +21,17 @@ describe('Phase 16 integration gate invariants', () => {
     }
   });
 
+  it('producers select uncontributed candidates (starvation-free redrive)', () => {
+    const text = readFileSync(
+      join(repoRoot, 'packages/tasks/src/producer-shared.ts'),
+      'utf8',
+    );
+    expect(text).toMatch(/selectDailyLoginContributionCandidates/);
+    expect(text).toMatch(/selectValidAdContributionCandidates/);
+    expect(text).toMatch(/mission_streak_producer_checkpoints/);
+    expect(text).toMatch(/NOT EXISTS/);
+  });
+
   it('worker mission maintenance sequences progress before money', () => {
     const text = readFileSync(
       join(repoRoot, 'apps/worker/src/mission-maintenance.ts'),
@@ -47,6 +58,7 @@ describe('Phase 16 integration gate invariants', () => {
       '0051_phase16_mission_integrity.sql',
       '0052_phase16_mission_lifecycle_hardening.sql',
       '0053_phase16_mission_reward_issuance.sql',
+      '0054_phase16_mission_runtime_financial_hardening.sql',
     ]) {
       const sql = readFileSync(join(repoRoot, 'migrations', name), 'utf8').toLowerCase();
       expect(sql).not.toMatch(/insert into mission_definitions\b/);
@@ -57,6 +69,27 @@ describe('Phase 16 integration gate invariants', () => {
       expect(sql).not.toMatch(/insert into country/);
       expect(sql).not.toMatch(/insert into.*grace/);
     }
+  });
+
+  it('issue-mission uses AD evidence FOR SHARE and multi-exposure helpers', () => {
+    const text = readFileSync(
+      join(repoRoot, 'packages/rewards/src/issue-mission.ts'),
+      'utf8',
+    );
+    expect(text).toMatch(/assertValidAdEvidenceLocked/);
+    expect(text).toMatch(/FOR SHARE OF re/);
+    expect(text).toMatch(/resolveMissionBonusDailyLimits/);
+    expect(text).toMatch(/mission_reward_decision_exposure_periods/);
+    expect(text).toMatch(/validatePinnedRewardRuleLifecycle/);
+  });
+
+  it('pending claim batch orders by last decision time (fair redrive)', () => {
+    const text = readFileSync(
+      join(repoRoot, 'packages/rewards/src/mission-maintenance.ts'),
+      'utf8',
+    );
+    expect(text).toMatch(/mission_reward_decisions mrd/);
+    expect(text).toMatch(/decided_at/);
   });
 
   it('post-grant AD reversal cascade remains OWNER_POLICY_REQUIRED', () => {

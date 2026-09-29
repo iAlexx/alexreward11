@@ -225,6 +225,14 @@ export async function contributeMissionProgress(
     input.missionVersionId,
   );
 
+  if (version.status === 'DRAFT' || version.status === 'REVOKED') {
+    throw new MissionDomainError(
+      'MISSION_NOT_ACTIVE',
+      `mission version status is ${version.status}; contributions require ACTIVE or SUPERSEDED redrive`,
+      { missionVersionId: version.id, status: version.status },
+    );
+  }
+
   validateMissionVersionStructure(version);
   assertContributionWindow(version, input.occurredAt);
   assertSourceMatchesCondition(version, input.sourceKind);

@@ -47,6 +47,29 @@ export function formatAtomicAmountGrouped(amountAtomic: string): string {
   return negative ? `-${grouped}` : grouped;
 }
 
+/** Presentation-only: shift atomic digits by server-provided asset decimals (no float math). */
+export function formatAtomicAmountWithAssetDecimals(
+  amountAtomic: string,
+  assetDecimals: number,
+): string {
+  if (!Number.isInteger(assetDecimals) || assetDecimals < 0) {
+    throw new InvalidAtomicAmountError('assetDecimals must be a non-negative integer');
+  }
+  const value = parseAtomicAmount(amountAtomic);
+  if (assetDecimals === 0) {
+    return formatAtomicAmountGrouped(amountAtomic);
+  }
+  const negative = value < 0n;
+  const abs = negative ? -value : value;
+  const divisor = 10n ** BigInt(assetDecimals);
+  const whole = abs / divisor;
+  const frac = abs % divisor;
+  const fracStr = frac.toString().padStart(assetDecimals, '0').replace(/0+$/, '');
+  const wholeGrouped = formatAtomicAmountGrouped(whole.toString());
+  const combined = fracStr.length > 0 ? `${wholeGrouped}.${fracStr}` : wholeGrouped;
+  return negative ? `-${combined}` : combined;
+}
+
 /** True when the string is a safe atomic amount the UI may render. */
 export function isAtomicAmountString(value: unknown): value is string {
   return typeof value === 'string' && ATOMIC_PATTERN.test(value.trim());

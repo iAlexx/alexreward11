@@ -39,6 +39,68 @@ const ALLOWED_ADMIN_CONDITIONS = new Set([
   'STREAK_MILESTONE',
 ]);
 
+function parseRequiredIsoTimestamp(value: unknown, field: string): Date {
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw Object.assign(new Error(`${field} is required`), { code: 'VALIDATION' });
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    throw Object.assign(new Error(`${field} must be a finite ISO timestamp`), {
+      code: 'VALIDATION',
+    });
+  }
+  return parsed;
+}
+
+async function assertMissionRewardRuleActivatable(
+  pool: Pool,
+  rewardRuleId: string,
+  versionStartAt: Date,
+): Promise<void> {
+  const rule = await pool.query<{
+    source_type: string;
+    fixed_reward_atomic: string | null;
+    status: string;
+    valid_from: Date;
+    valid_to: Date | null;
+  }>(
+    `SELECT source_type::text AS source_type,
+            fixed_reward_atomic::text AS fixed_reward_atomic,
+            status::text AS status, valid_from, valid_to
+     FROM reward_rules
+     WHERE id = $1::uuid
+     FOR SHARE`,
+    [rewardRuleId],
+  );
+  const row = rule.rows[0];
+  if (row === undefined) {
+    throw Object.assign(new Error('reward rule not found'), { code: 'VALIDATION' });
+  }
+  if (row.source_type !== 'MISSION') {
+    throw Object.assign(new Error('reward source must be MISSION'), { code: 'VALIDATION' });
+  }
+  if (row.fixed_reward_atomic === null || BigInt(row.fixed_reward_atomic) <= 0n) {
+    throw Object.assign(new Error('mission reward rule fixed amount invalid'), {
+      code: 'VALIDATION',
+    });
+  }
+  if (row.status !== 'ACTIVE') {
+    throw Object.assign(new Error(`reward rule status ${row.status} blocks activation`), {
+      code: 'VALIDATION',
+    });
+  }
+  if (versionStartAt < row.valid_from) {
+    throw Object.assign(new Error('mission start_at before reward rule valid_from'), {
+      code: 'VALIDATION',
+    });
+  }
+  if (row.valid_to !== null && !(versionStartAt < row.valid_to)) {
+    throw Object.assign(new Error('mission start_at outside reward rule validity window'), {
+      code: 'VALIDATION',
+    });
+  }
+}
+
 /**
  * Mission administration (Phase 16).
  * Allowlisted conditions only. Activation uses Phase 13 high-impact confirmation.
@@ -120,30 +182,41 @@ export class MissionsAdminController {
         });
       }
 
-      const inserted = await this.pool.query<{ id: string }>(
-        `INSERT INTO mission_definitions (code, name_key, status)
-         VALUES ($1, $2, 'DRAFT'::content_status)
-         RETURNING id`,
-        [code, nameKey],
-      );
-      const id = inserted.rows[0]?.id;
-      if (id === undefined) throw new Error('definition insert failed');
+      const client = await this.pool.connect();
+      let id: string;
+      try {
+        await client.query('BEGIN');
+        const inserted = await client.query<{ id: string }>(
+          `INSERT INTO mission_definitions (code, name_key, status)
+           VALUES ($1, $2, 'DRAFT'::content_status)
+           RETURNING id`,
+          [code, nameKey],
+        );
+        id = inserted.rows[0]?.id ?? '';
+        if (id === '') throw new Error('definition insert failed');
 
-      await this.pool.query(
-        `INSERT INTO audit_logs (
-           admin_user_id, actor_type, action_type, resource_type, resource_id,
-           after_snapshot, reason, source
-         ) VALUES (
-           $1::uuid, 'ADMIN', 'missions.definition_create', 'mission_definition', $2,
-           $3::jsonb, $4, 'WEB'
-         )`,
-        [
-          session.adminUserId,
-          id,
-          JSON.stringify({ code, nameKey, status: 'DRAFT' }),
-          reason,
-        ],
-      );
+        await client.query(
+          `INSERT INTO audit_logs (
+             admin_user_id, actor_type, action_type, resource_type, resource_id,
+             after_snapshot, reason, source
+           ) VALUES (
+             $1::uuid, 'ADMIN', 'missions.definition_create', 'mission_definition', $2,
+             $3::jsonb, $4, 'WEB'
+           )`,
+          [
+            session.adminUserId,
+            id,
+            JSON.stringify({ code, nameKey, status: 'DRAFT' }),
+            reason,
+          ],
+        );
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
 
       return { contractVersion: '1' as const, id, status: 'DRAFT' as const };
     } catch (error) {
@@ -167,6 +240,7 @@ export class MissionsAdminController {
       readonly rewardRuleId?: unknown;
       readonly requiredMembershipPlanId?: unknown;
       readonly eligibilityPolicy?: unknown;
+      readonly startAt?: unknown;
       readonly reason?: unknown;
     },
   ) {
@@ -184,7 +258,8 @@ export class MissionsAdminController {
         });
       }
       const nameKey = requireNonEmptyString(body.nameKey, 'nameKey');
-      const resetPolicy = requireNonEmptyString(body.resetPolicy ?? 'NONE', 'resetPolicy');
+      const resetPolicy = requireNonEmptyString(body.resetPolicy, 'resetPolicy');
+      const startAt = parseRequiredIsoTimestamp(body.startAt, 'startAt');
       if (resetPolicy === 'WEEKLY') {
         throw Object.assign(new Error('WEEKLY reset is OWNER_POLICY_REQUIRED'), {
           code: 'OWNER_POLICY_REQUIRED',
@@ -215,13 +290,6 @@ export class MissionsAdminController {
         });
       }
 
-      const nextVersion = await this.pool.query<{ n: number }>(
-        `SELECT COALESCE(MAX(mission_version), 0) + 1 AS n
-         FROM mission_versions WHERE mission_definition_id = $1::uuid`,
-        [missionDefinitionId],
-      );
-      const missionVersion = nextVersion.rows[0]?.n ?? 1;
-
       const rewardRuleId =
         body.rewardRuleId === undefined || body.rewardRuleId === null || body.rewardRuleId === ''
           ? null
@@ -233,71 +301,95 @@ export class MissionsAdminController {
           ? null
           : requireNonEmptyString(body.requiredMembershipPlanId, 'requiredMembershipPlanId');
 
-      const inserted = await this.pool.query<{ id: string }>(
-        `INSERT INTO mission_versions (
-           mission_definition_id, mission_version, name_key, description_key,
-           condition_type, target, reset_policy, eligibility_policy,
-           required_membership_plan_id, reward_source_type, reward_rule_id,
-           status, created_by_admin_id
-         ) VALUES (
-           $1::uuid, $2, $3, $4,
-           $5::mission_condition_type, $6, $7::mission_reset_policy, $8::jsonb,
-           $9::uuid, 'MISSION'::reward_source_type, $10::uuid,
-           'DRAFT'::rule_version_status, $11::uuid
-         )
-         RETURNING id`,
-        [
-          missionDefinitionId,
-          missionVersion,
-          nameKey,
-          typeof body.descriptionKey === 'string' ? body.descriptionKey : null,
-          conditionType,
-          target,
-          resetPolicy,
-          JSON.stringify(eligibilityPolicy),
-          requiredMembershipPlanId,
-          rewardRuleId,
-          session.adminUserId,
-        ],
-      );
-      const id = inserted.rows[0]?.id;
-      if (id === undefined) throw new Error('version insert failed');
+      const client = await this.pool.connect();
+      let id: string;
+      let missionVersion: number;
+      try {
+        await client.query('BEGIN');
+        await client.query(
+          `SELECT id FROM mission_definitions WHERE id = $1::uuid FOR UPDATE`,
+          [missionDefinitionId],
+        );
+        const nextVersion = await client.query<{ n: number }>(
+          `SELECT COALESCE(MAX(mission_version), 0) + 1 AS n
+           FROM mission_versions WHERE mission_definition_id = $1::uuid`,
+          [missionDefinitionId],
+        );
+        missionVersion = nextVersion.rows[0]?.n ?? 1;
 
-      // Structural validation against loaded row semantics.
-      const loaded = await this.pool.query(
-        `SELECT id, mission_definition_id, mission_version, name_key, description_key,
-                condition_type::text AS condition_type, target, reset_policy::text AS reset_policy,
-                eligibility_policy, required_membership_plan_id,
-                reward_source_type::text AS reward_source_type, reward_rule_id,
-                status::text AS status, start_at, end_at, created_at
-         FROM mission_versions WHERE id = $1::uuid`,
-        [id],
-      );
-      const { mapMissionVersionRow } = await import('@alex-rewards/tasks');
-      validateMissionVersionStructure(mapMissionVersionRow(loaded.rows[0]!));
-
-      await this.pool.query(
-        `INSERT INTO audit_logs (
-           admin_user_id, actor_type, action_type, resource_type, resource_id,
-           after_snapshot, reason, source
-         ) VALUES (
-           $1::uuid, 'ADMIN', 'missions.version_create', 'mission_version', $2,
-           $3::jsonb, $4, 'WEB'
-         )`,
-        [
-          session.adminUserId,
-          id,
-          JSON.stringify({
+        const inserted = await client.query<{ id: string }>(
+          `INSERT INTO mission_versions (
+             mission_definition_id, mission_version, name_key, description_key,
+             condition_type, target, reset_policy, eligibility_policy,
+             required_membership_plan_id, reward_source_type, reward_rule_id,
+             status, start_at, created_by_admin_id
+           ) VALUES (
+             $1::uuid, $2, $3, $4,
+             $5::mission_condition_type, $6, $7::mission_reset_policy, $8::jsonb,
+             $9::uuid, 'MISSION'::reward_source_type, $10::uuid,
+             'DRAFT'::rule_version_status, $11::timestamptz, $12::uuid
+           )
+           RETURNING id`,
+          [
             missionDefinitionId,
             missionVersion,
+            nameKey,
+            typeof body.descriptionKey === 'string' ? body.descriptionKey : null,
             conditionType,
             target,
             resetPolicy,
+            JSON.stringify(eligibilityPolicy),
+            requiredMembershipPlanId,
             rewardRuleId,
-          }),
-          reason,
-        ],
-      );
+            startAt.toISOString(),
+            session.adminUserId,
+          ],
+        );
+        id = inserted.rows[0]?.id ?? '';
+        if (id === '') throw new Error('version insert failed');
+
+        const loaded = await client.query(
+          `SELECT id, mission_definition_id, mission_version, name_key, description_key,
+                  condition_type::text AS condition_type, target, reset_policy::text AS reset_policy,
+                  eligibility_policy, required_membership_plan_id,
+                  reward_source_type::text AS reward_source_type, reward_rule_id,
+                  status::text AS status, start_at, end_at, created_at
+           FROM mission_versions WHERE id = $1::uuid`,
+          [id],
+        );
+        const { mapMissionVersionRow } = await import('@alex-rewards/tasks');
+        validateMissionVersionStructure(mapMissionVersionRow(loaded.rows[0]!));
+
+        await client.query(
+          `INSERT INTO audit_logs (
+             admin_user_id, actor_type, action_type, resource_type, resource_id,
+             after_snapshot, reason, source
+           ) VALUES (
+             $1::uuid, 'ADMIN', 'missions.version_create', 'mission_version', $2,
+             $3::jsonb, $4, 'WEB'
+           )`,
+          [
+            session.adminUserId,
+            id,
+            JSON.stringify({
+              missionDefinitionId,
+              missionVersion,
+              conditionType,
+              target,
+              resetPolicy,
+              rewardRuleId,
+              startAt: startAt.toISOString(),
+            }),
+            reason,
+          ],
+        );
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
 
       return {
         contractVersion: '1' as const,
@@ -343,11 +435,12 @@ export class MissionsAdminController {
         reward_source_type: string;
         eligibility_policy: unknown;
         reset_policy: string;
+        start_at: Date | null;
       }>(
         `SELECT id, mission_definition_id, mission_version,
                 condition_type::text AS condition_type, status::text AS status,
                 reward_rule_id, reward_source_type::text AS reward_source_type,
-                eligibility_policy, reset_policy::text AS reset_policy
+                eligibility_policy, reset_policy::text AS reset_policy, start_at
          FROM mission_versions WHERE id = $1::uuid`,
         [versionId],
       );
@@ -393,6 +486,24 @@ export class MissionsAdminController {
       if (row.reward_rule_id !== null && row.reward_source_type !== 'MISSION') {
         throw Object.assign(new Error('reward source must be MISSION'), { code: 'VALIDATION' });
       }
+      if (row.status !== 'DRAFT') {
+        throw Object.assign(new Error('only DRAFT mission versions may be activated'), {
+          code: 'VALIDATION',
+        });
+      }
+      if (row.start_at === null) {
+        throw Object.assign(new Error('mission version start_at is not configured'), {
+          code: 'MISSION_START_AT_NOT_CONFIGURED',
+        });
+      }
+      const effectiveStartAt = row.start_at;
+      if (row.reward_rule_id !== null) {
+        await assertMissionRewardRuleActivatable(
+          this.pool,
+          row.reward_rule_id,
+          effectiveStartAt,
+        );
+      }
 
       await requireConsumedConfirmation(this.pool, session, body.confirmationId, {
         action: 'MISSION_VERSION_ACTIVATE',
@@ -402,25 +513,27 @@ export class MissionsAdminController {
         payload: {
           versionId,
           reason: gated.reason,
-          startAt: body.startAt ?? null,
+          startAt: effectiveStartAt.toISOString(),
         },
       });
-
-      const startAt =
-        typeof body.startAt === 'string' && body.startAt.trim() !== ''
-          ? new Date(body.startAt)
-          : new Date();
 
       const client = await this.pool.connect();
       try {
         await client.query('BEGIN');
+        await client.query(
+          `SELECT id FROM mission_definitions WHERE id = $1::uuid FOR UPDATE`,
+          [row.mission_definition_id],
+        );
+        await client.query(
+          `SELECT id FROM mission_versions WHERE id = $1::uuid FOR UPDATE`,
+          [versionId],
+        );
         await client.query(
           `UPDATE mission_definitions
            SET status = 'ACTIVE'::content_status, updated_at = now()
            WHERE id = $1::uuid`,
           [row.mission_definition_id],
         );
-        // Close prior ACTIVE version window safely if present.
         await client.query(
           `UPDATE mission_versions
            SET status = 'SUPERSEDED'::rule_version_status,
@@ -430,15 +543,15 @@ export class MissionsAdminController {
              AND status = 'ACTIVE'
              AND id <> $3::uuid
              AND end_at IS NULL`,
-          [row.mission_definition_id, startAt.toISOString(), versionId],
+          [row.mission_definition_id, effectiveStartAt.toISOString(), versionId],
         );
         await client.query(
           `UPDATE mission_versions
            SET status = 'ACTIVE'::rule_version_status,
-               start_at = COALESCE(start_at, $2::timestamptz),
                updated_at = now()
-           WHERE id = $1::uuid`,
-          [versionId, startAt.toISOString()],
+           WHERE id = $1::uuid
+             AND status = 'DRAFT'::rule_version_status`,
+          [versionId],
         );
         await client.query(
           `INSERT INTO audit_logs (
@@ -452,7 +565,7 @@ export class MissionsAdminController {
             session.adminUserId,
             versionId,
             JSON.stringify({ status: row.status }),
-            JSON.stringify({ status: 'ACTIVE', startAt: startAt.toISOString() }),
+            JSON.stringify({ status: 'ACTIVE', startAt: effectiveStartAt.toISOString() }),
             gated.reason,
           ],
         );

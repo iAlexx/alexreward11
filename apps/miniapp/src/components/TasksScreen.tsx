@@ -5,6 +5,7 @@ import { useTranslations } from 'next-intl';
 
 import type { TaskListItemDto } from '@alex-rewards/contracts';
 
+import { formatAtomicAmountWithAssetDecimals } from '../lib/money/format';
 import { queryKeys } from '../lib/query/keys';
 import {
   isKnownTaskState,
@@ -77,9 +78,17 @@ function TaskRow({
           {t('progress')}: {progress}
         </p>
       )}
-      {item.rewardAtomic !== null ? (
+      {item.reward !== null ? (
         <p className="alex-meta">
-          {t('rewardServerNote')}: {item.rewardAtomic}
+          {t('rewardServerNote')}:{' '}
+          {formatAtomicAmountWithAssetDecimals(
+            item.reward.amountAtomic,
+            item.reward.assetDecimals,
+          )}{' '}
+          {item.reward.assetCode}
+          {item.reward.pendingHoldSeconds > 0
+            ? ` · ${t('rewardPendingHold', { seconds: item.reward.pendingHoldSeconds })}`
+            : ''}
         </p>
       ) : (
         <p className="alex-meta">{t('rewardServerNote')}</p>
