@@ -35,7 +35,7 @@ const financialShells = [
   // withdrawals is implemented in Phase 7 (Withdrawal Engine + fake chain).
   // control-center is implemented in Phase 8 (Telegram Owner Control Center).
   // referrals: Phase 15 rule authority + PENDING attribution (no money / activation).
-  'tasks',
+  // tasks: Phase 16 mission version authority (no monetary issuance).
 ];
 
 const failures = [];
@@ -283,6 +283,45 @@ for (const name of financialShells) {
     }
     if (/\beval\s*\(/.test(source) || /\bnew\s+Function\s*\(/.test(source)) {
       failures.push(`${path}: packages/referrals must not use eval/Function executable rules`);
+    }
+  }
+}
+
+// Phase 16: tasks/mission may resolve versions via pg only — never money/payout/chain/signing.
+{
+  const taskFiles = (await walk('packages/tasks/')).filter((path) => {
+    const normalized = path.replaceAll('\\', '/');
+    return (
+      /\.(?:ts|tsx|js|mjs)$/.test(normalized) &&
+      !normalized.includes('/dist/') &&
+      !normalized.includes('/node_modules/')
+    );
+  });
+  for (const path of taskFiles) {
+    const source = await readFile(new URL(path, root), 'utf8');
+    if (/from\s+['"]@alex-rewards\/ledger['"]/.test(source)) {
+      failures.push(`${path}: packages/tasks must not import @alex-rewards/ledger`);
+    }
+    if (/from\s+['"]@alex-rewards\/withdrawals['"]/.test(source)) {
+      failures.push(`${path}: packages/tasks must not import @alex-rewards/withdrawals`);
+    }
+    if (/from\s+['"]@alex-rewards\/signing['"]/.test(source)) {
+      failures.push(`${path}: packages/tasks must not import @alex-rewards/signing`);
+    }
+    if (/from\s+['"]@alex-rewards\/ton['"]/.test(source)) {
+      failures.push(`${path}: packages/tasks must not import @alex-rewards/ton`);
+    }
+    if (/from\s+['"]@alex-rewards\/control-center['"]/.test(source)) {
+      failures.push(`${path}: packages/tasks must not import @alex-rewards/control-center`);
+    }
+    if (/from\s+['"]@alex-rewards\/rewards['"]/.test(source)) {
+      failures.push(`${path}: packages/tasks must not import @alex-rewards/rewards`);
+    }
+    if (/from\s+['"]@alex-rewards\/worker['"]/.test(source) || /from\s+['"]@alex-rewards\/worker\//.test(source)) {
+      failures.push(`${path}: packages/tasks must not import @alex-rewards/worker`);
+    }
+    if (/\beval\s*\(/.test(source) || /\bnew\s+Function\s*\(/.test(source)) {
+      failures.push(`${path}: packages/tasks must not use eval/Function executable rules`);
     }
   }
 }

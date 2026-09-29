@@ -12,7 +12,15 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint src",
-    "test": "vitest run --passWithNoTests"
+    "lint": "eslint src test",
+    "test": "vitest run --fileParallelism=false",
+    "test:phase16": "cross-env PHASE16_MISSION_TESTS=1 vitest run --fileParallelism=false test/phase16-mission-version.unit.test.ts test/phase16-mission-integrity.db.test.ts"
+  },
+  "dependencies": {
+    "pg": "8.23.0"
+  },
+  "devDependencies": {
+    "@alex-rewards/db": "workspace:*",
+    "@types/pg": "8.23.1"
   }
 }
