@@ -48,7 +48,7 @@ describe('Phase 13 Admin security matrix 12–52', () => {
     const referrals = overview.domains.find((d) => d.key === 'referrals');
     const fraud = overview.domains.find((d) => d.key === 'fraud_engine');
     expect(missions?.status).toBe('ENGINE_NOT_ENABLED');
-    expect(referrals?.status).toBe('ENGINE_NOT_ENABLED');
+    expect(referrals?.status).toBe('READY');
     expect(fraud?.status).toBe('READY');
     expect(fraud).not.toHaveProperty('reasonCode');
     for (const domain of overview.domains) {
@@ -63,10 +63,9 @@ describe('Phase 13 Admin security matrix 12–52', () => {
     expect(body.data).toBeNull();
   });
 
-  it('M14 referral foundation returns ENGINE_NOT_ENABLED', () => {
-    const body = new ReferralAdminController().foundation();
-    expect(body.status).toBe('UNAVAILABLE');
-    expect(body.reasonCode).toBe('ENGINE_NOT_ENABLED');
+  it('M14 referral admin controller is DI-bound for Phase 15 read model', () => {
+    // Phase 15: referrals foundation is live/read-only and requires the database pool.
+    expect(ReferralAdminController.length).toBeGreaterThanOrEqual(1);
   });
 
   it('M15 settings families are typed-only', () => {

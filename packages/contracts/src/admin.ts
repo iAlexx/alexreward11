@@ -624,9 +624,20 @@ export interface AdminMissionsFoundationResponse {
 
 export interface AdminReferralFoundationResponse {
   readonly contractVersion: typeof ADMIN_API_CONTRACT_VERSION;
-  readonly status: 'UNAVAILABLE';
-  readonly reasonCode: 'ENGINE_NOT_ENABLED';
-  readonly data: null;
+  readonly status: 'READY' | 'EMPTY' | 'UNAVAILABLE';
+  readonly reasonCode?: 'ENGINE_NOT_ENABLED' | 'READ_FAILED';
+  readonly data: {
+    readonly edgeCounts: {
+      readonly pending: number;
+      readonly active: number;
+      readonly rejected: number;
+    };
+    readonly productionPolicySeeds: {
+      readonly referralRule: 'NOT_SEEDED' | 'SEEDED';
+      readonly codePolicy: 'NOT_SEEDED' | 'SEEDED';
+      readonly maxReferralBonusDaily: 'NOT_SEEDED' | 'SEEDED';
+    };
+  } | null;
 }
 
 /** Safe aggregate counts only — never linked user PII, IP, wallet, or initData. */

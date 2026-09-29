@@ -42,8 +42,7 @@ export class OverviewController {
         },
         {
           key: 'referrals',
-          status: 'ENGINE_NOT_ENABLED',
-          reasonCode: 'ENGINE_NOT_ENABLED',
+          status: 'READY',
         },
         {
           key: 'fraud_engine',

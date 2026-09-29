@@ -14,6 +14,9 @@ export default function Page() {
         { id: 'inviter', header: 'Inviter', field: 'inviterUserId' },
         { id: 'invitee', header: 'Invitee', field: 'inviteeUserId' },
         { id: 'status', header: 'Status', field: 'status' },
+        { id: 'activationRule', header: 'Rule', field: 'activationRuleVersion' },
+        { id: 'attributedAt', header: 'Attributed', field: 'attributedAt' },
+        { id: 'activatedAt', header: 'Activated', field: 'activatedAt' },
       ]}
     />
   );
