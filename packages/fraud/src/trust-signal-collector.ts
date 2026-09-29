@@ -22,7 +22,14 @@ export interface CollectConfiguredTrustSignalsResult {
 interface TrustSourceSnapshot {
   readonly userExists: boolean;
   readonly accountAgeDays: number | null;
+  /**
+   * Greatest verified-primary age in whole days across qualifying wallets.
+   * Null when no active verified primary wallet has BOTH verified_at and
+   * became_primary_at (age evidence unavailable / unsatisfied).
+   */
   readonly walletAgeDays: number | null;
+  /** True when at least one verified active primary wallet exists (age may still be unavailable). */
+  readonly hasVerifiedPrimary: boolean;
   readonly rewardedAdCount: number;
   readonly confirmedPayoutCount: number;
 }
@@ -34,7 +41,8 @@ interface TrustSourceSnapshot {
  * Sources (no Founder / membership / username / language):
  *   ACCOUNT_AGE — users.created_at age in whole days
  *   VERIFIED_PRIMARY_WALLET_AGE — verified active primary user_wallets;
- *     age from COALESCE(verified_at, created_at); max age across matching wallets
+ *     per-wallet age starts at GREATEST(verified_at, became_primary_at) only when
+ *     BOTH timestamps are non-null (no created_at fallback); MAX across wallets
  *   REWARDED_AD_HISTORY — reward_events source_type=AD state=AVAILABLE (all-time)
  *   CONFIRMED_PAYOUT_HISTORY — withdrawals.state=CONFIRMED (all-time)
  */
@@ -46,6 +54,7 @@ async function loadTrustSourceSnapshot(
     user_exists: boolean;
     account_age_days: number | null;
     wallet_age_days: number | null;
+    has_verified_primary: boolean;
     rewarded_ad_count: number;
     confirmed_payout_count: number;
   }>(
@@ -53,11 +62,19 @@ async function loadTrustSourceSnapshot(
        SELECT id, created_at FROM users WHERE id = $1::uuid
      ),
      wallet_age AS (
-       SELECT MAX(
-         FLOOR(
-           EXTRACT(EPOCH FROM (now() - COALESCE(verified_at, created_at))) / 86400
-         )
-       )::int AS wallet_age_days
+       SELECT
+         MAX(
+           CASE
+             WHEN verified_at IS NOT NULL AND became_primary_at IS NOT NULL THEN
+               FLOOR(
+                 EXTRACT(
+                   EPOCH FROM (now() - GREATEST(verified_at, became_primary_at))
+                 ) / 86400
+               )::int
+             ELSE NULL
+           END
+         ) AS wallet_age_days,
+         COALESCE(BOOL_OR(true), false) AS has_verified_primary
        FROM user_wallets
        WHERE user_id = $1::uuid
          AND verified = true
@@ -87,6 +104,7 @@ async function loadTrustSourceSnapshot(
          ELSE NULL
        END AS account_age_days,
        wallet_age.wallet_age_days,
+       wallet_age.has_verified_primary,
        ad_rewards.rewarded_ad_count,
        payouts.confirmed_payout_count
      FROM wallet_age
@@ -104,6 +122,7 @@ async function loadTrustSourceSnapshot(
     userExists: row.user_exists,
     accountAgeDays: row.account_age_days,
     walletAgeDays: row.wallet_age_days,
+    hasVerifiedPrimary: row.has_verified_primary,
     rewardedAdCount: row.rewarded_ad_count,
     confirmedPayoutCount: row.confirmed_payout_count,
   };
@@ -180,12 +199,14 @@ export async function collectConfiguredTrustSignals(
       case 'VERIFIED_PRIMARY_WALLET_AGE': {
         const cfg = policy.signals.VERIFIED_PRIMARY_WALLET_AGE!;
         const ageDays = snapshot.walletAgeDays;
-        const satisfied = ageDays !== null && ageDays >= cfg.minDays;
+        const ageEstablished = ageDays !== null;
+        const satisfied = ageEstablished && ageDays >= cfg.minDays;
         facts.push(
           buildFact(code, satisfied, {
-            ageDays: ageDays === null ? 0 : ageDays,
+            ageDays: ageEstablished ? ageDays : 0,
             minDays: cfg.minDays,
-            hasVerifiedPrimary: ageDays !== null,
+            hasVerifiedPrimary: snapshot.hasVerifiedPrimary,
+            ageEstablished,
           }),
         );
         break;

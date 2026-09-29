@@ -48,21 +48,95 @@ async function setUserCreatedAt(pool: Pool, userId: string, createdAt: Date): Pr
   ]);
 }
 
+/**
+ * TEST ONLY — independently set verifiedAt vs becamePrimaryAt so Trust age
+ * semantics can be asserted.
+ *
+ * Absolute Date fields are written as-is (existing tests use sufficiently old dates).
+ * Prefer verifiedDaysAgo / becamePrimaryDaysAgo when asserting exact ageDays against
+ * PostgreSQL now() (vitest fake timers do not affect DB clock).
+ *
+ * becamePrimaryAt / becamePrimaryDaysAgo may be null to leave became_primary_at NULL.
+ */
 async function insertVerifiedPrimaryWallet(
   pool: Pool,
-  input: { userId: string; networkId: string; verifiedAt: Date; rawSuffix: string },
+  input: {
+    userId: string;
+    networkId: string;
+    verifiedAt?: Date;
+    becamePrimaryAt?: Date | null;
+    createdAt?: Date;
+    verifiedDaysAgo?: number;
+    becamePrimaryDaysAgo?: number | null;
+    createdDaysAgo?: number;
+    rawSuffix: string;
+  },
 ): Promise<string> {
   const raw = `0:trustwallet${input.rawSuffix}${'a'.repeat(40)}`.slice(0, 66);
+  const useRelative =
+    input.verifiedDaysAgo !== undefined || input.becamePrimaryDaysAgo !== undefined;
+
+  if (useRelative) {
+    if (input.verifiedDaysAgo === undefined) {
+      throw new Error('verifiedDaysAgo required when using relative wallet timestamps');
+    }
+    const becamePrimaryDaysAgo =
+      input.becamePrimaryDaysAgo === undefined
+        ? input.verifiedDaysAgo
+        : input.becamePrimaryDaysAgo;
+    const createdDaysAgo = input.createdDaysAgo ?? input.verifiedDaysAgo;
+    const result = await pool.query<{ id: string }>(
+      `INSERT INTO user_wallets (
+         user_id, network_id, chain, raw_address, friendly_address,
+         is_primary, verified, verification_method, verified_at, became_primary_at, created_at
+       ) VALUES (
+         $1::uuid, $2::uuid, 'TON', $3, $4,
+         true, true, 'TON_PROOF',
+         now() - ($5::int * interval '1 day'),
+         CASE WHEN $6::int IS NULL THEN NULL
+              ELSE now() - ($6::int * interval '1 day') END,
+         now() - ($7::int * interval '1 day')
+       )
+       RETURNING id`,
+      [
+        input.userId,
+        input.networkId,
+        raw,
+        `EQ_TRUST_${input.rawSuffix}`,
+        input.verifiedDaysAgo,
+        becamePrimaryDaysAgo,
+        createdDaysAgo,
+      ],
+    );
+    const id = result.rows[0]?.id;
+    if (id === undefined) throw new Error('wallet insert failed');
+    return id;
+  }
+
+  if (input.verifiedAt === undefined) {
+    throw new Error('verifiedAt or verifiedDaysAgo is required');
+  }
+  const becamePrimaryAt =
+    input.becamePrimaryAt === undefined ? input.verifiedAt : input.becamePrimaryAt;
+  const createdAt = input.createdAt ?? input.verifiedAt;
   const result = await pool.query<{ id: string }>(
     `INSERT INTO user_wallets (
        user_id, network_id, chain, raw_address, friendly_address,
        is_primary, verified, verification_method, verified_at, became_primary_at, created_at
      ) VALUES (
        $1::uuid, $2::uuid, 'TON', $3, $4,
-       true, true, 'TON_PROOF', $5::timestamptz, $5::timestamptz, $5::timestamptz
+       true, true, 'TON_PROOF', $5::timestamptz, $6::timestamptz, $7::timestamptz
      )
      RETURNING id`,
-    [input.userId, input.networkId, raw, `EQ_TRUST_${input.rawSuffix}`, input.verifiedAt.toISOString()],
+    [
+      input.userId,
+      input.networkId,
+      raw,
+      `EQ_TRUST_${input.rawSuffix}`,
+      input.verifiedAt.toISOString(),
+      becamePrimaryAt === null ? null : becamePrimaryAt.toISOString(),
+      createdAt.toISOString(),
+    ],
   );
   const id = result.rows[0]?.id;
   if (id === undefined) throw new Error('wallet insert failed');
@@ -398,6 +472,89 @@ describe.skipIf(phase14DatabaseUrl === '')('Phase 14 evaluateAndPersistTrust DB'
       result.signalFacts.find((f) => f.code === 'VERIFIED_PRIMARY_WALLET_AGE')?.satisfied,
     ).toBe(true);
     expect(result.evaluation.score).toBe(25);
+  });
+
+  it('VERIFIED_PRIMARY_WALLET_AGE: old verified + recent primary is unsatisfied (minDays=3)', async () => {
+    // TEST policy minDays=3. Ages measured against PostgreSQL now().
+    await insertVerifiedPrimaryWallet(pool, {
+      userId,
+      networkId,
+      verifiedDaysAgo: 30,
+      becamePrimaryDaysAgo: 1,
+      rawSuffix: 'oldvnewp',
+    });
+    const result = await withTx((client) => evaluateAndPersistTrust(client, { userId }));
+    const fact = result.signalFacts.find((f) => f.code === 'VERIFIED_PRIMARY_WALLET_AGE');
+    expect(fact).toBeDefined();
+    expect(fact!.satisfied).toBe(false);
+    expect(fact!.safeDetails).toMatchObject({
+      ageDays: 1,
+      ageEstablished: true,
+      hasVerifiedPrimary: true,
+    });
+    expect(
+      result.evaluation.contributions.find((c) => c.code === 'VERIFIED_PRIMARY_WALLET_AGE'),
+    ).toMatchObject({ contribution: 0, satisfied: false });
+    expect(result.evaluation.score).toBe(0);
+  });
+
+  it('VERIFIED_PRIMARY_WALLET_AGE: age uses later of verified_at and became_primary_at (~10d not 30d)', async () => {
+    await insertVerifiedPrimaryWallet(pool, {
+      userId,
+      networkId,
+      verifiedDaysAgo: 30,
+      becamePrimaryDaysAgo: 10,
+      rawSuffix: 'bothold',
+    });
+    const result = await withTx((client) => evaluateAndPersistTrust(client, { userId }));
+    const fact = result.signalFacts.find((f) => f.code === 'VERIFIED_PRIMARY_WALLET_AGE');
+    expect(fact).toBeDefined();
+    expect(fact!.satisfied).toBe(true);
+    expect(fact!.safeDetails).toMatchObject({
+      ageDays: 10,
+      ageEstablished: true,
+    });
+    expect(result.evaluation.score).toBe(25);
+  });
+
+  it('VERIFIED_PRIMARY_WALLET_AGE: verification later than primary uses verified_at age (~2d)', async () => {
+    await insertVerifiedPrimaryWallet(pool, {
+      userId,
+      networkId,
+      verifiedDaysAgo: 2,
+      becamePrimaryDaysAgo: 20,
+      rawSuffix: 'newvoldp',
+    });
+    const result = await withTx((client) => evaluateAndPersistTrust(client, { userId }));
+    const fact = result.signalFacts.find((f) => f.code === 'VERIFIED_PRIMARY_WALLET_AGE');
+    expect(fact).toBeDefined();
+    expect(fact!.satisfied).toBe(false);
+    expect(fact!.safeDetails).toMatchObject({
+      ageDays: 2,
+      ageEstablished: true,
+    });
+    expect(result.evaluation.score).toBe(0);
+  });
+
+  it('VERIFIED_PRIMARY_WALLET_AGE: NULL became_primary_at is unsatisfied (no created_at/verified_at fallback)', async () => {
+    await insertVerifiedPrimaryWallet(pool, {
+      userId,
+      networkId,
+      verifiedDaysAgo: 30,
+      becamePrimaryDaysAgo: null,
+      createdDaysAgo: 400,
+      rawSuffix: 'nullprim',
+    });
+    const result = await withTx((client) => evaluateAndPersistTrust(client, { userId }));
+    const fact = result.signalFacts.find((f) => f.code === 'VERIFIED_PRIMARY_WALLET_AGE');
+    expect(fact).toBeDefined();
+    expect(fact!.satisfied).toBe(false);
+    expect(fact!.safeDetails).toMatchObject({
+      ageDays: 0,
+      ageEstablished: false,
+      hasVerifiedPrimary: true,
+    });
+    expect(result.evaluation.score).toBe(0);
   });
 
   it('REWARDED_AD_HISTORY counts AVAILABLE AD reward_events', async () => {
