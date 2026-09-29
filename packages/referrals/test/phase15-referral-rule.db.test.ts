@@ -773,9 +773,9 @@ describe.skipIf(phase15DatabaseUrl === '')('Phase 15 referral edges / codes / ev
       pool.query(
         `INSERT INTO referral_reward_events (
            referral_edge_id, referrer_user_id, source_reward_event_id,
-           rate_bps, rule_version, amount_atomic
+           rate_bps, rule_version, amount_atomic, rate_source
          ) VALUES (
-           $1::uuid, $2::uuid, $3::uuid, 123, 99999, 10
+           $1::uuid, $2::uuid, $3::uuid, 123, 99999, 10, 'BASE_RULE'::referral_rate_source
          )`,
         [edgeId, referrerId, rewardEvent.rows[0]!.id],
       ),
@@ -784,9 +784,9 @@ describe.skipIf(phase15DatabaseUrl === '')('Phase 15 referral edges / codes / ev
     const inserted = await pool.query<{ id: string }>(
       `INSERT INTO referral_reward_events (
          referral_edge_id, referrer_user_id, source_reward_event_id,
-         rate_bps, rule_version, amount_atomic
+         rate_bps, rule_version, amount_atomic, rate_source
        ) VALUES (
-         $1::uuid, $2::uuid, $3::uuid, 123, 1, 10
+         $1::uuid, $2::uuid, $3::uuid, 123, 1, 10, 'BASE_RULE'::referral_rate_source
        )
        RETURNING id`,
       [edgeId, referrerId, rewardEvent.rows[0]!.id],

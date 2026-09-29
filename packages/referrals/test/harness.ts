@@ -125,21 +125,76 @@ export async function insertFraudFlag(
 export async function grantFounderMembership(
   pool: Pool,
   userId: string,
-): Promise<void> {
+): Promise<string> {
   const plan = await pool.query<{ id: string }>(
     `SELECT id FROM membership_plans WHERE code = 'FOUNDER_LIFETIME'`,
   );
   const planId = plan.rows[0]?.id;
   if (planId === undefined) throw new Error('FOUNDER_LIFETIME plan missing');
-  await pool.query(
+  const result = await pool.query<{ id: string }>(
     `INSERT INTO user_memberships (
        user_id, membership_plan_id, status, source, claimed_at, founder_number
      ) VALUES (
        $1::uuid, $2::uuid, 'ACTIVE'::membership_status, 'OWNER_GRANT', now(),
        nextval('founder_number_seq')
-     )`,
+     )
+     RETURNING id`,
     [userId, planId],
   );
+  const id = result.rows[0]?.id;
+  if (id === undefined) throw new Error('founder membership insert failed');
+  return id;
+}
+
+/** TEST-ONLY: bind a synthetic ACTIVE REFERRAL_RATE_BOOST FINANCIAL BPS rule. */
+export async function seedReferralRateBoost(
+  pool: Pool,
+  input: {
+    readonly valueBps: number;
+    readonly assetId?: string | null;
+    readonly ruleVersion?: number;
+    readonly planCode?: string;
+  },
+): Promise<{ ruleVersionId: string; planId: string; entitlementId: string }> {
+  const plan = await pool.query<{ id: string }>(
+    `SELECT id FROM membership_plans WHERE code = $1`,
+    [input.planCode ?? 'FOUNDER_LIFETIME'],
+  );
+  const planId = plan.rows[0]?.id;
+  if (planId === undefined) throw new Error('membership plan missing');
+  const ent = await pool.query<{ id: string }>(
+    `SELECT id FROM entitlements WHERE code = 'REFERRAL_RATE_BOOST'`,
+  );
+  const entitlementId = ent.rows[0]?.id;
+  if (entitlementId === undefined) throw new Error('REFERRAL_RATE_BOOST entitlement missing');
+
+  const version = await pool.query<{ id: string }>(
+    `INSERT INTO membership_benefit_rule_versions (
+       entitlement_id, membership_plan_id, rule_version, value_bps, asset_id,
+       status, effective_from, reason
+     ) VALUES (
+       $1::uuid, $2::uuid, $3, $4, $5::uuid,
+       'ACTIVE', now(), 'PHASE15 TEST synthetic referral rate profile'
+     )
+     RETURNING id`,
+    [
+      entitlementId,
+      planId,
+      input.ruleVersion ?? 1,
+      input.valueBps,
+      input.assetId ?? null,
+    ],
+  );
+  const ruleVersionId = version.rows[0]?.id;
+  if (ruleVersionId === undefined) throw new Error('benefit rule insert failed');
+
+  await pool.query(
+    `INSERT INTO membership_plan_entitlements (
+       membership_plan_id, entitlement_id, rule_version_id, valid_from, status
+     ) VALUES ($1::uuid, $2::uuid, $3::uuid, now(), 'ACTIVE')`,
+    [planId, entitlementId, ruleVersionId],
+  );
+  return { ruleVersionId, planId, entitlementId };
 }
 
 /** Explicit TEST-ONLY referral rule row — not a production seed. */

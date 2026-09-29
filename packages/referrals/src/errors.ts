@@ -5,6 +5,7 @@ export type ReferralErrorCode =
   | 'REFERRAL_RULE_INVALID'
   | 'REFERRAL_RULE_AMBIGUOUS'
   | 'REFERRAL_RULE_INTEGRITY'
+  | 'REFERRAL_ENTITLEMENT_AMBIGUOUS'
   | 'INTERNAL';
 
 export class ReferralDomainError extends Error {

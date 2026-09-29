@@ -4,7 +4,8 @@
  * Step 1: versioned referral rule resolution.
  * Step 2: signed start_param parsing + one-time PENDING attribution.
  * Step 3: authoritative PENDING → ACTIVE/REJECTED activation.
- * Does not issue referral money, generate production codes, or resolve REFERRAL_RATE_BOOST.
+ * Step 4: membership REFERRAL_RATE_BOOST effective rate (replacement, not additive).
+ * Does not issue referral money or generate production codes.
  */
 
 export { ReferralDomainError, type ReferralErrorCode } from './errors.js';
@@ -31,3 +32,9 @@ export {
   evaluateReferralActivation,
   type ReferralActivationOutcome,
 } from './activation.js';
+export {
+  REFERRAL_RATE_BOOST_CODE,
+  resolveEffectiveReferralRate,
+  type EffectiveReferralRate,
+  type ReferralRateSource,
+} from './effective-rate.js';
