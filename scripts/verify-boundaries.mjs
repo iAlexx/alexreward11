@@ -245,7 +245,7 @@ for (const name of financialShells) {
   }
 }
 
-// Phase 15: referrals may resolve rules + PENDING attribution — never money, payout, or chain.
+// Phase 15: referrals may resolve rules, PENDING attribution, and activation — never money/payout/chain.
 {
   const referralFiles = (await walk('packages/referrals/')).filter((path) => {
     const normalized = path.replaceAll('\\', '/');

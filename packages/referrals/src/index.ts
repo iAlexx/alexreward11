@@ -3,8 +3,8 @@
  *
  * Step 1: versioned referral rule resolution.
  * Step 2: signed start_param parsing + one-time PENDING attribution.
- * Does not activate referrals, issue referral money, generate production codes,
- * resolve REFERRAL_RATE_BOOST, or talk to Telegram HMAC validation directly.
+ * Step 3: authoritative PENDING → ACTIVE/REJECTED activation.
+ * Does not issue referral money, generate production codes, or resolve REFERRAL_RATE_BOOST.
  */
 
 export { ReferralDomainError, type ReferralErrorCode } from './errors.js';
@@ -26,3 +26,8 @@ export {
   attributeReferralCode,
   type ReferralAttributionOutcome,
 } from './attribution.js';
+export {
+  CRITICAL_FRAUD_REJECTION_REASON,
+  evaluateReferralActivation,
+  type ReferralActivationOutcome,
+} from './activation.js';

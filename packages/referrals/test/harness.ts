@@ -36,16 +36,110 @@ export async function resetAndMigrate(url: string): Promise<void> {
   await migrateDatabase(url);
 }
 
-export async function createTestUser(pool: Pool, telegramUserId: string): Promise<string> {
+export async function createTestUser(
+  pool: Pool,
+  telegramUserId: string,
+  options: { readonly createdAt?: Date } = {},
+): Promise<string> {
   const result = await pool.query<{ id: string }>(
-    `INSERT INTO users (telegram_user_id, preferred_locale)
-     VALUES ($1::bigint, 'en')
-     RETURNING id`,
-    [telegramUserId],
+    options.createdAt === undefined
+      ? `INSERT INTO users (telegram_user_id, preferred_locale)
+         VALUES ($1::bigint, 'en')
+         RETURNING id`
+      : `INSERT INTO users (telegram_user_id, preferred_locale, created_at)
+         VALUES ($1::bigint, 'en', $2::timestamptz)
+         RETURNING id`,
+    options.createdAt === undefined
+      ? [telegramUserId]
+      : [telegramUserId, options.createdAt.toISOString()],
   );
   const id = result.rows[0]?.id;
   if (id === undefined) throw new Error('user insert failed');
   return id;
+}
+
+export async function getUsdtAssetId(pool: Pool): Promise<string> {
+  const asset = await pool.query<{ id: string }>(`SELECT id FROM assets WHERE symbol = 'USDT'`);
+  const id = asset.rows[0]?.id;
+  if (id === undefined) throw new Error('USDT asset missing');
+  return id;
+}
+
+export async function insertRewardEvent(
+  pool: Pool,
+  input: {
+    readonly userId: string;
+    readonly sourceId: string;
+    readonly assetId: string;
+    readonly sourceType?: 'AD' | 'TASK' | 'REFERRAL' | 'MEMBERSHIP_BONUS';
+    readonly state?: 'CREATED' | 'PENDING' | 'AVAILABLE' | 'REVERSED';
+    readonly amountAtomic?: number;
+  },
+): Promise<string> {
+  const result = await pool.query<{ id: string }>(
+    `INSERT INTO reward_events (
+       user_id, source_type, source_id, asset_id, amount_atomic, state
+     ) VALUES (
+       $1::uuid, $2::reward_source_type, $3::uuid, $4::uuid, $5, $6::reward_event_state
+     )
+     RETURNING id`,
+    [
+      input.userId,
+      input.sourceType ?? 'AD',
+      input.sourceId,
+      input.assetId,
+      input.amountAtomic ?? 100,
+      input.state ?? 'AVAILABLE',
+    ],
+  );
+  const id = result.rows[0]?.id;
+  if (id === undefined) throw new Error('reward_event insert failed');
+  return id;
+}
+
+export async function insertFraudFlag(
+  pool: Pool,
+  input: {
+    readonly userId: string;
+    readonly severity: 'INFO' | 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+    readonly status?: 'OPEN' | 'REVIEWED' | 'DISMISSED' | 'CONFIRMED';
+    readonly flagType?: string;
+  },
+): Promise<string> {
+  const status = input.status ?? 'OPEN';
+  const result = await pool.query<{ id: string }>(
+    `INSERT INTO fraud_flags (
+       user_id, flag_type, severity, status, reviewed_at
+     ) VALUES (
+       $1::uuid, $2, $3::severity_level, $4::fraud_flag_status,
+       CASE WHEN $4::fraud_flag_status = 'OPEN'::fraud_flag_status THEN NULL ELSE now() END
+     )
+     RETURNING id`,
+    [input.userId, input.flagType ?? 'phase15-test-flag', input.severity, status],
+  );
+  const id = result.rows[0]?.id;
+  if (id === undefined) throw new Error('fraud_flag insert failed');
+  return id;
+}
+
+export async function grantFounderMembership(
+  pool: Pool,
+  userId: string,
+): Promise<void> {
+  const plan = await pool.query<{ id: string }>(
+    `SELECT id FROM membership_plans WHERE code = 'FOUNDER_LIFETIME'`,
+  );
+  const planId = plan.rows[0]?.id;
+  if (planId === undefined) throw new Error('FOUNDER_LIFETIME plan missing');
+  await pool.query(
+    `INSERT INTO user_memberships (
+       user_id, membership_plan_id, status, source, claimed_at, founder_number
+     ) VALUES (
+       $1::uuid, $2::uuid, 'ACTIVE'::membership_status, 'OWNER_GRANT', now(),
+       nextval('founder_number_seq')
+     )`,
+    [userId, planId],
+  );
 }
 
 /** Explicit TEST-ONLY referral rule row — not a production seed. */
