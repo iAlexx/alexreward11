@@ -49,6 +49,11 @@ export interface ContributeMissionProgressInput {
   readonly sourceKind: MissionProgressSourceKind;
   readonly sourceKey: string;
   readonly occurredAt: Date;
+  /**
+   * Internal STREAK_MILESTONE producer only.
+   * Clients must never supply periodKey — public callers omit this.
+   */
+  readonly periodKeyOverride?: string;
 }
 
 interface ProgressRow {
@@ -224,11 +229,33 @@ export async function contributeMissionProgress(
   assertContributionWindow(version, input.occurredAt);
   assertSourceMatchesCondition(version, input.sourceKind);
 
-  const period = resolveMissionPeriod(version.resetPolicy, input.occurredAt);
+  let periodKey: string;
+  if (input.periodKeyOverride !== undefined) {
+    if (
+      version.conditionType !== 'STREAK_MILESTONE' ||
+      input.sourceKind !== 'STREAK_DAY'
+    ) {
+      throw new MissionDomainError(
+        'MISSION_INTEGRITY',
+        'periodKeyOverride is only allowed for STREAK_MILESTONE STREAK_DAY contributions',
+      );
+    }
+    if (!/^STREAK:\d{4}-\d{2}-\d{2}$/.test(input.periodKeyOverride)) {
+      throw new MissionDomainError(
+        'MISSION_INTEGRITY',
+        'streak periodKeyOverride must be STREAK:YYYY-MM-DD',
+        { periodKeyOverride: input.periodKeyOverride },
+      );
+    }
+    periodKey = input.periodKeyOverride;
+  } else {
+    periodKey = resolveMissionPeriod(version.resetPolicy, input.occurredAt).periodKey;
+  }
+
   const progress = await lockOrInsertProgress(client, {
     missionVersionId: version.id,
     userId: input.userId,
-    periodKey: period.periodKey,
+    periodKey,
     target: version.target,
   });
 
@@ -274,7 +301,7 @@ export async function contributeMissionProgress(
       progress.id,
       version.id,
       input.userId,
-      period.periodKey,
+      periodKey,
       input.sourceKind,
       input.sourceKey,
       input.occurredAt.toISOString(),
@@ -352,7 +379,7 @@ export async function contributeMissionProgress(
         progressId: progress.id,
         missionVersionId: version.id,
         userId: input.userId,
-        periodKey: period.periodKey,
+        periodKey: periodKey,
         completedAt: (completedAt ?? input.occurredAt).toISOString(),
       },
     });
@@ -364,7 +391,7 @@ export async function contributeMissionProgress(
     progressCount: newCount,
     target: progress.target,
     state: nextState,
-    periodKey: period.periodKey,
+    periodKey: periodKey,
     completed: nextState === 'COMPLETED',
   };
 }

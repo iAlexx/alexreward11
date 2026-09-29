@@ -1,7 +1,7 @@
 /**
  * Phase 16 mission package.
  *
- * Step 2: idempotent progress contribution engine (no monetary issuance).
+ * Step 3: V1 source producers (daily login / valid ads / streak) — no money.
  */
 
 export { MissionDomainError, type MissionErrorCode } from './errors.js';
@@ -47,3 +47,10 @@ export {
   type ContributeMissionProgressResult,
 } from './contribute.js';
 export { insertMissionOutboxEvent, type InsertMissionOutboxEventInput } from './outbox.js';
+export { processDailyLoginMissionContributionsBatch } from './producers-daily-login.js';
+export { processValidAdMissionContributionsBatch } from './producers-valid-ad.js';
+export {
+  processStreakMissionContributionsBatch,
+  streakGapAllowsContinuation,
+} from './producers-streak.js';
+export type { MissionProducerBatchResult } from './producer-shared.js';

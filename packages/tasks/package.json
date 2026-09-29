@@ -14,7 +14,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src test",
     "test": "vitest run --fileParallelism=false",
-    "test:phase16": "cross-env PHASE16_MISSION_TESTS=1 vitest run --fileParallelism=false test/phase16-mission-version.unit.test.ts test/phase16-mission-integrity.db.test.ts test/phase16-mission-progress.unit.test.ts test/phase16-mission-progress.db.test.ts"
+    "test:phase16": "cross-env PHASE16_MISSION_TESTS=1 vitest run --fileParallelism=false test/phase16-mission-version.unit.test.ts test/phase16-mission-integrity.db.test.ts test/phase16-mission-progress.unit.test.ts test/phase16-mission-progress.db.test.ts test/phase16-mission-producers.db.test.ts"
   },
   "dependencies": {
     "pg": "8.23.0"

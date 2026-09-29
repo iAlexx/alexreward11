@@ -103,17 +103,20 @@ export async function insertMissionVersion(
     readonly nameKey?: string;
     readonly rewardSourceType?: string;
     readonly rewardRuleId?: string | null;
+    readonly eligibilityPolicy?: unknown;
   },
 ): Promise<string> {
   const result = await pool.query<{ id: string }>(
     `INSERT INTO mission_versions (
        mission_definition_id, mission_version, name_key, condition_type, target,
-       reset_policy, status, start_at, end_at, reward_source_type, reward_rule_id
+       reset_policy, status, start_at, end_at, reward_source_type, reward_rule_id,
+       eligibility_policy
      ) VALUES (
        $1::uuid, $2, $3, $4::mission_condition_type, $5,
        $6::mission_reset_policy, $7::rule_version_status,
        $8::timestamptz, $9::timestamptz,
-       $10::reward_source_type, $11::uuid
+       $10::reward_source_type, $11::uuid,
+       $12::jsonb
      )
      RETURNING id`,
     [
@@ -128,6 +131,7 @@ export async function insertMissionVersion(
       input.endAt === undefined ? null : input.endAt === null ? null : input.endAt.toISOString(),
       input.rewardSourceType ?? 'MISSION',
       input.rewardRuleId ?? null,
+      JSON.stringify(input.eligibilityPolicy ?? {}),
     ],
   );
   const id = result.rows[0]?.id;
