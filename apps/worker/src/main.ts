@@ -22,10 +22,15 @@ import {
   mapDeploymentEnvToRewardEnvironment,
   startReferralMaintenanceLoop,
 } from './referral-maintenance.js';
+import {
+  createMissionMaintenanceCycle,
+  startMissionMaintenanceLoop,
+} from './mission-maintenance.js';
 import { withdrawalEngineConfigFromWorker } from './withdrawal-engine-config.js';
 
 const OUTBOX_POLL_INTERVAL_MS = 2_000;
 const REFERRAL_MAINTENANCE_INTERVAL_MS = 5_000;
+const MISSION_MAINTENANCE_INTERVAL_MS = 5_000;
 
 const config = loadWorkerConfig();
 const withdrawalConfig = withdrawalEngineConfigFromWorker(config);
@@ -65,6 +70,7 @@ let dbPool: Pool | undefined;
 let temporalClient: Client | undefined;
 let outboxPollTimer: ReturnType<typeof setInterval> | undefined;
 let referralMaintenanceTimer: ReturnType<typeof setInterval> | undefined;
+let missionMaintenanceTimer: ReturnType<typeof setInterval> | undefined;
 
 const health = (readyForTraffic: boolean): HealthResponse =>
   buildWorkerHealth({
@@ -169,6 +175,24 @@ try {
     });
   }
 
+  let missionMaintenanceEnabled = referralMaintenanceEnabled;
+  if (missionMaintenanceEnabled && dbPool !== undefined) {
+    const missionCycle = createMissionMaintenanceCycle({
+      pool: dbPool,
+      deploymentEnv: config.DEPLOYMENT_ENV,
+    });
+    missionMaintenanceTimer = startMissionMaintenanceLoop({
+      enabled: true,
+      intervalMs: MISSION_MAINTENANCE_INTERVAL_MS,
+      poll: async () => {
+        await missionCycle();
+      },
+      onError: (error) => {
+        observability.logger.warn({ err: error }, 'mission maintenance batch failed');
+      },
+    });
+  }
+
   observability.logger.info(
     {
       port: config.WORKER_PORT,
@@ -178,6 +202,7 @@ try {
       realChainEnabled: phase10Config.realChainEnabled,
       outboxRelayEnabled: config.WORKER_OUTBOX_RELAY_ENABLED,
       referralMaintenanceEnabled,
+      missionMaintenanceEnabled,
     },
     'worker listening',
   );
@@ -204,6 +229,12 @@ const shutdown = createShutdownCoordinator(observability.logger, 'worker', [
     if (referralMaintenanceTimer !== undefined) {
       clearInterval(referralMaintenanceTimer);
       referralMaintenanceTimer = undefined;
+    }
+  },
+  () => {
+    if (missionMaintenanceTimer !== undefined) {
+      clearInterval(missionMaintenanceTimer);
+      missionMaintenanceTimer = undefined;
     }
   },
   () => worker?.shutdown(),

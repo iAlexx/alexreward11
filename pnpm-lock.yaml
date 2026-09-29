@@ -406,6 +406,9 @@ importers:
       '@alex-rewards/signing':
         specifier: workspace:*
         version: link:../../packages/signing
+      '@alex-rewards/tasks':
+        specifier: workspace:*
+        version: link:../../packages/tasks
       '@alex-rewards/withdrawals':
         specifier: workspace:*
         version: link:../../packages/withdrawals
