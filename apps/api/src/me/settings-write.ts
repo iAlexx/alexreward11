@@ -11,7 +11,7 @@ import {
   type PublicPayoutIdentityMode,
   type UserSettingsResponse,
 } from '@alex-rewards/contracts';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 
 export class SettingsWriteError extends Error {
   readonly code: 'UNAUTHORIZED' | 'VALIDATION' | 'NOT_FOUND' | 'INTERNAL';
@@ -26,6 +26,35 @@ export class SettingsWriteError extends Error {
 export interface UserSettingsPatch {
   readonly preferredLocale?: LocaleCode;
   readonly publicPayoutIdentityMode?: PublicPayoutIdentityMode;
+}
+
+
+/**
+ * Phase17 privacy lock contract:
+ * Future public-payout sender must SELECT payout_publications ... FOR UPDATE
+ * before final identity recheck/build. This settings downgrade UPDATE locks the
+ * same non-terminal rows, so concurrent send vs HIDE serialize deterministically:
+ *   A) HIDE commits first => sender later observes HIDE_IDENTITY
+ *   B) sender holds FOR UPDATE first => HIDE blocks until send durable outcome
+ * A committed HIDE must never be ignored by a send that had not yet serialized.
+ */
+async function downgradeNonTerminalPayoutPublicationsToHide(
+  client: PoolClient,
+  userId: string,
+): Promise<number> {
+  const result = await client.query(
+    `UPDATE payout_publications pp
+     SET identity_mode = 'HIDE_IDENTITY'::public_payout_identity_mode,
+         username_snapshot = NULL,
+         updated_at = now()
+     FROM withdrawals w
+     WHERE pp.withdrawal_id = w.id
+       AND w.user_id = $1::uuid
+       AND pp.identity_mode = 'SHOW_USERNAME'::public_payout_identity_mode
+       AND pp.status::text IN ('PENDING', 'FAILED', 'SENDING', 'AMBIGUOUS')`,
+    [userId],
+  );
+  return result.rowCount ?? 0;
 }
 
 export async function patchUserSettings(
@@ -100,6 +129,10 @@ export async function patchUserSettings(
            updated_at = now()`,
         [userId, publicPayoutIdentityMode],
       );
+    }
+
+    if (publicPayoutIdentityMode === 'HIDE_IDENTITY') {
+      await downgradeNonTerminalPayoutPublicationsToHide(client, userId);
     }
 
     await client.query('COMMIT');

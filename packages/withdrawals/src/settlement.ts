@@ -8,6 +8,7 @@ import {
 } from '@alex-rewards/ledger';
 
 import { WithdrawalDomainError } from './errors.js';
+import { ensureWithdrawalConfirmedOutbox } from './public-payout-outbox.js';
 
 export interface SettleWithdrawalReservationInput {
   readonly withdrawalId: string;
@@ -71,6 +72,11 @@ export async function settleWithdrawalReservation(
     await stampSettledConfirmedAttempt(client, {
       withdrawalId: w.id,
       attemptId: confirmedAttemptId,
+    });
+    // Phase17: durable withdrawal.confirmed after settlement authority (heal path).
+    await ensureWithdrawalConfirmedOutbox(client, {
+      withdrawalId: w.id,
+      confirmedAttemptId,
     });
     return {
       settled: false,
@@ -151,6 +157,11 @@ export async function settleWithdrawalReservation(
       withdrawalId: w.id,
       attemptId: confirmedAttemptId,
     });
+    // Phase17: Outbox commits atomically with settlement; failure rolls back this TX.
+    await ensureWithdrawalConfirmedOutbox(client, {
+      withdrawalId: w.id,
+      confirmedAttemptId,
+    });
     return { settled: true, ledgerTxId: tx.id, confirmedAttemptId };
   } catch (error) {
     if (error instanceof LedgerDomainError && error.code === 'IDEMPOTENCY_CONFLICT') {
@@ -161,6 +172,10 @@ export async function settleWithdrawalReservation(
       await stampSettledConfirmedAttempt(client, {
         withdrawalId: w.id,
         attemptId: confirmedAttemptId,
+      });
+      await ensureWithdrawalConfirmedOutbox(client, {
+        withdrawalId: w.id,
+        confirmedAttemptId,
       });
       return {
         settled: false,
