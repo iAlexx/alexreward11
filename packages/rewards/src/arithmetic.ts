@@ -162,3 +162,17 @@ export function computeMembershipBonusAtomic(input: {
   const bonus = (base * bps) / BPS_DENOMINATOR;
   return assertPgBigint(bonus, 'membershipBonusAtomic');
 }
+
+/**
+ * Spec §81: FLOOR(source_amount_atomic * effective_rate_bps / 10000).
+ * Zero after FLOOR means no monetary referral issuance (caller records durable skip).
+ */
+export function computeReferralBonusAtomic(input: {
+  readonly sourceAmountAtomic: bigint | string;
+  readonly effectiveRateBps: number;
+}): bigint {
+  const source = parsePositiveAtomic(input.sourceAmountAtomic, 'sourceAmountAtomic');
+  const bps = parseBps(input.effectiveRateBps, 'effectiveRateBps');
+  const bonus = (source * bps) / BPS_DENOMINATOR;
+  return assertPgBigint(bonus, 'referralBonusAtomic');
+}

@@ -14,11 +14,13 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src test",
     "test": "vitest run --fileParallelism=false --passWithNoTests",
-    "test:phase5": "cross-env PHASE5_REWARD_TESTS=1 vitest run --fileParallelism=false test/phase5-arithmetic.test.ts test/phase5-rules.test.ts test/phase5-quotes-budgets.test.ts test/phase5-issuance.test.ts test/phase5-bonus.test.ts test/phase5-maturity.test.ts test/phase5-guardrails.test.ts test/phase5-failure-injection.test.ts test/phase5-concurrency.test.ts test/phase5-financial-corrections.test.ts test/phase5-budget-scope.test.ts test/phase15-referral-eligible.test.ts"
+    "test:phase5": "cross-env PHASE5_REWARD_TESTS=1 vitest run --fileParallelism=false test/phase5-arithmetic.test.ts test/phase5-rules.test.ts test/phase5-quotes-budgets.test.ts test/phase5-issuance.test.ts test/phase5-bonus.test.ts test/phase5-maturity.test.ts test/phase5-guardrails.test.ts test/phase5-failure-injection.test.ts test/phase5-concurrency.test.ts test/phase5-financial-corrections.test.ts test/phase5-budget-scope.test.ts test/phase15-referral-eligible.test.ts",
+    "test:phase15": "cross-env PHASE15_REFERRAL_TESTS=1 PHASE5_REWARD_TESTS=1 vitest run --fileParallelism=false test/phase15-referral-eligible.test.ts test/phase15-referral-issuance.db.test.ts"
   },
   "dependencies": {
     "@alex-rewards/db": "workspace:*",
     "@alex-rewards/ledger": "workspace:*",
+    "@alex-rewards/referrals": "workspace:*",
     "pg": "8.23.0"
   },
   "devDependencies": {

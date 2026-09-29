@@ -48,6 +48,7 @@ provider business behaviour is implemented here.
 | `0044_phase15_referral_rule_integrity.sql`           | Phase 15 Step 1: `referral_rule_versions` + edge/code/reward-event integrity; `reward_rules.referral_eligible` (no seeds / no money)                                                                                                                          |
 | `0045_phase15_referral_reference_hardening.sql`      | Phase 15 Step 1.1: terminal edge provenance freeze; orphan referral-rule FK fail-closed; VALIDATE edge/reward-event rule FKs                                                                                                                                 |
 | `0046_phase15_referral_rate_provenance.sql`          | Phase 15 Step 4: `referral_reward_events` rate_source + membership entitlement provenance (no seeds / no money)                                                                                                                                              |
+| `0047_phase15_referral_reward_issuance.sql`          | Phase 15 Step 5: `referral_reward_decisions` + `referral_bonus_exposure_reservations` (no production budget seed / no money)                                                                                                                                 |
 
 Migrations `0001`–`0026` remain immutable. Signer login isolation is added only by
 forward migration `0027` (local provision script sets password; ops credential rotation

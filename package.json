@@ -34,7 +34,7 @@
     "test:phase13": "pnpm --filter @alex-rewards/auth run test:phase13-admin-auth && pnpm --filter @alex-rewards/ads run test:phase13 && pnpm --filter @alex-rewards/api run test:phase13 && pnpm --filter @alex-rewards/admin run test",
     "test:phase13:admin-e2e": "node apps/admin-e2e/scripts/run-phase13-admin-e2e.mjs",
     "test:phase14": "pnpm --filter @alex-rewards/fraud run test:phase14 && cross-env PHASE14_FRAUD_TESTS=1 pnpm --filter @alex-rewards/api run test:phase14",
-    "test:phase15": "pnpm --filter @alex-rewards/referrals run test:phase15 && pnpm --filter @alex-rewards/auth run test:phase15",
+    "test:phase15": "pnpm --filter @alex-rewards/referrals run test:phase15 && pnpm --filter @alex-rewards/auth run test:phase15 && pnpm --filter @alex-rewards/rewards run test:phase15",
     "test:m0-single-owner": "pnpm --filter @alex-rewards/db run test:m0-single-owner",
     "test:owner-admin-auth": "pnpm --filter @alex-rewards/auth run test:owner-admin-auth",
     "test:owner-bootstrap": "pnpm --filter @alex-rewards/auth run test:owner-bootstrap",

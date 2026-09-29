@@ -6,6 +6,7 @@ import {
 } from '@alex-rewards/ledger';
 
 import { RewardDomainError } from './errors.js';
+import { maybeIssueReferralRewardAfterMaturity } from './issue-referral.js';
 import { insertOutboxEvent } from './outbox.js';
 import type { MatureRewardEventCommand, MatureRewardEventResult } from './types.js';
 
@@ -13,12 +14,18 @@ import type { MatureRewardEventCommand, MatureRewardEventResult } from './types.
  * Mature a PENDING reward_event into AVAILABLE.
  * Idempotent and concurrent-safe (row lock + ledger idempotency).
  * Business reference: reward-maturity/{rewardEventId}
+ *
+ * After a successful AD maturity commit, referral bonus issuance runs in a
+ * separate transaction so budget rejection cannot roll back invitee maturity.
  */
 export async function matureRewardEvent(
   db: LedgerDb,
   command: MatureRewardEventCommand,
 ): Promise<MatureRewardEventResult> {
-  return withLedgerTransaction(db, async (client) => {
+  let maturedSourceType: string | null = null;
+  let newlyMatured = false;
+
+  const result = await withLedgerTransaction(db, async (client) => {
     const asOf = command.asOf ?? new Date();
     const locked = await client.query<{
       id: string;
@@ -26,11 +33,13 @@ export async function matureRewardEvent(
       asset_id: string;
       amount_atomic: string;
       state: string;
+      source_type: string;
       pending_until: Date | null;
       available_at: Date | null;
       maturity_ledger_transaction_id: string | null;
     }>(
       `SELECT id, user_id, asset_id, amount_atomic::text AS amount_atomic, state::text AS state,
+              source_type::text AS source_type,
               pending_until, available_at, maturity_ledger_transaction_id
        FROM reward_events
        WHERE id = $1
@@ -44,12 +53,14 @@ export async function matureRewardEvent(
       });
     }
 
+    maturedSourceType = event.source_type;
+
     if (event.state === 'AVAILABLE' && event.maturity_ledger_transaction_id !== null) {
       return {
         rewardEventId: event.id,
         ledgerTransactionId: event.maturity_ledger_transaction_id,
         created: false,
-        state: 'AVAILABLE',
+        state: 'AVAILABLE' as const,
         availableAt: (event.available_at ?? asOf).toISOString(),
       };
     }
@@ -132,12 +143,28 @@ export async function matureRewardEvent(
       },
     });
 
+    newlyMatured = true;
     return {
       rewardEventId: event.id,
       ledgerTransactionId: ledger.id,
       created: ledger.created,
-      state: 'AVAILABLE',
+      state: 'AVAILABLE' as const,
       availableAt: asOf.toISOString(),
     };
   });
+
+  if (newlyMatured && maturedSourceType === 'AD') {
+    try {
+      await maybeIssueReferralRewardAfterMaturity(db, {
+        sourceRewardEventId: result.rewardEventId,
+        environment: command.environment ?? 'LOCAL',
+        sourceType: maturedSourceType,
+      });
+    } catch {
+      // Invitee maturity already committed. Referral failures must not undo it;
+      // retries / worker outbox can re-drive issueReferralReward idempotently.
+    }
+  }
+
+  return result;
 }

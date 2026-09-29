@@ -6,6 +6,7 @@ export {
   clampRewardAtomic,
   computeQuotedRewardAtomic,
   computeMembershipBonusAtomic,
+  computeReferralBonusAtomic,
 } from './arithmetic.js';
 
 export { isPool, withLedgerTransaction } from './db.js';
@@ -57,6 +58,16 @@ export {
 
 export { issueSimulatedReward } from './issuance.js';
 export { issueAdReward } from './issue-ad.js';
+export {
+  issueReferralReward,
+  maybeIssueReferralRewardAfterMaturity,
+  referralBonusSourceIdFromOrigin,
+} from './issue-referral.js';
+export type {
+  IssueReferralRewardCommand,
+  IssueReferralRewardResult,
+  ReferralIssuanceKind,
+} from './issue-referral.js';
 export { matureRewardEvent } from './maturity.js';
 
 export {
