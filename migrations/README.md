@@ -46,6 +46,7 @@ provider business behaviour is implemented here.
 | `0031_phase13_admin_webauthn_challenges.sql`         | Phase 13: `admin_webauthn_challenges` one-time WebAuthn ceremony rows (no RP ID defaults)                                                                                                                                                                    |
 | `0032`–`0043`                                        | Phase 13/14 forward migrations (admin WebAuthn session bind, fraud/risk/trust/eligibility integrity)                                                                                                                                                         |
 | `0044_phase15_referral_rule_integrity.sql`           | Phase 15 Step 1: `referral_rule_versions` + edge/code/reward-event integrity; `reward_rules.referral_eligible` (no seeds / no money)                                                                                                                          |
+| `0045_phase15_referral_reference_hardening.sql`      | Phase 15 Step 1.1: terminal edge provenance freeze; orphan referral-rule FK fail-closed; VALIDATE edge/reward-event rule FKs                                                                                                                                 |
 
 Migrations `0001`–`0026` remain immutable. Signer login isolation is added only by
 forward migration `0027` (local provision script sets password; ops credential rotation

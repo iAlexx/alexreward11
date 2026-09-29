@@ -498,7 +498,7 @@ describe.skipIf(phase15DatabaseUrl === '')('Phase 15 referral edges / codes / ev
          WHERE id = $1::uuid`,
         [edgeId],
       ),
-    ).rejects.toThrow(/invalid referral edge state transition/i);
+    ).rejects.toMatchObject({ code: RESTRICT_VIOLATION });
 
     const referred2 = await createTestUser(pool, '15002003');
     const pending2 = await insertPendingEdge(pool, {
@@ -517,11 +517,218 @@ describe.skipIf(phase15DatabaseUrl === '')('Phase 15 referral edges / codes / ev
     await expect(
       pool.query(
         `UPDATE referral_edges
-         SET rejection_reason = ' '
+         SET rejection_reason = 'changed'
          WHERE id = $1::uuid`,
         [pending2],
       ),
-    ).rejects.toMatchObject({ code: CHECK_VIOLATION });
+    ).rejects.toMatchObject({ code: RESTRICT_VIOLATION });
+  });
+
+  it('freezes ACTIVE terminal activation provenance', async () => {
+    await insertReferralRule(pool, {
+      ruleVersion: 2,
+      status: 'DRAFT',
+      effectiveFrom: new Date('2020-01-01T00:00:00.000Z'),
+    });
+    const referred = await createTestUser(pool, '15002005');
+    const edgeId = await insertPendingEdge(pool, {
+      referrerUserId: referrerId,
+      referredUserId: referred,
+      codeId,
+    });
+
+    const activated = await pool.query<{
+      activation_rule_version: number;
+      activated_at: Date;
+      rejected_at: Date | null;
+      rejection_reason: string | null;
+      state: string;
+    }>(
+      `UPDATE referral_edges
+       SET state = 'ACTIVE'::referral_edge_state,
+           activated_at = timestamptz '2024-06-01T12:00:00.000Z',
+           activation_rule_version = 1
+       WHERE id = $1::uuid
+       RETURNING activation_rule_version, activated_at, rejected_at, rejection_reason, state::text AS state`,
+      [edgeId],
+    );
+    const original = activated.rows[0]!;
+    expect(original.state).toBe('ACTIVE');
+    expect(original.activation_rule_version).toBe(1);
+
+    await expect(
+      pool.query(
+        `UPDATE referral_edges SET activation_rule_version = 2 WHERE id = $1::uuid`,
+        [edgeId],
+      ),
+    ).rejects.toMatchObject({ code: RESTRICT_VIOLATION });
+
+    await expect(
+      pool.query(
+        `UPDATE referral_edges
+         SET activated_at = timestamptz '2025-01-01T00:00:00.000Z'
+         WHERE id = $1::uuid`,
+        [edgeId],
+      ),
+    ).rejects.toMatchObject({ code: RESTRICT_VIOLATION });
+
+    await expect(
+      pool.query(
+        `UPDATE referral_edges
+         SET rejected_at = now(), rejection_reason = 'nope'
+         WHERE id = $1::uuid`,
+        [edgeId],
+      ),
+    ).rejects.toMatchObject({ code: RESTRICT_VIOLATION });
+
+    await expect(
+      pool.query(
+        `UPDATE referral_edges
+         SET state = 'ACTIVE'::referral_edge_state,
+             activation_rule_version = 2,
+             activated_at = now()
+         WHERE id = $1::uuid`,
+        [edgeId],
+      ),
+    ).rejects.toMatchObject({ code: RESTRICT_VIOLATION });
+
+    await expect(
+      pool.query(
+        `UPDATE referral_edges
+         SET state = 'PENDING'::referral_edge_state,
+             activated_at = NULL,
+             activation_rule_version = NULL
+         WHERE id = $1::uuid`,
+        [edgeId],
+      ),
+    ).rejects.toMatchObject({ code: RESTRICT_VIOLATION });
+
+    const after = await pool.query<{
+      activation_rule_version: number;
+      activated_at: Date;
+      rejected_at: Date | null;
+      rejection_reason: string | null;
+      state: string;
+    }>(
+      `SELECT activation_rule_version, activated_at, rejected_at, rejection_reason,
+              state::text AS state
+       FROM referral_edges WHERE id = $1::uuid`,
+      [edgeId],
+    );
+    expect(after.rows[0]).toMatchObject({
+      state: 'ACTIVE',
+      activation_rule_version: 1,
+      rejected_at: null,
+      rejection_reason: null,
+    });
+    expect(after.rows[0]!.activated_at.toISOString()).toBe(
+      original.activated_at.toISOString(),
+    );
+  });
+
+  it('freezes REJECTED terminal rejection provenance', async () => {
+    const referred = await createTestUser(pool, '15002006');
+    const edgeId = await insertPendingEdge(pool, {
+      referrerUserId: referrerId,
+      referredUserId: referred,
+      codeId,
+    });
+
+    const rejected = await pool.query<{
+      activation_rule_version: number | null;
+      activated_at: Date | null;
+      rejected_at: Date;
+      rejection_reason: string;
+      state: string;
+    }>(
+      `UPDATE referral_edges
+       SET state = 'REJECTED'::referral_edge_state,
+           rejected_at = timestamptz '2024-07-01T08:00:00.000Z',
+           rejection_reason = 'critical_fraud',
+           activation_rule_version = 1
+       WHERE id = $1::uuid
+       RETURNING activation_rule_version, activated_at, rejected_at, rejection_reason,
+                 state::text AS state`,
+      [edgeId],
+    );
+    const original = rejected.rows[0]!;
+    expect(original.state).toBe('REJECTED');
+    expect(original.rejection_reason).toBe('critical_fraud');
+    expect(original.activation_rule_version).toBe(1);
+
+    await expect(
+      pool.query(
+        `UPDATE referral_edges SET rejection_reason = 'other' WHERE id = $1::uuid`,
+        [edgeId],
+      ),
+    ).rejects.toMatchObject({ code: RESTRICT_VIOLATION });
+
+    await expect(
+      pool.query(
+        `UPDATE referral_edges
+         SET rejected_at = timestamptz '2025-01-01T00:00:00.000Z'
+         WHERE id = $1::uuid`,
+        [edgeId],
+      ),
+    ).rejects.toMatchObject({ code: RESTRICT_VIOLATION });
+
+    await expect(
+      pool.query(
+        `UPDATE referral_edges SET activation_rule_version = 2 WHERE id = $1::uuid`,
+        [edgeId],
+      ),
+    ).rejects.toMatchObject({ code: RESTRICT_VIOLATION });
+
+    await expect(
+      pool.query(
+        `UPDATE referral_edges
+         SET state = 'REJECTED'::referral_edge_state,
+             rejection_reason = 'rewrite'
+         WHERE id = $1::uuid`,
+        [edgeId],
+      ),
+    ).rejects.toMatchObject({ code: RESTRICT_VIOLATION });
+
+    await expect(
+      pool.query(
+        `UPDATE referral_edges SET state = 'ACTIVE'::referral_edge_state WHERE id = $1::uuid`,
+        [edgeId],
+      ),
+    ).rejects.toMatchObject({ code: RESTRICT_VIOLATION });
+
+    const after = await pool.query<{
+      activation_rule_version: number | null;
+      activated_at: Date | null;
+      rejected_at: Date;
+      rejection_reason: string;
+      state: string;
+    }>(
+      `SELECT activation_rule_version, activated_at, rejected_at, rejection_reason,
+              state::text AS state
+       FROM referral_edges WHERE id = $1::uuid`,
+      [edgeId],
+    );
+    expect(after.rows[0]).toMatchObject({
+      state: 'REJECTED',
+      rejection_reason: 'critical_fraud',
+      activation_rule_version: 1,
+      activated_at: null,
+    });
+    expect(after.rows[0]!.rejected_at.toISOString()).toBe(original.rejected_at.toISOString());
+  });
+
+  it('validates referral rule FKs (convalidated=true)', async () => {
+    const rows = await pool.query<{ conname: string; convalidated: boolean }>(
+      `SELECT conname, convalidated
+       FROM pg_constraint
+       WHERE conname IN (
+         'referral_edges_activation_rule_version_fkey',
+         'referral_reward_events_rule_version_fkey'
+       )
+       ORDER BY conname`,
+    );
+    expect(rows.rows).toHaveLength(2);
+    expect(rows.rows.every((r) => r.convalidated === true)).toBe(true);
   });
 
   it('freezes referral code identity but allows status', async () => {
