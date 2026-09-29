@@ -621,6 +621,9 @@ importers:
       '@alex-rewards/db':
         specifier: workspace:*
         version: link:../db
+      '@alex-rewards/fraud':
+        specifier: workspace:*
+        version: link:../fraud
       '@alex-rewards/ledger':
         specifier: workspace:*
         version: link:../ledger
@@ -631,6 +634,9 @@ importers:
         specifier: 8.23.0
         version: 8.23.0
     devDependencies:
+      '@alex-rewards/tasks':
+        specifier: workspace:*
+        version: link:../tasks
       '@types/pg':
         specifier: 8.23.1
         version: 8.23.1

@@ -864,3 +864,13 @@ to independent remediation (see `docs/PHASE_13_INDEPENDENT_REVIEW_REMEDIATION.md
    `expectedVersion` + recent reauth; confirmation bindings invalidate on payload change.
    `PAYOUT_DISPATCH_PAUSE` may be displayed and Owner-changed with full ceremony, but silent
    flip is refused; Phase 10 baseline is not auto-changed.
+
+## ADR-024 — Phase 16 post-grant AD reversal for Mission rewards
+
+**Status:** OWNER_POLICY_REQUIRED
+
+When a contributing AVAILABLE AD reward is later reversed **after** a Mission claim has already
+been GRANTED and Mission money issued, Phase 16 does **not** automatically cascade-reverse the
+Mission reward. Production activation of monetary `VALID_AD_COUNT` missions remains blocked until
+the Owner approves a cascade / non-cascade policy. Non-AD monetary missions (e.g. DAILY_LOGIN)
+may still be issued in synthetic LOCAL/STAGING tests.

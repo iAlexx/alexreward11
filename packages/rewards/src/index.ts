@@ -67,6 +67,15 @@ export type {
   IssueReferralRewardResult,
   ReferralIssuanceKind,
 } from './issue-referral.js';
+export {
+  issueMissionReward,
+  missionRewardSourceIdFromClaim,
+} from './issue-mission.js';
+export type {
+  IssueMissionRewardCommand,
+  IssueMissionRewardResult,
+  MissionIssuanceKind,
+} from './issue-mission.js';
 export { reverseRewardEvent } from './reverse-reward.js';
 export type {
   ReverseRewardEventCommand,
@@ -77,6 +86,18 @@ export {
   processDueReferralMaturityBatch,
   processReferralIssuanceBatch,
 } from './referral-maintenance.js';
+export {
+  processDueMissionRewardMaturityBatch,
+  processPendingMissionRewardClaimsBatch,
+} from './mission-maintenance.js';
+export type {
+  MissionIssuanceBatchItem,
+  MissionMaturityBatchItem,
+  ProcessDueMissionRewardMaturityBatchOptions,
+  ProcessDueMissionRewardMaturityBatchResult,
+  ProcessPendingMissionRewardClaimsBatchOptions,
+  ProcessPendingMissionRewardClaimsBatchResult,
+} from './mission-maintenance.js';
 export type {
   ProcessDueReferralMaturityBatchOptions,
   ProcessDueReferralMaturityBatchResult,
