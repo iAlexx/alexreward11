@@ -51,7 +51,14 @@ export type {
   HomeTodayAdsData,
 } from './home.js';
 
-export type { TaskListItemDto, TaskProgressStateDto, TasksListResponse } from './tasks.js';
+export type {
+  TaskClaimOutcomeDto,
+  TaskClaimResponse,
+  TaskClaimStatusDto,
+  TaskListItemDto,
+  TaskProgressStateDto,
+  TasksListResponse,
+} from './tasks.js';
 
 export type { ReferralsSummaryData, ReferralsSummaryResponse, ReferralCodeResponse } from './referrals.js';
 

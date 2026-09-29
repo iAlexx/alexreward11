@@ -37,8 +37,7 @@ export class OverviewController {
         { key: 'notifications', status: 'READY' },
         {
           key: 'missions',
-          status: 'ENGINE_NOT_ENABLED',
-          reasonCode: 'ENGINE_NOT_ENABLED',
+          status: 'READY',
         },
         {
           key: 'referrals',

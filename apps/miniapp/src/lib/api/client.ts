@@ -336,6 +336,13 @@ export function createApiClient(options: ApiClientOptions) {
       return request<TasksListResponse>('/v1/tasks');
     },
 
+    claimTask(progressId: string): Promise<import('@alex-rewards/contracts').TaskClaimResponse> {
+      return request(`/v1/tasks/${encodeURIComponent(progressId)}/claim`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+    },
+
     getReferralsSummary(): Promise<ReferralsSummaryResponse> {
       return request<ReferralsSummaryResponse>('/v1/referrals/summary');
     },

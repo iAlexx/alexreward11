@@ -617,9 +617,13 @@ export interface AdminNotificationCampaignDraftRequest {
 
 export interface AdminMissionsFoundationResponse {
   readonly contractVersion: typeof ADMIN_API_CONTRACT_VERSION;
-  readonly status: 'EMPTY' | 'UNAVAILABLE';
-  readonly reasonCode: 'ENGINE_NOT_ENABLED';
-  readonly data: null;
+  readonly status: 'READY' | 'EMPTY' | 'UNAVAILABLE';
+  readonly reasonCode?: 'ENGINE_NOT_ENABLED' | 'READ_FAILED';
+  readonly data: {
+    readonly definitions: readonly unknown[];
+    readonly versions: readonly unknown[];
+    readonly allowlistedConditions: readonly string[];
+  } | null;
 }
 
 export interface AdminReferralFoundationResponse {

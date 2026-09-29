@@ -57,19 +57,21 @@ describe('LOOTRA Step 5 Tasks authority', () => {
     expect(screen).toMatch(/data\.items\.length === 0/);
   });
 
-  it('C — no task Claim Reward button exists', async () => {
+  it('C — claim uses server claimable gate (no fabricated Claim Reward)', async () => {
     const screen = await readSrc('components/TasksScreen.tsx');
-    expect(screen).not.toMatch(/Claim Reward|claimReward|t\('claim'\)/i);
-    expect(screen).not.toMatch(/onClick.*claim/i);
+    expect(screen).not.toMatch(/Claim Reward|claimReward/i);
+    expect(screen).toMatch(/item\.claimable/);
   });
 
-  it('D — no task mutation API call exists', async () => {
+  it('D — task claim API is progressId-scoped POST only', async () => {
     const client = await readSrc('lib/api/client.ts');
     const screen = await readSrc('components/TasksScreen.tsx');
     expect(client).toMatch(/getTasks\(\)/);
-    expect(client).not.toMatch(/\/v1\/tasks\/[^'"]+\/(claim|verify|complete|progress)/);
-    expect(screen).not.toMatch(/claimTask|verifyTask|completeTask|mutateTask/);
+    expect(client).toMatch(/claimTask\(/);
+    expect(client).toMatch(/\/v1\/tasks\/\$\{encodeURIComponent\(progressId\)\}\/claim/);
+    expect(screen).toMatch(/claimTask/);
     expect(screen).toMatch(/api\.getTasks/);
+    expect(screen).not.toMatch(/verifyTask|completeTask|mutateTask/);
   });
 
   it('E — READY items render read-only server fields only', async () => {
@@ -78,28 +80,41 @@ describe('LOOTRA Step 5 Tasks authority', () => {
     expect(screen).toMatch(/item\.progressCount/);
     expect(screen).toMatch(/item\.target/);
     expect(screen).toMatch(/item\.state/);
-    expect(screen).not.toMatch(/rewardAmount|taskUrl|claimable|expiresAt|description/);
+    expect(screen).toMatch(/item\.claimable/);
+    expect(screen).toMatch(/item\.rewardAtomic/);
+    expect(screen).not.toMatch(/rewardAmount|taskUrl|expiresAt/);
   });
 
-  it('F — COMPLETED task does not automatically expose a claim action', async () => {
+  it('F — claim button is server-gated via claimable only', async () => {
     const screen = await readSrc('components/TasksScreen.tsx');
-    expect(screen).toMatch(/COMPLETED does not expose a claim/);
-    expect(screen).not.toMatch(/state === ['"]COMPLETED['"].*claim|CLAIM.*button/is);
+    expect(screen).toMatch(/item\.claimable/);
+    expect(screen).toMatch(/claimTask/);
+    expect(screen).not.toMatch(/progressCount\s*>=\s*target/);
   });
 
   it('G — no task reward amount is fabricated', async () => {
     const screen = await readSrc('components/TasksScreen.tsx');
     expect(screen).toMatch(/rewardServerNote/);
-    expect(screen).not.toMatch(/\+0\.02|\+500|USDT|rewardAmount/i);
+    expect(screen).toMatch(/item\.rewardAtomic/);
+    expect(screen).not.toMatch(/\+0\.02|\+500/);
   });
 
   it('H — task progress does not mutate financial/account state', () => {
     const item: TaskListItemDto = {
       taskCode: 't1',
+      missionVersionId: '00000000-0000-4000-8000-000000000001',
+      progressId: null,
       nameKey: 'unknown.key',
+      descriptionKey: null,
       state: 'IN_PROGRESS',
       progressCount: 2,
       target: 5,
+      resetPolicy: 'DAILY',
+      periodKey: 'DAY:2026-01-01',
+      claimStatus: null,
+      claimable: false,
+      rewardAtomic: null,
+      endsAt: null,
     };
     const p = safeTaskProgress(item.progressCount, item.target);
     expect(p.progress).toBe(2);

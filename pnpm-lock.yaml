@@ -156,6 +156,9 @@ importers:
       '@alex-rewards/support':
         specifier: workspace:*
         version: link:../../packages/support
+      '@alex-rewards/tasks':
+        specifier: workspace:*
+        version: link:../../packages/tasks
       '@alex-rewards/telegram':
         specifier: workspace:*
         version: link:../../packages/telegram

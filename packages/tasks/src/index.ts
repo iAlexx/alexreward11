@@ -60,3 +60,7 @@ export {
   type PrepareMissionClaimOutcome,
   type PrepareMissionClaimResult,
 } from './prepare-claim.js';
+export {
+  listUserMissions,
+  type UserMissionListItem,
+} from './list-missions.js';

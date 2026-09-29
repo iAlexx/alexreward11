@@ -201,12 +201,8 @@ describe('earn summary reports AdsGram as BLOCKED', () => {
 });
 
 describe('not-yet-approved engines answer honestly', () => {
-  it('reports tasks as UNAVAILABLE with an empty item list', () => {
-    expect(new TasksController().listTasks()).toEqual({
-      status: 'UNAVAILABLE',
-      items: [],
-      reasonCode: 'ENGINE_NOT_ENABLED',
-    });
+  it('keeps TasksController constructor DI-bound (Phase 16 live reads)', () => {
+    expect(TasksController.length).toBeGreaterThanOrEqual(2);
   });
 
   it('keeps ReferralsController constructor DI-bound (Phase 15 live reads)', () => {

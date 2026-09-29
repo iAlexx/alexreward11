@@ -1,6 +1,6 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslations } from 'next-intl';
 
 import type { TaskListItemDto } from '@alex-rewards/contracts';
@@ -41,7 +41,15 @@ function TasksHero() {
   );
 }
 
-function TaskRow({ item }: { readonly item: TaskListItemDto }) {
+function TaskRow({
+  item,
+  onClaim,
+  claiming,
+}: {
+  readonly item: TaskListItemDto;
+  readonly onClaim: (progressId: string) => void;
+  readonly claiming: boolean;
+}) {
   const t = useTranslations('tasks');
   const title = resolveTaskDisplayName(item.nameKey, t('taskNameFallback'));
   const { progress, target, ratio } = safeTaskProgress(item.progressCount, item.target);
@@ -69,24 +77,50 @@ function TaskRow({ item }: { readonly item: TaskListItemDto }) {
           {t('progress')}: {progress}
         </p>
       )}
-      {/* Read-only: COMPLETED does not expose a claim action — no claim endpoint exists. */}
-      <p className="alex-meta">{t('rewardServerNote')}</p>
+      {item.rewardAtomic !== null ? (
+        <p className="alex-meta">
+          {t('rewardServerNote')}: {item.rewardAtomic}
+        </p>
+      ) : (
+        <p className="alex-meta">{t('rewardServerNote')}</p>
+      )}
+      {item.claimStatus !== null ? (
+        <p className="alex-meta">Claim: {item.claimStatus}</p>
+      ) : null}
+      {item.claimable && item.progressId !== null ? (
+        <button
+          type="button"
+          className="alex-button"
+          disabled={claiming}
+          onClick={() => onClaim(item.progressId!)}
+        >
+          {claiming ? '…' : t('claim') ?? 'Claim'}
+        </button>
+      ) : null}
     </li>
   );
 }
 
 /**
- * Tasks / Missions screen.
- * ENGINE_NOT_ENABLED is an intentional product state — not empty, not error.
- * READY items (when the engine exists) are read-only server fields only.
+ * Tasks / Missions screen — server-authoritative rows only.
+ * Claim enabled only when server sets claimable=true.
  */
 export function TasksScreen() {
   const t = useTranslations('tasks');
   const { api } = useAuth();
+  const queryClient = useQueryClient();
 
   const tasks = useQuery({
     queryKey: queryKeys.tasks,
     queryFn: () => api.getTasks(),
+  });
+
+  const claim = useMutation({
+    mutationFn: (progressId: string) => api.claimTask(progressId),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.tasks });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.wallets });
+    },
   });
 
   if (tasks.isLoading) return <TasksSkeleton />;
@@ -122,10 +156,14 @@ export function TasksScreen() {
         <DomainStateView state="EMPTY" emptyTitle={t('empty')} emptyBody={t('emptyBody')} />
       ) : data.status === 'READY' ? (
         <section className="lootra-tasks-list-wrap" aria-label={t('title')}>
-          <p className="alex-meta">{t('rewardServerNote')}</p>
           <ul className="lootra-tasks-list">
             {data.items.map((item) => (
-              <TaskRow key={item.taskCode} item={item} />
+              <TaskRow
+                key={`${item.taskCode}:${item.missionVersionId}:${item.periodKey}`}
+                item={item}
+                claiming={claim.isPending}
+                onClaim={(progressId) => claim.mutate(progressId)}
+              />
             ))}
           </ul>
         </section>

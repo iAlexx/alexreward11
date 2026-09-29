@@ -26,6 +26,7 @@
     "@alex-rewards/referrals": "workspace:*",
     "@alex-rewards/rewards": "workspace:*",
     "@alex-rewards/support": "workspace:*",
+    "@alex-rewards/tasks": "workspace:*",
     "@alex-rewards/telegram": "workspace:*",
     "@alex-rewards/ton": "workspace:*",
     "@alex-rewards/wallets": "workspace:*",

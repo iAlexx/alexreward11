@@ -47,7 +47,7 @@ describe('Phase 13 Admin security matrix 12–52', () => {
     const missions = overview.domains.find((d) => d.key === 'missions');
     const referrals = overview.domains.find((d) => d.key === 'referrals');
     const fraud = overview.domains.find((d) => d.key === 'fraud_engine');
-    expect(missions?.status).toBe('ENGINE_NOT_ENABLED');
+    expect(missions?.status).toBe('READY');
     expect(referrals?.status).toBe('READY');
     expect(fraud?.status).toBe('READY');
     expect(fraud).not.toHaveProperty('reasonCode');
@@ -56,11 +56,8 @@ describe('Phase 13 Admin security matrix 12–52', () => {
     }
   });
 
-  it('M13 missions foundation returns ENGINE_NOT_ENABLED and null data', () => {
-    const body = new MissionsAdminController().list();
-    expect(body.status).toBe('UNAVAILABLE');
-    expect(body.reasonCode).toBe('ENGINE_NOT_ENABLED');
-    expect(body.data).toBeNull();
+  it('M13 missions admin controller is DI-bound for Phase 16 read/write control', () => {
+    expect(MissionsAdminController.length).toBeGreaterThanOrEqual(2);
   });
 
   it('M14 referral admin controller is DI-bound for Phase 15 read model', () => {
