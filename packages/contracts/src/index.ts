@@ -53,7 +53,7 @@ export type {
 
 export type { TaskListItemDto, TaskProgressStateDto, TasksListResponse } from './tasks.js';
 
-export type { ReferralsSummaryData, ReferralsSummaryResponse } from './referrals.js';
+export type { ReferralsSummaryData, ReferralsSummaryResponse, ReferralCodeResponse } from './referrals.js';
 
 export type {
   TonProofBindRequest,

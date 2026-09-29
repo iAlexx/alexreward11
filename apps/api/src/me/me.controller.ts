@@ -16,6 +16,7 @@ import type {
 } from '@alex-rewards/contracts';
 import type { Pool } from '@alex-rewards/db';
 import { readUserLedgerBalances } from '@alex-rewards/ledger';
+import { readReferralSummary } from '@alex-rewards/referrals';
 import { readUserLifetimeEarned } from '@alex-rewards/rewards';
 
 import { ENVIRONMENT_BY_DEPLOYMENT } from '../ads/http.js';
@@ -81,9 +82,22 @@ export class MeController {
       asOf: asOf.toISOString(),
       balances,
       todayAds,
-      // Mission and referral engines are not approved yet; saying so is the honest answer.
+      // Mission engine is not approved yet; referrals return authoritative Phase 15 reads.
       missions: unavailableDomain<HomeMissionsData>('ENGINE_NOT_ENABLED'),
-      referrals: unavailableDomain<ReferralsSummaryData>('ENGINE_NOT_ENABLED'),
+      referrals: await settleDomain<ReferralsSummaryData>(async () => {
+        const client = await this.pool.connect();
+        try {
+          const summary = await readReferralSummary(client, { userId: auth.userId });
+          return {
+            referralCode: summary.referralCode,
+            referralDeepLink: null,
+            invitedCount: summary.invitedCount,
+            activatedCount: summary.activatedCount,
+          };
+        } finally {
+          client.release();
+        }
+      }),
       latestWithdrawal,
       announcement,
       membershipBrief,

@@ -21,6 +21,28 @@ export function createPool(url: string): Pool {
   return new Pool({ connectionString: url });
 }
 
+export async function withClient<T>(
+  pool: Pool,
+  fn: (client: PoolClient) => Promise<T>,
+): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await fn(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (error) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      // ignore
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function resetAndMigrate(url: string): Promise<void> {
   assertSafeDestructiveTestDatabaseUrl(url);
   const client = new Client({ connectionString: url });

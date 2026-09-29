@@ -209,12 +209,8 @@ describe('not-yet-approved engines answer honestly', () => {
     });
   });
 
-  it('reports referrals as UNAVAILABLE with no fabricated counts', () => {
-    const summary = new ReferralsController().getSummary();
-    expect(summary).toEqual({
-      status: 'UNAVAILABLE',
-      data: null,
-      reasonCode: 'ENGINE_NOT_ENABLED',
-    });
+  it('keeps ReferralsController constructor DI-bound (Phase 15 live reads)', () => {
+    // Referrals are Phase 15-enabled: controller requires pool + config injection.
+    expect(ReferralsController.length).toBeGreaterThanOrEqual(2);
   });
 });

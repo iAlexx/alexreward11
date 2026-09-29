@@ -147,6 +147,9 @@ importers:
       '@alex-rewards/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@alex-rewards/referrals':
+        specifier: workspace:*
+        version: link:../../packages/referrals
       '@alex-rewards/rewards':
         specifier: workspace:*
         version: link:../../packages/rewards

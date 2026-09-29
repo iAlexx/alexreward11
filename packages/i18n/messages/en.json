@@ -191,7 +191,8 @@
     "engineBody": "Friends rewards are not available yet. Counts and invite codes will appear only when the server enables the program.",
     "invitedCount": "Invited",
     "activatedCount": "Activated",
-    "referralCode": "Referral code"
+    "referralCode": "Referral code",
+    "codeNotConfigured": "A referral code will appear once the server has an approved code policy."
   },
   "wallet": {
     "title": "Wallet",

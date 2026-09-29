@@ -5,7 +5,8 @@
  * Step 2: signed start_param parsing + one-time PENDING attribution.
  * Step 3: authoritative PENDING → ACTIVE/REJECTED activation.
  * Step 4: membership REFERRAL_RATE_BOOST effective rate (replacement, not additive).
- * Does not issue referral money or generate production codes.
+ * Step 5–6: money issuance/reversal live in Reward Engine (this package must not import ledger).
+ * Step 7: versioned code policy + ensureReferralCode + summary reads.
  */
 
 export { ReferralDomainError, type ReferralErrorCode } from './errors.js';
@@ -38,3 +39,12 @@ export {
   type EffectiveReferralRate,
   type ReferralRateSource,
 } from './effective-rate.js';
+export {
+  assertReferralCodePolicyShape,
+  ensureReferralCode,
+  readReferralSummary,
+  referralCodeEntropyBits,
+  resolveActiveReferralCodePolicy,
+  type EnsureReferralCodeResult,
+  type ReferralCodePolicyVersion,
+} from './code-policy.js';

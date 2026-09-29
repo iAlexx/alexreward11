@@ -42,11 +42,16 @@ function ReferralReadySummary({ data }: { readonly data: ReferralsSummaryData })
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
 
+  const shareValue =
+    data.referralDeepLink !== null && data.referralDeepLink !== ''
+      ? data.referralDeepLink
+      : data.referralCode;
+
   async function copyCode() {
-    if (data.referralCode === null || data.referralCode === '') return;
+    if (shareValue === null || shareValue === '') return;
     setCopyFailed(false);
     try {
-      await navigator.clipboard.writeText(data.referralCode);
+      await navigator.clipboard.writeText(shareValue);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 2000);
     } catch {
@@ -79,6 +84,11 @@ function ReferralReadySummary({ data }: { readonly data: ReferralsSummaryData })
           <p className="lootra-referral-code__value" dir="ltr">
             {data.referralCode}
           </p>
+          {data.referralDeepLink !== null && data.referralDeepLink !== '' ? (
+            <p className="alex-meta" dir="ltr">
+              {data.referralDeepLink}
+            </p>
+          ) : null}
           <button type="button" className="lootra-btn lootra-btn--ghost" onClick={() => void copyCode()}>
             {copied ? common('copied') : t('copyCode')}
           </button>
@@ -93,7 +103,9 @@ function ReferralReadySummary({ data }: { readonly data: ReferralsSummaryData })
             </p>
           ) : null}
         </div>
-      ) : null}
+      ) : (
+        <p className="alex-muted">{t('codeNotConfigured')}</p>
+      )}
     </section>
   );
 }

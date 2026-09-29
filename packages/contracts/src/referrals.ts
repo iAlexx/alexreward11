@@ -1,15 +1,17 @@
 /**
- * Referral read models (Phase 12).
+ * Referral read models (Phase 15).
  *
- * The referral tables exist from the approved schema phase, but no approved engine writes
- * or activates them yet, so the summary reports `UNAVAILABLE` / `ENGINE_NOT_ENABLED`.
- * Counts are never estimated and no referral amount is ever quoted here.
+ * Summary returns authoritative server counts. Referral codes are server-generated
+ * via versioned policy; deep links are only returned when an approved public bot
+ * username is configured (never hardcoded).
  */
 
 import type { DomainReasonCode, ServerDomainAvailability } from './common.js';
 
 export interface ReferralsSummaryData {
   readonly referralCode: string | null;
+  /** Present only when server has an approved public bot username config. */
+  readonly referralDeepLink: string | null;
   readonly invitedCount: number;
   readonly activatedCount: number;
 }
@@ -17,5 +19,12 @@ export interface ReferralsSummaryData {
 export interface ReferralsSummaryResponse {
   readonly status: ServerDomainAvailability;
   readonly data: ReferralsSummaryData | null;
+  readonly reasonCode?: DomainReasonCode;
+}
+
+export interface ReferralCodeResponse {
+  readonly status: ServerDomainAvailability;
+  readonly code: string | null;
+  readonly deepLink: string | null;
   readonly reasonCode?: DomainReasonCode;
 }
