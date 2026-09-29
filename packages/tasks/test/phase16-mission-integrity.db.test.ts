@@ -482,13 +482,25 @@ describe.skipIf(phase16DatabaseUrl === '')('Phase 16 mission integrity + resolve
       )
     ).rows[0]!.id;
 
-    const events = await pool.query<{ to_status: string; from_status: string | null }>(
-      `SELECT from_status::text AS from_status, to_status::text AS to_status
-       FROM mission_claim_events WHERE mission_claim_id = $1::uuid`,
+    const events = await pool.query<{
+      to_status: string;
+      from_status: string | null;
+      actor_type: string;
+      actor_id: string | null;
+    }>(
+      `SELECT from_status::text AS from_status, to_status::text AS to_status,
+              actor_type::text AS actor_type, actor_id
+       FROM mission_claim_events WHERE mission_claim_id = $1::uuid
+       ORDER BY created_at ASC`,
       [claimId],
     );
     expect(events.rows).toHaveLength(1);
-    expect(events.rows[0]).toMatchObject({ from_status: null, to_status: 'PENDING' });
+    expect(events.rows[0]).toMatchObject({
+      from_status: null,
+      to_status: 'PENDING',
+      actor_type: 'SYSTEM',
+      actor_id: null,
+    });
 
     await expect(
       pool.query(
@@ -500,11 +512,20 @@ describe.skipIf(phase16DatabaseUrl === '')('Phase 16 mission integrity + resolve
       ),
     ).resolves.toBeTruthy();
 
-    const after = await pool.query<{ c: number }>(
-      `SELECT count(*)::int AS c FROM mission_claim_events WHERE mission_claim_id = $1::uuid`,
+    const after = await pool.query<{
+      c: number;
+      actor_type: string;
+      actor_id: string | null;
+    }>(
+      `SELECT count(*)::int AS c,
+              max(actor_type::text) AS actor_type,
+              max(actor_id::text) AS actor_id
+       FROM mission_claim_events WHERE mission_claim_id = $1::uuid`,
       [claimId],
     );
     expect(after.rows[0]?.c).toBe(2);
+    expect(after.rows[0]?.actor_type).toBe('SYSTEM');
+    expect(after.rows[0]?.actor_id).toBeNull();
 
     await expect(
       pool.query(
@@ -558,11 +579,20 @@ describe.skipIf(phase16DatabaseUrl === '')('Phase 16 mission integrity + resolve
         [grantClaimId],
       ),
     ).resolves.toBeTruthy();
-    const grantEvents = await pool.query<{ c: number }>(
-      `SELECT count(*)::int AS c FROM mission_claim_events WHERE mission_claim_id = $1::uuid`,
+    const grantEvents = await pool.query<{
+      c: number;
+      actor_type: string;
+      actor_id: string | null;
+    }>(
+      `SELECT count(*)::int AS c,
+              max(actor_type::text) AS actor_type,
+              max(actor_id::text) AS actor_id
+       FROM mission_claim_events WHERE mission_claim_id = $1::uuid`,
       [grantClaimId],
     );
     expect(grantEvents.rows[0]?.c).toBe(2);
+    expect(grantEvents.rows[0]?.actor_type).toBe('SYSTEM');
+    expect(grantEvents.rows[0]?.actor_id).toBeNull();
     await expect(
       pool.query(
         `UPDATE mission_claims
@@ -969,5 +999,528 @@ describe.skipIf(phase16DatabaseUrl === '')('Phase 16 mission integrity + resolve
       waiter.release();
       watcher.release();
     }
+  });
+
+  it('ACTIVE resolution requires ACTIVE definition (code + id); historical ignores status', async () => {
+    for (const status of ['DRAFT', 'PAUSED', 'ARCHIVED'] as const) {
+      const code = `P16_DEF_${status}`;
+      const defId = await insertMissionDefinition(pool, { code, status });
+      await insertMissionVersion(pool, {
+        missionDefinitionId: defId,
+        missionVersion: 1,
+        status: 'ACTIVE',
+        startAt: new Date('2020-01-01T00:00:00.000Z'),
+        endAt: null,
+        target: 1,
+      });
+      const client = await pool.connect();
+      try {
+        await expect(
+          resolveActiveMissionVersion(client, { code }),
+        ).rejects.toMatchObject({ code: 'MISSION_NOT_ACTIVE' });
+        await expect(
+          resolveActiveMissionVersion(client, { missionDefinitionId: defId }),
+        ).rejects.toMatchObject({ code: 'MISSION_NOT_ACTIVE' });
+        await expect(
+          resolveActiveMissionVersionForEvaluation(client, { code }),
+        ).rejects.toMatchObject({ code: 'MISSION_NOT_ACTIVE' });
+        await expect(
+          resolveActiveMissionVersionForEvaluation(client, { missionDefinitionId: defId }),
+        ).rejects.toMatchObject({ code: 'MISSION_NOT_ACTIVE' });
+      } finally {
+        client.release();
+      }
+    }
+
+    const activeDef = await freshDefinition('P16_DEF_ACTIVE_OK');
+    const versionId = await insertMissionVersion(pool, {
+      missionDefinitionId: activeDef,
+      missionVersion: 1,
+      status: 'ACTIVE',
+      startAt: new Date('2020-01-01T00:00:00.000Z'),
+      endAt: null,
+      target: 1,
+    });
+    const client = await pool.connect();
+    try {
+      const byCode = await resolveActiveMissionVersion(client, { code: 'P16_DEF_ACTIVE_OK' });
+      expect(byCode.id).toBe(versionId);
+      const byId = await resolveActiveMissionVersion(client, {
+        missionDefinitionId: activeDef,
+      });
+      expect(byId.id).toBe(versionId);
+
+      await pool.query(
+        `UPDATE mission_definitions SET status = 'ARCHIVED'::content_status WHERE id = $1::uuid`,
+        [activeDef],
+      );
+      const historical = await getMissionVersionById(client, versionId);
+      expect(historical.id).toBe(versionId);
+      expect(historical.status).toBe('ACTIVE');
+    } finally {
+      client.release();
+    }
+  });
+
+  it('evaluation FOR SHARE on definition blocks concurrent PAUSE; pause-first fails MISSION_NOT_ACTIVE', async () => {
+    const defId = await freshDefinition('P16_DEF_LOCK_A');
+    await insertMissionVersion(pool, {
+      missionDefinitionId: defId,
+      missionVersion: 1,
+      status: 'ACTIVE',
+      startAt: new Date('2020-01-01T00:00:00.000Z'),
+      endAt: null,
+      target: 1,
+    });
+
+    // Case A — evaluation first
+    {
+      const holder = await pool.connect();
+      const waiter = await pool.connect();
+      const watcher = await pool.connect();
+      try {
+        await holder.query('BEGIN');
+        await resolveActiveMissionVersionForEvaluation(holder, {
+          missionDefinitionId: defId,
+        });
+        const holderPid = (
+          await holder.query<{ pid: number }>(`SELECT pg_backend_pid() AS pid`)
+        ).rows[0]!.pid;
+
+        const waitPromise = (async () => {
+          await waiter.query('BEGIN');
+          await waiter.query(
+            `UPDATE mission_definitions
+             SET status = 'PAUSED'::content_status
+             WHERE id = $1::uuid`,
+            [defId],
+          );
+          await waiter.query('COMMIT');
+        })();
+
+        const blocked = await waitForBlockedOnHolder(watcher, holderPid, 8_000);
+        expect(blocked).toBe(true);
+        await holder.query('COMMIT');
+        await waitPromise;
+      } finally {
+        try {
+          await holder.query('ROLLBACK');
+        } catch {
+          // ignore
+        }
+        holder.release();
+        waiter.release();
+        watcher.release();
+      }
+    }
+
+    // Restore ACTIVE for case B
+    await pool.query(
+      `UPDATE mission_definitions SET status = 'ACTIVE'::content_status WHERE id = $1::uuid`,
+      [defId],
+    );
+
+    // Case B — pause first
+    {
+      const holder = await pool.connect();
+      const waiter = await pool.connect();
+      const watcher = await pool.connect();
+      try {
+        await holder.query('BEGIN');
+        await holder.query(
+          `UPDATE mission_definitions
+           SET status = 'PAUSED'::content_status
+           WHERE id = $1::uuid`,
+          [defId],
+        );
+        const holderPid = (
+          await holder.query<{ pid: number }>(`SELECT pg_backend_pid() AS pid`)
+        ).rows[0]!.pid;
+
+        let waiterError: unknown;
+        const waitPromise = (async () => {
+          await waiter.query('BEGIN');
+          try {
+            await resolveActiveMissionVersionForEvaluation(waiter, {
+              missionDefinitionId: defId,
+            });
+            await waiter.query('COMMIT');
+          } catch (error) {
+            waiterError = error;
+            try {
+              await waiter.query('ROLLBACK');
+            } catch {
+              // ignore
+            }
+          }
+        })();
+
+        const blocked = await waitForBlockedOnHolder(watcher, holderPid, 8_000);
+        expect(blocked).toBe(true);
+        await holder.query('COMMIT');
+        await waitPromise;
+        expect(waiterError).toMatchObject({ code: 'MISSION_NOT_ACTIVE' });
+      } finally {
+        try {
+          await holder.query('ROLLBACK');
+        } catch {
+          // ignore
+        }
+        holder.release();
+        waiter.release();
+        watcher.release();
+      }
+    }
+  });
+
+  it('started_at is one-shot; completion preserves start; completed_at immutable', async () => {
+    const defId = await freshDefinition('P16_STARTED');
+    const versionId = await insertMissionVersion(pool, {
+      missionDefinitionId: defId,
+      missionVersion: 1,
+      status: 'ACTIVE',
+      startAt: new Date('2026-01-01T00:00:00.000Z'),
+      endAt: null,
+      target: 2,
+    });
+    const progressId = await insertMissionProgress(pool, {
+      missionVersionId: versionId,
+      userId,
+      target: 2,
+      state: 'NOT_STARTED',
+      progressCount: 0,
+    });
+
+    const startedAt = '2026-02-01T10:00:00.000Z';
+    await pool.query(
+      `UPDATE mission_progress
+       SET state = 'IN_PROGRESS'::task_progress_state,
+           progress_count = 1,
+           started_at = $2::timestamptz
+       WHERE id = $1::uuid`,
+      [progressId, startedAt],
+    );
+
+    // Same-state progress increase keeps started_at.
+    await expect(
+      pool.query(
+        `UPDATE mission_progress
+         SET progress_count = 1
+         WHERE id = $1::uuid`,
+        [progressId],
+      ),
+    ).resolves.toBeTruthy();
+
+    await expect(
+      pool.query(
+        `UPDATE mission_progress
+         SET started_at = '2026-03-01T00:00:00.000Z'::timestamptz
+         WHERE id = $1::uuid`,
+        [progressId],
+      ),
+    ).rejects.toMatchObject({ code: RESTRICT_VIOLATION });
+
+    await expect(
+      pool.query(
+        `UPDATE mission_progress SET started_at = NULL WHERE id = $1::uuid`,
+        [progressId],
+      ),
+    ).rejects.toMatchObject({ code: RESTRICT_VIOLATION });
+
+    // Completion must preserve started_at.
+    await expect(
+      pool.query(
+        `UPDATE mission_progress
+         SET state = 'COMPLETED'::task_progress_state,
+             progress_count = 2,
+             started_at = '2026-03-01T00:00:00.000Z'::timestamptz,
+             completed_at = '2026-02-02T00:00:00.000Z'::timestamptz
+         WHERE id = $1::uuid`,
+        [progressId],
+      ),
+    ).rejects.toMatchObject({ code: RESTRICT_VIOLATION });
+
+    await pool.query(
+      `UPDATE mission_progress
+       SET state = 'COMPLETED'::task_progress_state,
+           progress_count = 2,
+           completed_at = '2026-02-02T00:00:00.000Z'::timestamptz
+       WHERE id = $1::uuid`,
+      [progressId],
+    );
+
+    const row = await pool.query<{ started_at: Date }>(
+      `SELECT started_at FROM mission_progress WHERE id = $1::uuid`,
+      [progressId],
+    );
+    expect(row.rows[0]!.started_at.toISOString()).toBe(startedAt);
+
+    await expect(
+      pool.query(
+        `UPDATE mission_progress
+         SET completed_at = '2026-04-01T00:00:00.000Z'::timestamptz
+         WHERE id = $1::uuid`,
+        [progressId],
+      ),
+    ).rejects.toMatchObject({ code: RESTRICT_VIOLATION });
+  });
+
+  it('progress events enforce [start_at,end_at) and serialize with end_at closure', async () => {
+    const defId = await freshDefinition('P16_EVT_WIN');
+    const versionId = await insertMissionVersion(pool, {
+      missionDefinitionId: defId,
+      missionVersion: 1,
+      status: 'ACTIVE',
+      startAt: new Date('2026-06-01T00:00:00.000Z'),
+      endAt: new Date('2026-07-01T00:00:00.000Z'),
+      target: 2,
+    });
+    const evtUser = await createTestUser(pool, '16000301');
+    const progressId = await insertMissionProgress(pool, {
+      missionVersionId: versionId,
+      userId: evtUser,
+      target: 2,
+    });
+
+    // Before start rejected.
+    await expect(
+      pool.query(
+        `INSERT INTO mission_progress_events (
+           mission_progress_id, mission_version_id, user_id, period_key,
+           source_kind, source_key, progress_delta, occurred_at
+         ) VALUES (
+           $1::uuid, $2::uuid, $3::uuid, 'LIFETIME',
+           'REWARD_EVENT', 'before', 1,
+           '2026-05-31T23:59:59.000Z'::timestamptz
+         )`,
+        [progressId, versionId, evtUser],
+      ),
+    ).rejects.toMatchObject({ code: CHECK_VIOLATION });
+
+    // Exactly at start allowed.
+    await expect(
+      pool.query(
+        `INSERT INTO mission_progress_events (
+           mission_progress_id, mission_version_id, user_id, period_key,
+           source_kind, source_key, progress_delta, occurred_at
+         ) VALUES (
+           $1::uuid, $2::uuid, $3::uuid, 'LIFETIME',
+           'REWARD_EVENT', 'at-start', 1,
+           '2026-06-01T00:00:00.000Z'::timestamptz
+         )`,
+        [progressId, versionId, evtUser],
+      ),
+    ).resolves.toBeTruthy();
+
+    // Exactly at end rejected ([start, end)).
+    await expect(
+      pool.query(
+        `INSERT INTO mission_progress_events (
+           mission_progress_id, mission_version_id, user_id, period_key,
+           source_kind, source_key, progress_delta, occurred_at
+         ) VALUES (
+           $1::uuid, $2::uuid, $3::uuid, 'LIFETIME',
+           'REWARD_EVENT', 'at-end', 1,
+           '2026-07-01T00:00:00.000Z'::timestamptz
+         )`,
+        [progressId, versionId, evtUser],
+      ),
+    ).rejects.toMatchObject({ code: CHECK_VIOLATION });
+
+    // Open-ended version for concurrency cases.
+    const openDef = await freshDefinition('P16_EVT_CONC');
+    const openVersion = await insertMissionVersion(pool, {
+      missionDefinitionId: openDef,
+      missionVersion: 1,
+      status: 'ACTIVE',
+      startAt: new Date('2020-01-01T00:00:00.000Z'),
+      endAt: null,
+      target: 1,
+    });
+    const openUser = await createTestUser(pool, '16000302');
+    const openProgress = await insertMissionProgress(pool, {
+      missionVersionId: openVersion,
+      userId: openUser,
+      target: 1,
+    });
+
+    // Event first — closure at/before occurred_at blocks then rejects.
+    // Use occurred_at after progress.created_at so rejection is driven by the contribution.
+    const occurredAt = (
+      await pool.query<{ t: Date }>(
+        `SELECT (created_at + interval '2 days') AS t
+         FROM mission_progress WHERE id = $1::uuid`,
+        [openProgress],
+      )
+    ).rows[0]!.t;
+    {
+      const holder = await pool.connect();
+      const waiter = await pool.connect();
+      const watcher = await pool.connect();
+      try {
+        await holder.query('BEGIN');
+        await holder.query(
+          `INSERT INTO mission_progress_events (
+             mission_progress_id, mission_version_id, user_id, period_key,
+             source_kind, source_key, progress_delta, occurred_at
+           ) VALUES (
+             $1::uuid, $2::uuid, $3::uuid, 'LIFETIME',
+             'STREAK_DAY', 't1', 1,
+             $4::timestamptz
+           )`,
+          [openProgress, openVersion, openUser, occurredAt.toISOString()],
+        );
+        const holderPid = (
+          await holder.query<{ pid: number }>(`SELECT pg_backend_pid() AS pid`)
+        ).rows[0]!.pid;
+
+        let waiterError: unknown;
+        const waitPromise = (async () => {
+          await waiter.query('BEGIN');
+          try {
+            await waiter.query(
+              `UPDATE mission_versions
+               SET end_at = $2::timestamptz
+               WHERE id = $1::uuid`,
+              [openVersion, occurredAt.toISOString()],
+            );
+            await waiter.query('COMMIT');
+          } catch (error) {
+            waiterError = error;
+            try {
+              await waiter.query('ROLLBACK');
+            } catch {
+              // ignore
+            }
+          }
+        })();
+
+        const blocked = await waitForBlockedOnHolder(watcher, holderPid, 8_000);
+        expect(blocked).toBe(true);
+        await holder.query('COMMIT');
+        await waitPromise;
+        expect(waiterError).toMatchObject({ code: RESTRICT_VIOLATION });
+      } finally {
+        try {
+          await holder.query('ROLLBACK');
+        } catch {
+          // ignore
+        }
+        holder.release();
+        waiter.release();
+        watcher.release();
+      }
+    }
+
+    // Closure first — events after end rejected; before end allowed.
+    // end_at must be strictly after progress.created_at (now), so use a future close.
+    const closeDef = await freshDefinition('P16_EVT_CLOSE');
+    const closeVersion = await insertMissionVersion(pool, {
+      missionDefinitionId: closeDef,
+      missionVersion: 1,
+      status: 'ACTIVE',
+      startAt: new Date('2020-01-01T00:00:00.000Z'),
+      endAt: null,
+      target: 1,
+    });
+    const closeUser = await createTestUser(pool, '16000303');
+    const closeProgress = await insertMissionProgress(pool, {
+      missionVersionId: closeVersion,
+      userId: closeUser,
+      target: 1,
+    });
+    // Choose T after progress.created_at so first closure is allowed.
+    const closeAt = (
+      await pool.query<{ t: Date }>(
+        `SELECT (created_at + interval '1 day') AS t
+         FROM mission_progress WHERE id = $1::uuid`,
+        [closeProgress],
+      )
+    ).rows[0]!.t;
+    const beforeClose = new Date(closeAt.getTime() - 60_000);
+    const atClose = closeAt;
+
+    {
+      const holder = await pool.connect();
+      const waiter = await pool.connect();
+      const watcher = await pool.connect();
+      try {
+        await holder.query('BEGIN');
+        await holder.query(
+          `UPDATE mission_versions
+           SET end_at = $2::timestamptz
+           WHERE id = $1::uuid`,
+          [closeVersion, closeAt.toISOString()],
+        );
+        const holderPid = (
+          await holder.query<{ pid: number }>(`SELECT pg_backend_pid() AS pid`)
+        ).rows[0]!.pid;
+
+        const waitPromise = (async () => {
+          await waiter.query('BEGIN');
+          await waiter.query(
+            `INSERT INTO mission_progress_events (
+               mission_progress_id, mission_version_id, user_id, period_key,
+               source_kind, source_key, progress_delta, occurred_at
+             ) VALUES (
+               $1::uuid, $2::uuid, $3::uuid, 'LIFETIME',
+               'STREAK_DAY', 'during-close', 1,
+               $4::timestamptz
+             )`,
+            [closeProgress, closeVersion, closeUser, beforeClose.toISOString()],
+          );
+          await waiter.query('COMMIT');
+        })();
+
+        const blocked = await waitForBlockedOnHolder(watcher, holderPid, 8_000);
+        expect(blocked).toBe(true);
+        await holder.query('COMMIT');
+        await waitPromise;
+      } finally {
+        try {
+          await holder.query('ROLLBACK');
+        } catch {
+          // ignore
+        }
+        holder.release();
+        waiter.release();
+        watcher.release();
+      }
+    }
+
+    // After committed closure: occurred_at < end allowed (already inserted);
+    // occurred_at >= end rejected.
+    await expect(
+      pool.query(
+        `INSERT INTO mission_progress_events (
+           mission_progress_id, mission_version_id, user_id, period_key,
+           source_kind, source_key, progress_delta, occurred_at
+         ) VALUES (
+           $1::uuid, $2::uuid, $3::uuid, 'LIFETIME',
+           'STREAK_DAY', 'at-or-after-end', 1,
+           $4::timestamptz
+         )`,
+        [closeProgress, closeVersion, closeUser, atClose.toISOString()],
+      ),
+    ).rejects.toMatchObject({ code: CHECK_VIOLATION });
+
+    await expect(
+      pool.query(
+        `INSERT INTO mission_progress_events (
+           mission_progress_id, mission_version_id, user_id, period_key,
+           source_kind, source_key, progress_delta, occurred_at
+         ) VALUES (
+           $1::uuid, $2::uuid, $3::uuid, 'LIFETIME',
+           'STREAK_DAY', 'before-end-ok', 1,
+           $4::timestamptz
+         )`,
+        [
+          closeProgress,
+          closeVersion,
+          closeUser,
+          new Date(closeAt.getTime() - 120_000).toISOString(),
+        ],
+      ),
+    ).resolves.toBeTruthy();
   });
 });

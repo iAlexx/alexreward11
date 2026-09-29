@@ -53,6 +53,7 @@ provider business behaviour is implemented here.
 | `0049_phase15_referral_remediation.sql`              | Phase 15 remediation: referenced code-policy effective_to safe closure; `referral_reward_decisions` rule/membership provenance columns (no production seeds / no money)                                                                                    |
 | `0050_phase15_telegram_referral_transport.sql`       | Phase 15 micro-fix: Telegram start-param transport — code_length <= 60; alphabet [A-Za-z0-9_-] only (no seeds / no rewrite)                                                                                                                              |
 | `0051_phase16_mission_integrity.sql`                 | Phase 16 Step 1: mission_* authority + semantic freeze, ACTIVE GiST exclusion, safe end_at, progress/claims integrity + append-only events; task_reward_events append-only (no seeds / no money)                                                          |
+| `0052_phase16_mission_lifecycle_hardening.sql`       | Phase 16 Step 1.1: started_at one-shot; progress-event FOR SHARE + `[start_at,end_at)` window; safe end_at includes contribution occurred_at; claim-event actor provenance (no seeds / no money)                                                           |
 
 Migrations `0001`–`0026` remain immutable. Signer login isolation is added only by
 forward migration `0027` (local provision script sets password; ops credential rotation

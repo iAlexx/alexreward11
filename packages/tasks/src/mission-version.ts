@@ -180,49 +180,125 @@ export type ResolveActiveMissionVersionOptions = {
   readonly at?: Date;
 };
 
-async function resolveDefinitionId(
-  client: PoolClient,
+function assertExclusiveLookup(
   options: ResolveActiveMissionVersionOptions,
-): Promise<string> {
+): void {
   if (options.missionDefinitionId !== undefined && options.code !== undefined) {
     throw new MissionDomainError(
       'MISSION_INTEGRITY',
       'provide missionDefinitionId or code, not both',
     );
   }
-  if (options.missionDefinitionId !== undefined) {
-    return options.missionDefinitionId;
-  }
-  if (options.code === undefined || options.code === '') {
+  if (
+    options.missionDefinitionId === undefined &&
+    (options.code === undefined || options.code === '')
+  ) {
     throw new MissionDomainError(
       'MISSION_INTEGRITY',
       'missionDefinitionId or code is required',
     );
   }
-  const result = await client.query<{ id: string }>(
-    `SELECT id FROM mission_definitions WHERE code = $1`,
-    [options.code],
-  );
-  const id = result.rows[0]?.id;
-  if (id === undefined) {
-    throw new MissionDomainError(
-      'MISSION_NOT_CONFIGURED',
-      `mission definition code ${options.code} not found`,
-      { code: options.code },
-    );
-  }
-  return id;
 }
 
 /**
- * Resolve the single ACTIVE mission version for a definition applicable at `at`.
+ * Load mission_definitions and require status = ACTIVE for authoritative resolution.
+ * Missing → MISSION_NOT_CONFIGURED; present but inactive → MISSION_NOT_ACTIVE.
+ */
+async function resolveActiveDefinitionId(
+  client: PoolClient,
+  options: ResolveActiveMissionVersionOptions,
+  forShare: boolean,
+): Promise<string> {
+  assertExclusiveLookup(options);
+
+  const lockSql = forShare ? ' FOR SHARE' : '';
+  let result: { rows: Array<{ id: string; status: string }> };
+
+  if (options.missionDefinitionId !== undefined) {
+    result = await client.query<{ id: string; status: string }>(
+      `SELECT id, status::text AS status
+       FROM mission_definitions
+       WHERE id = $1::uuid${lockSql}`,
+      [options.missionDefinitionId],
+    );
+  } else {
+    result = await client.query<{ id: string; status: string }>(
+      `SELECT id, status::text AS status
+       FROM mission_definitions
+       WHERE code = $1${lockSql}`,
+      [options.code],
+    );
+  }
+
+  const row = result.rows[0];
+  if (row === undefined) {
+    throw new MissionDomainError(
+      'MISSION_NOT_CONFIGURED',
+      options.missionDefinitionId !== undefined
+        ? `mission definition ${options.missionDefinitionId} not found`
+        : `mission definition code ${options.code} not found`,
+      {
+        missionDefinitionId: options.missionDefinitionId,
+        code: options.code,
+      },
+    );
+  }
+
+  if (row.status !== 'ACTIVE') {
+    throw new MissionDomainError(
+      'MISSION_NOT_ACTIVE',
+      `mission definition status is ${row.status}, expected ACTIVE`,
+      {
+        missionDefinitionId: row.id,
+        status: row.status,
+      },
+    );
+  }
+
+  return row.id;
+}
+
+function requireSingleActiveVersion(
+  rows: MissionVersionRow[],
+  definitionId: string,
+  at: Date,
+): ResolvedMissionVersion {
+  if (rows.length === 0) {
+    throw new MissionDomainError(
+      'MISSION_NOT_CONFIGURED',
+      'No ACTIVE mission version applies at the requested time',
+      { missionDefinitionId: definitionId, at: at.toISOString() },
+    );
+  }
+  if (rows.length > 1) {
+    throw new MissionDomainError(
+      'MISSION_VERSION_AMBIGUOUS',
+      'Multiple ACTIVE mission versions apply at the same instant',
+      {
+        missionDefinitionId: definitionId,
+        at: at.toISOString(),
+        missionVersions: rows.map((row) => row.mission_version),
+      },
+    );
+  }
+
+  const mapped = mapMissionVersionRow(rows[0]!);
+  if (mapped.status !== 'ACTIVE') {
+    throw new MissionDomainError('MISSION_NOT_ACTIVE', 'Resolved mission version is not ACTIVE');
+  }
+  return mapped as ResolvedMissionVersion;
+}
+
+/**
+ * Resolve the single ACTIVE mission version for an ACTIVE definition applicable at `at`.
  * Fail closed when zero or multiple rows match — never invent mission rules.
+ * Read-only: does not acquire lifecycle locks.
  */
 export async function resolveActiveMissionVersion(
   client: PoolClient,
   options: ResolveActiveMissionVersionOptions,
 ): Promise<ResolvedMissionVersion> {
-  const definitionId = await resolveDefinitionId(client, options);
+  const definitionId = await resolveActiveDefinitionId(client, options, false);
   const at = options.at ?? new Date();
   const result = await client.query<MissionVersionRow>(
     `${MISSION_VERSION_SELECT}
@@ -234,48 +310,28 @@ export async function resolveActiveMissionVersion(
      ORDER BY mission_version ASC`,
     [definitionId, at.toISOString()],
   );
-
-  if (result.rows.length === 0) {
-    throw new MissionDomainError(
-      'MISSION_NOT_CONFIGURED',
-      'No ACTIVE mission version applies at the requested time',
-      { missionDefinitionId: definitionId, at: at.toISOString() },
-    );
-  }
-  if (result.rows.length > 1) {
-    throw new MissionDomainError(
-      'MISSION_VERSION_AMBIGUOUS',
-      'Multiple ACTIVE mission versions apply at the same instant',
-      {
-        missionDefinitionId: definitionId,
-        at: at.toISOString(),
-        missionVersions: result.rows.map((row) => row.mission_version),
-      },
-    );
-  }
-
-  const mapped = mapMissionVersionRow(result.rows[0]!);
-  if (mapped.status !== 'ACTIVE') {
-    throw new MissionDomainError('MISSION_NOT_ACTIVE', 'Resolved mission version is not ACTIVE');
-  }
-  return mapped as ResolvedMissionVersion;
+  return requireSingleActiveVersion(result.rows, definitionId, at);
 }
 
 /**
  * Authoritative ACTIVE mission-version resolution for evaluation paths.
- * Uses server current time only (no caller `at`) and locks matching rows FOR SHARE.
+ * Lock order: mission_definitions FOR SHARE, then matching mission_versions FOR SHARE.
+ * Uses server current time only (no caller `at`).
  */
 export async function resolveActiveMissionVersionForEvaluation(
   client: PoolClient,
   options: { readonly missionDefinitionId?: string; readonly code?: string },
 ): Promise<ResolvedMissionVersion> {
-  const definitionId = await resolveDefinitionId(client, options);
+  // 1) Lock definition lifecycle authority first (consistent order: definition → version).
+  const definitionId = await resolveActiveDefinitionId(client, options, true);
+
   const nowResult = await client.query<{ now: Date }>(`SELECT now() AS now`);
   const at = nowResult.rows[0]?.now;
   if (at === undefined) {
     throw new MissionDomainError('INTERNAL', 'failed to read server now()');
   }
 
+  // 2) Lock matching ACTIVE version row(s).
   const result = await client.query<MissionVersionRow>(
     `${MISSION_VERSION_SELECT}
      FROM mission_versions
@@ -287,31 +343,7 @@ export async function resolveActiveMissionVersionForEvaluation(
      FOR SHARE`,
     [definitionId, at.toISOString()],
   );
-
-  if (result.rows.length === 0) {
-    throw new MissionDomainError(
-      'MISSION_NOT_CONFIGURED',
-      'No ACTIVE mission version applies at the requested time',
-      { missionDefinitionId: definitionId, at: at.toISOString() },
-    );
-  }
-  if (result.rows.length > 1) {
-    throw new MissionDomainError(
-      'MISSION_VERSION_AMBIGUOUS',
-      'Multiple ACTIVE mission versions apply at the same instant',
-      {
-        missionDefinitionId: definitionId,
-        at: at.toISOString(),
-        missionVersions: result.rows.map((row) => row.mission_version),
-      },
-    );
-  }
-
-  const mapped = mapMissionVersionRow(result.rows[0]!);
-  if (mapped.status !== 'ACTIVE') {
-    throw new MissionDomainError('MISSION_NOT_ACTIVE', 'Resolved mission version is not ACTIVE');
-  }
-  return mapped as ResolvedMissionVersion;
+  return requireSingleActiveVersion(result.rows, definitionId, at);
 }
 
 /** Load a mission version by primary key (any status). */
