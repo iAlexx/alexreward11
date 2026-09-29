@@ -1,7 +1,7 @@
 /**
  * Phase 16 mission package.
  *
- * Step 1: versioned mission authority + integrity (no monetary issuance).
+ * Step 2: idempotent progress contribution engine (no monetary issuance).
  */
 
 export { MissionDomainError, type MissionErrorCode } from './errors.js';
@@ -20,3 +20,30 @@ export {
   type ResolveActiveMissionVersionOptions,
   type ResolvedMissionVersion,
 } from './mission-version.js';
+export {
+  formatUtcDayKey,
+  formatUtcMonthKey,
+  resolveMissionPeriod,
+  utcDayWindow,
+  utcMonthWindow,
+  type MissionPeriod,
+} from './period.js';
+export {
+  parseMissionEligibilityPolicy,
+  type MissionEligibilityPolicy,
+  type MissionStreakPolicy,
+  type MissionStreakSource,
+} from './eligibility-policy.js';
+export {
+  assertSourceMatchesCondition,
+  requiredSourceKindForCondition,
+  validateMissionVersionStructure,
+  type MissionProgressSourceKind,
+} from './condition.js';
+export {
+  contributeMissionProgress,
+  loadMissionVersionForContribution,
+  type ContributeMissionProgressInput,
+  type ContributeMissionProgressResult,
+} from './contribute.js';
+export { insertMissionOutboxEvent, type InsertMissionOutboxEventInput } from './outbox.js';
