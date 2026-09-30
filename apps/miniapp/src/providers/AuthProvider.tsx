@@ -16,6 +16,7 @@ import {
 import { useTranslations } from 'next-intl';
 
 import { ApiError, createApiClient, type ApiClient } from '../lib/api/client';
+import { decideAuthBoot } from '../lib/auth/boot-decision';
 import {
   clearStoredAuth,
   loadStoredAuth,
@@ -149,10 +150,22 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
 
     async function boot(): Promise<void> {
       setStatus('LOADING');
+      // Resolve current Telegram initData BEFORE trusting any stored session.
+      const initData = resolveAuthInitData();
       const existing = loadStoredAuth();
-      if (existing !== null) {
-        persist(existing);
-        const expiresAt = Date.parse(existing.session.accessExpiresAt);
+      const decision = decideAuthBoot({ stored: existing, initData });
+
+      if (decision.kind === 'UNAUTHORIZED') {
+        if (!cancelled) {
+          clear();
+          setStatus('UNAUTHORIZED');
+        }
+        return;
+      }
+
+      if (decision.kind === 'REUSE_STORED') {
+        persist(decision.stored);
+        const expiresAt = Date.parse(decision.stored.session.accessExpiresAt);
         if (Number.isFinite(expiresAt) && expiresAt <= Date.now() + 30_000) {
           const token = await refreshSession();
           if (cancelled) return;
@@ -162,20 +175,16 @@ export function AuthProvider({ children }: { readonly children: ReactNode }) {
         return;
       }
 
-      const initData = resolveAuthInitData();
-      if (initData === null) {
-        if (!cancelled) {
-          clear();
-          setStatus('UNAUTHORIZED');
-        }
-        return;
+      // AUTHENTICATE_TELEGRAM — server HMAC remains the sole Telegram identity authority.
+      if (decision.clearStoredFirst) {
+        clear();
       }
 
       try {
         const result = await createApiClient({
           baseUrl: webConfig.NEXT_PUBLIC_API_BASE_URL,
           getAccessToken: () => null,
-        }).authTelegram(initData);
+        }).authTelegram(decision.initData);
         if (cancelled) return;
         persist(result);
         setStatus('READY');
