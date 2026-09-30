@@ -308,14 +308,14 @@ Exact accepted source commit: `bea319ae389a458d87b4f874e4468b1b087d5e9f`
 | -------- | ------ |
 | Canonical source ZIP | `ALEx_Rewards_PHASE_17_PUBLIC_PAYOUT_LOGS_20260930-180057_bea319a.zip` |
 | Canonical source ZIP path | `phase-archives/PHASE_17_PUBLIC_PAYOUT_LOGS/ALEx_Rewards_PHASE_17_PUBLIC_PAYOUT_LOGS_20260930-180057_bea319a.zip` |
-| Canonical source ZIP SHA256 | *(filled after packaging; see `SHA256SUMS.txt`)* |
+| Canonical source ZIP SHA256 | `a49e6d4ee82a1d0e4a97ab3c5288052741991c77939b631f8c2970495ca6e6fe` |
 | Final review-package filename | `PHASE_17_PUBLIC_PAYOUT_LOGS_PACKAGE_20260930-180057_bea319a.zip` |
-| Source extraction | **PASS** (required) |
-| Outer package extraction | **PASS** (required) |
-| Prohibited-path scan (source + outer) | **PASS** (required) |
-| Nested source validation | **PASS** (required) |
-| Forward-slash ZIP entry names | **PASS** (required; entries under `PHASE_17_PUBLIC_PAYOUT_LOGS/`) |
-| SHA256SUMS verification | **PASS** (required) |
+| Source extraction | **PASS** |
+| Outer package extraction | **PASS** |
+| Prohibited-path scan (source + outer) | **PASS** |
+| Nested source validation | **PASS** |
+| Forward-slash ZIP entry names | **PASS** (4 entries under `PHASE_17_PUBLIC_PAYOUT_LOGS/`) |
+| SHA256SUMS verification | **PASS** |
 
 Final review-package SHA256 is recorded externally in `PACKAGE_SHA256.txt` beside the package.
 Section O does **not** embed the outer package SHA256.
