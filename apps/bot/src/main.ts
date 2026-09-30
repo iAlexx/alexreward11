@@ -97,17 +97,21 @@ try {
       );
     }
 
-    // Public Referral transport bridge only — no attribution / no financial authority.
+    // Public /start transport bridge only — no attribution / no financial authority.
     bot.command('start', async (ctx) => {
       const payload = typeof ctx.match === 'string' ? ctx.match : '';
       const bridge = resolveReferralStartBridge({
         startPayload: payload,
         botUsername: config.TELEGRAM_PUBLIC_BOT_USERNAME,
       });
-      if (bridge.kind !== 'LAUNCH') {
+      if (bridge.kind === 'IGNORE') {
         return;
       }
-      await ctx.reply('Open LOOTRA to continue.', {
+      const text =
+        bridge.kind === 'LAUNCH_MAIN'
+          ? 'Welcome to LOOTRA. Tap below to open the Mini App.'
+          : 'Open LOOTRA to continue.';
+      await ctx.reply(text, {
         reply_markup: {
           inline_keyboard: [[{ text: 'Open LOOTRA', url: bridge.launchUrl }]],
         },

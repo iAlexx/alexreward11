@@ -31,6 +31,7 @@ export {
   buildReferralStartPayload,
   buildReferralBotStartLink,
   buildReferralMiniAppLaunchLink,
+  buildMainMiniAppLaunchLink,
   isTelegramSafeReferralCodeAlphabetChar,
   type ReferralStartPayloadResult,
 } from './telegram-links.js';

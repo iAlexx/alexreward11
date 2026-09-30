@@ -80,3 +80,19 @@ export function buildReferralMiniAppLaunchLink(
   if (!built.ok) return null;
   return `https://t.me/${username}?startapp=${built.payload}`;
 }
+
+
+/** Canonical Telegram bot username (no leading @), matches config validation. */
+const TELEGRAM_PUBLIC_BOT_USERNAME = /^[A-Za-z][A-Za-z0-9_]{3,30}[A-Za-z0-9]$/;
+
+/**
+ * Main Mini App launch link with no startapp payload:
+ * https://t.me/<username>?startapp
+ * Presentation/transport only — no referral identity.
+ */
+export function buildMainMiniAppLaunchLink(username: string): string | null {
+  if (!TELEGRAM_PUBLIC_BOT_USERNAME.test(username)) {
+    return null;
+  }
+  return `https://t.me/${username}?startapp`;
+}

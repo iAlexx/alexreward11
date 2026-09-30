@@ -1,11 +1,25 @@
 /**
- * Bot Referral /start transport bridge — pure logic, no DB mutation.
+ * Bot /start transport bridge — pure logic, no DB mutation.
  */
 import { describe, expect, it } from 'vitest';
 
 import { resolveReferralStartBridge } from '../src/referral-start.js';
 
 describe('resolveReferralStartBridge', () => {
+  it('plain /start launches Main Mini App without startapp identity', () => {
+    const result = resolveReferralStartBridge({
+      startPayload: '',
+      botUsername: 'ExampleBot',
+    });
+    expect(result).toEqual({
+      kind: 'LAUNCH_MAIN',
+      launchUrl: 'https://t.me/ExampleBot?startapp',
+    });
+    if (result.kind !== 'LAUNCH_MAIN') throw new Error('expected LAUNCH_MAIN');
+    expect(result.launchUrl.includes('startapp=')).toBe(false);
+    expect(result.launchUrl.includes('ref_')).toBe(false);
+  });
+
   it('builds Mini App ?startapp=ref_<code> for valid /start payload', () => {
     const result = resolveReferralStartBridge({
       startPayload: 'ref_ABC_123-x',
@@ -41,6 +55,12 @@ describe('resolveReferralStartBridge', () => {
     expect(
       resolveReferralStartBridge({
         startPayload: 'ref_ABC_123-x',
+        botUsername: undefined,
+      }).kind,
+    ).toBe('IGNORE');
+    expect(
+      resolveReferralStartBridge({
+        startPayload: '',
         botUsername: undefined,
       }).kind,
     ).toBe('IGNORE');

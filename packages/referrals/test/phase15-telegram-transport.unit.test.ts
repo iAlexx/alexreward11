@@ -10,6 +10,7 @@ import {
   assertReferralCodePolicyShape,
   buildReferralBotStartLink,
   buildReferralMiniAppLaunchLink,
+  buildMainMiniAppLaunchLink,
   buildReferralStartPayload,
   parseReferralStartParam,
   referralCodeEntropyBits,
@@ -108,5 +109,12 @@ describe('Telegram deep-link builders', () => {
       kind: 'REFERRAL_CODE',
       code,
     });
+  });
+
+  it('builds Main Mini App ?startapp with no payload', () => {
+    expect(buildMainMiniAppLaunchLink('ExampleBot')).toBe('https://t.me/ExampleBot?startapp');
+    expect(buildMainMiniAppLaunchLink('')).toBeNull();
+    expect(buildMainMiniAppLaunchLink('@ExampleBot')).toBeNull();
+    expect(buildMainMiniAppLaunchLink('bad bot')).toBeNull();
   });
 });

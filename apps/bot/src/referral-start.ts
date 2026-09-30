@@ -1,10 +1,11 @@
 /**
- * Public Referral /start transport bridge (Bot).
+ * Public /start transport bridge (Bot).
  *
  * Transport ONLY: never attributes referrals, never mutates referral_edges,
  * never issues rewards. Signed Mini App initData remains attribution authority.
  */
 import {
+  buildMainMiniAppLaunchLink,
   buildReferralMiniAppLaunchLink,
   buildReferralStartPayload,
   parseReferralStartParam,
@@ -17,11 +18,17 @@ export type ReferralStartBridgeResult =
       readonly payload: string;
       readonly code: string;
     }
+  | {
+      readonly kind: 'LAUNCH_MAIN';
+      readonly launchUrl: string;
+    }
   | { readonly kind: 'IGNORE' };
 
 /**
  * Resolve a Telegram /start payload into a Mini App launch URL when safe.
- * Malformed / unsafe / unrelated payloads => IGNORE (no referral state).
+ * - Empty payload => Main Mini App launch (no startapp identity).
+ * - Valid ref_<code> => referral Mini App launch (?startapp=ref_<code>).
+ * - Malformed / unsafe / unrelated payloads => IGNORE (no referral state).
  */
 export function resolveReferralStartBridge(input: {
   readonly startPayload: string | null | undefined;
@@ -33,7 +40,11 @@ export function resolveReferralStartBridge(input: {
   }
   const raw = input.startPayload ?? '';
   if (raw === '') {
-    return { kind: 'IGNORE' };
+    const launchUrl = buildMainMiniAppLaunchLink(username);
+    if (launchUrl === null) {
+      return { kind: 'IGNORE' };
+    }
+    return { kind: 'LAUNCH_MAIN', launchUrl };
   }
   const parsed = parseReferralStartParam(raw);
   if (parsed.kind !== 'REFERRAL_CODE') {
