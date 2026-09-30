@@ -1,17 +1,28 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import { buildWorkerHealth } from '../src/health.js';
 import { createWithdrawalOutboxPoller, startWithdrawalOutboxRelay } from '../src/outbox-relay.js';
 
+const srcDir = join(dirname(fileURLToPath(import.meta.url)), '../src');
+
 describe('withdrawal outbox relay gate', () => {
   it('does not schedule or invoke relay handlers when disabled', async () => {
     const processApproved = vi.fn(async () => undefined);
     const processFailedPreRetry = vi.fn(async () => undefined);
+    const processConfirmedPublicPayout = vi.fn(async () => undefined);
     const schedule = vi.fn();
     const timer = startWithdrawalOutboxRelay({
       enabled: false,
       intervalMs: 2_000,
-      poll: createWithdrawalOutboxPoller({ processApproved, processFailedPreRetry }),
+      poll: createWithdrawalOutboxPoller({
+        processApproved,
+        processFailedPreRetry,
+        processConfirmedPublicPayout,
+      }),
       onError: () => undefined,
       schedule,
     });
@@ -20,15 +31,19 @@ describe('withdrawal outbox relay gate', () => {
     expect(schedule).not.toHaveBeenCalled();
     expect(processApproved).not.toHaveBeenCalled();
     expect(processFailedPreRetry).not.toHaveBeenCalled();
+    expect(processConfirmedPublicPayout).not.toHaveBeenCalled();
   });
 
-  it('keeps the approved then failed-pre-retry poll when enabled', async () => {
+  it('runs approved, failed-pre-retry, then confirmed public-payout when enabled', async () => {
     const order: string[] = [];
     const processApproved = vi.fn(async () => {
       order.push('approved');
     });
     const processFailedPreRetry = vi.fn(async () => {
       order.push('failed-pre-retry');
+    });
+    const processConfirmedPublicPayout = vi.fn(async () => {
+      order.push('confirmed-public-payout');
     });
     let tick: (() => void) | undefined;
     const schedule = vi.fn((callback: () => void, intervalMs: number) => {
@@ -39,7 +54,11 @@ describe('withdrawal outbox relay gate', () => {
     const timer = startWithdrawalOutboxRelay({
       enabled: true,
       intervalMs: 2_000,
-      poll: createWithdrawalOutboxPoller({ processApproved, processFailedPreRetry }),
+      poll: createWithdrawalOutboxPoller({
+        processApproved,
+        processFailedPreRetry,
+        processConfirmedPublicPayout,
+      }),
       onError: () => {
         throw new Error('relay error was not expected');
       },
@@ -49,9 +68,22 @@ describe('withdrawal outbox relay gate', () => {
     expect(processApproved).not.toHaveBeenCalled();
     tick?.();
     await vi.waitFor(() => {
-      expect(processFailedPreRetry).toHaveBeenCalledTimes(1);
+      expect(processConfirmedPublicPayout).toHaveBeenCalledTimes(1);
     });
-    expect(order).toEqual(['approved', 'failed-pre-retry']);
+    expect(order).toEqual(['approved', 'failed-pre-retry', 'confirmed-public-payout']);
+  });
+
+  it('worker outbox modules never import Telegram/grammY', () => {
+    const relay = readFileSync(join(srcDir, 'outbox-relay.ts'), 'utf8');
+    const main = readFileSync(join(srcDir, 'main.ts'), 'utf8');
+    for (const source of [relay, main]) {
+      expect(source).not.toMatch(/from ['"]grammy['"]/);
+      expect(source).not.toMatch(/TELEGRAM_BOT_TOKEN/);
+      expect(source).not.toMatch(/sendMessage/);
+      expect(source).not.toMatch(/createGrammy/);
+    }
+    expect(main).toContain('processWithdrawalConfirmedPublicPayoutOutboxBatch');
+    expect(main).toContain('mapDeploymentEnvToFeatureEnvironment');
   });
 });
 

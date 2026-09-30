@@ -1,10 +1,12 @@
 /**
  * Withdrawal outbox relay scheduling.
  * When disabled, no interval is armed and no relay handler runs.
+ * Confirmed public-payout consumer creates publications only (never Telegram).
  */
 export interface WithdrawalOutboxRelayHandlers {
   readonly processApproved: () => Promise<unknown>;
   readonly processFailedPreRetry: () => Promise<unknown>;
+  readonly processConfirmedPublicPayout: () => Promise<unknown>;
 }
 
 export function createWithdrawalOutboxPoller(
@@ -13,6 +15,7 @@ export function createWithdrawalOutboxPoller(
   return async () => {
     await handlers.processApproved();
     await handlers.processFailedPreRetry();
+    await handlers.processConfirmedPublicPayout();
   };
 }
 

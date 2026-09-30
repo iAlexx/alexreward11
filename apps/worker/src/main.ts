@@ -11,7 +11,10 @@ import { createShutdownCoordinator, initializeObservability } from '@alex-reward
 import {
   processWithdrawalApprovedOutboxBatch,
   processWithdrawalFailedPreRetryOutboxBatch,
+  processWithdrawalConfirmedPublicPayoutOutboxBatch,
+  mapDeploymentEnvToFeatureEnvironment,
   buildPhase10PayoutConfig,
+  type PublicPayoutFeatureEnvironment,
 } from '@alex-rewards/withdrawals';
 
 import { createWithdrawalActivities } from './activities.js';
@@ -71,6 +74,7 @@ let temporalClient: Client | undefined;
 let outboxPollTimer: ReturnType<typeof setInterval> | undefined;
 let referralMaintenanceTimer: ReturnType<typeof setInterval> | undefined;
 let missionMaintenanceTimer: ReturnType<typeof setInterval> | undefined;
+let publicPayoutFeatureEnvironment: PublicPayoutFeatureEnvironment | undefined;
 
 const health = (readyForTraffic: boolean): HealthResponse =>
   buildWorkerHealth({
@@ -113,7 +117,18 @@ try {
     process.exitCode = 1;
   });
 
+  try {
+    publicPayoutFeatureEnvironment = mapDeploymentEnvToFeatureEnvironment(config.DEPLOYMENT_ENV);
+  } catch (error) {
+    publicPayoutFeatureEnvironment = undefined;
+    observability.logger.warn(
+      { err: error, deploymentEnv: config.DEPLOYMENT_ENV },
+      'public payout outbox consumer disabled: DEPLOYMENT_ENV unmapped (fail closed)',
+    );
+  }
+
   // Historical poll when enabled. Disabled staging integration never arms this interval.
+  // Confirmed public-payout handler creates publications only — never Telegram.
   outboxPollTimer = startWithdrawalOutboxRelay({
     enabled: config.WORKER_OUTBOX_RELAY_ENABLED,
     intervalMs: OUTBOX_POLL_INTERVAL_MS,
@@ -121,6 +136,7 @@ try {
       if (dbPool === undefined || temporalClient === undefined) return;
       const pool = dbPool;
       const client = temporalClient;
+      const publicPayoutEnvironment = publicPayoutFeatureEnvironment;
       await createWithdrawalOutboxPoller({
         processApproved: () =>
           processWithdrawalApprovedOutboxBatch(pool, {
@@ -136,6 +152,12 @@ try {
             fakeChainEnabled: withdrawalConfig.fakeChainEnabled,
             realChainEnabled: phase10Config.realChainEnabled,
           }),
+        processConfirmedPublicPayout: async () => {
+          if (publicPayoutEnvironment === undefined) return;
+          await processWithdrawalConfirmedPublicPayoutOutboxBatch(pool, {
+            environment: publicPayoutEnvironment,
+          });
+        },
       })();
     },
     onError: (error) => {

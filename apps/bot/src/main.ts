@@ -10,9 +10,19 @@ import {
 } from '@alex-rewards/control-center';
 import { HEALTH_CONTRACT_VERSION, type HealthResponse } from '@alex-rewards/contracts';
 import { createShutdownCoordinator, initializeObservability } from '@alex-rewards/observability';
-import { withdrawalEngineConfigFromValidatedApi } from '@alex-rewards/withdrawals';
+import {
+  claimAndDeliverPublicPayoutBatch,
+  mapDeploymentEnvToFeatureEnvironment,
+  withdrawalEngineConfigFromValidatedApi,
+  type PublicPayoutFeatureEnvironment,
+} from '@alex-rewards/withdrawals';
 
 import { createGrammyApprovalsSender } from './approvals-telegram-sender.js';
+import {
+  PUBLIC_PAYOUT_POLL_INTERVAL_MS,
+  startPublicPayoutDeliveryPoller,
+} from './public-payout-poller.js';
+import { createGrammyPublicPayoutSender } from './public-payout-telegram-sender.js';
 import { resolveReferralStartBridge } from './referral-start.js';
 import { shouldStartTelegramControlCenter } from './telegram-control-center-gate.js';
 
@@ -38,6 +48,8 @@ let pool: Pool | undefined;
 let ready = config.BOT_TRANSPORT_MODE === 'disabled';
 let ownerReviewPollTimer: ReturnType<typeof setInterval> | undefined;
 let ownerReviewPollInFlight = false;
+let publicPayoutPollTimer: ReturnType<typeof setInterval> | undefined;
+let publicPayoutFeatureEnvironment: PublicPayoutFeatureEnvironment | undefined;
 
 const controlCenterConfig = controlCenterConfigFromBot(config);
 const withdrawalEngineConfig = withdrawalEngineConfigFromValidatedApi({
@@ -74,6 +86,16 @@ try {
     pool = new Pool({ connectionString: config.DATABASE_URL });
     bot = new Bot(config.TELEGRAM_BOT_TOKEN);
     const approvalsSender = createGrammyApprovalsSender(bot.api);
+    const publicPayoutSender = createGrammyPublicPayoutSender(bot.api);
+    try {
+      publicPayoutFeatureEnvironment = mapDeploymentEnvToFeatureEnvironment(config.DEPLOYMENT_ENV);
+    } catch (error) {
+      publicPayoutFeatureEnvironment = undefined;
+      observability.logger.warn(
+        { err: error, deploymentEnv: config.DEPLOYMENT_ENV },
+        'public payout delivery poller disabled: DEPLOYMENT_ENV unmapped (fail closed)',
+      );
+    }
 
     // Public Referral transport bridge only — no attribution / no financial authority.
     bot.command('start', async (ctx) => {
@@ -154,6 +176,24 @@ try {
           ownerReviewPollInFlight = false;
         });
     }, OWNER_REVIEW_POLL_INTERVAL_MS);
+
+    // Public payout Telegram delivery — missing destination/feature does not affect readiness.
+    publicPayoutPollTimer = startPublicPayoutDeliveryPoller({
+      enabled: publicPayoutFeatureEnvironment !== undefined,
+      intervalMs: PUBLIC_PAYOUT_POLL_INTERVAL_MS,
+      poll: async () => {
+        if (pool === undefined || publicPayoutFeatureEnvironment === undefined) return;
+        await claimAndDeliverPublicPayoutBatch(pool, {
+          owner: 'bot-public-payout',
+          sender: publicPayoutSender,
+          environment: publicPayoutFeatureEnvironment,
+          recoverStaleFirst: true,
+        });
+      },
+      onError: (error) => {
+        observability.logger.warn({ err: error }, 'public payout delivery batch failed');
+      },
+    });
   }
   observability.logger.info(
     {
@@ -174,7 +214,16 @@ const shutdown = createShutdownCoordinator(observability.logger, 'bot', [
     ready = false;
   },
   () => {
-    if (ownerReviewPollTimer !== undefined) clearInterval(ownerReviewPollTimer);
+    if (ownerReviewPollTimer !== undefined) {
+      clearInterval(ownerReviewPollTimer);
+      ownerReviewPollTimer = undefined;
+    }
+  },
+  () => {
+    if (publicPayoutPollTimer !== undefined) {
+      clearInterval(publicPayoutPollTimer);
+      publicPayoutPollTimer = undefined;
+    }
   },
   async () => {
     if (bot?.isRunning()) await bot.stop();
