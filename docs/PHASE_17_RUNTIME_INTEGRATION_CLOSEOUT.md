@@ -186,5 +186,19 @@ change Phase 17 authoritative payout semantics or financial boundaries. They are
 staging/runtime integration fixes for TonConnect manifest exposure, Telegram entry UX, Mini App
 startapp referral transport URLs, and Telegram account-context session safety.
 
-**Not archived.** **Phase 18 not started.** **No deploy performed as part of this closeout
-document commit.**
+**Not archived.** **Phase 18 not started.**
+
+### Deployment accuracy (docs commit `c67d5bc`)
+
+- **No manual deployment** was performed as part of the closeout documentation task
+  (Cursor did not trigger Railway deploy, and no operator deploy command was run).
+- Pushing `c67d5bc5180f1597e089fd74dff56eb5537d3001` to `staging-runtime-validation`
+  triggered the **normal Railway auto-deploy** for the branch-connected
+  **miniapp-staging** service only.
+- That auto-deploy completed **SUCCESS**:
+  - Railway Deployment ID: `6703476f-b40f-46c4-8874-1cf12f0da949`
+  - Service: `miniapp-staging`
+  - Commit: `c67d5bc5180f1597e089fd74dff56eb5537d3001`
+- This docs commit did **not** trigger an API / Bot / Worker Phase 17 financial or
+  public-payout deployment.
+- **No Mainnet deployment** occurred.
