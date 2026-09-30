@@ -92,20 +92,20 @@ describe('Telegram deep-link builders', () => {
     expect(buildReferralStartPayload('')).toEqual({ ok: false, reason: 'EMPTY' });
   });
 
-  it('preserves exact code identity across share → bridge → Mini App parse', () => {
+  it('preserves exact code identity across legacy start → startapp bridge → Mini App parse', () => {
     const code = 'AbC_12-XyZ';
-    const share = buildReferralBotStartLink('MyBotName', code);
-    const bridge = buildReferralMiniAppLaunchLink('MyBotName', code);
-    expect(share).toBe(`https://t.me/MyBotName?start=ref_${code}`);
-    expect(bridge).toBe(`https://t.me/MyBotName?startapp=ref_${code}`);
-    const sharePayload = share!.split('?start=')[1]!;
-    const bridgePayload = bridge!.split('?startapp=')[1]!;
-    expect(sharePayload).toBe(bridgePayload);
-    expect(parseReferralStartParam(sharePayload)).toEqual({
+    const legacyStart = buildReferralBotStartLink('MyBotName', code);
+    const userFacing = buildReferralMiniAppLaunchLink('MyBotName', code);
+    expect(legacyStart).toBe(`https://t.me/MyBotName?start=ref_${code}`);
+    expect(userFacing).toBe(`https://t.me/MyBotName?startapp=ref_${code}`);
+    const legacyPayload = legacyStart!.split('?start=')[1]!;
+    const startappPayload = userFacing!.split('?startapp=')[1]!;
+    expect(legacyPayload).toBe(startappPayload);
+    expect(parseReferralStartParam(legacyPayload)).toEqual({
       kind: 'REFERRAL_CODE',
       code,
     });
-    expect(parseReferralStartParam(bridgePayload)).toEqual({
+    expect(parseReferralStartParam(startappPayload)).toEqual({
       kind: 'REFERRAL_CODE',
       code,
     });

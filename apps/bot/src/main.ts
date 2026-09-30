@@ -23,7 +23,7 @@ import {
   startPublicPayoutDeliveryPoller,
 } from './public-payout-poller.js';
 import { createGrammyPublicPayoutSender } from './public-payout-telegram-sender.js';
-import { resolveReferralStartBridge } from './referral-start.js';
+import { buildPlainStartWebAppButton, resolveReferralStartBridge } from './referral-start.js';
 import { shouldStartTelegramControlCenter } from './telegram-control-center-gate.js';
 
 const OWNER_REVIEW_POLL_INTERVAL_MS = 2_000;
@@ -103,15 +103,20 @@ try {
       const bridge = resolveReferralStartBridge({
         startPayload: payload,
         botUsername: config.TELEGRAM_PUBLIC_BOT_USERNAME,
+        miniAppPublicUrl: config.MINIAPP_PUBLIC_URL,
       });
       if (bridge.kind === 'IGNORE') {
         return;
       }
-      const text =
-        bridge.kind === 'LAUNCH_MAIN'
-          ? 'Welcome to LOOTRA. Tap below to open the Mini App.'
-          : 'Open LOOTRA to continue.';
-      await ctx.reply(text, {
+      if (bridge.kind === 'LAUNCH_MAIN') {
+        await ctx.reply('Welcome to LOOTRA. Tap below to open the Mini App.', {
+          reply_markup: {
+            inline_keyboard: [[buildPlainStartWebAppButton(bridge.webAppUrl)]],
+          },
+        });
+        return;
+      }
+      await ctx.reply('Open LOOTRA to continue.', {
         reply_markup: {
           inline_keyboard: [[{ text: 'Open LOOTRA', url: bridge.launchUrl }]],
         },

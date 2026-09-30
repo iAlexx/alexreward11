@@ -5,7 +5,6 @@
  * never issues rewards. Signed Mini App initData remains attribution authority.
  */
 import {
-  buildMainMiniAppLaunchLink,
   buildReferralMiniAppLaunchLink,
   buildReferralStartPayload,
   parseReferralStartParam,
@@ -20,31 +19,65 @@ export type ReferralStartBridgeResult =
     }
   | {
       readonly kind: 'LAUNCH_MAIN';
-      readonly launchUrl: string;
+      readonly webAppUrl: string;
     }
   | { readonly kind: 'IGNORE' };
 
+/** Native Telegram Mini App inline button for plain /start (not a t.me URL button). */
+export type PlainStartWebAppButton = {
+  readonly text: 'Open LOOTRA';
+  readonly web_app: { readonly url: string };
+  readonly style: 'primary';
+};
+
 /**
- * Resolve a Telegram /start payload into a Mini App launch URL when safe.
- * - Empty payload => Main Mini App launch (no startapp identity).
+ * True when the configured Mini App public URL is safe for web_app.url.
+ * Rejects t.me deep links and non-http(s) schemes (fail closed).
+ */
+export function isSafeMiniAppPublicUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    if (host === 't.me' || host.endsWith('.t.me')) {
+      return false;
+    }
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
+/** Build the native primary Mini App button for plain /start. */
+export function buildPlainStartWebAppButton(webAppUrl: string): PlainStartWebAppButton {
+  return {
+    text: 'Open LOOTRA',
+    web_app: { url: webAppUrl },
+    style: 'primary',
+  };
+}
+
+/**
+ * Resolve a Telegram /start payload into a launch action when safe.
+ * - Empty payload => native Mini App web_app button (MINIAPP_PUBLIC_URL).
  * - Valid ref_<code> => referral Mini App launch (?startapp=ref_<code>).
  * - Malformed / unsafe / unrelated payloads => IGNORE (no referral state).
  */
 export function resolveReferralStartBridge(input: {
   readonly startPayload: string | null | undefined;
   readonly botUsername: string | undefined;
+  readonly miniAppPublicUrl: string | undefined;
 }): ReferralStartBridgeResult {
+  const raw = input.startPayload ?? '';
+  if (raw === '') {
+    const webAppUrl = input.miniAppPublicUrl;
+    if (webAppUrl === undefined || webAppUrl === '' || !isSafeMiniAppPublicUrl(webAppUrl)) {
+      return { kind: 'IGNORE' };
+    }
+    return { kind: 'LAUNCH_MAIN', webAppUrl };
+  }
   const username = input.botUsername;
   if (username === undefined || username === '') {
     return { kind: 'IGNORE' };
-  }
-  const raw = input.startPayload ?? '';
-  if (raw === '') {
-    const launchUrl = buildMainMiniAppLaunchLink(username);
-    if (launchUrl === null) {
-      return { kind: 'IGNORE' };
-    }
-    return { kind: 'LAUNCH_MAIN', launchUrl };
   }
   const parsed = parseReferralStartParam(raw);
   if (parsed.kind !== 'REFERRAL_CODE') {

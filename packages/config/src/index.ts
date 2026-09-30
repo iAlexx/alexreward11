@@ -316,6 +316,15 @@ const botSchema = commonSchema
         )
         .optional(),
     ),
+    /**
+     * Optional public HTTPS Mini App origin for native Telegram web_app buttons.
+     * No production default. Empty → unset. Plain /start fails closed when absent.
+     * Must be the real Mini App URL — not a t.me deep link.
+     */
+    MINIAPP_PUBLIC_URL: z.preprocess(
+      (value) => (value === '' || value === undefined || value === null ? undefined : value),
+      z.url().optional(),
+    ),
     DATABASE_URL: postgresUrl.optional(),
     REDIS_URL: redisUrl.optional(),
     CONTROL_CENTER_OWNER_TELEGRAM_USER_IDS: z.string().default(''),
@@ -352,6 +361,41 @@ const botSchema = commonSchema
       });
     }
     const outsideLocal = value.DEPLOYMENT_ENV !== 'local' && value.DEPLOYMENT_ENV !== 'test';
+    if (value.MINIAPP_PUBLIC_URL !== undefined) {
+      try {
+        const miniAppUrl = new URL(value.MINIAPP_PUBLIC_URL);
+        const host = miniAppUrl.hostname.toLowerCase();
+        if (host === 't.me' || host.endsWith('.t.me')) {
+          context.addIssue({
+            code: 'custom',
+            path: ['MINIAPP_PUBLIC_URL'],
+            message: 'must be the Mini App HTTPS origin, not a t.me deep link',
+          });
+        } else if (outsideLocal && miniAppUrl.protocol !== 'https:') {
+          context.addIssue({
+            code: 'custom',
+            path: ['MINIAPP_PUBLIC_URL'],
+            message: 'must be HTTPS outside local/test',
+          });
+        } else if (
+          !outsideLocal &&
+          miniAppUrl.protocol !== 'https:' &&
+          miniAppUrl.protocol !== 'http:'
+        ) {
+          context.addIssue({
+            code: 'custom',
+            path: ['MINIAPP_PUBLIC_URL'],
+            message: 'must be an http(s) Mini App URL',
+          });
+        }
+      } catch {
+        context.addIssue({
+          code: 'custom',
+          path: ['MINIAPP_PUBLIC_URL'],
+          message: 'must be a valid Mini App URL',
+        });
+      }
+    }
     const ownerIds = value.CONTROL_CENTER_OWNER_TELEGRAM_USER_IDS.split(',')
       .map((item) => item.trim())
       .filter((item) => item.length > 0);

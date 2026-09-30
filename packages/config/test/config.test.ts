@@ -1214,3 +1214,81 @@ describe('TELEGRAM_PUBLIC_BOT_USERNAME', () => {
     expect(botNamed.TELEGRAM_PUBLIC_BOT_USERNAME).toBe('ExampleBot');
   });
 });
+
+describe('MINIAPP_PUBLIC_URL', () => {
+  it('is optional on BotConfig; empty becomes unset; rejects t.me deep links', () => {
+    const unset = loadBotConfig({
+      ...common,
+      BOT_TRANSPORT_MODE: 'disabled',
+    });
+    expect(unset.MINIAPP_PUBLIC_URL).toBeUndefined();
+
+    const empty = loadBotConfig({
+      ...common,
+      BOT_TRANSPORT_MODE: 'disabled',
+      MINIAPP_PUBLIC_URL: '',
+    });
+    expect(empty.MINIAPP_PUBLIC_URL).toBeUndefined();
+
+    const https = loadBotConfig({
+      ...common,
+      BOT_TRANSPORT_MODE: 'disabled',
+      MINIAPP_PUBLIC_URL: 'https://miniapp.example.com',
+    });
+    expect(https.MINIAPP_PUBLIC_URL).toBe('https://miniapp.example.com');
+
+    const localHttp = loadBotConfig({
+      ...common,
+      BOT_TRANSPORT_MODE: 'disabled',
+      MINIAPP_PUBLIC_URL: 'http://localhost:3000',
+    });
+    expect(localHttp.MINIAPP_PUBLIC_URL).toBe('http://localhost:3000');
+
+    expect(() =>
+      loadBotConfig({
+        ...common,
+        BOT_TRANSPORT_MODE: 'disabled',
+        MINIAPP_PUBLIC_URL: 'https://t.me/ExampleBot?startapp',
+      }),
+    ).toThrow(/MINIAPP_PUBLIC_URL/);
+  });
+
+  it('requires HTTPS outside local/test', () => {
+    expect(() =>
+      loadBotConfig({
+        DEPLOYMENT_ENV: 'staging',
+        NODE_ENV: 'production',
+        STAGING_INTEGRATION_MODE: 'true',
+        BOT_TRANSPORT_MODE: 'disabled',
+        CONTROL_CENTER_ACTION_TOKEN_TTL_SECONDS: '900',
+        CONTROL_CENTER_CONFIRM_TOKEN_TTL_SECONDS: '300',
+        CONTROL_CENTER_RATE_LIMIT_WINDOW_SECONDS: '60',
+        CONTROL_CENTER_RATE_LIMIT_MAX: '30',
+        WITHDRAWAL_QUOTE_TTL_SECONDS: '300',
+        WITHDRAWAL_RISK_POLICY_VERSION: '1',
+        WITHDRAWAL_NETWORK_CODE: 'TON_TESTNET',
+        WITHDRAWAL_ASSET_SYMBOL: 'USDT',
+        WITHDRAWAL_FAKE_CHAIN_ENABLED: 'false',
+        MINIAPP_PUBLIC_URL: 'http://miniapp.example.com',
+      }),
+    ).toThrow(/MINIAPP_PUBLIC_URL/);
+
+    const stagingHttps = loadBotConfig({
+      DEPLOYMENT_ENV: 'staging',
+      NODE_ENV: 'production',
+      STAGING_INTEGRATION_MODE: 'true',
+      BOT_TRANSPORT_MODE: 'disabled',
+      CONTROL_CENTER_ACTION_TOKEN_TTL_SECONDS: '900',
+      CONTROL_CENTER_CONFIRM_TOKEN_TTL_SECONDS: '300',
+      CONTROL_CENTER_RATE_LIMIT_WINDOW_SECONDS: '60',
+      CONTROL_CENTER_RATE_LIMIT_MAX: '30',
+      WITHDRAWAL_QUOTE_TTL_SECONDS: '300',
+      WITHDRAWAL_RISK_POLICY_VERSION: '1',
+      WITHDRAWAL_NETWORK_CODE: 'TON_TESTNET',
+      WITHDRAWAL_ASSET_SYMBOL: 'USDT',
+      WITHDRAWAL_FAKE_CHAIN_ENABLED: 'false',
+      MINIAPP_PUBLIC_URL: 'https://miniapp.example.com',
+    });
+    expect(stagingHttps.MINIAPP_PUBLIC_URL).toBe('https://miniapp.example.com');
+  });
+});

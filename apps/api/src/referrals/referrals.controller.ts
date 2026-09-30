@@ -7,7 +7,7 @@ import type {
 } from '@alex-rewards/contracts';
 import type { Pool } from '@alex-rewards/db';
 import {
-  buildReferralBotStartLink,
+  buildReferralMiniAppLaunchLink,
   ensureReferralCode,
   readReferralSummary,
   ReferralDomainError,
@@ -24,7 +24,8 @@ function deepLinkFor(config: ApiConfig, code: string | null): string | null {
   if (code === null || code === '') return null;
   const bot = config.TELEGRAM_PUBLIC_BOT_USERNAME;
   if (bot === undefined) return null;
-  return buildReferralBotStartLink(bot, code);
+  // User-facing share link opens Mini App directly (?startapp=ref_<code>).
+  return buildReferralMiniAppLaunchLink(bot, code);
 }
 
 /**
