@@ -197,6 +197,31 @@ export type {
   ProcessWithdrawalConfirmedPublicPayoutOutboxBatchResult,
 } from './public-payout-outbox-consumer.js';
 
+export {
+  PublicPayoutDefiniteFailureError,
+  claimAndDeliverPublicPayoutBatch,
+  claimPublicPayoutPublications,
+  classifyPublicPayoutSenderError,
+  deliverClaimedPublicPayout,
+  finalizePublicPayoutAmbiguous,
+  finalizePublicPayoutFailed,
+  finalizePublicPayoutPublished,
+  markPublicPayoutNetworkAttemptStarted,
+  publicPayoutDeliveryBackoffSeconds,
+  recoverStalePublicPayoutSendingBatch,
+  redactPublicPayoutDeliveryError,
+} from './public-payout-delivery.js';
+export type {
+  ClaimAndDeliverPublicPayoutBatchOptions,
+  ClaimAndDeliverPublicPayoutBatchResult,
+  ClaimedPublicPayoutPublication,
+  DeliverClaimedPublicPayoutOutcome,
+  DeliverClaimedPublicPayoutResult,
+  MarkNetworkAttemptStartedResult,
+  PublicPayoutSendClassification,
+  PublicPayoutTelegramSender,
+  RecoverStalePublicPayoutSendingBatchResult,
+} from './public-payout-delivery.js';
 
 export {
   createWithdrawalAttempt,
