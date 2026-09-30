@@ -602,4 +602,249 @@ describe.skipIf(phase7DatabaseUrl === '')('Phase17 publication builder', () => {
       details: { code: 'TESTNET_PUBLICATION_BLOCKED' },
     });
   });
+
+  it('PRODUCTION/STAGING block TESTNET network even when code is TON_ALPHA (no code heuristic)', async () => {
+    await setFeatureFlag(pool, 'PRODUCTION', true);
+    await seedDestination(pool, 'PRODUCTION', true);
+    await setFeatureFlag(pool, 'STAGING', true);
+    await seedDestination(pool, 'STAGING', true);
+
+    const userId = await nextUser();
+    const { withdrawalId, attemptId } = await confirmWithdrawal(pool, {
+      userId,
+      networkId,
+      assetId,
+      adminUserId,
+      hotWalletId,
+    });
+    await insertConfirmedChainTx(pool, { withdrawalId, attemptId });
+
+    const renamed = `TON_ALPHA_${seq}`;
+    await pool.query(`UPDATE networks SET code = $2 WHERE id = $1::uuid`, [networkId, renamed]);
+    try {
+      const env = await pool.query<{ environment: string; code: string }>(
+        `SELECT environment::text AS environment, code FROM networks WHERE id = $1::uuid`,
+        [networkId],
+      );
+      expect(env.rows[0]?.environment).toBe('TESTNET');
+      expect(env.rows[0]?.code).toBe(renamed);
+      expect(env.rows[0]?.code.includes('TESTNET')).toBe(false);
+
+      await expect(
+        withWithdrawalTransaction(pool, async (client) =>
+          createConfirmedPayoutPublication(client, {
+            withdrawalId,
+            confirmedAttemptId: attemptId,
+            environment: 'PRODUCTION',
+          }),
+        ),
+      ).rejects.toMatchObject({
+        code: 'CONFIG',
+        details: { code: 'TESTNET_PUBLICATION_BLOCKED', networkCode: renamed },
+      });
+
+      await expect(
+        withWithdrawalTransaction(pool, async (client) =>
+          createConfirmedPayoutPublication(client, {
+            withdrawalId,
+            confirmedAttemptId: attemptId,
+            environment: 'STAGING',
+          }),
+        ),
+      ).rejects.toMatchObject({
+        code: 'CONFIG',
+        details: { code: 'TESTNET_PUBLICATION_BLOCKED' },
+      });
+    } finally {
+      await pool.query(`UPDATE networks SET code = 'TON_TESTNET' WHERE id = $1::uuid`, [networkId]);
+    }
+  }, 20000);
+  it('HIDE-first vs builder: builder waits then snapshots HIDE_IDENTITY', async () => {
+    await setFeatureFlag(pool, 'LOCAL', true);
+    await seedDestination(pool, 'LOCAL', true);
+    const userId = await nextUser('show_user');
+    await pool.query(`UPDATE users SET username = 'visible_user' WHERE id = $1::uuid`, [userId]);
+    await pool.query(
+      `INSERT INTO user_settings (user_id, public_payout_identity_mode)
+       VALUES ($1::uuid, 'SHOW_USERNAME'::public_payout_identity_mode)
+       ON CONFLICT (user_id) DO UPDATE SET public_payout_identity_mode = EXCLUDED.public_payout_identity_mode`,
+      [userId],
+    );
+    const { withdrawalId, attemptId } = await confirmWithdrawal(pool, {
+      userId,
+      networkId,
+      assetId,
+      adminUserId,
+      hotWalletId,
+    });
+    await insertConfirmedChainTx(pool, { withdrawalId, attemptId });
+
+    const barrier = (() => {
+      let remaining = 2;
+      let release!: () => void;
+      const gate = new Promise<void>((r) => {
+        release = r;
+      });
+      return {
+        wait: () => gate,
+        arrive: () => {
+          remaining -= 1;
+          if (remaining <= 0) release();
+        },
+      };
+    })();
+
+    let hideCommitted = false;
+    const hideTx = (async () => {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(`SELECT id FROM users WHERE id = $1::uuid FOR UPDATE`, [userId]);
+        await client.query(
+          `INSERT INTO user_settings (user_id, public_payout_identity_mode)
+           VALUES ($1::uuid, 'HIDE_IDENTITY'::public_payout_identity_mode)
+           ON CONFLICT (user_id) DO UPDATE SET
+             public_payout_identity_mode = EXCLUDED.public_payout_identity_mode,
+             updated_at = now()`,
+          [userId],
+        );
+        barrier.arrive();
+        await barrier.wait();
+        await new Promise((r) => setTimeout(r, 40));
+        await client.query('COMMIT');
+        hideCommitted = true;
+      } catch (error) {
+        await client.query('ROLLBACK').catch(() => undefined);
+        throw error;
+      } finally {
+        client.release();
+      }
+    })();
+
+    const builderTx = (async () => {
+      barrier.arrive();
+      await barrier.wait();
+      return withWithdrawalTransaction(pool, async (client) =>
+        createConfirmedPayoutPublication(client, {
+          withdrawalId,
+          confirmedAttemptId: attemptId,
+          environment: 'LOCAL',
+        }),
+      );
+    })();
+
+    const [, created] = await Promise.all([hideTx, builderTx]);
+    expect(hideCommitted).toBe(true);
+    expect(created.outcome).toBe('CREATED');
+    const pub = await pool.query<{ identity_mode: string; username_snapshot: string | null }>(
+      `SELECT identity_mode::text AS identity_mode, username_snapshot
+       FROM payout_publications WHERE id = $1::uuid`,
+      [created.publicationId],
+    );
+    expect(pub.rows[0]?.identity_mode).toBe('HIDE_IDENTITY');
+    expect(pub.rows[0]?.username_snapshot).toBeNull();
+  }, 20000);
+  it('builder-first then HIDE: final publication is HIDE_IDENTITY', async () => {
+    await setFeatureFlag(pool, 'LOCAL', true);
+    await seedDestination(pool, 'LOCAL', true);
+    const userId = await nextUser('builder_first');
+    await pool.query(`UPDATE users SET username = 'builder_show' WHERE id = $1::uuid`, [userId]);
+    await pool.query(
+      `INSERT INTO user_settings (user_id, public_payout_identity_mode)
+       VALUES ($1::uuid, 'SHOW_USERNAME'::public_payout_identity_mode)
+       ON CONFLICT (user_id) DO UPDATE SET public_payout_identity_mode = EXCLUDED.public_payout_identity_mode`,
+      [userId],
+    );
+    const { withdrawalId, attemptId } = await confirmWithdrawal(pool, {
+      userId,
+      networkId,
+      assetId,
+      adminUserId,
+      hotWalletId,
+    });
+    await insertConfirmedChainTx(pool, { withdrawalId, attemptId });
+
+    const barrier = (() => {
+      let remaining = 2;
+      let release!: () => void;
+      const gate = new Promise<void>((r) => {
+        release = r;
+      });
+      return {
+        wait: () => gate,
+        arrive: () => {
+          remaining -= 1;
+          if (remaining <= 0) release();
+        },
+      };
+    })();
+
+    const builderTx = (async () => {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const created = await createConfirmedPayoutPublication(client, {
+          withdrawalId,
+          confirmedAttemptId: attemptId,
+          environment: 'LOCAL',
+        });
+        expect(created.outcome).toBe('CREATED');
+        barrier.arrive();
+        await barrier.wait();
+        await new Promise((r) => setTimeout(r, 40));
+        await client.query('COMMIT');
+        return created.publicationId!;
+      } catch (error) {
+        await client.query('ROLLBACK').catch(() => undefined);
+        throw error;
+      } finally {
+        client.release();
+      }
+    })();
+
+    const hideTx = (async () => {
+      barrier.arrive();
+      await barrier.wait();
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(`SELECT id FROM users WHERE id = $1::uuid FOR UPDATE`, [userId]);
+        await client.query(
+          `INSERT INTO user_settings (user_id, public_payout_identity_mode)
+           VALUES ($1::uuid, 'HIDE_IDENTITY'::public_payout_identity_mode)
+           ON CONFLICT (user_id) DO UPDATE SET
+             public_payout_identity_mode = EXCLUDED.public_payout_identity_mode,
+             updated_at = now()`,
+          [userId],
+        );
+        await client.query(
+          `UPDATE payout_publications pp
+           SET identity_mode = 'HIDE_IDENTITY'::public_payout_identity_mode,
+               username_snapshot = NULL,
+               updated_at = now()
+           FROM withdrawals w
+           WHERE pp.withdrawal_id = w.id
+             AND w.user_id = $1::uuid
+             AND pp.identity_mode = 'SHOW_USERNAME'::public_payout_identity_mode
+             AND pp.status::text IN ('PENDING', 'FAILED')`,
+          [userId],
+        );
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK').catch(() => undefined);
+        throw error;
+      } finally {
+        client.release();
+      }
+    })();
+
+    const [publicationId] = await Promise.all([builderTx, hideTx]);
+    const pub = await pool.query<{ identity_mode: string; username_snapshot: string | null }>(
+      `SELECT identity_mode::text AS identity_mode, username_snapshot
+       FROM payout_publications WHERE id = $1::uuid`,
+      [publicationId],
+    );
+    expect(pub.rows[0]?.identity_mode).toBe('HIDE_IDENTITY');
+    expect(pub.rows[0]?.username_snapshot).toBeNull();
+  }, 20000);
 });

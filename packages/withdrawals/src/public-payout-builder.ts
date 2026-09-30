@@ -33,11 +33,6 @@ export interface CreateConfirmedPayoutPublicationResult {
   readonly outcome: CreateConfirmedPayoutPublicationOutcome;
 }
 
-function isTestnetNetworkCode(code: string): boolean {
-  const upper = code.toUpperCase();
-  return upper.includes('TESTNET') || upper === 'TON_TESTNET';
-}
-
 export async function createConfirmedPayoutPublication(
   client: PoolClient,
   input: CreateConfirmedPayoutPublicationInput,
@@ -271,8 +266,12 @@ export async function createConfirmedPayoutPublication(
     code: string;
     display_name: string;
     public_explorer_base_url: string | null;
+    environment: string;
   }>(
-    `SELECT code, display_name, public_explorer_base_url
+    `SELECT code,
+            display_name,
+            public_explorer_base_url,
+            environment::text AS environment
      FROM networks
      WHERE id = $1::uuid`,
     [w.network_id],
@@ -282,17 +281,21 @@ export async function createConfirmedPayoutPublication(
     throw new WithdrawalDomainError('CONFIG', 'Withdrawal network not found');
   }
 
+  // Authoritative network environment (not code/display-name heuristics).
+  // PRODUCTION/STAGING require MAINNET. TESTNET remains OWNER_POLICY_REQUIRED (fail closed).
+  // LOCAL fixtures may use TESTNET.
   if (
     (input.environment === 'PRODUCTION' || input.environment === 'STAGING') &&
-    isTestnetNetworkCode(net.code)
+    net.environment !== 'MAINNET'
   ) {
     throw new WithdrawalDomainError(
       'CONFIG',
-      'Public payout publication blocked for Testnet in this environment',
+      'Public payout publication blocked for non-MAINNET network in this environment',
       {
         details: {
           code: 'TESTNET_PUBLICATION_BLOCKED',
           environment: input.environment,
+          networkEnvironment: net.environment,
           networkCode: net.code,
         },
       },
@@ -320,6 +323,16 @@ export async function createConfirmedPayoutPublication(
   }
   // Validate https explorer joinability now (snapshots set at SENDING in Step 3).
   void buildExplorerUrl(explorerBase, chain.chain_tx_reference);
+
+  // Privacy authority lock: serialize with patchUserSettings (users FOR UPDATE).
+  // Lock order: withdrawal FOR SHARE (above) -> users FOR SHARE -> read settings -> insert publication.
+  const userLock = await client.query<{ id: string }>(
+    `SELECT id::text AS id FROM users WHERE id = $1::uuid FOR SHARE`,
+    [w.user_id],
+  );
+  if (userLock.rows[0] === undefined) {
+    throw new WithdrawalDomainError('VALIDATION', 'Withdrawal user not found for publication');
+  }
 
   const settings = await client.query<{
     identity_mode: string | null;

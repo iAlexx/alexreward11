@@ -55,12 +55,24 @@ export interface ClaimedPublicPayoutPublication {
   readonly topicThreadId: number | null;
 }
 
-export interface MarkNetworkAttemptStartedResult {
-  readonly started: true;
-  readonly attempts: number;
-}
+export type MarkNetworkAttemptStartedResult =
+  | {
+      readonly blocked?: undefined;
+      readonly newlyStarted: boolean;
+      readonly attempts: number;
+      readonly chatId: string;
+      readonly topicThreadId: number | null;
+    }
+  | {
+      readonly blocked: true;
+      readonly reason: string;
+    };
 
-export type DeliverClaimedPublicPayoutOutcome = 'PUBLISHED' | 'FAILED' | 'AMBIGUOUS';
+export type DeliverClaimedPublicPayoutOutcome =
+  | 'PUBLISHED'
+  | 'FAILED'
+  | 'AMBIGUOUS'
+  | 'ALREADY_STARTED';
 
 export interface DeliverClaimedPublicPayoutResult {
   readonly publicationId: string;
@@ -95,6 +107,17 @@ export class PublicPayoutDefiniteFailureError extends Error {
   constructor(message = 'Public payout send definite failure') {
     super(message);
     this.name = 'PublicPayoutDefiniteFailureError';
+  }
+}
+
+/** Pre-network authorization failure: no Telegram call; row moved to FAILED. */
+export class PublicPayoutPreNetworkAuthError extends Error {
+  readonly reason: string;
+
+  constructor(reason: string) {
+    super(`Public payout pre-network auth blocked: ${reason}`);
+    this.name = 'PublicPayoutPreNetworkAuthError';
+    this.reason = reason;
   }
 }
 
@@ -519,12 +542,17 @@ export async function claimPublicPayoutPublications(
 }
 
 /**
- * Mark that the live Telegram HTTP send is about to begin.
- * Increments attempts exactly once per lease. Idempotent replay for same lease.
+ * Final send authorization + irreversible network-attempt marker.
+ * Re-checks DB feature flag and destination under FOR SHARE locks.
+ * Increments attempts exactly once per lease. Replay returns newlyStarted=false.
  */
 export async function markPublicPayoutNetworkAttemptStarted(
   client: PoolClient,
-  input: { readonly publicationId: string; readonly leaseToken: string },
+  input: {
+    readonly publicationId: string;
+    readonly leaseToken: string;
+    readonly environment: PublicPayoutFeatureEnvironment;
+  },
 ): Promise<MarkNetworkAttemptStartedResult> {
   const locked = await client.query<{
     status: string;
@@ -532,12 +560,14 @@ export async function markPublicPayoutNetworkAttemptStarted(
     lease_expires_at: Date | null;
     send_request_started_at: Date | null;
     attempts: number;
+    destination_id: string;
   }>(
     `SELECT status::text AS status,
             lease_token::text AS lease_token,
             lease_expires_at,
             send_request_started_at,
-            attempts
+            attempts,
+            destination_id::text AS destination_id
      FROM payout_publications
      WHERE id = $1::uuid
      FOR UPDATE`,
@@ -564,9 +594,133 @@ export async function markPublicPayoutNetworkAttemptStarted(
       details: { code: 'LEASE_EXPIRED' },
     });
   }
+
+  const loadRoutingTarget = async (): Promise<{
+    chatId: string;
+    topicThreadId: number | null;
+  }> => {
+    const dest = await client.query<{
+      chat_id: string;
+      topic_thread_id: string | null;
+    }>(
+      `SELECT chat_id::text AS chat_id,
+              topic_thread_id::text AS topic_thread_id
+       FROM telegram_destinations
+       WHERE id = $1::uuid`,
+      [row.destination_id],
+    );
+    const d = dest.rows[0];
+    if (d === undefined) {
+      throw new WithdrawalDomainError('CONFIG', 'publication destination missing for routing', {
+        details: { code: 'DESTINATION_MISSING' },
+      });
+    }
+    const topic =
+      d.topic_thread_id === null || d.topic_thread_id === ''
+        ? null
+        : Number(d.topic_thread_id);
+    return {
+      chatId: d.chat_id,
+      topicThreadId: topic !== null && Number.isFinite(topic) ? topic : null,
+    };
+  };
+
   if (row.send_request_started_at !== null) {
-    return { started: true, attempts: row.attempts };
+    const routing = await loadRoutingTarget();
+    return {
+      newlyStarted: false,
+      attempts: row.attempts,
+      chatId: routing.chatId,
+      topicThreadId: routing.topicThreadId,
+    };
   }
+
+  const failPreNetwork = async (
+    reason: string,
+  ): Promise<Extract<MarkNetworkAttemptStartedResult, { blocked: true }>> => {
+    await finalizePublicPayoutFailed(client, {
+      publicationId: input.publicationId,
+      leaseToken: input.leaseToken,
+      errorRedacted: reason,
+    });
+    return { blocked: true, reason };
+  };
+
+  // Feature flag final authorization (FOR SHARE serializes with disable UPDATEs).
+  const flag = await client.query<{ enabled: boolean }>(
+    `SELECT enabled
+     FROM feature_flags
+     WHERE flag_key = 'PUBLIC_PAYOUT_LOGS_ENABLED'
+       AND environment = $1::environment_name
+     FOR SHARE`,
+    [input.environment],
+  );
+  if (flag.rows[0] === undefined) {
+    return await failPreNetwork('FEATURE_FLAG_MISSING_BEFORE_NETWORK');
+  }
+  if (flag.rows[0]!.enabled !== true) {
+    return await failPreNetwork('FEATURE_DISABLED_BEFORE_NETWORK');
+  }
+
+  const destRow = await client.query<{
+    id: string;
+    enabled: boolean;
+    purpose: string;
+    environment: string;
+    chat_id: string;
+    topic_thread_id: string | null;
+  }>(
+    `SELECT id::text AS id,
+            enabled,
+            purpose::text AS purpose,
+            environment::text AS environment,
+            chat_id::text AS chat_id,
+            topic_thread_id::text AS topic_thread_id
+     FROM telegram_destinations
+     WHERE id = $1::uuid
+     FOR SHARE`,
+    [row.destination_id],
+  );
+  const destination = destRow.rows[0];
+  if (destination === undefined) {
+    return await failPreNetwork('DESTINATION_DISABLED_BEFORE_NETWORK');
+  }
+  if (
+    destination!.enabled !== true ||
+    destination!.purpose !== 'PUBLIC_PAYOUT_LOGS' ||
+    destination!.environment !== input.environment
+  ) {
+    return await failPreNetwork('DESTINATION_DISABLED_BEFORE_NETWORK');
+  }
+
+  const enabledSet = await client.query<{ id: string }>(
+    `SELECT id::text AS id
+     FROM telegram_destinations
+     WHERE environment = $1::environment_name
+       AND purpose = 'PUBLIC_PAYOUT_LOGS'::telegram_destination_purpose
+       AND enabled = true
+     ORDER BY id ASC
+     FOR SHARE`,
+    [input.environment],
+  );
+  if (enabledSet.rows.length === 0) {
+    return await failPreNetwork('DESTINATION_DISABLED_BEFORE_NETWORK');
+  }
+  if (enabledSet.rows.length > 1) {
+    return await failPreNetwork('DESTINATION_AMBIGUOUS_BEFORE_NETWORK');
+  }
+  if (enabledSet.rows[0]!.id !== row.destination_id) {
+    return await failPreNetwork('DESTINATION_CHANGED_BEFORE_NETWORK');
+  }
+
+  const topicRaw = destination!.topic_thread_id;
+  const topicParsed =
+    topicRaw === null || topicRaw === '' ? null : Number(topicRaw);
+  const routing = {
+    chatId: destination!.chat_id,
+    topicThreadId:
+      topicParsed !== null && Number.isFinite(topicParsed) ? topicParsed : null,
+  };
 
   const updated = await client.query<{ attempts: number }>(
     `UPDATE payout_publications
@@ -586,7 +740,12 @@ export async function markPublicPayoutNetworkAttemptStarted(
       details: { code: 'MARK_RACE' },
     });
   }
-  return { started: true, attempts };
+  return {
+    newlyStarted: true,
+    attempts,
+    chatId: routing.chatId,
+    topicThreadId: routing.topicThreadId,
+  };
 }
 
 export async function finalizePublicPayoutPublished(
@@ -832,24 +991,32 @@ export async function recoverStalePublicPayoutSendingBatch(
 
 /**
  * Orchestration: mark network attempt, then send, then finalize by classification.
- * Marker is committed before any sender call.
+ * Marker is committed before any sender call. Only newlyStarted may invoke Telegram.
  */
 export async function deliverClaimedPublicPayout(
   pool: Pool,
   sender: PublicPayoutTelegramSender,
   claimed: ClaimedPublicPayoutPublication,
+  environment: PublicPayoutFeatureEnvironment,
 ): Promise<DeliverClaimedPublicPayoutResult> {
-  await withWithdrawalTransaction(pool, async (client) => {
-    await markPublicPayoutNetworkAttemptStarted(client, {
+  const markResult = await withWithdrawalTransaction(pool, async (client) =>
+    markPublicPayoutNetworkAttemptStarted(client, {
       publicationId: claimed.publicationId,
       leaseToken: claimed.leaseToken,
-    });
-  });
+      environment,
+    }),
+  );
+  if (markResult.blocked === true) {
+    return { publicationId: claimed.publicationId, outcome: 'FAILED' };
+  }
+  if (!markResult.newlyStarted) {
+    return { publicationId: claimed.publicationId, outcome: 'ALREADY_STARTED' };
+  }
 
   try {
     const sendResult = await sender.sendPublicPayout({
-      chatId: claimed.chatId,
-      topicThreadId: claimed.topicThreadId,
+      chatId: markResult.chatId,
+      topicThreadId: markResult.topicThreadId,
       text: claimed.messageTextSnapshot,
       explorerUrl: claimed.explorerUrlSnapshot,
     });
@@ -912,7 +1079,9 @@ export async function claimAndDeliverPublicPayoutBatch(
 
   const delivered: DeliverClaimedPublicPayoutResult[] = [];
   for (const row of claimed) {
-    delivered.push(await deliverClaimedPublicPayout(pool, options.sender, row));
+    delivered.push(
+      await deliverClaimedPublicPayout(pool, options.sender, row, options.environment),
+    );
   }
 
   return { recovered, claimed: claimed.length, delivered };

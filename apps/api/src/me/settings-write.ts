@@ -30,13 +30,13 @@ export interface UserSettingsPatch {
 
 
 /**
- * Phase17 privacy lock contract:
- * Future public-payout sender must SELECT payout_publications ... FOR UPDATE
- * before final identity recheck/build. This settings downgrade UPDATE locks the
- * same non-terminal rows, so concurrent send vs HIDE serialize deterministically:
- *   A) HIDE commits first => sender later observes HIDE_IDENTITY
- *   B) sender holds FOR UPDATE first => HIDE blocks until send durable outcome
- * A committed HIDE must never be ignored by a send that had not yet serialized.
+ * Phase17 privacy lock contract (shared users-row authority):
+ * Lock order for PATCH settings:
+ *   users FOR UPDATE -> user_settings mutation -> payout_publications downgrade.
+ * Lock order for createConfirmedPayoutPublication:
+ *   withdrawal FOR SHARE -> users FOR SHARE -> read settings/username -> insert publication.
+ * Concurrent HIDE vs builder serialize on users; a committed HIDE cannot be followed by
+ * a stale SHOW publication. PENDING/FAILED publications are also downgraded on HIDE.
  */
 async function downgradeNonTerminalPayoutPublicationsToHide(
   client: PoolClient,
@@ -86,19 +86,20 @@ export async function patchUserSettings(
   try {
     await client.query('BEGIN');
 
+    // Privacy authority: lock users first so builder FOR SHARE serializes with HIDE.
+    const userLocked = await client.query(
+      `SELECT id FROM users WHERE id = $1::uuid FOR UPDATE`,
+      [userId],
+    );
+    if (userLocked.rowCount === 0) {
+      throw new SettingsWriteError('NOT_FOUND', 'User not found');
+    }
+
     if (preferredLocale !== undefined) {
-      const updated = await client.query(
+      await client.query(
         `UPDATE users SET preferred_locale = $2 WHERE id = $1::uuid`,
         [userId, preferredLocale],
       );
-      if (updated.rowCount === 0) {
-        throw new SettingsWriteError('NOT_FOUND', 'User not found');
-      }
-    } else {
-      const exists = await client.query(`SELECT 1 FROM users WHERE id = $1::uuid`, [userId]);
-      if (exists.rowCount === 0) {
-        throw new SettingsWriteError('NOT_FOUND', 'User not found');
-      }
     }
 
     if (preferredLocale !== undefined && publicPayoutIdentityMode !== undefined) {

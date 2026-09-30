@@ -10,6 +10,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   FakePayoutChain,
   PublicPayoutDefiniteFailureError,
+  PublicPayoutPreNetworkAuthError,
   claimAndDeliverPublicPayoutBatch,
   claimPublicPayoutPublications,
   createConfirmedPayoutPublication,
@@ -388,17 +389,27 @@ describe.skipIf(phase7DatabaseUrl === '')('Phase17 public payout delivery', () =
       markPublicPayoutNetworkAttemptStarted(client, {
         publicationId: row.publicationId,
         leaseToken: row.leaseToken,
+        environment: 'LOCAL',
       }),
     );
-    expect(first.attempts).toBe(1);
+    expect(first.blocked).toBeUndefined();
+    if (first.blocked !== true) {
+      expect(first.attempts).toBe(1);
+      expect(first.newlyStarted).toBe(true);
+    }
 
     const replay = await withWithdrawalTransaction(pool, async (client) =>
       markPublicPayoutNetworkAttemptStarted(client, {
         publicationId: row.publicationId,
         leaseToken: row.leaseToken,
+        environment: 'LOCAL',
       }),
     );
-    expect(replay.attempts).toBe(1);
+    expect(replay.blocked).toBeUndefined();
+    if (replay.blocked !== true) {
+      expect(replay.attempts).toBe(1);
+      expect(replay.newlyStarted).toBe(false);
+    }
     expect((await readPublication(pool, row.publicationId)).attempts).toBe(1);
 
     await expect(
@@ -406,6 +417,7 @@ describe.skipIf(phase7DatabaseUrl === '')('Phase17 public payout delivery', () =
         markPublicPayoutNetworkAttemptStarted(client, {
           publicationId: row.publicationId,
           leaseToken: randomUUID(),
+          environment: 'LOCAL',
         }),
       ),
     ).rejects.toBeInstanceOf(WithdrawalDomainError);
@@ -421,6 +433,7 @@ describe.skipIf(phase7DatabaseUrl === '')('Phase17 public payout delivery', () =
         markPublicPayoutNetworkAttemptStarted(client, {
           publicationId: row.publicationId,
           leaseToken: row.leaseToken,
+          environment: 'LOCAL',
         }),
       ),
     ).rejects.toMatchObject({ details: { code: 'LEASE_EXPIRED' } });
@@ -447,7 +460,7 @@ describe.skipIf(phase7DatabaseUrl === '')('Phase17 public payout delivery', () =
         if (claimed.length === 0) {
           return { owner, claimed: [] as ClaimedPublicPayoutPublication[], delivered: null };
         }
-        const delivered = await deliverClaimedPublicPayout(pool, sender, claimed[0]!);
+        const delivered = await deliverClaimedPublicPayout(pool, sender, claimed[0]!, 'LOCAL');
         return { owner, claimed, delivered };
       } catch (error) {
         try {
@@ -576,6 +589,7 @@ describe.skipIf(phase7DatabaseUrl === '')('Phase17 public payout delivery', () =
       markPublicPayoutNetworkAttemptStarted(client, {
         publicationId: row.publicationId,
         leaseToken: row.leaseToken,
+        environment: 'LOCAL',
       }),
     );
     expect((await readPublication(pool, seeded.publicationId)).attempts).toBe(1);
@@ -620,6 +634,7 @@ describe.skipIf(phase7DatabaseUrl === '')('Phase17 public payout delivery', () =
       markPublicPayoutNetworkAttemptStarted(client, {
         publicationId: row.publicationId,
         leaseToken: row.leaseToken,
+        environment: 'LOCAL',
       }),
     );
     const ghostSender = createFakeSender({ mode: 'success' });
@@ -686,6 +701,7 @@ describe.skipIf(phase7DatabaseUrl === '')('Phase17 public payout delivery', () =
       pool,
       createFakeSender({ mode: 'definite' }),
       claimedOnly[0]!,
+      'LOCAL',
     );
     expect((await readPublication(pool, seeded.publicationId)).attempts).toBe(2);
     expect((await readPublication(pool, seeded.publicationId)).status).toBe('FAILED');
@@ -746,4 +762,434 @@ describe.skipIf(phase7DatabaseUrl === '')('Phase17 public payout delivery', () =
     }
     expect(seen.has(later.publicationId)).toBe(true);
   });
+
+  it('feature disabled after claim: marker blocked, attempts unchanged, sender 0', async () => {
+    const seeded = await seedPendingPublication(pool, await userCtx());
+    const claimed = await withWithdrawalTransaction(pool, async (client) =>
+      claimPublicPayoutPublications(client, {
+        owner: 'worker-flag-disable',
+        environment: 'LOCAL',
+        limit: 1,
+        leaseSeconds: 60,
+      }),
+    );
+    expect(claimed).toHaveLength(1);
+    await setFeatureFlag(pool, 'LOCAL', false);
+
+    const sender = createFakeSender({ mode: 'success' });
+    const delivered = await deliverClaimedPublicPayout(pool, sender, claimed[0]!, 'LOCAL');
+    expect(delivered.outcome).toBe('FAILED');
+    expect(sender.calls).toHaveLength(0);
+
+    const row = await readPublication(pool, seeded.publicationId);
+    expect(row.status).toBe('FAILED');
+    expect(row.send_request_started_at).toBeNull();
+    expect(row.attempts).toBe(0);
+  }, 20000);
+  it('destination disabled after claim: marker blocked, sender 0', async () => {
+    const seeded = await seedPendingPublication(pool, await userCtx());
+    const claimed = await withWithdrawalTransaction(pool, async (client) =>
+      claimPublicPayoutPublications(client, {
+        owner: 'worker-dest-disable',
+        environment: 'LOCAL',
+        limit: 1,
+        leaseSeconds: 60,
+      }),
+    );
+    expect(claimed).toHaveLength(1);
+    await pool.query(
+      `UPDATE telegram_destinations
+       SET enabled = false
+       WHERE environment = 'LOCAL'::environment_name
+         AND purpose = 'PUBLIC_PAYOUT_LOGS'::telegram_destination_purpose`,
+    );
+
+    const sender = createFakeSender({ mode: 'success' });
+    const delivered = await deliverClaimedPublicPayout(pool, sender, claimed[0]!, 'LOCAL');
+    expect(delivered.outcome).toBe('FAILED');
+    expect(sender.calls).toHaveLength(0);
+    expect((await readPublication(pool, seeded.publicationId)).send_request_started_at).toBeNull();
+    expect((await readPublication(pool, seeded.publicationId)).attempts).toBe(0);
+  }, 20000);
+  it('destination routing change after claim: sender uses marker-authorized chatId', async () => {
+    const seeded = await seedPendingPublication(pool, await userCtx());
+    const claimed = await withWithdrawalTransaction(pool, async (client) =>
+      claimPublicPayoutPublications(client, {
+        owner: 'worker-route-change',
+        environment: 'LOCAL',
+        limit: 1,
+        leaseSeconds: 60,
+      }),
+    );
+    expect(claimed).toHaveLength(1);
+    const staleChat = claimed[0]!.chatId;
+    const newChat = String(-(9_000_000_000 + Math.floor(Math.random() * 1_000_000)));
+    await pool.query(
+      `UPDATE telegram_destinations
+       SET chat_id = $2::bigint
+       WHERE id = $1::uuid`,
+      [claimed[0]!.destinationId, newChat],
+    );
+    expect(newChat).not.toBe(staleChat);
+
+    const sender = createFakeSender({ mode: 'success' });
+    const delivered = await deliverClaimedPublicPayout(pool, sender, claimed[0]!, 'LOCAL');
+    expect(delivered.outcome).toBe('PUBLISHED');
+    expect(sender.calls).toHaveLength(1);
+    expect(sender.calls[0]!.chatId).toBe(newChat);
+    expect(sender.calls[0]!.chatId).not.toBe(staleChat);
+  }, 20000);
+  it('same-lease double deliverClaimed: exactly one sender call and attempts=1', async () => {
+    const seeded = await seedPendingPublication(pool, await userCtx());
+    const claimed = await withWithdrawalTransaction(pool, async (client) =>
+      claimPublicPayoutPublications(client, {
+        owner: 'worker-double-deliver',
+        environment: 'LOCAL',
+        limit: 1,
+        leaseSeconds: 60,
+      }),
+    );
+    expect(claimed).toHaveLength(1);
+    const row = claimed[0]!;
+
+    let releaseSend!: () => void;
+    const sendHold = new Promise<void>((resolve) => {
+      releaseSend = resolve;
+    });
+    let signalEntered!: () => void;
+    const sendEntered = new Promise<void>((resolve) => {
+      signalEntered = resolve;
+    });
+
+    const sender = createFakeSender({
+      mode: 'success',
+      onSend: async () => {
+        signalEntered();
+        await sendHold;
+      },
+    });
+
+    const p1 = deliverClaimedPublicPayout(pool, sender, row, 'LOCAL');
+    await sendEntered; // first marker committed; inside transport
+    const r2 = await deliverClaimedPublicPayout(pool, sender, row, 'LOCAL');
+    expect(r2.outcome).toBe('ALREADY_STARTED');
+    releaseSend();
+    const r1 = await p1;
+    expect(r1.outcome).toBe('PUBLISHED');
+    expect(sender.calls).toHaveLength(1);
+    expect((await readPublication(pool, seeded.publicationId)).attempts).toBe(1);
+    expect((await readPublication(pool, seeded.publicationId)).status).toBe('PUBLISHED');
+  }, 20000);
+  it('marker replay after crash-before-send: no Telegram; stale recovery => AMBIGUOUS', async () => {
+    const seeded = await seedPendingPublication(pool, await userCtx());
+    const claimed = await withWithdrawalTransaction(pool, async (client) =>
+      claimPublicPayoutPublications(client, {
+        owner: 'worker-replay-crash',
+        environment: 'LOCAL',
+        limit: 1,
+        leaseSeconds: 60,
+      }),
+    );
+    const row = claimed[0]!;
+    await withWithdrawalTransaction(pool, async (client) =>
+      markPublicPayoutNetworkAttemptStarted(client, {
+        publicationId: row.publicationId,
+        leaseToken: row.leaseToken,
+        environment: 'LOCAL',
+      }),
+    );
+
+    const sender = createFakeSender({ mode: 'success' });
+    const replay = await deliverClaimedPublicPayout(pool, sender, row, 'LOCAL');
+    expect(replay.outcome).toBe('ALREADY_STARTED');
+    expect(sender.calls).toHaveLength(0);
+
+    await pool.query(
+      `UPDATE payout_publications
+       SET lease_expires_at = now() - interval '1 second'
+       WHERE id = $1::uuid`,
+      [seeded.publicationId],
+    );
+    const recovered = await withWithdrawalTransaction(pool, async (client) =>
+      recoverStalePublicPayoutSendingBatch(client, { limit: 5 }),
+    );
+    expect(recovered.ambiguous).toBe(1);
+    expect((await readPublication(pool, seeded.publicationId)).status).toBe('AMBIGUOUS');
+  }, 20000);
+  it('FLAG_FIRST: disable UPDATE blocks marker then marker refuses; sender 0', async () => {
+    const seeded = await seedPendingPublication(pool, await userCtx());
+    const claimed = await withWithdrawalTransaction(pool, async (client) =>
+      claimPublicPayoutPublications(client, {
+        owner: 'worker-flag-first',
+        environment: 'LOCAL',
+        limit: 1,
+        leaseSeconds: 60,
+      }),
+    );
+    const row = claimed[0]!;
+    const barrier = createBarrier(2);
+    const disableTx = (async () => {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(
+          `SELECT enabled FROM feature_flags
+           WHERE flag_key = 'PUBLIC_PAYOUT_LOGS_ENABLED'
+             AND environment = 'LOCAL'::environment_name
+           FOR UPDATE`,
+        );
+        await client.query(
+          `UPDATE feature_flags SET enabled = false, updated_at = now()
+           WHERE flag_key = 'PUBLIC_PAYOUT_LOGS_ENABLED'
+             AND environment = 'LOCAL'::environment_name`,
+        );
+        barrier.arrive();
+        await barrier.wait();
+        // hold lock briefly so marker is waiting on FOR SHARE
+        await new Promise((r) => setTimeout(r, 50));
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK').catch(() => undefined);
+        throw error;
+      } finally {
+        client.release();
+      }
+    })();
+
+    const markerTx = (async () => {
+      barrier.arrive();
+      await barrier.wait();
+      return withWithdrawalTransaction(pool, async (client) =>
+        markPublicPayoutNetworkAttemptStarted(client, {
+          publicationId: row.publicationId,
+          leaseToken: row.leaseToken,
+          environment: 'LOCAL',
+        }),
+      );
+    })();
+
+    await disableTx;
+    const markerResult = await markerTx;
+    expect(markerResult.blocked).toBe(true);
+    if (markerResult.blocked === true) {
+      expect(markerResult.reason).toBe('FEATURE_DISABLED_BEFORE_NETWORK');
+    }
+
+    const sender = createFakeSender({ mode: 'success' });
+    // Row already FAILED by marker auth path; deliver should not send.
+    const after = await readPublication(pool, seeded.publicationId);
+    expect(after.status).toBe('FAILED');
+    expect(after.send_request_started_at).toBeNull();
+    expect(after.attempts).toBe(0);
+    expect(sender.calls).toHaveLength(0);
+  }, 20000);
+  it('MARKER_FIRST: marker FOR SHARE blocks disable UPDATE until marker commits', async () => {
+    const seeded = await seedPendingPublication(pool, await userCtx());
+    const claimed = await withWithdrawalTransaction(pool, async (client) =>
+      claimPublicPayoutPublications(client, {
+        owner: 'worker-marker-first',
+        environment: 'LOCAL',
+        limit: 1,
+        leaseSeconds: 60,
+      }),
+    );
+    const row = claimed[0]!;
+    const barrier = createBarrier(2);
+    let disableSawBlocking = false;
+
+    const markerTx = (async () => {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const marked = await markPublicPayoutNetworkAttemptStarted(client, {
+          publicationId: row.publicationId,
+          leaseToken: row.leaseToken,
+          environment: 'LOCAL',
+        });
+        expect(marked.blocked).toBeUndefined();
+        if (marked.blocked !== true) {
+          expect(marked.newlyStarted).toBe(true);
+        }
+        barrier.arrive();
+        await barrier.wait();
+        // hold share locks while disable attempts UPDATE
+        await new Promise((r) => setTimeout(r, 80));
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK').catch(() => undefined);
+        throw error;
+      } finally {
+        client.release();
+      }
+    })();
+
+    const disableTx = (async () => {
+      barrier.arrive();
+      await barrier.wait();
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        // statement_timeout would fail the proof; use lock_timeout to detect blocking then retry after commit
+        await client.query(`SET LOCAL lock_timeout = '30ms'`);
+        try {
+          await client.query(
+            `UPDATE feature_flags SET enabled = false, updated_at = now()
+             WHERE flag_key = 'PUBLIC_PAYOUT_LOGS_ENABLED'
+               AND environment = 'LOCAL'::environment_name`,
+          );
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          disableSawBlocking = /lock timeout|canceling statement due to lock timeout/i.test(msg);
+          await client.query('ROLLBACK');
+          await client.query('BEGIN');
+        }
+        // After marker commits, disable must succeed.
+        await client.query(
+          `UPDATE feature_flags SET enabled = false, updated_at = now()
+           WHERE flag_key = 'PUBLIC_PAYOUT_LOGS_ENABLED'
+             AND environment = 'LOCAL'::environment_name`,
+        );
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK').catch(() => undefined);
+        throw error;
+      } finally {
+        client.release();
+      }
+    })();
+
+    await Promise.all([markerTx, disableTx]);
+    expect(disableSawBlocking).toBe(true);
+    expect((await readPublication(pool, seeded.publicationId)).send_request_started_at).not.toBeNull();
+    expect((await readPublication(pool, seeded.publicationId)).attempts).toBe(1);
+  }, 20000);
+  it('DESTINATION_FIRST then marker refuses; MARKER_FIRST blocks destination disable', async () => {
+    const seeded = await seedPendingPublication(pool, await userCtx());
+    const claimed = await withWithdrawalTransaction(pool, async (client) =>
+      claimPublicPayoutPublications(client, {
+        owner: 'worker-dest-first',
+        environment: 'LOCAL',
+        limit: 1,
+        leaseSeconds: 60,
+      }),
+    );
+    const row = claimed[0]!;
+
+    // Destination-first
+    const barrier = createBarrier(2);
+    const disableDest = (async () => {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(
+          `SELECT id FROM telegram_destinations WHERE id = $1::uuid FOR UPDATE`,
+          [row.destinationId],
+        );
+        await client.query(
+          `UPDATE telegram_destinations SET enabled = false WHERE id = $1::uuid`,
+          [row.destinationId],
+        );
+        barrier.arrive();
+        await barrier.wait();
+        await new Promise((r) => setTimeout(r, 50));
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK').catch(() => undefined);
+        throw error;
+      } finally {
+        client.release();
+      }
+    })();
+    const markerAfter = (async () => {
+      barrier.arrive();
+      await barrier.wait();
+      const result = await withWithdrawalTransaction(pool, async (client) =>
+        markPublicPayoutNetworkAttemptStarted(client, {
+          publicationId: row.publicationId,
+          leaseToken: row.leaseToken,
+          environment: 'LOCAL',
+        }),
+      );
+      expect(result.blocked).toBe(true);
+    })();
+    await Promise.all([disableDest, markerAfter]);
+    expect((await readPublication(pool, seeded.publicationId)).attempts).toBe(0);
+    expect((await readPublication(pool, seeded.publicationId)).status).toBe('FAILED');
+
+    // Fresh claim for marker-first destination lock proof
+    await setFeatureFlag(pool, 'LOCAL', true);
+    await seedDestination(pool, 'LOCAL', true);
+    const seeded2 = await seedPendingPublication(pool, await userCtx());
+    const claimed2 = await withWithdrawalTransaction(pool, async (client) =>
+      claimPublicPayoutPublications(client, {
+        owner: 'worker-dest-marker-first',
+        environment: 'LOCAL',
+        limit: 1,
+        leaseSeconds: 60,
+      }),
+    );
+    const row2 = claimed2[0]!;
+    const barrier2 = createBarrier(2);
+    let destDisableBlocked = false;
+
+    const markerFirst = (async () => {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const marked = await markPublicPayoutNetworkAttemptStarted(client, {
+          publicationId: row2.publicationId,
+          leaseToken: row2.leaseToken,
+          environment: 'LOCAL',
+        });
+        expect(marked.blocked).toBeUndefined();
+        if (marked.blocked !== true) {
+          expect(marked.newlyStarted).toBe(true);
+        }
+        barrier2.arrive();
+        await barrier2.wait();
+        await new Promise((r) => setTimeout(r, 80));
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK').catch(() => undefined);
+        throw error;
+      } finally {
+        client.release();
+      }
+    })();
+
+    const destDisable = (async () => {
+      barrier2.arrive();
+      await barrier2.wait();
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(`SET LOCAL lock_timeout = '30ms'`);
+        try {
+          await client.query(
+            `UPDATE telegram_destinations SET enabled = false WHERE id = $1::uuid`,
+            [row2.destinationId],
+          );
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          destDisableBlocked = /lock timeout|canceling statement due to lock timeout/i.test(msg);
+          await client.query('ROLLBACK');
+          await client.query('BEGIN');
+        }
+        await client.query(
+          `UPDATE telegram_destinations SET enabled = false WHERE id = $1::uuid`,
+          [row2.destinationId],
+        );
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK').catch(() => undefined);
+        throw error;
+      } finally {
+        client.release();
+      }
+    })();
+
+    await Promise.all([markerFirst, destDisable]);
+    expect(destDisableBlocked).toBe(true);
+    expect((await readPublication(pool, seeded2.publicationId)).attempts).toBe(1);
+  }, 20000);
 });

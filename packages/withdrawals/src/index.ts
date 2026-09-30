@@ -199,6 +199,7 @@ export type {
 
 export {
   PublicPayoutDefiniteFailureError,
+  PublicPayoutPreNetworkAuthError,
   claimAndDeliverPublicPayoutBatch,
   claimPublicPayoutPublications,
   classifyPublicPayoutSenderError,
