@@ -15,6 +15,7 @@ const requiredPackages = [
   'ledger',
   'notifications',
   'observability',
+  'ops-health',
   'referrals',
   'rewards',
   'signing',

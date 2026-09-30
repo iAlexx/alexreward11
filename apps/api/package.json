@@ -23,6 +23,7 @@
     "@alex-rewards/db": "workspace:*",
     "@alex-rewards/ledger": "workspace:*",
     "@alex-rewards/observability": "workspace:*",
+    "@alex-rewards/ops-health": "workspace:*",
     "@alex-rewards/referrals": "workspace:*",
     "@alex-rewards/rewards": "workspace:*",
     "@alex-rewards/support": "workspace:*",

@@ -12,6 +12,7 @@ import type {
   AdminPolicyRuleSummary,
   AdminReauthResult,
   AdminSessionResponse,
+  AdminSystemHealthData,
   AdminSystemHealthItem,
   AdminUserListItem,
   AdminWebAuthnOptionsResponse,
@@ -417,10 +418,63 @@ export function createAdminApiClient(options: AdminApiClientOptions) {
       return fetchDomain(`/v1/admin/audit${toQuery(query)}`);
     },
 
-    getSystemHealth(): Promise<
-      AdminDomainEnvelope<{ components: readonly AdminSystemHealthItem[] }>
-    > {
-      return fetchDomain('/v1/admin/system');
+    getSystemHealth(): Promise<AdminDomainEnvelope<AdminSystemHealthData>> {
+      return fetchDomain('/v1/admin/system').then((envelope) => {
+        if (envelope.status !== 'READY' || envelope.data === null) {
+          return envelope as AdminDomainEnvelope<AdminSystemHealthData>;
+        }
+        const raw = envelope.data as Record<string, unknown>;
+        const legacyRaw = Array.isArray(raw.components) ? raw.components : [];
+        const systemRaw = Array.isArray(raw.systemComponents) ? raw.systemComponents : [];
+        const alertsRaw = Array.isArray(raw.alerts) ? raw.alerts : [];
+        const components: AdminSystemHealthItem[] = legacyRaw.map((row) => {
+          const item = row as Record<string, unknown>;
+          // Prefer Phase 18 name/state; fall back to component/status shapes.
+          const name =
+            typeof item.name === 'string'
+              ? item.name
+              : typeof item.component === 'string'
+                ? item.component
+                : 'unknown';
+          const state =
+            typeof item.state === 'string'
+              ? item.state
+              : typeof item.status === 'string'
+                ? item.status
+                : null;
+          const detail =
+            typeof item.detail === 'string'
+              ? item.detail
+              : typeof item.reasonCode === 'string'
+                ? item.reasonCode
+                : null;
+          return { component: name, status: state, detail };
+        });
+        const mapped: AdminSystemHealthData = {
+          components,
+          systemComponents: systemRaw as AdminSystemHealthData['systemComponents'],
+          alerts: alertsRaw as AdminSystemHealthData['alerts'],
+          payoutDispatchPause: (raw.payoutDispatchPause ?? {
+            flagKey: 'PAYOUT_DISPATCH_PAUSE',
+            environment: 'UNKNOWN',
+            enabled: null,
+            reasonCode: 'SIGNAL_NOT_CONFIGURED',
+            observedAt: new Date(0).toISOString(),
+            authoritativeSource: 'feature_flags',
+            autoUnpause: false,
+          }) as AdminSystemHealthData['payoutDispatchPause'],
+          financialAuthority: false,
+          observedAt:
+            typeof raw.observedAt === 'string' ? raw.observedAt : new Date().toISOString(),
+          ...(typeof raw.contractVersion === 'string'
+            ? { contractVersion: raw.contractVersion }
+            : {}),
+        };
+        return {
+          ...envelope,
+          data: mapped,
+        };
+      });
     },
 
     getSettings(): Promise<AdminDomainEnvelope<Record<string, unknown>>> {

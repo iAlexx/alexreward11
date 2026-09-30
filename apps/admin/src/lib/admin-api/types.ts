@@ -162,6 +162,46 @@ export interface AdminSystemHealthItem {
   readonly detail: string | null;
 }
 
+export interface AdminSystemHealthComponent {
+  readonly component: string;
+  readonly state: string;
+  readonly reasonCode: string;
+  readonly observedAt: string;
+  readonly detailsRedacted?: Readonly<Record<string, string | number | boolean | null>>;
+}
+
+export interface AdminBusinessAlertItem {
+  readonly alertClass: string;
+  readonly severity: string;
+  readonly reasonCode: string;
+  readonly observedAt: string;
+  readonly detailsRedacted?: Readonly<Record<string, string | number | boolean | null>>;
+  readonly financialAuthority: false;
+  readonly mutatesLedger: false;
+  readonly mutatesWithdrawals: false;
+  readonly autoUnpause: false;
+}
+
+export interface AdminPayoutDispatchPauseView {
+  readonly flagKey: 'PAYOUT_DISPATCH_PAUSE';
+  readonly environment: string;
+  readonly enabled: boolean | null;
+  readonly reasonCode: string;
+  readonly observedAt: string;
+  readonly authoritativeSource: 'feature_flags';
+  readonly autoUnpause: false;
+}
+
+export interface AdminSystemHealthData {
+  readonly components: readonly AdminSystemHealthItem[];
+  readonly systemComponents: readonly AdminSystemHealthComponent[];
+  readonly alerts: readonly AdminBusinessAlertItem[];
+  readonly payoutDispatchPause: AdminPayoutDispatchPauseView;
+  readonly financialAuthority: false;
+  readonly observedAt: string;
+  readonly contractVersion?: string;
+}
+
 export interface AdminPolicyRuleSummary {
   readonly family: string;
   readonly version: number | null;

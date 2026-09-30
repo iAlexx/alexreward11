@@ -147,6 +147,9 @@ importers:
       '@alex-rewards/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@alex-rewards/ops-health':
+        specifier: workspace:*
+        version: link:../../packages/ops-health
       '@alex-rewards/referrals':
         specifier: workspace:*
         version: link:../../packages/referrals
@@ -608,6 +611,19 @@ importers:
       pino:
         specifier: 10.3.1
         version: 10.3.1
+
+  packages/ops-health:
+    dependencies:
+      '@alex-rewards/observability':
+        specifier: workspace:*
+        version: link:../observability
+      pg:
+        specifier: 8.23.0
+        version: 8.23.0
+    devDependencies:
+      '@types/pg':
+        specifier: 8.23.1
+        version: 8.23.1
 
   packages/referrals:
     dependencies:

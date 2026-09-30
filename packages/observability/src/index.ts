@@ -7,6 +7,9 @@ import { NodeSDK } from '@opentelemetry/sdk-node';
 import * as Sentry from '@sentry/node';
 import pino, { type Logger } from 'pino';
 
+/** Re-export OpenTelemetry meter API for workspace packages (bounded-cardinality metrics). */
+export { metrics, trace };
+
 export interface ObservabilityOptions {
   readonly serviceName: string;
   readonly environment: string;
