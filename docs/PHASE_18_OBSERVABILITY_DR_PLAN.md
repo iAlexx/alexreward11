@@ -152,10 +152,10 @@ Do not mark operational infrastructure complete merely because application code 
 | Field | Value |
 | --- | --- |
 | Status | `PARTIAL` |
-| Existing | `phase10-restore-reconcile` read-only scanner; `review_cases` type `RECONCILIATION_ISSUE` |
-| Missing | Persisted findings table; automated post-restore gate UI |
-| Tests | Open recon cases → DEGRADED/DANGER; scanner never auto-unpause |
-| DB migration | Optional later |
+| Existing | Authoritative persisted `reconciliation_runs` / `reconciliation_items` / `reconciliation_issues` (migration 0010); ops-health reads unresolved `reconciliation_issues`; `phase10-restore-reconcile` CLI scanner; Review Queue `RECONCILIATION_ISSUE` is operational projection only |
+| Missing | Continuous pager; automated post-restore gate UI; Owner resume ceremony automation |
+| Tests | CRITICAL OPEN cannot be hidden by zero review cases; WARNING degrades; RESOLVED/DISMISSED ignored |
+| DB migration | No |
 | Railway/external | Restore drill host |
 | Owner approval | Resume ceremony |
 
@@ -164,9 +164,9 @@ Do not mark operational infrastructure complete merely because application code 
 | Field | Value |
 | --- | --- |
 | Status | `PARTIAL` |
-| Existing | `provider_limit_rules`, `provider_contracts`, Admin providers/contracts surfaces |
-| Missing | Owner near-exhaustion %; utilization join in alert eval |
-| Tests | Alert cannot override hard limits |
+| Existing | `provider_limit_rules`; authoritative `ad_daily_counters` (UTC_DAY REQUEST/SUCCESS); ops-health detects exact exhaustion for currently effective UTC_DAY rules |
+| Missing | Owner near-exhaustion %; HOUR / ROLLING_24H utilization wiring; country/risk-scoped aggregate policy |
+| Tests | Exact REQUEST/SUCCESS exhaustion; below-limit ≠ invented near threshold; expired/future rules ignored |
 | DB migration | No |
 | Railway/external | No |
 | Owner approval | **Yes — near-exhaustion thresholds** |
@@ -175,13 +175,13 @@ Do not mark operational infrastructure complete merely because application code 
 
 | Field | Value |
 | --- | --- |
-| Status | `MISSING` (persisted mismatch store) / `OWNER_POLICY_REQUIRED` |
-| Existing | Ads settlement concepts; Admin provider surfaces |
-| Missing | `provider_settlement_mismatches` (or equivalent) authoritative table + evaluator |
-| Tests | SIGNAL_NOT_CONFIGURED until present |
-| DB migration | Yes when designed |
+| Status | `PARTIAL` (tables exist; alert coverage incomplete) / `OWNER_POLICY_REQUIRED` (variance magnitude) |
+| Existing | `provider_settlement_periods`, `provider_settlement_items`, `provider_reporting_imports` (migration 0009); ops-health reads DISPUTED / unresolved non-zero variance / FAILED|PARTIAL imports |
+| Missing | Owner variance materiality threshold; continuous settlement feed automation |
+| Tests | DISPUTED → DANGER; empty settlement → SIGNAL_NOT_CONFIGURED (not fabricated OK) |
+| DB migration | No |
 | Railway/external | Provider settlement feeds |
-| Owner approval | Mismatch policy |
+| Owner approval | Variance magnitude / dispute policy |
 
 ## 15. Reward budget / exposure
 

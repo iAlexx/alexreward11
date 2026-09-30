@@ -5,13 +5,16 @@
 
 import type { Pool } from 'pg';
 import {
+  aggregateHealthStates,
   classifyProviderLimitUtilization,
+  classifyUnresolvedReconciliation,
   mapProviderHealthStatus,
   stateFromMissingSignal,
 } from './pure.js';
 import type {
   BusinessAlertObservation,
   HealthComponentSnapshot,
+  HealthState,
   OpsHealthSnapshot,
   PayoutDispatchPauseSnapshot,
   SystemComponentId,
@@ -35,6 +38,10 @@ export interface OpsHealthEvaluateInput {
 
 function iso(d: Date): string {
   return d.toISOString();
+}
+
+function utcDayString(d: Date): string {
+  return d.toISOString().slice(0, 10);
 }
 
 function alertBase(
@@ -125,7 +132,6 @@ async function readOutboxLag(
     );
     const pending = Number(result.rows[0]?.pending ?? 0);
     const oldestAgeSeconds = Number(result.rows[0]?.oldest_age_seconds ?? 0);
-    // Pending count is authoritative; lag severity threshold is Owner policy.
     const alert =
       pending > 0
         ? alertBase('OUTBOX_LAG', 'OWNER_POLICY_REQUIRED', 'THRESHOLD_NOT_CONFIGURED', observedAt, {
@@ -152,37 +158,71 @@ async function readOutboxLag(
   }
 }
 
+/**
+ * Authoritative reconciliation signal: reconciliation_issues.
+ * Review Queue RECONCILIATION_ISSUE cases are correlation only — never authority.
+ */
 async function readReconciliation(
   pool: Pool,
   observedAt: string,
 ): Promise<{ component: HealthComponentSnapshot; alert: BusinessAlertObservation }> {
   try {
-    // Persisted mismatch table is absent; open RECONCILIATION_ISSUE review cases are the
-    // operational projection. Phase 10 CLI restore-reconcile remains a separate scanner.
-    const counts = await pool.query<{ open_count: string }>(
-      `SELECT COUNT(*)::text AS open_count
-         FROM review_cases
-        WHERE case_type = 'RECONCILIATION_ISSUE'
-          AND state = ANY(ARRAY['OPEN','IN_REVIEW','WAITING_INPUT','ESCALATED']::review_case_state[])`,
+    const counts = await pool.query<{
+      critical_open: string;
+      warning_open: string;
+      info_open: string;
+    }>(
+      `SELECT
+         COUNT(*) FILTER (
+           WHERE severity = 'CRITICAL' AND status IN ('OPEN', 'INVESTIGATING')
+         )::text AS critical_open,
+         COUNT(*) FILTER (
+           WHERE severity = 'WARNING' AND status IN ('OPEN', 'INVESTIGATING')
+         )::text AS warning_open,
+         COUNT(*) FILTER (
+           WHERE severity = 'INFO' AND status IN ('OPEN', 'INVESTIGATING')
+         )::text AS info_open
+       FROM reconciliation_issues`,
     );
-    const openCount = Number(counts.rows[0]?.open_count ?? 0);
-    if (openCount > 0) {
-      return {
-        component: component('RECONCILIATION', 'DEGRADED', 'OPEN_RECONCILIATION_CASES', observedAt, {
-          openCount,
-        }),
-        alert: alertBase('RECONCILIATION_MISMATCH', 'DANGER', 'OPEN_RECONCILIATION_CASES', observedAt, {
-          openCount,
-        }),
-      };
+    const criticalOpen = Number(counts.rows[0]?.critical_open ?? 0);
+    const warningOpen = Number(counts.rows[0]?.warning_open ?? 0);
+    const infoOpen = Number(counts.rows[0]?.info_open ?? 0);
+
+    // Correlation only — must not drive reconciliation OK/DEGRADED.
+    let reviewProjectionCount = 0;
+    try {
+      const review = await pool.query<{ open_count: string }>(
+        `SELECT COUNT(*)::text AS open_count
+           FROM review_cases
+          WHERE case_type = 'RECONCILIATION_ISSUE'
+            AND state = ANY(ARRAY['OPEN','IN_REVIEW','WAITING_INPUT','ESCALATED']::review_case_state[])`,
+      );
+      reviewProjectionCount = Number(review.rows[0]?.open_count ?? 0);
+    } catch {
+      reviewProjectionCount = 0;
     }
+
+    const classified = classifyUnresolvedReconciliation({
+      criticalOpen,
+      warningOpen,
+      infoOpen,
+    });
+    const details = {
+      criticalOpen,
+      warningOpen,
+      infoOpen,
+      authoritativeSource: 'reconciliation_issues',
+      reviewQueueProjectionCount: reviewProjectionCount,
+    };
     return {
-      component: component('RECONCILIATION', 'OK', 'NO_OPEN_RECONCILIATION_CASES', observedAt, {
-        openCount: 0,
-      }),
-      alert: alertBase('RECONCILIATION_MISMATCH', 'INFO', 'NO_OPEN_RECONCILIATION_CASES', observedAt, {
-        openCount: 0,
-      }),
+      component: component('RECONCILIATION', classified.state, classified.reasonCode, observedAt, details),
+      alert: alertBase(
+        'RECONCILIATION_MISMATCH',
+        classified.severity,
+        classified.reasonCode,
+        observedAt,
+        details,
+      ),
     };
   } catch {
     const missing = stateFromMissingSignal('RECONCILIATION_QUERY_FAILED');
@@ -193,40 +233,106 @@ async function readReconciliation(
   }
 }
 
+/**
+ * Provider-scoped health: each relevant registry provider is evaluated independently.
+ * A healthy TEST_ONLY provider must not mask a degraded/unavailable ACTIVE provider.
+ */
 async function readProviderHealth(
   pool: Pool,
   observedAt: string,
 ): Promise<{ component: HealthComponentSnapshot; alerts: BusinessAlertObservation[] }> {
   const alerts: BusinessAlertObservation[] = [];
   try {
-    const latest = await pool.query<{ status: string }>(
-      `SELECT status::text AS status
-         FROM provider_health_snapshots
-        ORDER BY observed_at DESC, created_at DESC, id DESC
-        LIMIT 1`,
+    const rows = await pool.query<{
+      provider_code: string;
+      provider_status: string;
+      monetary_status: string;
+      health_status: string | null;
+    }>(
+      `SELECT
+         p.code AS provider_code,
+         p.status::text AS provider_status,
+         p.production_monetary_status::text AS monetary_status,
+         (
+           SELECT s.status::text
+             FROM provider_health_snapshots s
+            WHERE s.provider_id = p.id
+            ORDER BY s.observed_at DESC, s.created_at DESC, s.id DESC
+            LIMIT 1
+         ) AS health_status
+       FROM ad_providers p
+      WHERE p.status IN ('ACTIVE', 'PAUSED')
+      ORDER BY p.code`,
     );
-    if (latest.rowCount === 0) {
-      // Ads package rule: missing observation fails closed as UNAVAILABLE.
-      alerts.push(alertBase('PROVIDER_HEALTH', 'DANGER', 'NO_PROVIDER_OBSERVATION', observedAt));
+
+    if (rows.rowCount === 0) {
+      const missing = stateFromMissingSignal('NO_RELEVANT_PROVIDERS');
+      alerts.push(alertBase('PROVIDER_HEALTH', 'OWNER_POLICY_REQUIRED', 'NO_RELEVANT_PROVIDERS', observedAt));
       return {
-        component: component('ADS_PROVIDER', 'UNAVAILABLE', 'NO_PROVIDER_OBSERVATION', observedAt),
+        component: component('ADS_PROVIDER', missing.state, missing.reasonCode, observedAt),
         alerts,
       };
     }
-    const status = latest.rows[0]?.status ?? null;
-    const state = mapProviderHealthStatus(status);
+
+    const perProvider: Array<{
+      code: string;
+      monetaryStatus: string;
+      healthState: HealthState;
+      reason: string;
+    }> = [];
+
+    for (const row of rows.rows) {
+      if (row.health_status === null) {
+        // Missing observation fails closed as UNAVAILABLE (ads package rule).
+        perProvider.push({
+          code: row.provider_code,
+          monetaryStatus: row.monetary_status,
+          healthState: 'UNAVAILABLE',
+          reason: 'NO_PROVIDER_OBSERVATION',
+        });
+        continue;
+      }
+      const healthState = mapProviderHealthStatus(row.health_status);
+      perProvider.push({
+        code: row.provider_code,
+        monetaryStatus: row.monetary_status,
+        healthState,
+        reason: `PROVIDER_${healthState}`,
+      });
+    }
+
+    const aggregate = aggregateHealthStates(perProvider.map((p) => p.healthState));
+    const unavailableCount = perProvider.filter((p) => p.healthState === 'UNAVAILABLE').length;
+    const degradedCount = perProvider.filter((p) => p.healthState === 'DEGRADED').length;
+    const healthyCount = perProvider.filter((p) => p.healthState === 'OK').length;
+    // Redacted codes only — never UUIDs in details for high-cardinality avoidance in metrics;
+    // bounded list of provider codes is acceptable in the read model.
+    const providerCodes = perProvider.map((p) => p.code).join(',');
+
     alerts.push(
       alertBase(
         'PROVIDER_HEALTH',
-        state === 'OK' ? 'INFO' : state === 'DEGRADED' ? 'WARN' : 'DANGER',
-        state === 'OK' ? 'PROVIDER_HEALTHY' : `PROVIDER_${state}`,
+        aggregate === 'OK' ? 'INFO' : aggregate === 'DEGRADED' ? 'WARN' : 'DANGER',
+        aggregate === 'OK' ? 'PROVIDERS_HEALTHY' : `PROVIDERS_${aggregate}`,
         observedAt,
-        { status: status ?? 'null' },
+        {
+          relevantProviderCount: perProvider.length,
+          healthyCount,
+          degradedCount,
+          unavailableCount,
+          providerCodes,
+          aggregateFailSafe: true,
+        },
       ),
     );
+
     return {
-      component: component('ADS_PROVIDER', state, `PROVIDER_${state}`, observedAt, {
-        status: status ?? 'null',
+      component: component('ADS_PROVIDER', aggregate, `PROVIDERS_${aggregate}`, observedAt, {
+        relevantProviderCount: perProvider.length,
+        healthyCount,
+        degradedCount,
+        unavailableCount,
+        providerCodes,
       }),
       alerts,
     };
@@ -240,35 +346,117 @@ async function readProviderHealth(
   }
 }
 
+/**
+ * Exact UTC_DAY REQUEST/SUCCESS exhaustion from ad_daily_counters + effective ACTIVE rules.
+ * HOUR / ROLLING_24H and country/risk-scoped rules are reported as unsupported, not invented.
+ */
 async function readProviderLimits(
   pool: Pool,
   observedAt: string,
+  now: Date,
 ): Promise<BusinessAlertObservation[]> {
   try {
-    const rows = await pool.query<{ max_count: number }>(
-      `SELECT max_count
+    const asOf = now.toISOString();
+    const utcDay = utcDayString(now);
+
+    const unsupported = await pool.query<{ unsupported_count: string }>(
+      `SELECT COUNT(*)::text AS unsupported_count
          FROM provider_limit_rules
         WHERE status = 'ACTIVE'
-        LIMIT 50`,
+          AND valid_from <= $1::timestamptz
+          AND (valid_to IS NULL OR valid_to > $1::timestamptz)
+          AND (
+            limit_window IN ('HOUR', 'ROLLING_24H')
+            OR country_code IS NOT NULL
+            OR risk_tier IS NOT NULL
+          )`,
+      [asOf],
     );
-    if (rows.rowCount === 0) {
-      return [alertBase('PROVIDER_LIMIT', 'OWNER_POLICY_REQUIRED', 'SIGNAL_NOT_CONFIGURED', observedAt)];
+    const unsupportedCount = Number(unsupported.rows[0]?.unsupported_count ?? 0);
+
+    // Effective provider-wide UTC_DAY limits: min max_count per provider+metric among
+    // ACTIVE currently-valid rules with null country/risk (stricter-only).
+    const limits = await pool.query<{
+      provider_id: string;
+      limit_metric: string;
+      effective_max: number;
+    }>(
+      `SELECT provider_id::text AS provider_id,
+              limit_metric::text AS limit_metric,
+              MIN(max_count)::int AS effective_max
+         FROM provider_limit_rules
+        WHERE status = 'ACTIVE'
+          AND limit_window = 'UTC_DAY'
+          AND limit_metric IN ('REQUEST', 'SUCCESS')
+          AND country_code IS NULL
+          AND risk_tier IS NULL
+          AND valid_from <= $1::timestamptz
+          AND (valid_to IS NULL OR valid_to > $1::timestamptz)
+        GROUP BY provider_id, limit_metric`,
+      [asOf],
+    );
+
+    if ((limits.rowCount ?? 0) === 0) {
+      return [
+        alertBase('PROVIDER_LIMIT', 'OWNER_POLICY_REQUIRED', 'SIGNAL_NOT_CONFIGURED', observedAt, {
+          unsupportedActiveRuleDimensions: unsupportedCount,
+        }),
+      ];
     }
-    // Authoritative hard limits exist; near-exhaustion % is Owner policy.
-    // Exact exhaustion requires paired usage counters — without approved utilization
-    // threshold or joined usage projection, do not invent near/exhausted.
-    let anyZero = 0;
-    for (const row of rows.rows) {
+
+    let exhaustedRequest = 0;
+    let exhaustedSuccess = 0;
+    let belowLimitObserved = 0;
+
+    for (const rule of limits.rows) {
+      const counterColumn =
+        rule.limit_metric === 'REQUEST' ? 'provider_requests' : 'successful_rewards';
+      // Deterministic exact exhaustion: any user counter for today >= effective min limit.
+      const usage = await pool.query<{ max_used: string | null }>(
+        rule.limit_metric === 'REQUEST'
+          ? `SELECT MAX(provider_requests)::text AS max_used
+               FROM ad_daily_counters
+              WHERE provider_id = $1::uuid
+                AND utc_day = $2::date`
+          : `SELECT MAX(successful_rewards)::text AS max_used
+               FROM ad_daily_counters
+              WHERE provider_id = $1::uuid
+                AND utc_day = $2::date`,
+        [rule.provider_id, utcDay],
+      );
+      void counterColumn;
+      const maxUsedRaw = usage.rows[0]?.max_used ?? null;
+      const maxUsed = maxUsedRaw === null ? 0 : Number(maxUsedRaw);
       const classified = classifyProviderLimitUtilization({
-        used: null,
-        limit: row.max_count,
+        used: maxUsed,
+        limit: rule.effective_max,
       });
-      if (classified.reasonCode === 'THRESHOLD_NOT_CONFIGURED') anyZero += 1;
+      if (classified.reasonCode === 'LIMIT_EXHAUSTED') {
+        if (rule.limit_metric === 'REQUEST') exhaustedRequest += 1;
+        else exhaustedSuccess += 1;
+      } else {
+        belowLimitObserved += 1;
+      }
     }
+
+    if (exhaustedRequest > 0 || exhaustedSuccess > 0) {
+      return [
+        alertBase('PROVIDER_LIMIT', 'DANGER', 'LIMIT_EXHAUSTED', observedAt, {
+          exhaustedRequestDimensions: exhaustedRequest,
+          exhaustedSuccessDimensions: exhaustedSuccess,
+          belowLimitDimensions: belowLimitObserved,
+          unsupportedActiveRuleDimensions: unsupportedCount,
+          windowSupported: 'UTC_DAY',
+        }),
+      ];
+    }
+
     return [
       alertBase('PROVIDER_LIMIT', 'OWNER_POLICY_REQUIRED', 'THRESHOLD_NOT_CONFIGURED', observedAt, {
-        activeRulesObserved: rows.rowCount ?? 0,
-        nearExhaustionPolicyRequired: anyZero,
+        utcDayDimensionsObserved: limits.rowCount ?? 0,
+        belowLimitDimensions: belowLimitObserved,
+        unsupportedActiveRuleDimensions: unsupportedCount,
+        nearExhaustionInvented: false,
       }),
     ];
   } catch {
@@ -276,12 +464,86 @@ async function readProviderLimits(
   }
 }
 
+/**
+ * Uses provider_settlement_periods / provider_reporting_imports.
+ * Does not invent variance materiality thresholds.
+ */
 async function readSettlement(
-  _pool: Pool,
+  pool: Pool,
   observedAt: string,
 ): Promise<BusinessAlertObservation> {
-  // No dedicated provider_settlement_mismatches table in schema yet.
-  return alertBase('PROVIDER_SETTLEMENT', 'OWNER_POLICY_REQUIRED', 'SIGNAL_NOT_CONFIGURED', observedAt);
+  try {
+    const periods = await pool.query<{
+      total: string;
+      disputed: string;
+      unresolved_nonzero_variance: string;
+    }>(
+      `SELECT
+         COUNT(*)::text AS total,
+         COUNT(*) FILTER (WHERE status = 'DISPUTED')::text AS disputed,
+         COUNT(*) FILTER (
+           WHERE variance_atomic IS NOT NULL
+             AND variance_atomic <> 0
+             AND status IN ('OPEN', 'REPORTED', 'DISPUTED')
+         )::text AS unresolved_nonzero_variance
+       FROM provider_settlement_periods`,
+    );
+    const total = Number(periods.rows[0]?.total ?? 0);
+    const disputed = Number(periods.rows[0]?.disputed ?? 0);
+    const unresolvedNonzeroVariance = Number(periods.rows[0]?.unresolved_nonzero_variance ?? 0);
+
+    const imports = await pool.query<{ failed_or_partial: string }>(
+      `SELECT COUNT(*)::text AS failed_or_partial
+         FROM provider_reporting_imports
+        WHERE status IN ('FAILED', 'PARTIAL')`,
+    );
+    const failedOrPartial = Number(imports.rows[0]?.failed_or_partial ?? 0);
+
+    if (total === 0) {
+      return alertBase('PROVIDER_SETTLEMENT', 'OWNER_POLICY_REQUIRED', 'SIGNAL_NOT_CONFIGURED', observedAt, {
+        table: 'provider_settlement_periods',
+        periodCount: 0,
+      });
+    }
+
+    if (disputed > 0) {
+      return alertBase('PROVIDER_SETTLEMENT', 'DANGER', 'SETTLEMENT_DISPUTED', observedAt, {
+        disputedCount: disputed,
+        unresolvedNonzeroVariance,
+        failedOrPartialImports: failedOrPartial,
+      });
+    }
+
+    if (unresolvedNonzeroVariance > 0) {
+      // Non-zero unresolved variance is an observable mismatch; magnitude threshold is Owner policy.
+      return alertBase(
+        'PROVIDER_SETTLEMENT',
+        'OWNER_POLICY_REQUIRED',
+        'UNRESOLVED_NONZERO_VARIANCE',
+        observedAt,
+        {
+          unresolvedNonzeroVariance,
+          failedOrPartialImports: failedOrPartial,
+          varianceMagnitudeThresholdConfigured: false,
+        },
+      );
+    }
+
+    if (failedOrPartial > 0) {
+      return alertBase('PROVIDER_SETTLEMENT', 'WARN', 'REPORTING_IMPORT_DEGRADED', observedAt, {
+        failedOrPartialImports: failedOrPartial,
+        periodCount: total,
+      });
+    }
+
+    return alertBase('PROVIDER_SETTLEMENT', 'INFO', 'NO_OPEN_SETTLEMENT_MISMATCH', observedAt, {
+      periodCount: total,
+      disputedCount: 0,
+      unresolvedNonzeroVariance: 0,
+    });
+  } catch {
+    return alertBase('PROVIDER_SETTLEMENT', 'WARN', 'SETTLEMENT_QUERY_FAILED', observedAt);
+  }
 }
 
 async function readBudgetExposure(
@@ -329,7 +591,6 @@ async function readBudgetExposure(
         activeCount: active,
       });
     }
-    // Near-exhaustion % requires Owner policy — do not invent.
     return alertBase(alertClass, 'OWNER_POLICY_REQUIRED', 'THRESHOLD_NOT_CONFIGURED', observedAt, {
       table: tableName,
       activeCount: active,
@@ -425,11 +686,10 @@ export async function evaluateOpsHealth(input: OpsHealthEvaluateInput): Promise<
       alerts.push(...provider.alerts);
       continue;
     }
-    // TELEGRAM_BOT, TON_RPC_*, SIGNER, HOT_WALLET — no false OK without signal
     components.push(component(id, 'UNKNOWN', 'SIGNAL_NOT_CONFIGURED', observedAt));
   }
 
-  alerts.push(...(await readProviderLimits(input.pool, observedAt)));
+  alerts.push(...(await readProviderLimits(input.pool, observedAt, now)));
   alerts.push(await readSettlement(input.pool, observedAt));
   alerts.push(
     await readBudgetExposure(input.pool, observedAt, 'REWARD_BUDGET_EXPOSURE', 'reward_budget_periods'),

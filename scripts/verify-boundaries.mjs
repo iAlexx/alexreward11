@@ -386,6 +386,53 @@ for (const key of forbiddenPlaintextEnvKeys) {
   }
 }
 
+// Phase 18: ops-health is a read-model package — no financial mutation imports / SQL writes.
+{
+  const forbiddenOpsHealthImports = [
+    '@alex-rewards/ledger',
+    '@alex-rewards/withdrawals',
+    '@alex-rewards/rewards',
+    '@alex-rewards/signing',
+    '@alex-rewards/ton',
+    '@alex-rewards/control-center',
+    '@alex-rewards/ads',
+    '@alex-rewards/wallets',
+    '@alex-rewards/fraud',
+  ];
+  const opsHealthSrc = (await walk('packages/ops-health/src/')).filter((path) =>
+    /\.(?:ts|tsx|js|mjs)$/.test(path.replaceAll('\\', '/')),
+  );
+  for (const path of opsHealthSrc) {
+    const normalized = path.replaceAll('\\', '/');
+    if (normalized.includes('/dist/') || normalized.includes('.test.')) continue;
+    const source = await readFile(new URL(path, root), 'utf8');
+    for (const pkg of forbiddenOpsHealthImports) {
+      const escaped = pkg.replace('/', '\\/');
+      if (
+        new RegExp(`from\\s+['"]${escaped}['"]`).test(source) ||
+        new RegExp(`require\\(['"]${escaped}['"]\\)`).test(source)
+      ) {
+        failures.push(
+          `${path}: ops-health must not import financial mutation package ${pkg}`,
+        );
+      }
+    }
+    // Strip comments before mutation scan so documentation of forbidden verbs is allowed.
+    const withoutBlock = source.replace(/\/\*[\s\S]*?\*\//g, ' ');
+    const withoutLine = withoutBlock
+      .replace(/(^|[^:])\/\/[^\n]*/g, '$1')
+      .replace(/(^|[\s;(])--[^\n]*/g, '$1');
+    if (
+      /\bINSERT\s+INTO\b/i.test(withoutLine) ||
+      /\bUPDATE\s+[A-Za-z_][\w.]*/i.test(withoutLine) ||
+      /\bDELETE\s+FROM\b/i.test(withoutLine) ||
+      /\bMERGE\s+INTO\b/i.test(withoutLine)
+    ) {
+      failures.push(`${path}: ops-health production source must not execute SQL mutations`);
+    }
+  }
+}
+
 if (failures.length > 0) {
   console.error(`Architecture validation failed:\n- ${failures.join('\n- ')}`);
   process.exitCode = 1;

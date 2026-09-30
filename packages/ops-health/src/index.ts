@@ -16,10 +16,15 @@ export {
 export {
   ALLOWED_METRIC_LABEL_KEYS,
   assertBoundedMetricLabels,
+  aggregateHealthStates,
   classifyProviderLimitUtilization,
+  classifyUnresolvedReconciliation,
+  containsSqlMutationStatement,
+  effectiveMinLimit,
   isFalseOkForbidden,
   mapProviderHealthStatus,
   stateFromMissingSignal,
+  stripCodeComments,
 } from './pure.js';
 export {
   evaluateOpsHealth,
