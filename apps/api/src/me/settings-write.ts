@@ -51,7 +51,7 @@ async function downgradeNonTerminalPayoutPublicationsToHide(
      WHERE pp.withdrawal_id = w.id
        AND w.user_id = $1::uuid
        AND pp.identity_mode = 'SHOW_USERNAME'::public_payout_identity_mode
-       AND pp.status::text IN ('PENDING', 'FAILED', 'SENDING', 'AMBIGUOUS')`,
+       AND pp.status::text IN ('PENDING', 'FAILED')`,
     [userId],
   );
   return result.rowCount ?? 0;

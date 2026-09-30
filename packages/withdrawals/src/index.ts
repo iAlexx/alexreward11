@@ -149,10 +149,8 @@ export { settleWithdrawalReservation } from './settlement.js';
 
 export {
   WITHDRAWAL_CONFIRMED_OUTBOX_EVENT,
-  ensureWithdrawalConfirmedOutbox,
   withdrawalConfirmedDedupeKey,
 } from './public-payout-outbox.js';
-export type { EnsureWithdrawalConfirmedOutboxInput } from './public-payout-outbox.js';
 
 export { sanitizePublicPayoutUsernameSnapshot } from './public-payout-username.js';
 export { isPublicPayoutLogsEnabled } from './public-payout-feature.js';

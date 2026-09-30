@@ -75,16 +75,20 @@ export async function ensureWithdrawalConfirmedOutbox(
     );
   }
 
-  const owned = await client.query<{ id: string }>(
+  // Settlement stamps settled_at only on the authoritative confirmed attempt.
+  // Do not accept merely-owned historical attempts.
+  const settledAttempt = await client.query<{ id: string }>(
     `SELECT id::text AS id
      FROM withdrawal_attempts
-     WHERE id = $1::uuid AND withdrawal_id = $2::uuid`,
+     WHERE id = $1::uuid
+       AND withdrawal_id = $2::uuid
+       AND settled_at IS NOT NULL`,
     [confirmedAttemptId, withdrawalId],
   );
-  if (owned.rows[0] === undefined) {
+  if (settledAttempt.rows[0] === undefined) {
     throw new WithdrawalDomainError(
-      'VALIDATION',
-      'confirmedAttemptId does not belong to withdrawal',
+      'STATE_CONFLICT',
+      'withdrawal.confirmed Outbox requires settled_at on confirmedAttemptId',
       { details: { confirmedAttemptId, withdrawalId } },
     );
   }

@@ -104,13 +104,7 @@ describe.skipIf(phase7DatabaseUrl === '')('Phase17 payout_publications integrity
     );
 
     await pool.query(
-      `UPDATE payout_publications
-       SET status = 'FAILED',
-           lease_owner = NULL,
-           lease_token = NULL,
-           lease_expires_at = NULL,
-           sending_started_at = NULL
-       WHERE id = $1::uuid`,
+      `UPDATE payout_publications SET status = 'FAILED' WHERE id = $1::uuid`,
       [id],
     );
 
@@ -128,11 +122,7 @@ describe.skipIf(phase7DatabaseUrl === '')('Phase17 payout_publications integrity
     await pool.query(
       `UPDATE payout_publications
        SET status = 'AMBIGUOUS',
-           ambiguous_at = now(),
-           lease_owner = NULL,
-           lease_token = NULL,
-           lease_expires_at = NULL,
-           sending_started_at = NULL
+           ambiguous_at = now()
        WHERE id = $1::uuid`,
       [id],
     );
@@ -305,6 +295,182 @@ describe.skipIf(phase7DatabaseUrl === '')('Phase17 payout_publications integrity
       ),
     ).rejects.toThrow(/cannot escalate|HIDE_IDENTITY/);
   });
+
+
+  it('SENDING identity rewrite is rejected', async () => {
+    const id = await insertPending({ identity: 'SHOW_USERNAME', username: 'Alice' });
+    await pool.query(
+      `UPDATE payout_publications
+       SET status = 'SENDING',
+           sending_started_at = now(),
+           lease_owner = 'w',
+           lease_token = $2::uuid,
+           lease_expires_at = now() + interval '1 minute'
+       WHERE id = $1::uuid`,
+      [id, randomUUID()],
+    );
+    await expect(
+      pool.query(
+        `UPDATE payout_publications
+         SET identity_mode = 'HIDE_IDENTITY', username_snapshot = NULL
+         WHERE id = $1::uuid`,
+        [id],
+      ),
+    ).rejects.toThrow(/frozen|identity/i);
+    await expect(
+      pool.query(
+        `UPDATE payout_publications SET username_snapshot = 'Bob' WHERE id = $1::uuid`,
+        [id],
+      ),
+    ).rejects.toThrow(/frozen|identity/i);
+  });
+
+  it('AMBIGUOUS identity rewrite is rejected', async () => {
+    const id = await insertPending({ identity: 'SHOW_USERNAME', username: 'Alice' });
+    await pool.query(
+      `UPDATE payout_publications
+       SET status = 'SENDING',
+           sending_started_at = now(),
+           lease_owner = 'w',
+           lease_token = $2::uuid,
+           lease_expires_at = now() + interval '1 minute'
+       WHERE id = $1::uuid`,
+      [id, randomUUID()],
+    );
+    await pool.query(
+      `UPDATE payout_publications SET status = 'AMBIGUOUS', ambiguous_at = now() WHERE id = $1::uuid`,
+      [id],
+    );
+    const frozen = await pool.query<{
+      identity_mode: string;
+      username_snapshot: string | null;
+      identity_frozen_at: Date | null;
+      sending_started_at: Date | null;
+      lease_owner: string | null;
+    }>(
+      `SELECT identity_mode::text, username_snapshot, identity_frozen_at, sending_started_at, lease_owner
+       FROM payout_publications WHERE id = $1::uuid`,
+      [id],
+    );
+    expect(frozen.rows[0]?.identity_mode).toBe('SHOW_USERNAME');
+    expect(frozen.rows[0]?.username_snapshot).toBe('Alice');
+    expect(frozen.rows[0]?.identity_frozen_at).not.toBeNull();
+    expect(frozen.rows[0]?.sending_started_at).not.toBeNull();
+    expect(frozen.rows[0]?.lease_owner).toBeNull();
+
+    await expect(
+      pool.query(
+        `UPDATE payout_publications
+         SET identity_mode = 'HIDE_IDENTITY', username_snapshot = NULL
+         WHERE id = $1::uuid`,
+        [id],
+      ),
+    ).rejects.toThrow(/frozen|identity/i);
+    await expect(
+      pool.query(
+        `UPDATE payout_publications SET username_snapshot = 'Bob' WHERE id = $1::uuid`,
+        [id],
+      ),
+    ).rejects.toThrow(/frozen|identity/i);
+  });
+
+  it('FAILED SHOW->HIDE remains allowed and clears freeze', async () => {
+    const id = await insertPending({ identity: 'SHOW_USERNAME', username: 'Alice' });
+    await pool.query(
+      `UPDATE payout_publications
+       SET status = 'SENDING',
+           sending_started_at = now(),
+           lease_owner = 'w',
+           lease_token = $2::uuid,
+           lease_expires_at = now() + interval '1 minute'
+       WHERE id = $1::uuid`,
+      [id, randomUUID()],
+    );
+    await pool.query(`UPDATE payout_publications SET status = 'FAILED' WHERE id = $1::uuid`, [id]);
+    const afterFail = await pool.query<{
+      identity_frozen_at: Date | null;
+      sending_started_at: Date | null;
+      lease_owner: string | null;
+      identity_mode: string;
+      username_snapshot: string | null;
+    }>(
+      `SELECT identity_frozen_at, sending_started_at, lease_owner, identity_mode::text, username_snapshot
+       FROM payout_publications WHERE id = $1::uuid`,
+      [id],
+    );
+    expect(afterFail.rows[0]?.identity_frozen_at).toBeNull();
+    expect(afterFail.rows[0]?.sending_started_at).toBeNull();
+    expect(afterFail.rows[0]?.lease_owner).toBeNull();
+    expect(afterFail.rows[0]?.identity_mode).toBe('SHOW_USERNAME');
+    expect(afterFail.rows[0]?.username_snapshot).toBe('Alice');
+
+    await pool.query(
+      `UPDATE payout_publications
+       SET identity_mode = 'HIDE_IDENTITY'
+       WHERE id = $1::uuid`,
+      [id],
+    );
+    const afterHide = await pool.query<{
+      identity_mode: string;
+      username_snapshot: string | null;
+    }>(
+      `SELECT identity_mode::text, username_snapshot FROM payout_publications WHERE id = $1::uuid`,
+      [id],
+    );
+    expect(afterHide.rows[0]?.identity_mode).toBe('HIDE_IDENTITY');
+    expect(afterHide.rows[0]?.username_snapshot).toBeNull();
+  });
+
+  it('identity_frozen_at and leases are state-consistent', async () => {
+    const id = await insertPending({ identity: 'SHOW_USERNAME', username: 'Alice' });
+    let row = await pool.query<{ identity_frozen_at: Date | null; lease_owner: string | null }>(
+      `SELECT identity_frozen_at, lease_owner FROM payout_publications WHERE id = $1::uuid`,
+      [id],
+    );
+    expect(row.rows[0]?.identity_frozen_at).toBeNull();
+    expect(row.rows[0]?.lease_owner).toBeNull();
+
+    await pool.query(
+      `UPDATE payout_publications
+       SET status = 'SENDING',
+           sending_started_at = now(),
+           lease_owner = 'w',
+           lease_token = $2::uuid,
+           lease_expires_at = now() + interval '1 minute'
+       WHERE id = $1::uuid`,
+      [id, randomUUID()],
+    );
+    row = await pool.query(
+      `SELECT identity_frozen_at, lease_owner FROM payout_publications WHERE id = $1::uuid`,
+      [id],
+    );
+    expect(row.rows[0]?.identity_frozen_at).not.toBeNull();
+    expect(row.rows[0]?.lease_owner).toBe('w');
+
+    await pool.query(
+      `UPDATE payout_publications
+       SET status = 'PUBLISHED', telegram_message_id = 99, published_at = now()
+       WHERE id = $1::uuid`,
+      [id],
+    );
+    const pub = await pool.query<{
+      identity_frozen_at: Date | null;
+      lease_owner: string | null;
+      sending_started_at: Date | null;
+      identity_mode: string;
+      username_snapshot: string | null;
+    }>(
+      `SELECT identity_frozen_at, lease_owner, sending_started_at, identity_mode::text, username_snapshot
+       FROM payout_publications WHERE id = $1::uuid`,
+      [id],
+    );
+    expect(pub.rows[0]?.identity_frozen_at).not.toBeNull();
+    expect(pub.rows[0]?.lease_owner).toBeNull();
+    expect(pub.rows[0]?.sending_started_at).not.toBeNull();
+    expect(pub.rows[0]?.identity_mode).toBe('SHOW_USERNAME');
+    expect(pub.rows[0]?.username_snapshot).toBe('Alice');
+  });
+
 
   it('next_attempt_at defaults; attempts start at 0 (network send counter)', async () => {
     const id = await insertPending();

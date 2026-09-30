@@ -210,7 +210,8 @@ describe.skipIf(databaseUrl === '')('Phase17 settings privacy downgrade', () => 
     expect(pub.rows[0]?.username_snapshot).toBeNull();
   });
 
-  it('privacy lock serialization: sender FOR UPDATE blocks HIDE until release', async () => {
+
+  it('privacy race FAILED outcome: HIDE applies after definite no-message', async () => {
     const pubId = (
       await pool.query<{ id: string }>(
         `SELECT id::text AS id FROM payout_publications WHERE withdrawal_id = $1::uuid`,
@@ -218,60 +219,221 @@ describe.skipIf(databaseUrl === '')('Phase17 settings privacy downgrade', () => 
       )
     ).rows[0]!.id;
 
-    const clientA = await pool.connect();
-    const clientB = await pool.connect();
+    const sender = await pool.connect();
     try {
-      await clientA.query('BEGIN');
-      await clientA.query(`SELECT id FROM payout_publications WHERE id = $1::uuid FOR UPDATE`, [
+      await sender.query('BEGIN');
+      await sender.query(`SELECT id FROM payout_publications WHERE id = $1::uuid FOR UPDATE`, [
         pubId,
       ]);
+      await sender.query(
+        `UPDATE payout_publications
+         SET status = 'SENDING',
+             sending_started_at = now(),
+             lease_owner = 'sender',
+             lease_token = $2::uuid,
+             lease_expires_at = now() + interval '1 minute'
+         WHERE id = $1::uuid`,
+        [pubId, randomUUID()],
+      );
 
-      let bResolved = false;
-      let bError: unknown;
-      const bPromise = (async () => {
+      let hideDone = false;
+      let hideError: unknown;
+      const hidePromise = (async () => {
         try {
           await patchUserSettings(pool, {
             userId,
             patch: { publicPayoutIdentityMode: 'HIDE_IDENTITY' },
           });
-          bResolved = true;
+          hideDone = true;
         } catch (error) {
-          bError = error;
+          hideError = error;
         }
       })();
 
-      await expect(
-        clientB.query(`SELECT id FROM payout_publications WHERE id = $1::uuid FOR UPDATE NOWAIT`, [
-          pubId,
-        ]),
-      ).rejects.toThrow(/could not obtain lock|lock/i);
+      const probe = await pool.connect();
+      try {
+        await expect(
+          probe.query(
+            `SELECT id FROM payout_publications WHERE id = $1::uuid FOR UPDATE NOWAIT`,
+            [pubId],
+          ),
+        ).rejects.toThrow(/could not obtain lock|lock/i);
+      } finally {
+        probe.release();
+      }
+      expect(hideDone).toBe(false);
 
-      expect(bResolved).toBe(false);
+      await sender.query(`UPDATE payout_publications SET status = 'FAILED' WHERE id = $1::uuid`, [
+        pubId,
+      ]);
+      await sender.query('COMMIT');
+      await hidePromise;
+      expect(hideError).toBeUndefined();
+      expect(hideDone).toBe(true);
 
-      await clientA.query('COMMIT');
-      await bPromise;
-      expect(bError).toBeUndefined();
-      expect(bResolved).toBe(true);
-
-      const pub = await pool.query<{ identity_mode: string; username_snapshot: string | null }>(
-        `SELECT identity_mode::text AS identity_mode, username_snapshot
+      const settings = await readUserSettings(pool, userId);
+      expect(settings.publicPayoutIdentityMode).toBe('HIDE_IDENTITY');
+      const pub = await pool.query<{
+        status: string;
+        identity_mode: string;
+        username_snapshot: string | null;
+        identity_frozen_at: Date | null;
+      }>(
+        `SELECT status::text, identity_mode::text, username_snapshot, identity_frozen_at
          FROM payout_publications WHERE id = $1::uuid`,
         [pubId],
       );
+      expect(pub.rows[0]?.status).toBe('FAILED');
       expect(pub.rows[0]?.identity_mode).toBe('HIDE_IDENTITY');
       expect(pub.rows[0]?.username_snapshot).toBeNull();
+      expect(pub.rows[0]?.identity_frozen_at).toBeNull();
     } finally {
       try {
-        await clientA.query('ROLLBACK');
+        await sender.query('ROLLBACK');
       } catch {
         /* committed */
       }
-      clientA.release();
-      clientB.release();
+      sender.release();
     }
   });
 
-  it('HIDE first then sender lock observes HIDE', async () => {
+  it('privacy race AMBIGUOUS outcome: setting HIDE, snapshot preserved', async () => {
+    const pubId = (
+      await pool.query<{ id: string }>(
+        `SELECT id::text AS id FROM payout_publications WHERE withdrawal_id = $1::uuid`,
+        [withdrawalId],
+      )
+    ).rows[0]!.id;
+
+    const sender = await pool.connect();
+    try {
+      await sender.query('BEGIN');
+      await sender.query(`SELECT id FROM payout_publications WHERE id = $1::uuid FOR UPDATE`, [
+        pubId,
+      ]);
+      await sender.query(
+        `UPDATE payout_publications
+         SET status = 'SENDING',
+             sending_started_at = now(),
+             lease_owner = 'sender',
+             lease_token = $2::uuid,
+             lease_expires_at = now() + interval '1 minute'
+         WHERE id = $1::uuid`,
+        [pubId, randomUUID()],
+      );
+
+      let hideDone = false;
+      const hidePromise = (async () => {
+        await patchUserSettings(pool, {
+          userId,
+          patch: { publicPayoutIdentityMode: 'HIDE_IDENTITY' },
+        });
+        hideDone = true;
+      })();
+
+      expect(hideDone).toBe(false);
+      await sender.query(
+        `UPDATE payout_publications
+         SET status = 'AMBIGUOUS', ambiguous_at = now()
+         WHERE id = $1::uuid`,
+        [pubId],
+      );
+      await sender.query('COMMIT');
+      await hidePromise;
+      expect(hideDone).toBe(true);
+
+      const settings = await readUserSettings(pool, userId);
+      expect(settings.publicPayoutIdentityMode).toBe('HIDE_IDENTITY');
+      const pub = await pool.query<{
+        status: string;
+        identity_mode: string;
+        username_snapshot: string | null;
+        identity_frozen_at: Date | null;
+      }>(
+        `SELECT status::text, identity_mode::text, username_snapshot, identity_frozen_at
+         FROM payout_publications WHERE id = $1::uuid`,
+        [pubId],
+      );
+      expect(pub.rows[0]?.status).toBe('AMBIGUOUS');
+      expect(pub.rows[0]?.identity_mode).toBe('SHOW_USERNAME');
+      expect(pub.rows[0]?.username_snapshot).toBe('PublicName');
+      expect(pub.rows[0]?.identity_frozen_at).not.toBeNull();
+    } finally {
+      try {
+        await sender.query('ROLLBACK');
+      } catch {
+        /* committed */
+      }
+      sender.release();
+    }
+  });
+
+  it('privacy race PUBLISHED outcome: setting HIDE, published proof preserved', async () => {
+    const pubId = (
+      await pool.query<{ id: string }>(
+        `SELECT id::text AS id FROM payout_publications WHERE withdrawal_id = $1::uuid`,
+        [withdrawalId],
+      )
+    ).rows[0]!.id;
+
+    const sender = await pool.connect();
+    try {
+      await sender.query('BEGIN');
+      await sender.query(`SELECT id FROM payout_publications WHERE id = $1::uuid FOR UPDATE`, [
+        pubId,
+      ]);
+      await sender.query(
+        `UPDATE payout_publications
+         SET status = 'SENDING',
+             sending_started_at = now(),
+             lease_owner = 'sender',
+             lease_token = $2::uuid,
+             lease_expires_at = now() + interval '1 minute'
+         WHERE id = $1::uuid`,
+        [pubId, randomUUID()],
+      );
+
+      const hidePromise = patchUserSettings(pool, {
+        userId,
+        patch: { publicPayoutIdentityMode: 'HIDE_IDENTITY' },
+      });
+
+      await sender.query(
+        `UPDATE payout_publications
+         SET status = 'PUBLISHED',
+             telegram_message_id = 12345,
+             published_at = now()
+         WHERE id = $1::uuid`,
+        [pubId],
+      );
+      await sender.query('COMMIT');
+      await hidePromise;
+
+      const settings = await readUserSettings(pool, userId);
+      expect(settings.publicPayoutIdentityMode).toBe('HIDE_IDENTITY');
+      const pub = await pool.query<{
+        status: string;
+        identity_mode: string;
+        username_snapshot: string | null;
+      }>(
+        `SELECT status::text, identity_mode::text, username_snapshot
+         FROM payout_publications WHERE id = $1::uuid`,
+        [pubId],
+      );
+      expect(pub.rows[0]?.status).toBe('PUBLISHED');
+      expect(pub.rows[0]?.identity_mode).toBe('SHOW_USERNAME');
+      expect(pub.rows[0]?.username_snapshot).toBe('PublicName');
+    } finally {
+      try {
+        await sender.query('ROLLBACK');
+      } catch {
+        /* committed */
+      }
+      sender.release();
+    }
+  });
+
+  it('HIDE first then future sender lock observes HIDE on PENDING', async () => {
     await patchUserSettings(pool, {
       userId,
       patch: { publicPayoutIdentityMode: 'HIDE_IDENTITY' },

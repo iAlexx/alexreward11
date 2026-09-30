@@ -9,7 +9,6 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   FakePayoutChain,
   advanceFakeReconciliation,
-  ensureWithdrawalConfirmedOutbox,
   persistIntendedPayoutProvenEvidence,
   runFakePayoutPipeline,
   settleWithdrawalReservation,
@@ -17,6 +16,7 @@ import {
   withWithdrawalTransaction,
   withdrawalConfirmedDedupeKey,
 } from '../src/index.js';
+import { ensureWithdrawalConfirmedOutbox } from '../src/public-payout-outbox.js';
 import {
   bindVerifiedPrimaryWallet,
   createApprovedWithdrawal,
@@ -289,6 +289,80 @@ describe.skipIf(phase7DatabaseUrl === '')('Phase17 withdrawal.confirmed Outbox',
     });
     expect(await countConfirmedOutbox(pool, withdrawalId)).toBe(1);
   });
+
+
+  it('rejects owned-but-unsettled historical attempt for Outbox', async () => {
+    const withdrawalId = await approved();
+    const fakeChain = new FakePayoutChain(engineConfig);
+    const result = await runFakePayoutPipeline(pool, engineConfig, fakeChain, {
+      withdrawalId,
+      scenario: 'CONFIRMED_SUCCESS',
+    });
+    const settledId = result.attemptId!;
+
+    // Insert owned historical attempt without settled_at (not evidence-backed).
+    const historical = await pool.query<{ id: string }>(
+      `INSERT INTO withdrawal_attempts (
+         withdrawal_id, attempt_number, hot_wallet_id, expected_seqno, query_id,
+         valid_until, canonical_message_hash, signer_key_reference,
+         dispatch_fencing_token, broadcast_result_state, requires_state_init,
+         broadcast_submitted_at, broadcast_started_at, signed_external_message_boc
+       )
+       SELECT withdrawal_id, attempt_number + 1, hot_wallet_id, expected_seqno + 1, query_id + 1,
+              valid_until, 'phase17-historical-no-settled', signer_key_reference,
+              dispatch_fencing_token, 'BROADCASTED', requires_state_init,
+              now(), now(), 'bmV3ZXI='
+       FROM withdrawal_attempts WHERE id = $1::uuid
+       RETURNING id::text AS id`,
+      [settledId],
+    );
+    const historicalId = historical.rows[0]!.id;
+
+    await expect(
+      withWithdrawalTransaction(pool, async (client) =>
+        ensureWithdrawalConfirmedOutbox(client, {
+          withdrawalId,
+          confirmedAttemptId: historicalId,
+        }),
+      ),
+    ).rejects.toMatchObject({ code: 'STATE_CONFLICT' });
+
+    // Existing correct event remains the settled attempt from pipeline settle.
+    const payload = await outboxPayload(pool, withdrawalId);
+    expect(payload?.confirmedAttemptId).toBe(settledId);
+    expect(await countConfirmedOutbox(pool, withdrawalId)).toBe(1);
+  });
+
+  it('accepts only settled_at-stamped attempt and is idempotent', async () => {
+    const withdrawalId = await approved();
+    const fakeChain = new FakePayoutChain(engineConfig);
+    const result = await runFakePayoutPipeline(pool, engineConfig, fakeChain, {
+      withdrawalId,
+      scenario: 'CONFIRMED_SUCCESS',
+    });
+    const settledId = result.attemptId!;
+    const stamp = await pool.query<{ settled_at: Date | null }>(
+      `SELECT settled_at FROM withdrawal_attempts WHERE id = $1::uuid`,
+      [settledId],
+    );
+    expect(stamp.rows[0]?.settled_at).not.toBeNull();
+
+    await withWithdrawalTransaction(pool, async (client) => {
+      const first = await ensureWithdrawalConfirmedOutbox(client, {
+        withdrawalId,
+        confirmedAttemptId: settledId,
+      });
+      expect(first.created).toBe(false);
+      const second = await ensureWithdrawalConfirmedOutbox(client, {
+        withdrawalId,
+        confirmedAttemptId: settledId,
+      });
+      expect(second.created).toBe(false);
+      expect(second.id).toBe(first.id);
+    });
+    expect(await countConfirmedOutbox(pool, withdrawalId)).toBe(1);
+  });
+
 
   it('ensureWithdrawalConfirmedOutbox requires settlement_ledger_tx_id', async () => {
     const withdrawalId = await approved();
