@@ -59,6 +59,7 @@ provider business behaviour is implemented here.
 | `0055_phase16_final_integrity.sql`                     | Phase 16 final: append-only UPDATE/DELETE rejection on `mission_reward_decision_exposure_periods` (no seeds / no money)                                                                                                                                  |
 | `0056_phase17_payout_publication_integrity.sql` | Phase 17 Step 1: `payout_publication_status` + delivery lease/privacy fields; immutability + transition guards; no seeds / no Telegram send / no historical backfill |
 | `0057_phase17_publication_identity_freeze.sql` | Phase 17 Step 1.1: freeze identity after SENDING; lease-only-SENDING; truthful identity_frozen_at; no seeds / no Telegram send |
+| `0058_phase17_publication_delivery_snapshot.sql` | Phase 17 Step 2: delivery snapshot columns + tighter SENDING/AMBIGUOUS/PUBLISHED CHECK; DB-owned SENDING clocks; freeze message/explorer/send_request; no seeds / no Telegram send |
 | `0054_phase16_mission_runtime_financial_hardening.sql` | Phase 16 MEGA remediation: multi-exposure reservations per claim, decision↔exposure provenance, streak producer fairness checkpoints (no seeds / no money)                                                                                                  |
 
 Migrations `0001`–`0026` remain immutable. Signer login isolation is added only by

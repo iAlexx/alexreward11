@@ -8,6 +8,7 @@ import {
   WITHDRAWAL_OWNER_REVIEW_REQUIRED_OUTBOX_EVENT,
   withdrawalWorkflowId,
 } from './outbox.js';
+import { WITHDRAWAL_CONFIRMED_OUTBOX_EVENT } from './public-payout-outbox.js';
 
 export const WITHDRAWAL_PAYOUT_WORKFLOW_TYPE = 'withdrawalPayoutWorkflow' as const;
 
@@ -106,6 +107,14 @@ function describeStatusName(status: { name?: string } | string | number | undefi
  * Serialization is FOR UPDATE SKIP LOCKED on the selected rows while the transaction
  * is open — available_at is NOT fencing and is not bumped here.
  */
+
+export async function claimPendingWithdrawalConfirmedEvents(
+  client: PoolClient,
+  limit: number,
+): Promise<WithdrawalApprovedOutboxEvent[]> {
+  return claimPendingOutboxEventsByType(client, WITHDRAWAL_CONFIRMED_OUTBOX_EVENT, limit);
+}
+
 export async function claimPendingWithdrawalApprovedEvents(
   client: PoolClient,
   limit: number,

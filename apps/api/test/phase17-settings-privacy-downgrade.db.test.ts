@@ -231,7 +231,10 @@ describe.skipIf(databaseUrl === '')('Phase17 settings privacy downgrade', () => 
              sending_started_at = now(),
              lease_owner = 'sender',
              lease_token = $2::uuid,
-             lease_expires_at = now() + interval '1 minute'
+             lease_expires_at = now() + interval '1 minute',
+             message_text_snapshot = 'dummy-message',
+             explorer_url_snapshot = 'https://example.test/tx/dummy',
+             send_request_started_at = now()
          WHERE id = $1::uuid`,
         [pubId, randomUUID()],
       );
@@ -317,7 +320,10 @@ describe.skipIf(databaseUrl === '')('Phase17 settings privacy downgrade', () => 
              sending_started_at = now(),
              lease_owner = 'sender',
              lease_token = $2::uuid,
-             lease_expires_at = now() + interval '1 minute'
+             lease_expires_at = now() + interval '1 minute',
+             message_text_snapshot = 'dummy-message',
+             explorer_url_snapshot = 'https://example.test/tx/dummy',
+             send_request_started_at = now()
          WHERE id = $1::uuid`,
         [pubId, randomUUID()],
       );
@@ -388,7 +394,10 @@ describe.skipIf(databaseUrl === '')('Phase17 settings privacy downgrade', () => 
              sending_started_at = now(),
              lease_owner = 'sender',
              lease_token = $2::uuid,
-             lease_expires_at = now() + interval '1 minute'
+             lease_expires_at = now() + interval '1 minute',
+             message_text_snapshot = 'dummy-message',
+             explorer_url_snapshot = 'https://example.test/tx/dummy',
+             send_request_started_at = now()
          WHERE id = $1::uuid`,
         [pubId, randomUUID()],
       );

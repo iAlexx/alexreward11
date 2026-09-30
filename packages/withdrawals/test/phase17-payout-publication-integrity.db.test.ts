@@ -98,7 +98,10 @@ describe.skipIf(phase7DatabaseUrl === '')('Phase17 payout_publications integrity
            sending_started_at = now(),
            lease_owner = 'worker-a',
            lease_token = $2::uuid,
-           lease_expires_at = now() + interval '30 seconds'
+           lease_expires_at = now() + interval '30 seconds',
+           message_text_snapshot = 'dummy-message',
+           explorer_url_snapshot = 'https://example.test/tx/dummy',
+           send_request_started_at = now()
        WHERE id = $1::uuid`,
       [id, token],
     );
@@ -114,7 +117,10 @@ describe.skipIf(phase7DatabaseUrl === '')('Phase17 payout_publications integrity
            sending_started_at = now(),
            lease_owner = 'worker-a',
            lease_token = $2::uuid,
-           lease_expires_at = now() + interval '30 seconds'
+           lease_expires_at = now() + interval '30 seconds',
+           message_text_snapshot = 'dummy-message',
+           explorer_url_snapshot = 'https://example.test/tx/dummy',
+           send_request_started_at = now()
        WHERE id = $1::uuid`,
       [id, randomUUID()],
     );
@@ -134,11 +140,16 @@ describe.skipIf(phase7DatabaseUrl === '')('Phase17 payout_publications integrity
              sending_started_at = now(),
              lease_owner = 'x',
              lease_token = $2::uuid,
-             lease_expires_at = now() + interval '30 seconds'
+             lease_expires_at = now() + interval '30 seconds',
+             message_text_snapshot = 'dummy-message',
+             explorer_url_snapshot = 'https://example.test/tx/dummy',
+             send_request_started_at = now()
          WHERE id = $1::uuid`,
         [id, randomUUID()],
       ),
-    ).rejects.toThrow(/illegal payout_publications status transition/);
+    ).rejects.toThrow(
+      /illegal payout_publications status transition|delivery snapshot fields are frozen/,
+    );
 
     await pool.query(
       `UPDATE payout_publications
@@ -188,7 +199,9 @@ describe.skipIf(phase7DatabaseUrl === '')('Phase17 payout_publications integrity
            sending_started_at = now(),
            lease_owner = 'w',
            lease_token = $2::uuid,
-           lease_expires_at = now() - interval '1 second'
+           lease_expires_at = now() - interval '1 second',
+           message_text_snapshot = 'dummy-message',
+           explorer_url_snapshot = 'https://example.test/tx/dummy'
        WHERE id = $1::uuid`,
       [id, randomUUID()],
     );
@@ -221,7 +234,10 @@ describe.skipIf(phase7DatabaseUrl === '')('Phase17 payout_publications integrity
            sending_started_at = now(),
            lease_owner = 'w',
            lease_token = $2::uuid,
-           lease_expires_at = now() + interval '1 minute'
+           lease_expires_at = now() + interval '1 minute',
+           message_text_snapshot = 'dummy-message',
+           explorer_url_snapshot = 'https://example.test/tx/dummy',
+           send_request_started_at = now()
        WHERE id = $1::uuid`,
       [id, randomUUID()],
     );
@@ -305,7 +321,10 @@ describe.skipIf(phase7DatabaseUrl === '')('Phase17 payout_publications integrity
            sending_started_at = now(),
            lease_owner = 'w',
            lease_token = $2::uuid,
-           lease_expires_at = now() + interval '1 minute'
+           lease_expires_at = now() + interval '1 minute',
+           message_text_snapshot = 'dummy-message',
+           explorer_url_snapshot = 'https://example.test/tx/dummy',
+           send_request_started_at = now()
        WHERE id = $1::uuid`,
       [id, randomUUID()],
     );
@@ -333,7 +352,10 @@ describe.skipIf(phase7DatabaseUrl === '')('Phase17 payout_publications integrity
            sending_started_at = now(),
            lease_owner = 'w',
            lease_token = $2::uuid,
-           lease_expires_at = now() + interval '1 minute'
+           lease_expires_at = now() + interval '1 minute',
+           message_text_snapshot = 'dummy-message',
+           explorer_url_snapshot = 'https://example.test/tx/dummy',
+           send_request_started_at = now()
        WHERE id = $1::uuid`,
       [id, randomUUID()],
     );
@@ -382,7 +404,10 @@ describe.skipIf(phase7DatabaseUrl === '')('Phase17 payout_publications integrity
            sending_started_at = now(),
            lease_owner = 'w',
            lease_token = $2::uuid,
-           lease_expires_at = now() + interval '1 minute'
+           lease_expires_at = now() + interval '1 minute',
+           message_text_snapshot = 'dummy-message',
+           explorer_url_snapshot = 'https://example.test/tx/dummy',
+           send_request_started_at = now()
        WHERE id = $1::uuid`,
       [id, randomUUID()],
     );
@@ -436,7 +461,10 @@ describe.skipIf(phase7DatabaseUrl === '')('Phase17 payout_publications integrity
            sending_started_at = now(),
            lease_owner = 'w',
            lease_token = $2::uuid,
-           lease_expires_at = now() + interval '1 minute'
+           lease_expires_at = now() + interval '1 minute',
+           message_text_snapshot = 'dummy-message',
+           explorer_url_snapshot = 'https://example.test/tx/dummy',
+           send_request_started_at = now()
        WHERE id = $1::uuid`,
       [id, randomUUID()],
     );

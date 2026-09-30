@@ -47,6 +47,7 @@ export {
   WITHDRAWAL_PAYOUT_WORKFLOW_TYPE,
   assertNoRunningWithdrawalWorkflow,
   claimPendingWithdrawalApprovedEvents,
+  claimPendingWithdrawalConfirmedEvents,
   claimPendingFailedPreRetryEvents,
   claimPendingOwnerReviewRequiredEvents,
   markOutboxDeadLetter,
@@ -153,7 +154,48 @@ export {
 } from './public-payout-outbox.js';
 
 export { sanitizePublicPayoutUsernameSnapshot } from './public-payout-username.js';
-export { isPublicPayoutLogsEnabled } from './public-payout-feature.js';
+export {
+  mapDeploymentEnvToFeatureEnvironment,
+  parsePublicPayoutLogsEnabledFlag,
+  readPublicPayoutLogsFeatureFlag,
+  isPublicPayoutLogsEnabled,
+} from './public-payout-feature.js';
+export type {
+  PublicPayoutFeatureEnvironment,
+  PublicPayoutLogsFeatureFlagState,
+} from './public-payout-feature.js';
+
+export {
+  formatAtomicAmount,
+  buildExplorerUrl,
+  formatConfirmedUtcDate,
+} from './public-payout-format.js';
+
+export {
+  renderPublicPayoutMessage,
+} from './public-payout-render.js';
+export type {
+  PublicPayoutMessageRenderInput,
+  PublicPayoutDeliverySnapshot,
+  PublicPayoutIdentityMode,
+} from './public-payout-render.js';
+
+export {
+  createConfirmedPayoutPublication,
+} from './public-payout-builder.js';
+export type {
+  CreateConfirmedPayoutPublicationInput,
+  CreateConfirmedPayoutPublicationOutcome,
+  CreateConfirmedPayoutPublicationResult,
+} from './public-payout-builder.js';
+
+export {
+  processWithdrawalConfirmedPublicPayoutOutboxBatch,
+} from './public-payout-outbox-consumer.js';
+export type {
+  ProcessWithdrawalConfirmedPublicPayoutOutboxBatchOptions,
+  ProcessWithdrawalConfirmedPublicPayoutOutboxBatchResult,
+} from './public-payout-outbox-consumer.js';
 
 
 export {
