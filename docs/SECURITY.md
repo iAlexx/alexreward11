@@ -126,8 +126,8 @@ non-Mainnet-blocking carry-forward backlog (not silently closed; not Owner accep
 Critical/High). Product + dependency Mainnet blockers
 P19-SEC-001/009/014/016/017/018/019/020/021/022/023 are RESOLVED in source.
 
-Phase 20 has **not** started. Mainnet / production monetary / AdsGram monetary / payout resume
-remain unauthorized. This archive does **not** approve Mainnet or production monetary behavior.
+At Phase 19 archive time, Phase 20 had **not** started. Mainnet / production monetary / AdsGram monetary / payout resume
+remain unauthorized. The Phase 19 archive does **not** approve Mainnet or production monetary behavior.
 
 Authoritative review artifacts:
 
@@ -153,7 +153,7 @@ Verified-from-code statements for Phase 19 (not aspirational):
 
 ## Phase 20 — Closed Beta / Minimal Funds
 
-Phase 20 is **IN_PROGRESS** (Step 3 provider/no-fill observation). `PHASE20_GATE=HOLD`.
+Phase 20 is **IN_PROGRESS**. Step 3 provider/no-fill/Earn observation is **complete** / PASS (money still BLOCKED). Overall `PHASE20_GATE=HOLD` for Step 4 Owner policy/content decisions. Phase 20 is **not** PASS and **not** archived.
 Branch: `phase20-closed-beta`. Starting HEAD:
 `240d22a6c877f2d678668ba596238f6c8b234f71`.
 
@@ -163,10 +163,12 @@ Phase 20 archive **not** created. Phase 21 **not** started.
 
 Owner NOTIFICATIONS_SCOPE=DRAFT_ONLY_NO_SEND (P20-GAP-007 DEFERRED). AdsGram monetary remains BLOCKED after Step 3 observation.
 
-Step 2 HOLD: disposable draft-only notification proofs; fraud/eligibility fail-closed + TEST
+Step 2 (historical): disposable draft-only notification proofs; fraud/eligibility fail-closed + TEST
 fixture proofs (REFERENCE ONLY — NOT APPROVED FOR STAGING); empty mission list honesty;
-referral self-referral / ALREADY_ATTRIBUTED smoke. Do **not** activate staging policies,
-mission/referral content, or notification send without Owner approval.
+referral self-referral / ALREADY_ATTRIBUTED smoke.
+Step 3 (complete): Owner `DRAFT_ONLY_NO_SEND`; AdsGram BLOCKED observation/no-fill/Earn UX validated on disposable DB.
+`RAILWAY_DEPLOYMENT_PERFORMED=NO`. GitHub commit status reported `alex-rewards-miniapp` Vercel success for the Step 3 commit (automatic; not Railway validation).
+Do **not** activate staging policies, mission/referral content, or notification send without Owner approval. Step 4 not started.
 
 Authoritative artifacts:
 

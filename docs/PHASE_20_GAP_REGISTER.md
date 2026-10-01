@@ -1,7 +1,7 @@
-# Phase 20 — Gap Register (Step 1–2)
+# Phase 20 — Gap Register (Step 1–3)
 
 **PHASE20_GATE:** HOLD
-**Step:** 2 (source/config readiness; Owner decisions still required)
+**Step:** 3 complete (provider/no-fill observation validated); HOLD for Step 4 Owner policy/content decisions
 **Register scope:** Closed Beta readiness gaps + carried Phase 19 residuals
 **Rule:** Do not hide issues because they originated in an older phase.
 **Status values:** OPEN | DEFERRED | REMEDIATED | ACCEPTED_RESIDUAL (Owner only for Critical/High)
@@ -17,7 +17,7 @@ Canonical IDs: `P20-GAP-001` .. contiguous.
 | Total gaps                                               | 18    |
 | Blocks Closed Beta (observation / non-money)             | 2     |
 | Blocks real-money beta                                   | 8     |
-| Blocks Phase 20 archive (until resolved or Owner-scoped) | 2 |
+| Blocks Phase 20 archive (until resolved or Owner-scoped) | 2     |
 | Carried Phase 19 residuals mapped                        | 8     |
 
 ---
@@ -288,6 +288,7 @@ Canonical IDs: `P20-GAP-001` .. contiguous.
 **Owner decision recorded:** `NOTIFICATIONS_SCOPE = DRAFT_ONLY_NO_SEND`
 
 For Phase 20 Closed Beta:
+
 - Admin may create notification campaign draft metadata
 - no send / dispatch / Telegram / push / external provider delivery
 - no ledger or reward effect

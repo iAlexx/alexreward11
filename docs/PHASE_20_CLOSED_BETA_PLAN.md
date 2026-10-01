@@ -1,6 +1,6 @@
-# Phase 20 — Closed Beta / Minimal Funds Plan (Step 1–2)
+# Phase 20 — Closed Beta / Minimal Funds Plan (Step 1–3)
 
-**PHASE20_STATUS:** `IN_PROGRESS` (Step 2 source/config readiness; HOLD)
+**PHASE20_STATUS:** `IN_PROGRESS` — Step 3 provider/no-fill observation complete; HOLD for Step 4 Owner policy/content decisions
 **PHASE20_GATE:** `HOLD`
 **PHASE20_ARCHIVE:** `NOT CREATED`
 **Phase 21:** `NOT STARTED`
@@ -129,23 +129,23 @@ See `docs/PHASE_20_GAP_REGISTER.md` for mapped gaps.
 
 ---
 
-## 8. Proposed Step ordering (future — do not auto-start)
+## 8. Proposed Step ordering (do not auto-start next steps)
 
-Derived from repository evidence (not started by this Step 1 commit):
+Historical and current state:
 
-1. **Step 1:** readiness discovery / plan / matrix / gap register — complete / HOLD
-2. **Step 2 (this task):** close Closed-Beta-blocking source/config gaps that do **not** require real money — **HOLD for Owner decisions** (draft-only notifications proofs; fraud/eligibility proposals; controlled content proposals; no staging activation)
-3. **Step 3:** controlled provider session / no-fill / unavailable UX validation (AdsGram money still BLOCKED)
-4. **Step 4:** controlled fraud / trust / eligibility validation with Active policies as Owner-approved
+1. **Step 1:** readiness discovery / plan / matrix / gap register — **complete**
+2. **Step 2:** non-money Closed Beta blocker preparation (draft-only notifications proofs; fraud/eligibility proposals; controlled content proposals; no staging activation) — **complete / preparation accepted**
+3. **Step 3:** controlled provider session / no-fill / unavailable / Earn UX observation (AdsGram money still BLOCKED) — **complete / observation validated**
+4. **Step 4:** controlled fraud / trust / eligibility validation with Active policies as Owner-approved — **NOT STARTED**
 5. **Step 5:** controlled Founder / support / mission validation; notifications honesty (draft-only)
 6. **Step 6:** budget / exposure / provider-limit **staging** ceremony validation (no live unsafe limit raise)
-7. **Step 7:** closed-beta runtime deployment validation (readiness evidence; still no unauthorized money)
+7. **Step 7:** closed-beta Railway runtime deployment validation (readiness evidence; still no unauthorized money)
 8. **Step 8 (Owner-gated only):** reconsider AdsGram residuals + clarifications; only then consider
    monetary beta eligibility; separately Owner-gate minimal-funds withdrawal if in scope
 9. **Step 9:** observe / reconcile / document results
 10. **Step 10:** final Phase 20 acceptance + `PHASE_20_CLOSED_BETA` archive — then **STOP**
 
-Step 2 remains HOLD: do not activate staging policies/content/send; Owner must approve proposals.
+**Current Phase 20 state:** Step 3 completed; overall `PHASE20_GATE=HOLD` because Closed Beta / archive blockers **P20-GAP-009** and **P20-GAP-017** remain. Step 4 is not started. Do not activate staging policies/content/send without Owner approval.
 
 ---
 
@@ -155,6 +155,7 @@ Step 2 remains HOLD: do not activate staging policies/content/send; Owner must a
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Step 1 exit                | Plan + matrix + gap register committed; `PHASE20_GATE=HOLD`; independent review                                                                  |
 | Step 2 exit                | Disposable proofs + Owner proposals committed; gap 007/009/017 READY_FOR_OWNER_*; `PHASE20_GATE=HOLD`; no staging activation                     |
+| Step 3 exit                | Provider/no-fill/Earn observation validated (AdsGram money BLOCKED); Owner `DRAFT_ONLY_NO_SEND`; `PHASE20_GATE=HOLD`; Step 4 not started         |
 | Closed Beta observation go | Residual Critical/High product blockers for observation = none; AdsGram money stays BLOCKED                                                      |
 | Real-money AdsGram go      | Owner closes clarifications; P19-SEC-010/011/012 reconsidered/remediated; authenticity/correlation gates; monetary APPROVED ceremony; re-certify |
 | Minimal-funds payout go    | Explicit Owner authorization + Jetton/providers/Hot Wallet + REAL chain + brief signer unlock + pause unpause ceremony + preflight READY         |
@@ -219,7 +220,17 @@ API ceremony exists (`providers-admin` / `admin-limits`). Admin UI for limit cer
 
 `PHASE 20 STEP 2 = SOURCE/CONFIG PROOFS + OWNER PROPOSALS / HOLD (NO STAGING ACTIVATION)`
 
-No Phase 20 archive. No Phase 21. No real-money execution authorized.
+`PHASE 20 STEP 3 = PROVIDER / NO-FILL / EARN OBSERVATION VALIDATED / PASS`
+
+Step 3 qualifiers:
+
+- AdsGram monetary remains **BLOCKED**
+- no Railway runtime deployment validation occurred in Step 3 (`RAILWAY_DEPLOYMENT_PERFORMED=NO`, `RAILWAY_CHANGED=NO`)
+- GitHub commit status reported `alex-rewards-miniapp` Vercel success for the Step 3 commit (automatic status; not Cursor manual deploy; not Railway validation)
+- real-money readiness is **NOT** implied
+- Step 4 **not** started
+
+Overall Phase 20 remains `PHASE20_GATE=HOLD` (blockers P20-GAP-009, P20-GAP-017). No Phase 20 PASS. No Closed Beta activated. No Phase 20 archive. No Phase 21. No real-money execution authorized.
 
 ---
 
