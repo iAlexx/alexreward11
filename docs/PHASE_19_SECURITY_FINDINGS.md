@@ -18,9 +18,9 @@ Cursor does **not** accept findings on behalf of the Owner.
 | CRITICAL | 0 |
 | HIGH | 3 |
 | MEDIUM | 6 |
-| LOW | 5 |
+| LOW | 6 |
 | INFO | 2 |
-| **TOTAL** | **16** |
+| **TOTAL** | **17** |
 
 **Mainnet-blocking open IDs:** P19-SEC-001, P19-SEC-009, P19-SEC-014, P19-SEC-016, P19-SEC-017
 
