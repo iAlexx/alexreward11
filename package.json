@@ -58,7 +58,8 @@
     "phase20:gap-register:check": "node scripts/phase20-gap-register-check.mjs",
     "test:phase20-step2": "node scripts/phase20-step2-readiness.mjs",
     "phase20:step3": "node scripts/phase20-step3-provider-no-fill.mjs",
-    "phase20:step4b:policy-check": "node scripts/phase20-step4b-policy-check.mjs"
+    "phase20:step4b:policy-check": "node scripts/phase20-step4b-policy-check.mjs",
+    "phase20:step4c:preflight": "node scripts/phase20-step4c-staging-preflight.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

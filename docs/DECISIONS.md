@@ -901,3 +901,12 @@ The Owner-approved Closed Beta policy JSON remains canonical at
 export graph: no `readFileSync` / Phase20 artifact load on normal package import. Tests and
 `pnpm phase20:step4b:policy-check` load the JSON explicitly. Staging activation remains
 unauthorized.
+
+## Clarification — Phase 20 Step 4C staging activation preflight (2026-10-02)
+
+Read-only discovery of staging `risk_rule_versions` / `trust_rule_versions` /
+`eligibility_policy_versions` completed via Railway SSH tunnel with
+`default_transaction_read_only=on`. All three tables were empty; proposed next versions
+are 1/1/1. Canonical approved artifact remains `activationAuthorized=false`. No staging
+mutation, Railway change, or policy activation occurred. See
+`docs/PHASE_20_STEP4C_STAGING_POLICY_ACTIVATION_PREFLIGHT.md`.

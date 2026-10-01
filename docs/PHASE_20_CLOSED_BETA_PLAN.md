@@ -1,6 +1,6 @@
 # Phase 20 — Closed Beta / Minimal Funds Plan (Step 1–3)
 
-**PHASE20_STATUS:** `IN_PROGRESS` — Step 4B.1 runtime decoupling complete (staging activation pending); HOLD
+**PHASE20_STATUS:** `IN_PROGRESS` — Step 4C staging activation PREFLIGHT complete (activation pending Owner authorization); HOLD
 **PHASE20_GATE:** `HOLD`
 **PHASE20_ARCHIVE:** `NOT CREATED`
 **Phase 21:** `NOT STARTED`
@@ -256,3 +256,8 @@ Owner-approved Closed Beta Risk/Trust/Eligibility recorded in `packages/fraud/po
 ## Step 4B.1 notes
 
 Approved JSON remains canonical/source-controlled only. Removed from `@alex-rewards/fraud` runtime export graph (`readFileSync` / Phase20 artifact no longer loaded on package import). Test/tool loader: `packages/fraud/test/load-phase20-approved-policy.ts`.
+
+
+## Step 4C notes
+
+Read-only staging preflight recorded in `docs/PHASE_20_STEP4C_STAGING_POLICY_ACTIVATION_PREFLIGHT.md` (+ snapshot JSON). Policy tables currently empty; proposed ACTIVE versions = 1/1/1. **No staging mutation. No activation.**

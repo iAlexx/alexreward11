@@ -1,0 +1,129 @@
+{
+  "preflightAt": "2026-10-01T23:45:32.492Z",
+  "sourceCommit": "f870842e88cbf5ca62b1cfd6a6e3a5458b6a6d54",
+  "artifactPath": "packages/fraud/policy/phase20-closed-beta-owner-approved.json",
+  "activationAuthorized": false,
+  "readOnlyConfirmed": true,
+  "mutationRefused": true,
+  "identity": {
+    "database": "railway",
+    "dbUser": "postgres",
+    "applicationName": "phase20-step4c-preflight-ro",
+    "observedAt": "2026-10-01T23:45:28.357Z",
+    "accessMethod": "railway-connect-ssh-tunnel + default_transaction_read_only=on",
+    "serviceName": "Postgres",
+    "railwayEnvironmentName": "production",
+    "note": "Railway environment name is production; services are staging-labeled. Used operational Postgres, not restore sibling."
+  },
+  "approvedDigests": {
+    "risk": "c81bf1edeb82b2e3bf8da45ef9a4b409f1557412da4b87d78d8f322e0045ebb5",
+    "trust": "8b0d26cc3d3df43595ade3e63f70abc4a460dcb93a2bcf7afc1dd98d58ee5ba1",
+    "eligibility": "69c714db79b687d85f199cf812d485bc243d6ef53e69c64bf05f830b392aac28",
+    "fullArtifact": "8f8e4cba511900d7320ca8d80205389648d81a7778ce3b86a0add790bc039eeb"
+  },
+  "risk": {
+    "table": "risk_rule_versions",
+    "versionColumn": "rule_version",
+    "total_rows": 0,
+    "active_rows": 0,
+    "highest_version": 0,
+    "activeRows": [],
+    "resolverNowMatches": [],
+    "recentVersions": []
+  },
+  "trust": {
+    "table": "trust_rule_versions",
+    "versionColumn": "rule_version",
+    "total_rows": 0,
+    "active_rows": 0,
+    "highest_version": 0,
+    "activeRows": [],
+    "resolverNowMatches": [],
+    "recentVersions": []
+  },
+  "eligibility": {
+    "table": "eligibility_policy_versions",
+    "versionColumn": "policy_version",
+    "total_rows": 0,
+    "active_rows": 0,
+    "highest_version": 0,
+    "activeRows": [],
+    "resolverNowMatches": [],
+    "recentVersions": []
+  },
+  "featureFlagsObserved": [
+    {
+      "flag_key": "MISSION_REWARD_PAUSE",
+      "environment": "LOCAL",
+      "enabled": false
+    },
+    {
+      "flag_key": "PAYOUT_DISPATCH_PAUSE",
+      "environment": "LOCAL",
+      "enabled": false
+    },
+    {
+      "flag_key": "PAYOUT_DISPATCH_PAUSE",
+      "environment": "STAGING",
+      "enabled": true
+    },
+    {
+      "flag_key": "REFERRAL_REWARD_PAUSE",
+      "environment": "LOCAL",
+      "enabled": false
+    },
+    {
+      "flag_key": "REFERRAL_REWARD_PAUSE",
+      "environment": "STAGING",
+      "enabled": true
+    },
+    {
+      "flag_key": "WITHDRAWAL_REQUESTS_PAUSE",
+      "environment": "LOCAL",
+      "enabled": false
+    }
+  ],
+  "adsgramMonetary": {
+    "code": "ADSGRAM",
+    "status": "ACTIVE",
+    "lifecycle_state": "SANDBOX",
+    "production_monetary_status": "BLOCKED"
+  },
+  "plans": {
+    "risk": {
+      "activeCountNow": 0,
+      "currentActiveVersion": null,
+      "currentActiveId": null,
+      "highestExistingVersion": 0,
+      "proposedNextVersion": 1,
+      "conflict": false,
+      "zeroActive": true
+    },
+    "trust": {
+      "activeCountNow": 0,
+      "currentActiveVersion": null,
+      "currentActiveId": null,
+      "highestExistingVersion": 0,
+      "proposedNextVersion": 1,
+      "conflict": false,
+      "zeroActive": true
+    },
+    "eligibility": {
+      "activeCountNow": 0,
+      "currentActiveVersion": null,
+      "currentActiveId": null,
+      "highestExistingVersion": 0,
+      "proposedNextVersion": 1,
+      "conflict": false,
+      "zeroActive": true
+    }
+  },
+  "activationPreflight": "READY_FOR_OWNER_AUTHORIZATION",
+  "killSwitchObservations": {
+    "PAYOUT_DISPATCH_PAUSE_STAGING": true,
+    "REFERRAL_REWARD_PAUSE_STAGING": true,
+    "WITHDRAWAL_REQUESTS_PAUSE_STAGING_ROW": "MISSING",
+    "WITHDRAWAL_REQUESTS_PAUSE_LOCAL": false,
+    "note": "Missing STAGING WITHDRAWAL_REQUESTS_PAUSE causes ELIGIBILITY_GATE_SOURCE_UNAVAILABLE for WITHDRAWAL_REQUEST on STAGING until a separate flag row exists. Policy activation must NOT auto-create flags."
+  }
+}
