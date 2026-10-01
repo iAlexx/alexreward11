@@ -164,9 +164,9 @@ Do not mark operational infrastructure complete merely because application code 
 | Field | Value |
 | --- | --- |
 | Status | `PARTIAL` |
-| Existing | `provider_limit_rules`; authoritative `ad_daily_counters` (UTC_DAY REQUEST/SUCCESS); ops-health detects exact exhaustion for currently effective UTC_DAY rules |
-| Missing | Owner near-exhaustion %; HOUR / ROLLING_24H utilization wiring; country/risk-scoped aggregate policy |
-| Tests | Exact REQUEST/SUCCESS exhaustion; below-limit ≠ invented near threshold; expired/future rules ignored |
+| Existing | `provider_limit_rules`; actual proven request count = `ad_daily_counters.provider_requests`; SUCCESS = `ad_daily_counters.successful_rewards`; conservative runtime REQUEST admission cap (authorize.ts) = same-day `ad_sessions` count per user/provider (AdsGram exact provider-request proof remains unresolved); ops-health observes both REQUEST signals without conflating them |
+| Missing | Owner near-exhaustion %; HOUR / ROLLING_24H utilization wiring; country/risk-scoped aggregate policy; AdsGram authoritative request-proof path |
+| Tests | Exact runtime request-cap exhaustion via `ad_sessions`; exact actual `provider_requests` exhaustion; SUCCESS exhaustion; below-limit ≠ invented near threshold; expired/future rules ignored |
 | DB migration | No |
 | Railway/external | No |
 | Owner approval | **Yes — near-exhaustion thresholds** |
@@ -176,9 +176,9 @@ Do not mark operational infrastructure complete merely because application code 
 | Field | Value |
 | --- | --- |
 | Status | `PARTIAL` (tables exist; alert coverage incomplete) / `OWNER_POLICY_REQUIRED` (variance magnitude) |
-| Existing | `provider_settlement_periods`, `provider_settlement_items`, `provider_reporting_imports` (migration 0009); ops-health reads DISPUTED / unresolved non-zero variance / FAILED|PARTIAL imports |
+| Existing | `provider_settlement_periods`, `provider_settlement_items`, `provider_reporting_imports` (migration 0009); ops-health precedence: DISPUTED → FAILED/PARTIAL imports (even with zero periods) → unresolved non-zero variance → SIGNAL_NOT_CONFIGURED |
 | Missing | Owner variance materiality threshold; continuous settlement feed automation |
-| Tests | DISPUTED → DANGER; empty settlement → SIGNAL_NOT_CONFIGURED (not fabricated OK) |
+| Tests | DISPUTED → DANGER; failed import with zero periods → REPORTING_IMPORT_DEGRADED (not SIGNAL_NOT_CONFIGURED); empty periods+imports → SIGNAL_NOT_CONFIGURED |
 | DB migration | No |
 | Railway/external | Provider settlement feeds |
 | Owner approval | Variance magnitude / dispute policy |

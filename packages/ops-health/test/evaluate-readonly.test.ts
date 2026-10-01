@@ -175,7 +175,14 @@ describe('provider settlement tables', () => {
       if (sql.includes('provider_settlement_periods')) {
         return {
           rowCount: 1,
-          rows: [{ total: '0', disputed: '0', unresolved_nonzero_variance: '0' }],
+          rows: [
+            {
+              total: '0',
+              disputed: '0',
+              unresolved_nonzero_variance: '0',
+              open_or_reported: '0',
+            },
+          ],
         };
       }
       if (sql.includes('provider_reporting_imports')) {
@@ -205,26 +212,24 @@ describe('provider settlement tables', () => {
     expect(settlement?.reasonCode).toBe('SIGNAL_NOT_CONFIGURED');
     expect(settlement?.severity).toBe('OWNER_POLICY_REQUIRED');
   });
-});
 
-describe('provider UTC_DAY exact exhaustion', () => {
-  const now = new Date('2026-10-01T12:00:00.000Z');
-
-  it('detects exact REQUEST exhaustion from ad_daily_counters', async () => {
-    const providerId = '11111111-1111-4111-8111-111111111111';
-    const pool = createFakePool((sql, params) => {
-      if (sql.includes('unsupported_count')) {
-        return { rowCount: 1, rows: [{ unsupported_count: '0' }] };
-      }
-      if (sql.includes('MIN(max_count)') && sql.includes('UTC_DAY')) {
+  it('FAILED/PARTIAL reporting import is not hidden when settlement periods are zero', async () => {
+    const pool = createFakePool((sql) => {
+      if (sql.includes('provider_settlement_periods')) {
         return {
           rowCount: 1,
-          rows: [{ provider_id: providerId, limit_metric: 'REQUEST', effective_max: 10 }],
+          rows: [
+            {
+              total: '0',
+              disputed: '0',
+              unresolved_nonzero_variance: '0',
+              open_or_reported: '0',
+            },
+          ],
         };
       }
-      if (sql.includes('FROM ad_daily_counters') && sql.includes('provider_requests')) {
-        expect(params?.[0]).toBe(providerId);
-        return { rowCount: 1, rows: [{ max_used: '10' }] };
+      if (sql.includes('provider_reporting_imports')) {
+        return { rowCount: 1, rows: [{ failed_or_partial: '1' }] };
       }
       if (sql.includes('FROM reconciliation_issues')) {
         return {
@@ -240,25 +245,121 @@ describe('provider UTC_DAY exact exhaustion', () => {
         return { rowCount: 1, rows: [{ pending: '0', oldest_age_seconds: '0' }] };
       }
       if (sql.includes('FROM ad_providers')) return { rowCount: 0, rows: [] };
-      if (sql.includes('provider_settlement_periods')) {
-        return {
-          rowCount: 1,
-          rows: [{ total: '0', disputed: '0', unresolved_nonzero_variance: '0' }],
-        };
-      }
-      if (sql.includes('provider_reporting_imports')) {
-        return { rowCount: 1, rows: [{ failed_or_partial: '0' }] };
-      }
+      if (sql.includes('provider_limit_rules')) return { rowCount: 0, rows: [] };
       if (sql.includes('reward_budget') || sql.includes('membership_bonus')) return defaultBudget();
       if (sql.includes('review_cases')) return { rowCount: 1, rows: [{ open_count: '0' }] };
       return { rowCount: 0, rows: [] };
+    });
+    const snapshot = await evaluateOpsHealth({ pool, environment: 'LOCAL' });
+    const settlement = snapshot.alerts.find((a) => a.alertClass === 'PROVIDER_SETTLEMENT');
+    expect(settlement?.reasonCode).toBe('REPORTING_IMPORT_DEGRADED');
+    expect(settlement?.severity).toBe('WARN');
+    expect(settlement?.reasonCode).not.toBe('SIGNAL_NOT_CONFIGURED');
+  });
+});
+
+describe('provider UTC_DAY exact exhaustion', () => {
+  const now = new Date('2026-10-01T12:00:00.000Z');
+
+  function commonNonLimitHandlers(sql: string): QueryResult | null {
+    if (sql.includes('FROM reconciliation_issues')) {
+      return {
+        rowCount: 1,
+        rows: [{ critical_open: '0', warning_open: '0', info_open: '0' }],
+      };
+    }
+    if (sql.includes("case_type = 'RECONCILIATION_ISSUE'")) {
+      return { rowCount: 1, rows: [{ open_count: '0' }] };
+    }
+    if (sql.includes('feature_flags')) return { rowCount: 1, rows: [{ enabled: true }] };
+    if (sql.includes('outbox_events')) {
+      return { rowCount: 1, rows: [{ pending: '0', oldest_age_seconds: '0' }] };
+    }
+    if (sql.includes('FROM ad_providers')) return { rowCount: 0, rows: [] };
+    if (sql.includes('provider_settlement_periods')) {
+      return {
+        rowCount: 1,
+        rows: [
+          {
+            total: '0',
+            disputed: '0',
+            unresolved_nonzero_variance: '0',
+            open_or_reported: '0',
+          },
+        ],
+      };
+    }
+    if (sql.includes('provider_reporting_imports')) {
+      return { rowCount: 1, rows: [{ failed_or_partial: '0' }] };
+    }
+    if (sql.includes('reward_budget') || sql.includes('membership_bonus')) return defaultBudget();
+    if (sql.includes('review_cases')) return { rowCount: 1, rows: [{ open_count: '0' }] };
+    return null;
+  }
+
+  it('detects exact actual provider_requests exhaustion separately from runtime cap', async () => {
+    const providerId = '11111111-1111-4111-8111-111111111111';
+    const pool = createFakePool((sql, params) => {
+      if (sql.includes('unsupported_count')) {
+        return { rowCount: 1, rows: [{ unsupported_count: '0' }] };
+      }
+      if (sql.includes('MIN(max_count)') && sql.includes('UTC_DAY')) {
+        return {
+          rowCount: 1,
+          rows: [{ provider_id: providerId, limit_metric: 'REQUEST', effective_max: 10 }],
+        };
+      }
+      if (sql.includes('FROM ad_daily_counters') && sql.includes('provider_requests')) {
+        expect(params?.[0]).toBe(providerId);
+        return { rowCount: 1, rows: [{ max_used: '10' }] };
+      }
+      if (sql.includes('FROM ad_sessions') || sql.includes('session_counts')) {
+        return { rowCount: 1, rows: [{ max_sessions: '0' }] };
+      }
+      return commonNonLimitHandlers(sql) ?? { rowCount: 0, rows: [] };
     });
 
     const snapshot = await evaluateOpsHealth({ pool, environment: 'LOCAL', now });
     const limitAlert = snapshot.alerts.find((a) => a.alertClass === 'PROVIDER_LIMIT');
     expect(limitAlert?.reasonCode).toBe('LIMIT_EXHAUSTED');
     expect(limitAlert?.severity).toBe('DANGER');
-    expect(limitAlert?.detailsRedacted?.exhaustedRequestDimensions).toBe(1);
+    expect(limitAlert?.detailsRedacted?.actualProviderRequestExhaustedDimensions).toBe(1);
+    expect(limitAlert?.detailsRedacted?.runtimeRequestCapExhaustedDimensions).toBe(0);
+    expect(limitAlert?.detailsRedacted?.requestSemanticsConflated).toBe(false);
+    expect(limitAlert?.detailsRedacted?.requestActualSource).toBe(
+      'ad_daily_counters.provider_requests',
+    );
+    expect(limitAlert?.detailsRedacted?.requestConservativeRuntimeSource).toBe('ad_sessions');
+  });
+
+  it('detects exact runtime request-cap exhaustion from ad_sessions when provider_requests is 0', async () => {
+    const providerId = '33333333-3333-4333-8333-333333333333';
+    const pool = createFakePool((sql) => {
+      if (sql.includes('unsupported_count')) {
+        return { rowCount: 1, rows: [{ unsupported_count: '0' }] };
+      }
+      if (sql.includes('MIN(max_count)') && sql.includes('UTC_DAY')) {
+        return {
+          rowCount: 1,
+          rows: [{ provider_id: providerId, limit_metric: 'REQUEST', effective_max: 10 }],
+        };
+      }
+      if (sql.includes('FROM ad_daily_counters') && sql.includes('provider_requests')) {
+        return { rowCount: 1, rows: [{ max_used: '0' }] };
+      }
+      if (sql.includes('FROM ad_sessions') || sql.includes('session_counts')) {
+        return { rowCount: 1, rows: [{ max_sessions: '10' }] };
+      }
+      return commonNonLimitHandlers(sql) ?? { rowCount: 0, rows: [] };
+    });
+
+    const snapshot = await evaluateOpsHealth({ pool, environment: 'LOCAL', now });
+    const limitAlert = snapshot.alerts.find((a) => a.alertClass === 'PROVIDER_LIMIT');
+    expect(limitAlert?.reasonCode).toBe('LIMIT_EXHAUSTED');
+    expect(limitAlert?.severity).toBe('DANGER');
+    expect(limitAlert?.detailsRedacted?.runtimeRequestCapExhaustedDimensions).toBe(1);
+    expect(limitAlert?.detailsRedacted?.actualProviderRequestExhaustedDimensions).toBe(0);
+    expect(limitAlert?.detailsRedacted?.requestSemanticsConflated).toBe(false);
   });
 
   it('detects exact SUCCESS exhaustion', async () => {
@@ -276,53 +377,49 @@ describe('provider UTC_DAY exact exhaustion', () => {
       if (sql.includes('FROM ad_daily_counters') && sql.includes('successful_rewards')) {
         return { rowCount: 1, rows: [{ max_used: '5' }] };
       }
-      if (sql.includes('FROM reconciliation_issues')) {
-        return {
-          rowCount: 1,
-          rows: [{ critical_open: '0', warning_open: '0', info_open: '0' }],
-        };
-      }
-      if (sql.includes("case_type = 'RECONCILIATION_ISSUE'")) {
-        return { rowCount: 1, rows: [{ open_count: '0' }] };
-      }
-      if (sql.includes('feature_flags')) return { rowCount: 1, rows: [{ enabled: true }] };
-      if (sql.includes('outbox_events')) {
-        return { rowCount: 1, rows: [{ pending: '0', oldest_age_seconds: '0' }] };
-      }
-      if (sql.includes('FROM ad_providers')) return { rowCount: 0, rows: [] };
-      if (sql.includes('provider_settlement_periods')) {
-        return {
-          rowCount: 1,
-          rows: [{ total: '0', disputed: '0', unresolved_nonzero_variance: '0' }],
-        };
-      }
-      if (sql.includes('provider_reporting_imports')) {
-        return { rowCount: 1, rows: [{ failed_or_partial: '0' }] };
-      }
-      if (sql.includes('reward_budget') || sql.includes('membership_bonus')) return defaultBudget();
-      if (sql.includes('review_cases')) return { rowCount: 1, rows: [{ open_count: '0' }] };
-      return { rowCount: 0, rows: [] };
+      return commonNonLimitHandlers(sql) ?? { rowCount: 0, rows: [] };
     });
 
     const snapshot = await evaluateOpsHealth({ pool, environment: 'LOCAL', now });
     const limitAlert = snapshot.alerts.find((a) => a.alertClass === 'PROVIDER_LIMIT');
     expect(limitAlert?.reasonCode).toBe('LIMIT_EXHAUSTED');
-    expect(limitAlert?.detailsRedacted?.exhaustedSuccessDimensions).toBe(1);
+    expect(limitAlert?.detailsRedacted?.successfulRewardExhaustedDimensions).toBe(1);
   });
 
-  it('below-limit does not invent near threshold', () => {
+  it('sessions and provider_requests below limit do not invent near threshold', async () => {
+    const providerId = '44444444-4444-4444-8444-444444444444';
+    const pool = createFakePool((sql) => {
+      if (sql.includes('unsupported_count')) {
+        return { rowCount: 1, rows: [{ unsupported_count: '0' }] };
+      }
+      if (sql.includes('MIN(max_count)') && sql.includes('UTC_DAY')) {
+        return {
+          rowCount: 1,
+          rows: [{ provider_id: providerId, limit_metric: 'REQUEST', effective_max: 10 }],
+        };
+      }
+      if (sql.includes('FROM ad_daily_counters') && sql.includes('provider_requests')) {
+        return { rowCount: 1, rows: [{ max_used: '3' }] };
+      }
+      if (sql.includes('FROM ad_sessions') || sql.includes('session_counts')) {
+        return { rowCount: 1, rows: [{ max_sessions: '4' }] };
+      }
+      return commonNonLimitHandlers(sql) ?? { rowCount: 0, rows: [] };
+    });
+
+    const snapshot = await evaluateOpsHealth({ pool, environment: 'LOCAL', now });
+    const limitAlert = snapshot.alerts.find((a) => a.alertClass === 'PROVIDER_LIMIT');
+    expect(limitAlert?.reasonCode).toBe('THRESHOLD_NOT_CONFIGURED');
+    expect(limitAlert?.severity).toBe('OWNER_POLICY_REQUIRED');
+    expect(limitAlert?.detailsRedacted?.nearExhaustionInvented).toBe(false);
     expect(classifyProviderLimitUtilization({ used: 4, limit: 10 }).reasonCode).toBe(
       'THRESHOLD_NOT_CONFIGURED',
-    );
-    expect(classifyProviderLimitUtilization({ used: 4, limit: 10 }).severity).toBe(
-      'OWNER_POLICY_REQUIRED',
     );
     expect(effectiveMinLimit([10, 7, 20])).toBe(7);
   });
 
   it('expired/future rules are excluded by valid_from/valid_to SQL filters', async () => {
     const pool = createFakePool((sql) => {
-      // When only expired/future rules exist, the effective UTC_DAY query returns empty.
       if (sql.includes('unsupported_count')) {
         return { rowCount: 1, rows: [{ unsupported_count: '0' }] };
       }
@@ -331,32 +428,7 @@ describe('provider UTC_DAY exact exhaustion', () => {
         expect(sql).toContain('valid_to IS NULL OR valid_to >');
         return { rowCount: 0, rows: [] };
       }
-      if (sql.includes('FROM reconciliation_issues')) {
-        return {
-          rowCount: 1,
-          rows: [{ critical_open: '0', warning_open: '0', info_open: '0' }],
-        };
-      }
-      if (sql.includes("case_type = 'RECONCILIATION_ISSUE'")) {
-        return { rowCount: 1, rows: [{ open_count: '0' }] };
-      }
-      if (sql.includes('feature_flags')) return { rowCount: 1, rows: [{ enabled: true }] };
-      if (sql.includes('outbox_events')) {
-        return { rowCount: 1, rows: [{ pending: '0', oldest_age_seconds: '0' }] };
-      }
-      if (sql.includes('FROM ad_providers')) return { rowCount: 0, rows: [] };
-      if (sql.includes('provider_settlement_periods')) {
-        return {
-          rowCount: 1,
-          rows: [{ total: '0', disputed: '0', unresolved_nonzero_variance: '0' }],
-        };
-      }
-      if (sql.includes('provider_reporting_imports')) {
-        return { rowCount: 1, rows: [{ failed_or_partial: '0' }] };
-      }
-      if (sql.includes('reward_budget') || sql.includes('membership_bonus')) return defaultBudget();
-      if (sql.includes('review_cases')) return { rowCount: 1, rows: [{ open_count: '0' }] };
-      return { rowCount: 0, rows: [] };
+      return commonNonLimitHandlers(sql) ?? { rowCount: 0, rows: [] };
     });
     const snapshot = await evaluateOpsHealth({ pool, environment: 'LOCAL', now });
     const limitAlert = snapshot.alerts.find((a) => a.alertClass === 'PROVIDER_LIMIT');

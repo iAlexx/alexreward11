@@ -347,8 +347,13 @@ async function readProviderHealth(
 }
 
 /**
- * Exact UTC_DAY REQUEST/SUCCESS exhaustion from ad_daily_counters + effective ACTIVE rules.
- * HOUR / ROLLING_24H and country/risk-scoped rules are reported as unsupported, not invented.
+ * UTC_DAY REQUEST/SUCCESS limit observations.
+ *
+ * REQUEST distinguishes:
+ * - actual proven provider requests: ad_daily_counters.provider_requests
+ * - conservative runtime admission cap: same-day ad_sessions count (authorize.ts)
+ * These must never be conflated. SUCCESS uses successful_rewards only.
+ * HOUR / ROLLING_24H and country/risk-scoped rules remain unsupported.
  */
 async function readProviderLimits(
   pool: Pool,
@@ -404,49 +409,96 @@ async function readProviderLimits(
       ];
     }
 
-    let exhaustedRequest = 0;
-    let exhaustedSuccess = 0;
+    let runtimeRequestCapExhaustedDimensions = 0;
+    let actualProviderRequestExhaustedDimensions = 0;
+    let successfulRewardExhaustedDimensions = 0;
     let belowLimitObserved = 0;
 
     for (const rule of limits.rows) {
-      const counterColumn =
-        rule.limit_metric === 'REQUEST' ? 'provider_requests' : 'successful_rewards';
-      // Deterministic exact exhaustion: any user counter for today >= effective min limit.
+      if (rule.limit_metric === 'REQUEST') {
+        const actual = await pool.query<{ max_used: string | null }>(
+          `SELECT MAX(provider_requests)::text AS max_used
+             FROM ad_daily_counters
+            WHERE provider_id = $1::uuid
+              AND utc_day = $2::date`,
+          [rule.provider_id, utcDay],
+        );
+        const maxActual = Number(actual.rows[0]?.max_used ?? 0);
+
+        // Conservative runtime REQUEST admission cap (authorize.ts): ad_sessions per user/day.
+        // Never labeled as actual provider requests.
+        const sessions = await pool.query<{ max_sessions: string | null }>(
+          `SELECT COALESCE(MAX(session_count), 0)::text AS max_sessions
+             FROM (
+               SELECT COUNT(*)::int AS session_count
+                 FROM ad_sessions
+                WHERE provider_id = $1::uuid
+                  AND utc_day = $2::date
+                GROUP BY user_id
+             ) session_counts`,
+          [rule.provider_id, utcDay],
+        );
+        const maxSessions = Number(sessions.rows[0]?.max_sessions ?? 0);
+
+        const actualClassified = classifyProviderLimitUtilization({
+          used: maxActual,
+          limit: rule.effective_max,
+        });
+        const runtimeClassified = classifyProviderLimitUtilization({
+          used: maxSessions,
+          limit: rule.effective_max,
+        });
+
+        let dimensionExhausted = false;
+        if (actualClassified.reasonCode === 'LIMIT_EXHAUSTED') {
+          actualProviderRequestExhaustedDimensions += 1;
+          dimensionExhausted = true;
+        }
+        if (runtimeClassified.reasonCode === 'LIMIT_EXHAUSTED') {
+          runtimeRequestCapExhaustedDimensions += 1;
+          dimensionExhausted = true;
+        }
+        if (!dimensionExhausted) belowLimitObserved += 1;
+        continue;
+      }
+
+      // SUCCESS: authoritative successful_rewards only.
       const usage = await pool.query<{ max_used: string | null }>(
-        rule.limit_metric === 'REQUEST'
-          ? `SELECT MAX(provider_requests)::text AS max_used
-               FROM ad_daily_counters
-              WHERE provider_id = $1::uuid
-                AND utc_day = $2::date`
-          : `SELECT MAX(successful_rewards)::text AS max_used
-               FROM ad_daily_counters
-              WHERE provider_id = $1::uuid
-                AND utc_day = $2::date`,
+        `SELECT MAX(successful_rewards)::text AS max_used
+           FROM ad_daily_counters
+          WHERE provider_id = $1::uuid
+            AND utc_day = $2::date`,
         [rule.provider_id, utcDay],
       );
-      void counterColumn;
-      const maxUsedRaw = usage.rows[0]?.max_used ?? null;
-      const maxUsed = maxUsedRaw === null ? 0 : Number(maxUsedRaw);
+      const maxUsed = Number(usage.rows[0]?.max_used ?? 0);
       const classified = classifyProviderLimitUtilization({
         used: maxUsed,
         limit: rule.effective_max,
       });
       if (classified.reasonCode === 'LIMIT_EXHAUSTED') {
-        if (rule.limit_metric === 'REQUEST') exhaustedRequest += 1;
-        else exhaustedSuccess += 1;
+        successfulRewardExhaustedDimensions += 1;
       } else {
         belowLimitObserved += 1;
       }
     }
 
-    if (exhaustedRequest > 0 || exhaustedSuccess > 0) {
+    const anyExhausted =
+      runtimeRequestCapExhaustedDimensions > 0 ||
+      actualProviderRequestExhaustedDimensions > 0 ||
+      successfulRewardExhaustedDimensions > 0;
+
+    if (anyExhausted) {
       return [
         alertBase('PROVIDER_LIMIT', 'DANGER', 'LIMIT_EXHAUSTED', observedAt, {
-          exhaustedRequestDimensions: exhaustedRequest,
-          exhaustedSuccessDimensions: exhaustedSuccess,
+          runtimeRequestCapExhaustedDimensions,
+          actualProviderRequestExhaustedDimensions,
+          successfulRewardExhaustedDimensions,
           belowLimitDimensions: belowLimitObserved,
           unsupportedActiveRuleDimensions: unsupportedCount,
           windowSupported: 'UTC_DAY',
+          requestActualSource: 'ad_daily_counters.provider_requests',
+          requestConservativeRuntimeSource: 'ad_sessions',
+          requestSemanticsConflated: false,
         }),
       ];
     }
@@ -457,6 +509,12 @@ async function readProviderLimits(
         belowLimitDimensions: belowLimitObserved,
         unsupportedActiveRuleDimensions: unsupportedCount,
         nearExhaustionInvented: false,
+        runtimeRequestCapExhaustedDimensions: 0,
+        actualProviderRequestExhaustedDimensions: 0,
+        successfulRewardExhaustedDimensions: 0,
+        requestActualSource: 'ad_daily_counters.provider_requests',
+        requestConservativeRuntimeSource: 'ad_sessions',
+        requestSemanticsConflated: false,
       }),
     ];
   } catch {
@@ -467,6 +525,7 @@ async function readProviderLimits(
 /**
  * Uses provider_settlement_periods / provider_reporting_imports.
  * Does not invent variance materiality thresholds.
+ * FAILED/PARTIAL imports are never hidden behind empty settlement periods.
  */
 async function readSettlement(
   pool: Pool,
@@ -477,6 +536,7 @@ async function readSettlement(
       total: string;
       disputed: string;
       unresolved_nonzero_variance: string;
+      open_or_reported: string;
     }>(
       `SELECT
          COUNT(*)::text AS total,
@@ -485,12 +545,14 @@ async function readSettlement(
            WHERE variance_atomic IS NOT NULL
              AND variance_atomic <> 0
              AND status IN ('OPEN', 'REPORTED', 'DISPUTED')
-         )::text AS unresolved_nonzero_variance
+         )::text AS unresolved_nonzero_variance,
+         COUNT(*) FILTER (WHERE status IN ('OPEN', 'REPORTED'))::text AS open_or_reported
        FROM provider_settlement_periods`,
     );
     const total = Number(periods.rows[0]?.total ?? 0);
     const disputed = Number(periods.rows[0]?.disputed ?? 0);
     const unresolvedNonzeroVariance = Number(periods.rows[0]?.unresolved_nonzero_variance ?? 0);
+    const openOrReported = Number(periods.rows[0]?.open_or_reported ?? 0);
 
     const imports = await pool.query<{ failed_or_partial: string }>(
       `SELECT COUNT(*)::text AS failed_or_partial
@@ -499,34 +561,14 @@ async function readSettlement(
     );
     const failedOrPartial = Number(imports.rows[0]?.failed_or_partial ?? 0);
 
-    if (total === 0) {
-      return alertBase('PROVIDER_SETTLEMENT', 'OWNER_POLICY_REQUIRED', 'SIGNAL_NOT_CONFIGURED', observedAt, {
-        table: 'provider_settlement_periods',
-        periodCount: 0,
-      });
-    }
-
+    // Precedence: DISPUTED > FAILED/PARTIAL import > unresolved variance > empty signal.
     if (disputed > 0) {
       return alertBase('PROVIDER_SETTLEMENT', 'DANGER', 'SETTLEMENT_DISPUTED', observedAt, {
         disputedCount: disputed,
         unresolvedNonzeroVariance,
         failedOrPartialImports: failedOrPartial,
+        periodCount: total,
       });
-    }
-
-    if (unresolvedNonzeroVariance > 0) {
-      // Non-zero unresolved variance is an observable mismatch; magnitude threshold is Owner policy.
-      return alertBase(
-        'PROVIDER_SETTLEMENT',
-        'OWNER_POLICY_REQUIRED',
-        'UNRESOLVED_NONZERO_VARIANCE',
-        observedAt,
-        {
-          unresolvedNonzeroVariance,
-          failedOrPartialImports: failedOrPartial,
-          varianceMagnitudeThresholdConfigured: false,
-        },
-      );
     }
 
     if (failedOrPartial > 0) {
@@ -536,10 +578,35 @@ async function readSettlement(
       });
     }
 
-    return alertBase('PROVIDER_SETTLEMENT', 'INFO', 'NO_OPEN_SETTLEMENT_MISMATCH', observedAt, {
+    if (unresolvedNonzeroVariance > 0) {
+      return alertBase(
+        'PROVIDER_SETTLEMENT',
+        'OWNER_POLICY_REQUIRED',
+        'UNRESOLVED_NONZERO_VARIANCE',
+        observedAt,
+        {
+          unresolvedNonzeroVariance,
+          failedOrPartialImports: 0,
+          varianceMagnitudeThresholdConfigured: false,
+          periodCount: total,
+        },
+      );
+    }
+
+    if (total === 0) {
+      return alertBase('PROVIDER_SETTLEMENT', 'OWNER_POLICY_REQUIRED', 'SIGNAL_NOT_CONFIGURED', observedAt, {
+        table: 'provider_settlement_periods',
+        periodCount: 0,
+        failedOrPartialImports: 0,
+      });
+    }
+
+    return alertBase('PROVIDER_SETTLEMENT', 'INFO', 'NO_DETECTED_SETTLEMENT_MISMATCH', observedAt, {
       periodCount: total,
       disputedCount: 0,
       unresolvedNonzeroVariance: 0,
+      openOrReportedPeriodCount: openOrReported,
+      claimedFullyReconciled: false,
     });
   } catch {
     return alertBase('PROVIDER_SETTLEMENT', 'WARN', 'SETTLEMENT_QUERY_FAILED', observedAt);
