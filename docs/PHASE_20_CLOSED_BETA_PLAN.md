@@ -1,6 +1,6 @@
 # Phase 20 — Closed Beta / Minimal Funds Plan (Step 1–3)
 
-**PHASE20_STATUS:** `IN_PROGRESS` — Step 4B Owner policy approved in source (staging activation pending); HOLD
+**PHASE20_STATUS:** `IN_PROGRESS` — Step 4B.1 runtime decoupling complete (staging activation pending); HOLD
 **PHASE20_GATE:** `HOLD`
 **PHASE20_ARCHIVE:** `NOT CREATED`
 **Phase 21:** `NOT STARTED`
@@ -252,3 +252,7 @@ Owner decision pack for P20-GAP-009 published: `docs/PHASE_20_STEP4_OWNER_POLICY
 ## Step 4B notes
 
 Owner-approved Closed Beta Risk/Trust/Eligibility recorded in `packages/fraud/policy/phase20-closed-beta-owner-approved.json`. Disposable validation via `pnpm phase20:step4b:policy-check`. **No staging activation.**
+
+## Step 4B.1 notes
+
+Approved JSON remains canonical/source-controlled only. Removed from `@alex-rewards/fraud` runtime export graph (`readFileSync` / Phase20 artifact no longer loaded on package import). Test/tool loader: `packages/fraud/test/load-phase20-approved-policy.ts`.

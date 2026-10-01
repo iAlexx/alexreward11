@@ -892,3 +892,12 @@ This clarification does **not** authorize staging/ops ACTIVE policy activation, 
 production monetary, AdsGram monetary, payout resume, TON broadcast, signer, or Mainnet.
 `P20-GAP-009` remains OPEN / OWNER_APPROVED / READY_FOR_STAGING_ACTIVATION and still blocks
 Closed Beta until a separate staging activation ceremony.
+
+## Clarification — Phase 20 Step 4B.1 runtime decoupling (2026-10-02)
+
+The Owner-approved Closed Beta policy JSON remains canonical at
+`packages/fraud/policy/phase20-closed-beta-owner-approved.json` with
+`activationAuthorized=false`. Step 4B.1 removes it from the `@alex-rewards/fraud` runtime
+export graph: no `readFileSync` / Phase20 artifact load on normal package import. Tests and
+`pnpm phase20:step4b:policy-check` load the JSON explicitly. Staging activation remains
+unauthorized.

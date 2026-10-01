@@ -346,7 +346,7 @@ Historical 4A proposals remain above for audit; **canonical Closed-Beta profile 
 ## 11. Evidence pointers
 
 - `packages/fraud/policy/phase20-closed-beta-owner-approved.json` (canonical approved)
-- `packages/fraud/src/phase20-closed-beta-approved-policy.ts`
+- `packages/fraud/test/load-phase20-approved-policy.ts` (test/tool only; not runtime export)
 - `packages/fraud/src/risk-rule.ts`, `risk-evaluator.ts`, `risk-signal-collector.ts`, `evaluate-and-persist.ts`
 - `packages/fraud/src/trust-rule.ts`, `trust-evaluator.ts`, `trust-signal-collector.ts`
 - `packages/fraud/src/eligibility-policy.ts`, `eligibility-evaluator.ts`, `evaluate-and-persist-eligibility.ts`

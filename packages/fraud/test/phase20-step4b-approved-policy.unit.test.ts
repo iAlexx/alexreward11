@@ -2,14 +2,10 @@
  * Phase 20 Step 4B — Owner-approved Closed Beta policy static + pure-engine validation.
  * No DB. No activation.
  */
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import {
   COLLECTOR_SIGNAL_CODES,
-  PHASE20_CLOSED_BETA_OWNER_APPROVED_POLICY,
   evaluateRiskSignals,
   evaluateTrustSignals,
   parseEligibilityPolicyConfig,
@@ -19,13 +15,9 @@ import {
   type RiskRuleVersion,
   type TrustSignalFact,
 } from '../src/index.js';
+import { loadPhase20OwnerApprovedPolicy } from './load-phase20-approved-policy.js';
 
-const artifact = JSON.parse(
-  readFileSync(
-    join(dirname(fileURLToPath(import.meta.url)), '../policy/phase20-closed-beta-owner-approved.json'),
-    'utf8',
-  ),
-) as typeof PHASE20_CLOSED_BETA_OWNER_APPROVED_POLICY;
+const artifact = loadPhase20OwnerApprovedPolicy();
 
 function riskRule(): RiskRuleVersion {
   const cfg = validateRiskRuleConfig({
@@ -61,11 +53,11 @@ function facts(active: readonly string[]) {
 }
 
 describe('Phase 20 Step 4B approved policy static check', () => {
-  it('artifact matches export and refuses activationAuthorized', () => {
+  it('artifact refuses activationAuthorized and keeps exact identity', () => {
     expect(artifact.artifactId).toBe('PHASE20_CLOSED_BETA_OWNER_APPROVED_POLICY');
+    expect(artifact.status).toBe('OWNER_APPROVED_STAGING_CANDIDATE');
     expect(artifact.activationAuthorized).toBe(false);
-    expect(PHASE20_CLOSED_BETA_OWNER_APPROVED_POLICY.activationAuthorized).toBe(false);
-    expect(artifact).toEqual(PHASE20_CLOSED_BETA_OWNER_APPROVED_POLICY);
+    expect(artifact.phase).toBe(20);
   });
 
   it('parses Risk/Trust/Eligibility through authoritative parsers', () => {

@@ -1,7 +1,7 @@
 # Phase 20 — Gap Register (Step 1–3 / 4A decision pack)
 
 **PHASE20_GATE:** HOLD
-**Step:** 4B Owner-approved policy recorded (staging activation still pending); HOLD
+**Step:** 4B.1 runtime decoupling of approved policy artifact (staging activation still pending); HOLD
 **Register scope:** Closed Beta readiness gaps + carried Phase 19 residuals
 **Rule:** Do not hide issues because they originated in an older phase.
 **Status values:** OPEN | DEFERRED | REMEDIATED | ACCEPTED_RESIDUAL (Owner only for Critical/High)
@@ -156,6 +156,7 @@ Canonical IDs: `P20-GAP-001` .. contiguous.
 - **step4a note:** Owner decision matrix published. See `docs/PHASE_20_STEP4_OWNER_POLICY_DECISION.md`.
 - **step4a.1/4a.2 note:** ACCOUNT_STATE + FEATURE_FLAG semantics corrected before approval.
 - **step4b note:** Owner approved exact Closed Beta Risk/Trust/Eligibility values; source artifact `packages/fraud/policy/phase20-closed-beta-owner-approved.json`; disposable validation only. Staging activation **not** performed. See `docs/PHASE_20_STEP4_OWNER_POLICY_APPROVAL.md`.
+- **step4b.1 note:** Runtime export graph decoupled — approved JSON is test/tool-only (not loaded by `@alex-rewards/fraud` import). Status unchanged.
 
 ### P20-GAP-010 — Provider-limit Admin UI ceremony incomplete
 

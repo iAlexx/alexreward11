@@ -6,7 +6,6 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Pool } from 'pg';
 
 import {
-  PHASE20_CLOSED_BETA_OWNER_APPROVED_POLICY as APPROVED,
   evaluateAndPersistEligibility,
   evaluateAndPersistRisk,
   evaluateAndPersistTrust,
@@ -19,6 +18,9 @@ import {
   insertTrustRule,
   resetAndMigrate,
 } from './harness.js';
+import { loadPhase20OwnerApprovedPolicy } from './load-phase20-approved-policy.js';
+
+const APPROVED = loadPhase20OwnerApprovedPolicy();
 
 function resolveDbUrl(): string {
   const explicit = process.env.PHASE20_DATABASE_URL ?? '';

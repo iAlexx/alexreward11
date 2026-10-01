@@ -153,7 +153,7 @@ Verified-from-code statements for Phase 19 (not aspirational):
 
 ## Phase 20 — Closed Beta / Minimal Funds
 
-Phase 20 is **IN_PROGRESS**. Step 4B Owner-approved fraud/trust/eligibility policy recorded in source (**staging activation not performed**). Overall `PHASE20_GATE=HOLD`. Phase 20 is **not** PASS and **not** archived.
+Phase 20 is **IN_PROGRESS**. Step 4B.1 Owner-approved policy recorded in source and decoupled from fraud runtime import graph (**staging activation not performed**). Overall `PHASE20_GATE=HOLD`. Phase 20 is **not** PASS and **not** archived.
 Branch: `phase20-closed-beta`. Starting HEAD:
 `240d22a6c877f2d678668ba596238f6c8b234f71`.
 
