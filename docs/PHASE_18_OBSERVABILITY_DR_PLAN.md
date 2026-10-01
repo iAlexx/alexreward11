@@ -1,16 +1,16 @@
 # Phase 18 — Observability / DR / Business Health Plan
 
 Status: Step 3 operational closure in progress. Step 2B CLOSED / PASS.
-Archive slug: `PHASE_18_OBSERVABILITY_DR` — status **ACCEPTED / PACKAGING IN PROGRESS** (Owner-approved; Phase 19 NOT STARTED).
+Archive slug: `PHASE_18_OBSERVABILITY_DR` — status **CLOSED / PASS** (`PHASE18_ARCHIVE=PASS`; Phase 19 NOT STARTED).
 Gate: isolated restore drill PASSED with payout dispatch paused; **no automatic resume**.
 
-Semantic markers: STEP2B_COMPLETED, FULL_TECHNICAL_RESTORE_GATE_PASS, PAYOUT_RESUME_OWNER_GATED, ACCEPTED_PACKAGING_IN_PROGRESS, AUTO_UNPAUSE_FALSE, AUTO_RESEND_FALSE.\n\nHistorical Step 3 marker ARCHIVE_PENDING is superseded by Owner acceptance; packaging proceeds under ACCEPTED / PACKAGING IN PROGRESS.
+Semantic markers: STEP2B_COMPLETED, FULL_TECHNICAL_RESTORE_GATE_PASS, PAYOUT_RESUME_OWNER_GATED, PHASE18_ARCHIVE_PASS, AUTO_UNPAUSE_FALSE, AUTO_RESEND_FALSE.\n\nHistorical Step 3 marker ARCHIVE_PENDING is superseded by Owner acceptance and sealed archive (`PHASE18_ARCHIVE_PASS`). Archive acceptance does not authorize payout resume.
 
 Classification key (Step 3):
 - `COMPLETE` — software/ops contract satisfied for Phase 18 source closure
 - `OWNER_POLICY_REQUIRED` — Owner numeric/policy decision still required
 - `EXTERNAL_INTEGRATION_OPTIONAL` — optional hosted vendor / pager delivery not selected
-- `ACCEPTED_PACKAGING_IN_PROGRESS` — Owner-approved archive packaging in progress
+- `PHASE18_ARCHIVE_PASS` — Phase 18 archive pack sealed and verified
 
 Canonical companions:
 - `docs/PHASE_18_REQUIREMENT_CLOSURE_MATRIX.md`
@@ -62,7 +62,7 @@ Independent infrastructure review confirmed Step 2B CLOSED / PASS.
 | 12 | Isolated restore drill | COMPLETE Step 2B PASS |
 | 13 | Incident runbooks | COMPLETE in `docs/INCIDENT_RESPONSE.md` (SLA OWNER_POLICY_REQUIRED) |
 | 14 | Signer rotation / Hot Wallet retirement docs | COMPLETE (docs only; no live rotation in Step 3) |
-| 15 | Archive / restore documentation | ACCEPTED / PACKAGING IN PROGRESS |
+| 15 | Archive / restore documentation | PHASE18_ARCHIVE_PASS / CLOSED |
 
 See the closure matrix for implementation locations and fail-closed threshold notes.
 

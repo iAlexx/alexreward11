@@ -49,7 +49,7 @@ would be historically false.
 After packaging passes: present the final review-package path and `PACKAGE_SHA256.txt` to the
 Owner, then wait for explicit approval before starting the next phase.
 
-## Phase 18 archive slug (ACCEPTED / PACKAGING IN PROGRESS)
+## Phase 18 archive slug (CLOSED / PASS)
 
 When Phase 18 is accepted after independent review of Step 3, archive with:
 
@@ -62,4 +62,4 @@ Example (do **not** run during Step 3):
 pnpm archive:phase -- --phase 18 --slug OBSERVABILITY_DR --commit <accepted-sha> --report docs/PHASE_18_ACCEPTANCE_REPORT.md
 ```
 
-Phase 18 status: **ACCEPTED / PACKAGING IN PROGRESS** — Owner-approved archive packaging of canonical source `654a7097456d7d18ad6e6a7072793ee6d353ca33`. Phase 19 NOT STARTED.
+Phase 18 status: **CLOSED / PASS** — `PHASE18_GATE=PASS`, `PHASE18_ARCHIVE=PASS`. Canonical source `654a7097456d7d18ad6e6a7072793ee6d353ca33`. Phase 19 NOT STARTED. Archive acceptance does not authorize payout resume.

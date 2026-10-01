@@ -8,7 +8,8 @@
 **Branch:** `phase18-observability-dr`
 
 **PHASE18_GATE:** **PASS**
-**PHASE18_STATUS:** **ACCEPTED / PACKAGING IN PROGRESS** (updated to CLOSED / PASS after archive seal)
+**PHASE18_STATUS:** **CLOSED / PASS**
+**PHASE18_ARCHIVE:** **PASS**
 
 **PAYOUT_RESUME_ALLOWED:** **false**
 **AUTO_UNPAUSE:** **false**
@@ -349,15 +350,16 @@ Exact accepted source commit: `654a7097456d7d18ad6e6a7072793ee6d353ca33`
 
 | Artifact | Result |
 | -------- | ------ |
-| Canonical source ZIP | *(filled after packaging)* |
-| Canonical source ZIP SHA256 | *(filled after packaging)* |
-| Final review-package filename | *(filled after packaging)* |
-| Source extraction | pending packaging |
-| Outer package extraction | pending packaging |
-| Prohibited-path scan (source + outer) | pending packaging |
-| Nested source validation | pending packaging |
-| Forward-slash ZIP entry names | pending packaging |
-| SHA256SUMS verification | pending packaging |
+| Canonical source ZIP | `ALEx_Rewards_PHASE_18_OBSERVABILITY_DR_20261001-175223_654a709.zip` |
+| Canonical source ZIP path | `phase-archives/PHASE_18_OBSERVABILITY_DR/ALEx_Rewards_PHASE_18_OBSERVABILITY_DR_20261001-175223_654a709.zip` |
+| Canonical source ZIP SHA256 | `6ea2188834a9df04f7c2503a92751dfbde64e75ace33a0c624ac68c822045500` |
+| Final review-package filename | `PHASE_18_OBSERVABILITY_DR_PACKAGE_20261001-175223_654a709.zip` |
+| Source extraction | **PASS** |
+| Outer package extraction | **PASS** |
+| Prohibited-path scan (source + outer) | **PASS** |
+| Nested source validation | **PASS** |
+| Forward-slash ZIP entry names | **PASS** (4 entries under `PHASE_18_OBSERVABILITY_DR/`) |
+| SHA256SUMS verification | **PASS** |
 
 Final review-package SHA256 is recorded externally in `PACKAGE_SHA256.txt` beside the package.
 Section O does **not** embed the outer package SHA256.
