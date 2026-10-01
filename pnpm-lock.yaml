@@ -638,6 +638,25 @@ importers:
         specifier: 8.23.1
         version: 8.23.1
 
+  packages/restore-drill:
+    dependencies:
+      '@alex-rewards/db':
+        specifier: workspace:*
+        version: link:../db
+      '@alex-rewards/ledger':
+        specifier: workspace:*
+        version: link:../ledger
+      '@alex-rewards/withdrawals':
+        specifier: workspace:*
+        version: link:../withdrawals
+      pg:
+        specifier: 8.23.0
+        version: 8.23.0
+    devDependencies:
+      '@types/pg':
+        specifier: 8.23.1
+        version: 8.23.1
+
   packages/rewards:
     dependencies:
       '@alex-rewards/db':

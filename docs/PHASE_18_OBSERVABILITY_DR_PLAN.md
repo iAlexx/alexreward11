@@ -1,6 +1,6 @@
 # Phase 18 — Observability / DR / Business Health Plan
 
-Status: Step 1 foundation (application health model + alert evaluation).
+Status: Step 2A foundation (restore-drill tooling + runbook; PITR/infra not yet enabled).
 Archive slug (later): `PHASE_18_OBSERVABILITY_DR`
 Gate (later): isolated restore drill with payout dispatch paused; no automatic resume.
 
@@ -236,24 +236,25 @@ Do not mark operational infrastructure complete merely because application code 
 | Field | Value |
 | --- | --- |
 | Status | `EXTERNAL_INFRA_REQUIRED` / `OWNER_POLICY_REQUIRED` |
-| Existing | Docs (`DISASTER_RECOVERY.md`, `DATABASE.md`, runbook) describe requirements |
-| Missing | Verified Railway/Postgres automated backups + PITR retention in this environment |
-| Tests | N/A in app unit tests |
+| Existing | Docs + Step 2A restore-drill validator; Railway managed PITR direction documented |
+| Missing | Enable Railway-managed PITR / pgBackRest; retention; verified recovery point (Step 2B) |
+| Tests | App unit tests refuse operational DB / `DATABASE_URL` fallback; no DIY WAL config in repo |
 | DB migration | No |
-| Railway/external | **Yes** |
-| Owner approval | Retention / RPO / RTO |
+| Railway/external | **Yes — managed PITR only; do not edit `postgresql.conf` / archive_command** |
+| Owner approval | Retention / RPO / RTO targets; Step 2B enablement |
+| Verified staging state (Step 2A) | Volume present; **PITR disabled**; no isolated restore env yet |
 
 ## 20. Restore drill
 
 | Field | Value |
 | --- | --- |
-| Status | `MISSING` (execution) / `PARTIAL` (procedure docs + reconcile scanner) |
-| Existing | Runbook restore→pause→reconcile; `phase10:restore-reconcile` |
-| Missing | Successful isolated drill evidence with pause held |
-| Tests | Later gate tests |
+| Status | `PARTIAL` (Step 2A tooling) / `MISSING` (executed drill evidence) |
+| Existing | `@alex-rewards/restore-drill` + `pnpm phase18:restore-drill`; reuses `checkLedgerInvariants` + `runPhase10RestoreReconcileScan`; fail-closed `PHASE18_RESTORE_*` gates; pause verify-only; RTO/RPO observations |
+| Missing | Successful isolated restore + Temporal + live chain evidence (Step 2B) |
+| Tests | Guard refusal; pause FAIL; CRITICAL/DANGER ⇒ FAIL; Step 2A resume always false; no SQL mutation / sendBoc |
 | DB migration | No |
-| Railway/external | Isolated restore environment |
-| Owner approval | Drill window + resume |
+| Railway/external | Isolated restore environment (Step 2B) |
+| Owner approval | Drill window + resume ceremony |
 
 ## 21. Archive / restore procedures
 
@@ -304,6 +305,40 @@ Do not mark operational infrastructure complete merely because application code 
 | Metrics | `recordOpsHealthMetrics` via observability meter |
 | Payout pause | Read `feature_flags.PAYOUT_DISPATCH_PAUSE` only |
 
+## Step 2A delivery map (this step)
+
+| Deliverable | Module |
+| --- | --- |
+| Isolated target guard | `packages/restore-drill/src/target-guard.ts` |
+| Restore-drill orchestrator | `packages/restore-drill/src/run-restore-drill.ts` |
+| CLI | `pnpm phase18:restore-drill` |
+| Schema / pause / outbox / counts | `packages/restore-drill/src/*.ts` |
+| Ledger reuse | `checkLedgerInvariants` |
+| Withdrawal restore reuse | `runPhase10RestoreReconcileScan` (`autoResend`/`autoUnpause` false) |
+| Report contract | `phase18-restore-drill-v1` JSON + Markdown |
+| Docs | `DISASTER_RECOVERY.md`, `OPERATIONS_RUNBOOK.md`, this plan |
+
+### Step 2B planned sequence (NOT started)
+
+1. Verify payout dispatch pause on source staging
+2. Enable/configure Railway-managed PITR
+3. Establish backup recovery point
+4. Create isolated restore target
+5. Restore to isolated target
+6. Record restore start/availability timestamps
+7. Bind restore validator ONLY to isolated DB
+8. Verify schema
+9. Verify pause flag
+10. Run ledger invariants
+11. Run withdrawal/attempt/outbox DB reconciliation
+12. Compare representative source/restored counts
+13. Verify selected test-user histories if Owner provides IDs
+14. Perform read-only Temporal workflow reconciliation
+15. Perform required read-only Testnet chain reconciliation
+16. Record RTO/RPO observations
+17. Prove ambiguity ⇒ payout resume blocked
+18. No resume until Owner review
+
 ## Explicit non-goals (Step 1)
 
 - No restore drill execution
@@ -312,3 +347,15 @@ Do not mark operational infrastructure complete merely because application code 
 - No auto-unpause
 - No ledger / withdrawal financial mutations from alerts
 - No Mainnet / AdsGram monetary / auto payout enablement
+
+## Explicit non-goals (Step 2A)
+
+- No Railway PITR enablement
+- No isolated restore environment/service creation
+- No restore execution
+- No migrations against staging
+- No pause/unpause staging payouts
+- No Temporal query / workflow start/replay
+- No live TON RPC / sendBoc / signer calls
+- No `PAYOUT_RESUME_ALLOWED=true` (DB-only mode forces false)
+- No DIY WAL archive configuration

@@ -1,0 +1,28 @@
+{
+  "name": "@alex-rewards/restore-drill",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src test",
+    "test": "vitest run --fileParallelism=false",
+    "phase18:restore-drill": "node dist/cli.js"
+  },
+  "dependencies": {
+    "@alex-rewards/db": "workspace:*",
+    "@alex-rewards/ledger": "workspace:*",
+    "@alex-rewards/withdrawals": "workspace:*",
+    "pg": "8.23.0"
+  },
+  "devDependencies": {
+    "@types/pg": "8.23.1"
+  }
+}

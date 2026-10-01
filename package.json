@@ -43,6 +43,7 @@
     "test:m1-security-gates": "node scripts/m1-security-gates.mjs",
     "seal:phase9": "node scripts/seal-phase9.mjs",
     "security:secrets": "node scripts/scan-secrets.mjs",
+    "phase18:restore-drill": "pnpm --filter @alex-rewards/restore-drill run phase18:restore-drill",
     "security:audit": "pnpm audit --audit-level=high",
     "verify": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test && pnpm test:archive && pnpm build && pnpm verify:boundaries && pnpm validate:migrations && pnpm security:secrets",
     "verify:local": "dotenv -e .env -- cross-env NODE_ENV=test pnpm run verify",

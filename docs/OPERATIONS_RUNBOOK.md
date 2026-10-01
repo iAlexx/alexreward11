@@ -138,6 +138,32 @@ After any database restore:
 3. **Never auto-resend.** **Never unpause** from this scanner.
 4. Resume only after Owner review of findings + mandatory reconciliation.
 
+### Phase 18 isolated restore drill (Step 2A tooling)
+
+Current Railway staging observation: **PITR disabled**; no isolated restore target yet.
+Use Railway **managed** PITR / pgBackRest only — do not hand-edit Postgres WAL archive config.
+
+Fail-closed CLI (binds only to `PHASE18_RESTORE_DATABASE_URL`; never `DATABASE_URL`):
+
+```text
+pnpm phase18:restore-drill
+```
+
+Required: `PHASE18_RESTORE_DRILL_ENABLED=true`, `PHASE18_RESTORE_DATABASE_URL`,
+`PHASE18_RESTORE_EXPECTED_DATABASE_NAME`, `PHASE18_RESTORE_FEATURE_FLAG_ENVIRONMENT`.
+Optional: `PHASE18_RESTORE_VERIFY_USER_IDS` (comma-separated internal UUIDs; never commit real IDs).
+
+Behavior:
+
+- Read-only schema / ledger / Phase 10 restore-reconcile / outbox / counts
+- Verifies pause flag; does **not** create or flip it
+- `autoUnpause: false`, `autoResend: false`
+- Step 2A DB-only: Temporal + live chain = `NOT_OBSERVED` ⇒ `PAYOUT_RESUME_ALLOWED=false`
+- Writes gitignored `phase18-restore-drill-<UTC>.{json,md}`
+
+Step 2B (Owner-approved later) enables PITR, creates isolated restore DB, runs full Temporal +
+chain reconciliation. See `docs/DISASTER_RECOVERY.md` and `docs/PHASE_18_OBSERVABILITY_DR_PLAN.md`.
+
 ### Campaign dry-run
 
 `phase10:campaign-plan` (default `dry-run`) emits the intended scenario matrix from

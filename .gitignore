@@ -27,3 +27,5 @@ test-pages/**/.vercel/
 !.env.example
 # Local design-export extraction (never commit)
 .tmp-lootra-design/
+phase18-restore-drill-*.json
+phase18-restore-drill-*.md

@@ -17,6 +17,7 @@ const requiredPackages = [
   'observability',
   'ops-health',
   'referrals',
+  'restore-drill',
   'rewards',
   'signing',
   'support',
@@ -429,6 +430,54 @@ for (const key of forbiddenPlaintextEnvKeys) {
       /\bMERGE\s+INTO\b/i.test(withoutLine)
     ) {
       failures.push(`${path}: ops-health production source must not execute SQL mutations`);
+    }
+  }
+}
+
+// Phase 18 Step 2A: restore-drill may orchestrate read-only ledger/withdrawals scanners,
+// but must not import signer/TON/ads mutation surfaces or execute SQL mutations.
+{
+  const forbiddenRestoreDrillImports = [
+    '@alex-rewards/signing',
+    '@alex-rewards/ton',
+    '@alex-rewards/ads',
+    '@alex-rewards/rewards',
+    '@alex-rewards/control-center',
+    '@alex-rewards/fraud',
+    '@alex-rewards/wallets',
+  ];
+  const restoreDrillSrc = (await walk('packages/restore-drill/src/')).filter((path) =>
+    /\.(?:ts|tsx|js|mjs)$/.test(path.replaceAll('\\', '/')),
+  );
+  for (const path of restoreDrillSrc) {
+    const normalized = path.replaceAll('\\', '/');
+    if (normalized.includes('/dist/') || normalized.includes('.test.')) continue;
+    const source = await readFile(new URL(path, root), 'utf8');
+    for (const pkg of forbiddenRestoreDrillImports) {
+      const escaped = pkg.replace('/', '\\/');
+      if (
+        new RegExp(`from\\s+['"]${escaped}['"]`).test(source) ||
+        new RegExp(`require\\(['"]${escaped}['"]\\)`).test(source)
+      ) {
+        failures.push(
+          `${path}: restore-drill must not import mutation-capable package ${pkg}`,
+        );
+      }
+    }
+    const withoutBlock = source.replace(/\/\*[\s\S]*?\*\//g, ' ');
+    const withoutLine = withoutBlock
+      .replace(/(^|[^:])\/\/[^\n]*/g, '$1')
+      .replace(/(^|[\s;(])--[^\n]*/g, '$1');
+    if (
+      /\bINSERT\s+INTO\b/i.test(withoutLine) ||
+      /\bUPDATE\s+[A-Za-z_][\w.]*/i.test(withoutLine) ||
+      /\bDELETE\s+FROM\b/i.test(withoutLine) ||
+      /\bMERGE\s+INTO\b/i.test(withoutLine)
+    ) {
+      failures.push(`${path}: restore-drill production source must not execute SQL mutations`);
+    }
+    if (/\bsendBoc\b/.test(withoutLine) || /\bworkflow\.start\b/i.test(withoutLine)) {
+      failures.push(`${path}: restore-drill must not broadcast chain txs or start workflows`);
     }
   }
 }
