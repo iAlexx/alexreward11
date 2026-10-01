@@ -150,3 +150,23 @@ Verified-from-code statements for Phase 19 (not aspirational):
 - Fastify 5.12.2; Next 16.3.6; `@nestjs/platform-fastify` 12.0.3; `@grpc/grpc-js` 1.14.5; `fast-uri` 4.1.4/3.1.7 (`P19-SEC-018..022` RESOLVED).
 - `brace-expansion` pinned to 2.1.7 / 5.0.12 (`P19-SEC-023` RESOLVED). Step 2B left 2.1.4/5.0.9 including API `@fastify/static` closure; static registration and attacker-controlled glob input were not observed, but the High advisory was still patched.
 Mainnet / production monetary / AdsGram monetary / payout resume remain unauthorized.
+
+## Phase 20 — Closed Beta / Minimal Funds
+
+Phase 20 is **IN_PROGRESS** (Step 1 discovery only). `PHASE20_GATE=HOLD`.
+Branch: `phase20-closed-beta`. Starting HEAD:
+`240d22a6c877f2d678668ba596238f6c8b234f71`.
+
+Authority freeze unchanged: Mainnet OFF; production monetary OFF; AdsGram production
+monetary BLOCKED; payout resume unauthorized; `PHASE20_REAL_MONEY_EXECUTION_AUTHORIZED=false`.
+Phase 20 archive **not** created. Phase 21 **not** started.
+
+Authoritative Step 1 artifacts:
+
+- `docs/PHASE_20_CLOSED_BETA_PLAN.md`
+- `docs/PHASE_20_READINESS_MATRIX.md`
+- `docs/PHASE_20_GAP_REGISTER.md`
+
+Phase 19 residual OPEN findings (004–008, 010–012) are carried into the Phase 20 gap register
+and must not be silently discarded. P19-SEC-010/011/012 must be reconsidered before any
+provider production-money enablement.
