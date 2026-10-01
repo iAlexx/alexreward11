@@ -114,9 +114,9 @@ See `docs/OWNER_ADMIN_AUTH.md`, `docs/ADMIN_POLICY_CENTER.md`, ADR-023.
 
 ## Phase 19 — Pre-Mainnet security review
 
-Phase 19 is **IN_PROGRESS** (Step 2B). `PHASE19_GATE=HOLD` until independent review of remaining
-non-blocking Medium/Low/Info findings and residual audit triage. Product + dependency Mainnet
-blockers P19-SEC-001/009/014/016/017/018/019/020/021/022 are RESOLVED in source.
+Phase 19 is **IN_PROGRESS** (Step 2C). `PHASE19_GATE=HOLD` until independent review of remaining
+non-blocking Medium/Low/Info findings. Product + dependency Mainnet blockers
+P19-SEC-001/009/014/016/017/018/019/020/021/022/023 are RESOLVED in source.
 
 Authoritative review artifacts:
 
@@ -135,5 +135,5 @@ Verified-from-code statements for Phase 19 Step 2B (not aspirational):
 - Mission NEW claims and PENDING issuance refuse DRAFT/REVOKED mission versions (`P19-SEC-014` RESOLVED).
 - Missing `PAYOUT_DISPATCH_PAUSE` fails closed in STAGING/PRODUCTION (`P19-SEC-016` RESOLVED; pipeline DB proof Step 2B). Live STAGING pause flag unchanged.
 - Fastify 5.12.2; Next 16.3.6; `@nestjs/platform-fastify` 12.0.3; `@grpc/grpc-js` 1.14.5; `fast-uri` 4.1.4/3.1.7 (`P19-SEC-018..022` RESOLVED).
-
+- `brace-expansion` pinned to 2.1.7 / 5.0.12 (`P19-SEC-023` RESOLVED). Step 2B left 2.1.4/5.0.9 including API `@fastify/static` closure; static registration and attacker-controlled glob input were not observed, but the High advisory was still patched.
 Mainnet / production monetary / AdsGram monetary / payout resume remain unauthorized.

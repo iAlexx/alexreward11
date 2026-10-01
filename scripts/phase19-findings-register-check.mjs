@@ -1,6 +1,6 @@
 /**
  * Phase 19 finding-register integrity gate.
- * Requires exactly one canonical heading per P19-SEC-001..022 and consistent counts.
+ * Requires exactly one canonical heading per P19-SEC-001..023 and consistent counts.
  */
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -18,7 +18,7 @@ while ((m = headingRe.exec(text)) !== null) {
 }
 
 const expected = Array.from(
-  { length: 22 },
+  { length: 23 },
   (_, i) => `P19-SEC-${String(i + 1).padStart(3, '0')}`,
 );
 const errors = [];

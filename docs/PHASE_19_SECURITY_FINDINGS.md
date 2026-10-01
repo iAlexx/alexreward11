@@ -1,19 +1,19 @@
-# Phase 19 — Security Findings (Step 2B)
+# Phase 19 — Security Findings (Step 2C)
 
 **PHASE19_STATUS:** IN_PROGRESS
 **PHASE19_GATE:** HOLD
+**Step 2B remediation HEAD:** `6f3d20d37ad5e250374bd0837fd28ca8f9d5b4bf`
 **Step 2A remediation HEAD:** `1da5a6c5c9fb14beeb145daa5823517d778c48b8`
 **Step 1 discovery HEAD:** `616fe53dbc30494bac0f9d9ee538a2e84b6d8307`
 **Starting source HEAD:** `6c195dd826fcaa3eb720be2d6bcbb0c00e75c7af`
 **Canonical Phase 18 source (unchanged):** `654a7097456d7d18ad6e6a7072793ee6d353ca33`
 
-Step 2B patches remaining dependency Mainnet blockers (P19-SEC-019..022), restores finding-register
-heading integrity, and adds disposable-DB / route proofs for claim-code confirmation, Policy Center
-FEATURE_FLAGS refuse, and payout-pause pipeline fail-closed. Cursor does **not** Owner-accept findings.
+Step 2C patches residual `brace-expansion` High advisories (P19-SEC-023) that remained after Step 2B
+dependency patches. Cursor does **not** Owner-accept findings.
 
 ---
 
-## Summary (recalculated after Step 2B)
+## Summary (recalculated after Step 2C)
 
 | Severity | Open count | Notes |
 | --- | --- | --- |
@@ -24,7 +24,7 @@ FEATURE_FLAGS refuse, and payout-pause pipeline fail-closed. Cursor does **not**
 | INFO | 2 | P19-SEC-006, P19-SEC-008 |
 | **TOTAL OPEN** | **8** | |
 | FALSE_POSITIVE | 2 | P19-SEC-013, P19-SEC-015 |
-| RESOLVED | 12 | P19-SEC-001..003, 009, 014, 016..022 |
+| RESOLVED | 13 | P19-SEC-001..003, 009, 014, 016..023 |
 
 **Mainnet-blocking open IDs:** none
 
@@ -45,7 +45,7 @@ FEATURE_FLAGS refuse, and payout-pause pipeline fail-closed. Cursor does **not**
 | CATEGORY_8_NOTIFICATION_LEAKAGE | YES | EXISTING | 0 | 0 | 0 | 0 | PASS |
 | CATEGORY_9_FEATURE_FLAGS | YES | EXISTING + ADDED | 0 | 0 | 0 | 0 | REMEDIATED + FP |
 | CATEGORY_10_REVIEW_QUEUE | YES | EXISTING + ADDED | 0 | 0 | 0 | 0 | REMEDIATED |
-| DEPENDENCY_SUPPLY_CHAIN | YES | AUDIT | 0 | 0 | 0 | 0 | REMEDIATED |
+| DEPENDENCY_SUPPLY_CHAIN | YES | AUDIT | 0 | 0 | 0 | 0 | REMEDIATED (incl. P19-SEC-023) |
 
 ---
 
@@ -426,25 +426,38 @@ Non-hard scopes cannot exceed active hard ceiling (`wouldExceedProviderHardLimit
 
 ---
 
-## Dependency / static security (Step 2B)
+## Dependency / static security (Step 2B → Step 2C)
 
-### Audit snapshot (post Next 16.3.6 / Nest platform-fastify 12.0.3 / grpc-js 1.14.5 / fast-uri patched)
+### Step 2B audit residual (historical — corrected in Step 2C)
+
+After Next 16.3.6 / Nest platform-fastify 12.0.3 / grpc-js 1.14.5 / fast-uri patches, audit still
+reported High `brace-expansion` advisories. Step 2B documentation incorrectly characterized those
+remaining Highs too broadly as purely build/dev or unused.
+
+Accurate dependency presence at Step 2B HEAD (`6f3d20d`):
+
+| Version | Chains |
+| --- | --- |
+| `brace-expansion@2.1.4` | build/dev (and otel/rimraf/glob transitive paths) |
+| `brace-expansion@5.0.9` | **build/dev** (eslint) **and** API production dependency closure: `apps/api` → `@fastify/static@10.1.3` → `glob@13.0.6` → `minimatch@10.2.6` → `brace-expansion@5.0.9` |
+
+Advisories (vendor High): GHSA-6j4f-fj2g-mc7p; GHSA-qhr7-859c-m2p7 / CVE-2026-102278; GHSA-q2hr-2g5m-vwhr / CVE-2026-102277 (as reported by independent review / upstream).
+
+Distinguish:
+
+- **A. Dependency presence:** `5.0.9` was in the API direct dependency closure via `@fastify/static` (not build/dev-only).
+- **B. Demonstrated runtime exploit reachability:** API source review did **not** observe `@fastify/static` registration/import/use, and did **not** observe attacker-controlled glob/brace input. Remote exploitability is **NOT CLAIMED**.
+
+Nevertheless a reviewed High advisory remained unresolved with no Owner acceptance → Phase 19 blocker until patched (P19-SEC-023).
+
+### Step 2C audit snapshot (post brace-expansion patch)
 
 Command: `pnpm security:audit` / `pnpm audit --json`
 
-Record exact post-patch metadata in Step 2B RETURN (`DEPENDENCY_AUDIT_*`).
+Target: Critical=0, High=0 after overrides `brace-expansion@^2` → 2.1.7 and `brace-expansion@^5` → 5.0.12.
+Record exact counts in Step 2C RETURN.
 
-Triaged production Critical/High clusters P19-SEC-019..022 are **RESOLVED** by version removal.
-Any remaining Critical/High must be classified production-reachable vs build/dev-only; none may remain untriaged.
-
-Post-Step-2B audit remaining High (non-finding / not Mainnet-blocking under current evidence):
-
-| Package | Advisories | Classification |
-| --- | --- | --- |
-| brace-expansion 5.x (eslint) | GHSA-qhr7-859c-m2p7, GHSA-6j4f-fj2g-mc7p | **build/dev/test only** |
-| brace-expansion 2.x (otel rimraf/glob) | same | production dependency; nested-brace DoS path **not used** by LOOTRA request surfaces |
-
-### Reachability accuracy (pre-patch, Step 2B)
+### Reachability accuracy (pre-patch dependency clusters)
 
 | Finding | Dependency presence | Exact exploit precondition in source |
 | --- | --- | --- |
@@ -452,6 +465,7 @@ Post-Step-2B audit remaining High (non-finding / not Mainnet-blocking under curr
 | P19-SEC-020 | @nestjs/platform-fastify 12.0.1 | MiddlewareConsumer/forRoutes/exclude **NOT OBSERVED** |
 | P19-SEC-021 | @grpc/grpc-js 1.14.4 via Temporal | getAuthContext / TLS auth-context **NOT OBSERVED** (address-only Temporal) |
 | P19-SEC-022 | fast-uri 4.1.3 via Fastify | direct fast-uri object-form calls **NOT OBSERVED** |
+| P19-SEC-023 | brace-expansion 2.1.4 / 5.0.9 (incl. API `@fastify/static` closure) | `@fastify/static` runtime registration **NOT OBSERVED**; attacker-controlled glob **NOT OBSERVED** |
 
 Patched regardless; RESOLVED by removal of vulnerable versions.
 
@@ -546,6 +560,32 @@ Patched regardless; RESOLVED by removal of vulnerable versions.
 - **Owner acceptance permitted:** OWNER_POLICY_REQUIRED
 - **status:** RESOLVED
 - **resolution (Step 2B):** Runtime resolves `fast-uri@4.1.4`; build/dev paths resolve `fast-uri@3.1.7`. Vulnerable production 4.1.3 / 3.1.6 cleared from audit Critical/High for this cluster.
+
+### P19-SEC-023 — brace-expansion residual DoS advisories remain after Step 2B
+
+- **title:** brace-expansion residual DoS advisories remain after Step 2B
+- **category:** DEPENDENCY_SUPPLY_CHAIN
+- **affected (Step 2B HEAD `6f3d20d`):** `brace-expansion@2.1.4`, `brace-expansion@5.0.9`
+- **advisories:** GHSA-6j4f-fj2g-mc7p; GHSA-qhr7-859c-m2p7 / CVE-2026-102278; GHSA-q2hr-2g5m-vwhr / CVE-2026-102277 (vendor High)
+- **dependency presence:**
+  - build/dev chains (eslint / related tooling) resolving 5.0.9 and 2.x
+  - API production dependency closure: `apps/api` → `@fastify/static@10.1.3` → `glob` → `minimatch` → `brace-expansion@5.0.9`
+- **reachability (source review):**
+  - direct `@fastify/static` runtime registration / import / use: **NOT OBSERVED**
+  - attacker-controlled glob / brace-pattern input: **NOT OBSERVED**
+  - demonstrated remote exploitability: **NOT CLAIMED**
+- **why Phase 19 blocker before remediation:** known High advisory remained in the dependency graph after Step 2B; no Owner acceptance existed; Step 2B docs understated the API `@fastify/static` closure by treating remaining Highs too broadly as build/dev-only
+- **attacker capability:** DoS via uncontrolled recursion on nested brace groups (per advisory) if vulnerable code path is exercised
+- **security impact:** High vendor severity; practical exploit not demonstrated in current API source
+- **financial impact:** None demonstrated
+- **privacy impact:** None demonstrated
+- **severity:** HIGH
+- **confidence:** HIGH (dependency presence); MEDIUM (exploitability without static registration)
+- **remediation:** Workspace overrides `brace-expansion@^2.0.0` → `2.1.7`, `brace-expansion@^5.0.0` → `5.0.12`; prefer transitive patch over removing `@fastify/static` unless unused-and-safe removal is separately proven
+- **Mainnet blocker:** YES (was)
+- **Owner acceptance permitted:** OWNER_POLICY_REQUIRED
+- **status:** RESOLVED
+- **resolution (Step 2C):** Lockfile resolves only `2.1.7` / `5.0.12`; no `2.1.4` / `5.0.9` remain; post-patch audit Critical=0 High=0 for this cluster.
 
 ---
 

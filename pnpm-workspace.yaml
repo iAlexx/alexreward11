@@ -5,12 +5,15 @@ packages:
 # Pin transitive AWS SDK XML parser past GHSA-8gc5-j5rx-235r / related advisories.
 # Pin Fastify past 5.12.1 security advisories (P19-SEC-018), including Nest platform-fastify.
 # Pin Critical/High transitive deps cleared in Phase 19 Step 2B (P19-SEC-019..022 siblings).
+# Pin brace-expansion past residual High DoS advisories (P19-SEC-023 / Step 2C).
 overrides:
   fast-xml-parser: 5.11.1
   fastify: 5.12.2
   '@grpc/grpc-js': 1.14.5
   'fast-uri@^4.0.0': 4.1.4
   'fast-uri@^3.0.0': 3.1.7
+  'brace-expansion@^2.0.0': 2.1.7
+  'brace-expansion@^5.0.0': 5.0.12
 
 catalogMode: strict
 

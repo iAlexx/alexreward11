@@ -23,14 +23,17 @@
 - `packages/notifications` — stub / draft-only Admin
 - `packages/withdrawals` — pause flag fail-closed for STAGING/PRODUCTION when missing
 
-## Dependency attack surface (Step 2B)
+## Dependency attack surface (Step 2C)
 
 - Next.js **16.3.6** (P19-SEC-019 RESOLVED; no ImageResponse usage observed)
 - `@nestjs/platform-fastify` **12.0.3** (P19-SEC-020 RESOLVED; no MiddlewareConsumer observed)
 - `@grpc/grpc-js` **1.14.5** via Temporal (P19-SEC-021 RESOLVED; address-only Temporal connect)
 - `fast-uri` **4.1.4** runtime / **3.1.7** build-dev (P19-SEC-022 RESOLVED)
 - Fastify **5.12.2** (P19-SEC-018 RESOLVED)
-- Remaining audit High: `brace-expansion` (eslint build/dev + otel transitive nested-brace DoS path not used) — build/dev or unused path; not production-reachable Mainnet blockers
+- `brace-expansion` **2.1.7** / **5.0.12** (P19-SEC-023 RESOLVED)
+  - Step 2B residual: `2.1.4` / `5.0.9` under build/dev **and** API closure `@fastify/static → glob → minimatch → brace-expansion`
+  - `@fastify/static` runtime registration **NOT OBSERVED**; attacker-controlled glob **NOT OBSERVED**; remote exploitability **NOT CLAIMED**
+  - patched via workspace overrides (transitive fix preferred over package removal)
 
 ## Out of scope for Phase 19 live attack
 
