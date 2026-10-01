@@ -23,7 +23,6 @@ import {
   commentReviewCase,
   escalateReviewCase,
   listReviewQueue,
-  resolveReviewCaseAfterDomainSuccess,
 } from '@alex-rewards/control-center';
 import type { Pool } from '@alex-rewards/db';
 
@@ -157,21 +156,9 @@ export class ReviewQueueController {
             }),
             ledgerWrite: false,
           };
-        case 'RESOLVE_AFTER_DOMAIN':
-          return {
-            contractVersion: '1' as const,
-            result: await resolveReviewCaseAfterDomainSuccess(this.pool, {
-              reviewCaseId: id,
-              adminUserId: session.adminUserId,
-              disposition: 'RESOLVED',
-              resolutionNotes: body.note ?? gated.reason,
-              domainSucceeded: true,
-              actionInvoked: 'ADMIN_API_RESOLVE_AFTER_DOMAIN',
-            }),
-            ledgerWrite: false,
-            note: 'Resolution records queue state only after domain command success elsewhere',
-          };
         default:
+          // RESOLVE_AFTER_DOMAIN removed from Admin HTTP (P19-SEC-017): callers must not
+          // invent domainSucceeded=true. Keep lower-level helper for trusted domain paths only.
           // Future domain mutations (fraud mark-safe, monetary unlock, etc.) stay unavailable.
           assertFutureDomainMutationAvailable(String(body.action));
       }

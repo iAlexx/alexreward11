@@ -3,8 +3,10 @@ packages:
   - packages/*
 
 # Pin transitive AWS SDK XML parser past GHSA-8gc5-j5rx-235r / related advisories.
+# Pin Fastify past 5.12.1 security advisories (P19-SEC-018), including Nest platform-fastify.
 overrides:
   fast-xml-parser: 5.11.1
+  fastify: 5.12.2
 
 catalogMode: strict
 

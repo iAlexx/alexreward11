@@ -1,8 +1,8 @@
 # Phase 19 — Pre-Mainnet Security Review Plan
 
 **PHASE19_STATUS:** `IN_PROGRESS`
-**PHASE19_GATE:** `HOLD` (Step 1 discovery)
-**Archive slug (later):** `PHASE_19_SECURITY_REVIEW` — **NOT CREATED** in Step 1
+**PHASE19_GATE:** `HOLD` (Step 2A — product blockers remediated; dependency Critical/High remain open)
+**Archive slug (later):** `PHASE_19_SECURITY_REVIEW` — **NOT CREATED** in Step 2A
 
 ## Authority freeze (unchanged)
 
@@ -12,7 +12,7 @@
 | PRODUCTION_MONETARY_ALLOWED | false |
 | PAYOUT_RESUME_AUTHORIZED | false |
 | ADSGRAM_PRODUCTION_MONETARY | BLOCKED |
-| STAGING PAYOUT_DISPATCH_PAUSE | true (do not change in Phase 19 Step 1) |
+| STAGING PAYOUT_DISPATCH_PAUSE | true (do not change in Phase 19) |
 | AUTO_UNPAUSE | false |
 | AUTO_RESEND | false |
 | Phase 18 | CLOSED / PASS / ARCHIVED |
@@ -20,17 +20,17 @@
 
 Starting source HEAD: `6c195dd826fcaa3eb720be2d6bcbb0c00e75c7af`
 Branch: `phase19-security-review`
+Step 1 discovery HEAD: `616fe53dbc30494bac0f9d9ee538a2e84b6d8307`
 Canonical Phase 18 accepted source (unchanged): `654a7097456d7d18ad6e6a7072793ee6d353ca33`
 
 ## Purpose
 
 Master Specification Phase 19 requires a full pre-Mainnet security review covering ten
-categories. Step 1 is **discovery first**: attack-surface inventory, adversarial tests,
-finding classification, and documentation. Product remediation is deferred to later Phase 19
-steps after independent review.
+categories. Step 1 was discovery. Step 2A corrects the findings register, remediates confirmed
+product Mainnet blockers, runs disposable-DB gates, and triages Critical/High dependencies.
 
-Cursor MUST NOT self-accept Critical/High findings. Mainnet remains BLOCKED until Critical/High
-findings are resolved or explicitly Owner-accepted with documented mitigation where policy permits.
+Cursor MUST NOT self-accept Critical/High findings. Mainnet remains BLOCKED while Critical/High
+findings remain OPEN (currently dependency clusters P19-SEC-019..022).
 
 ## Scope (10 categories)
 
@@ -46,28 +46,33 @@ findings are resolved or explicitly Owner-accepted with documented mitigation wh
 10. Review Queue authorization
 
 Plus cross-cutting: Admin vs Access session separation, CSRF, reauth, confirmation binding,
-idempotency, concurrency, TOCTOU, mass assignment, IDOR, secret logging, fail-closed boundaries.
+idempotency, concurrency, TOCTOU, mass assignment, IDOR, secret logging, fail-closed boundaries,
+dependency supply-chain Critical/High triage.
 
 ## Method
 
 - Static source review of authoritative controllers/domain modules
 - Deterministic adversarial / source-contract tests under `apps/api/test/phase19-*`
 - Existing suite reuse via `pnpm test:phase19-security` harness
-- Isolated disposable DB only for mandatory DB-backed gates (fail closed if URL missing)
+- Isolated disposable DB only for mandatory DB-backed gates (`PHASE19_REQUIRE_DB_GATES=1`)
+- Harness fails closed if a mandatory DB suite reports 0 passed tests (skip ≠ PASS)
 - No live offensive actions against AdsGram, Telegram, Railway, Vercel, Mainnet, signer, or TON
 
 ## Severity model
 
 CRITICAL / HIGH / MEDIUM / LOW / INFO as defined in Master Spec Phase 19 guidance.
 If uncertain, choose the safer higher classification.
+Independent-review corrections supersede earlier discovery severity where evidence requires it.
 
-## Step 1 exit criteria
+## Step 2A exit criteria
 
-- Plan + findings + attack-surface docs present
-- Category matrix complete (REVIEWED / TEST_COVERAGE / open counts)
-- `PHASE19_GATE=HOLD` unless zero open findings AND all mandatory gates fully executed
+- Findings register corrected (014/016 HIGH; 013/015 FALSE_POSITIVE; 018 added; dependency triage)
+- Product remediations for 001/003/009/014/016/017/018 landed with tests
+- Disposable DB gates executed under `PHASE19_REQUIRE_DB_GATES=1`
+- `PHASE19_GATE=HOLD` while Critical/High remain OPEN
 - No Phase 19 archive
-- No product remediation (except non-authoritative harness wiring)
+- No Phase 20 start
+- No live Railway / staging DB / payout pause / signer / TON / Mainnet actions
 
 ## Companions
 

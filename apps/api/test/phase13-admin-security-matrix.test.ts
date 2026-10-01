@@ -245,7 +245,10 @@ describe('Phase 13 Admin security matrix 12–52', () => {
     expect(source).toContain('assignReviewCase');
     expect(source).toContain('commentReviewCase');
     expect(source).toContain('escalateReviewCase');
-    expect(source).toContain('resolveReviewCaseAfterDomainSuccess');
+    // P19-SEC-017: Admin HTTP no longer invents RESOLVE_AFTER_DOMAIN / domainSucceeded=true.
+    expect(source).not.toContain('resolveReviewCaseAfterDomainSuccess');
+    expect(source).not.toContain("case 'RESOLVE_AFTER_DOMAIN'");
+    expect(source).toContain('assertFutureDomainMutationAvailable');
     expect(source).toContain('ledgerWrite: false');
     expect(source).not.toContain('INSERT INTO ledger_');
     expect(source).not.toContain('postTransaction');
@@ -496,6 +499,19 @@ describe('Phase 13 Admin security matrix 12–52', () => {
     expect(confirmations).toContain("Post('prepare')");
     expect(confirmations).toContain('prepareAdminWebConfirmation');
     expect(confirmations).toContain('confirmAdminWebConfirmation');
+  });
+
+  it('P13-01b memberships issueClaimCode is route-scoped for confirmation consume (P19-SEC-002)', () => {
+    const text = readFileSync(join(adminSrc, 'memberships-admin.controller.ts'), 'utf8');
+    const issueIdx = text.indexOf('async issueClaimCode(');
+    expect(issueIdx).toBeGreaterThanOrEqual(0);
+    const issueSlice = text.slice(issueIdx, issueIdx + 1800);
+    expect(issueSlice).toContain('requireConsumedConfirmation');
+    expect(issueSlice).toContain('memberships.founder_claim_code_issue');
+    const grantIdx = text.indexOf('async grantFounder(');
+    const grantSlice = text.slice(grantIdx, grantIdx + 1200);
+    expect(grantSlice).toContain('requireConsumedConfirmation');
+    expect(grantSlice).toContain('memberships.founder_grant');
   });
 
   it('P13-02 admin auth login JSON must not return sessionToken', () => {

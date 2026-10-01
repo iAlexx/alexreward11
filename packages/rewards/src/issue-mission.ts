@@ -423,10 +423,12 @@ export async function issueMissionRewardOnClient(
       start_at: Date | null;
       end_at: Date | null;
       eligibility_policy: unknown;
+      status: string;
     }>(
       `SELECT id, condition_type::text AS condition_type, target,
               reward_source_type::text AS reward_source_type, reward_rule_id,
-              required_membership_plan_id, start_at, end_at, eligibility_policy
+              required_membership_plan_id, start_at, end_at, eligibility_policy,
+              status::text AS status
        FROM mission_versions
        WHERE id = $1::uuid
        FOR SHARE`,
@@ -444,6 +446,21 @@ export async function issueMissionRewardOnClient(
       return softResult('configuration_missing', claimId, 'MISSION_VERSION_MISSING', {
         decisionId,
       });
+    }
+
+    // P19-SEC-014: refuse issuance when version is DRAFT/REVOKED (covers PENDING claims
+    // created while ACTIVE that are later revoked before worker issuance).
+    if (mv.status === 'DRAFT' || mv.status === 'REVOKED') {
+      const reasonCode =
+        mv.status === 'DRAFT' ? 'MISSION_VERSION_DRAFT' : 'MISSION_VERSION_REVOKED';
+      const decisionId = await recordDecision(client, {
+        missionClaimId: claimId,
+        missionProgressId: claim.mission_progress_id,
+        missionVersionId: claim.mission_version_id,
+        outcome: 'CONFIGURATION_MISSING',
+        reasonCode,
+      });
+      return softResult('configuration_missing', claimId, reasonCode, { decisionId });
     }
 
     const progress = await client.query<{

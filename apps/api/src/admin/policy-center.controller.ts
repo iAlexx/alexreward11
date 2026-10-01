@@ -16,7 +16,6 @@ import type { AdminPolicyFamiliesResponse } from '@alex-rewards/contracts';
 import type { Pool } from '@alex-rewards/db';
 import {
   createExposureLimitVersion,
-  setFeatureFlagEnabled,
   withLedgerTransaction,
 } from '@alex-rewards/rewards';
 
@@ -95,34 +94,8 @@ export class PolicyCenterController {
         payload: { family, reason: gated.reason, typed: body.typed },
       });
 
-      if (family === 'FEATURE_FLAGS') {
-        const typed = body.typed as
-          | { flagKey?: string; environment?: string; enabled?: boolean }
-          | undefined;
-        const flagKey = requireNonEmptyString(typed?.flagKey, 'typed.flagKey');
-        const environment = requireNonEmptyString(
-          typed?.environment,
-          'typed.environment',
-        ) as 'LOCAL' | 'STAGING' | 'PRODUCTION';
-        if (typeof typed?.enabled !== 'boolean') {
-          throw Object.assign(new Error('typed.enabled boolean required'), {
-            code: 'VALIDATION',
-          });
-        }
-        await withLedgerTransaction(this.pool, async (client) => {
-          await setFeatureFlagEnabled(client, {
-            flagKey,
-            environment,
-            enabled: typed.enabled!,
-          });
-        });
-        return {
-          contractVersion: '1' as const,
-          family,
-          applied: true,
-          note: 'typed feature flag change delegated to domain',
-        };
-      }
+      // FEATURE_FLAGS: use dedicated POST /v1/admin/feature-flags only (P19-SEC-009).
+      // Do not mutate flags here — weaker version/audit/silent-flip stack than dedicated route.
 
       if (family === 'EXPOSURE_LIMITS') {
         const typed = body.typed as {
@@ -150,7 +123,7 @@ export class PolicyCenterController {
         return { contractVersion: '1' as const, family, applied: true, created };
       }
 
-      // PROVIDER_LIMITS / REWARD_RULES / BENEFIT_RULES / WITHDRAWAL_LIMITS:
+      // FEATURE_FLAGS / PROVIDER_LIMITS / REWARD_RULES / BENEFIT_RULES / WITHDRAWAL_LIMITS:
       // typed change must use dedicated Admin endpoints — Policy Center only routes metadata.
       return {
         contractVersion: '1' as const,

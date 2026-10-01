@@ -19,7 +19,7 @@
     "@alex-rewards/db": "workspace:*",
     "@alex-rewards/observability": "workspace:*",
     "@alex-rewards/signing": "workspace:*",
-    "fastify": "5.12.1",
+    "fastify": "5.12.2",
     "pg": "8.23.0",
     "zod": "4.5.4"
   },

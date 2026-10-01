@@ -405,6 +405,21 @@ export async function prepareMissionClaim(
       );
     }
 
+    // P19-SEC-014: NEW claims refuse DRAFT/REVOKED. SUPERSEDED remains allowed for
+    // historical claim/redrive within the valid claim window (matches contribute policy).
+    if (version.status === 'DRAFT' || version.status === 'REVOKED') {
+      throw new MissionDomainError(
+        'MISSION_NOT_ACTIVE',
+        `mission version status is ${version.status}; new claims require ACTIVE or SUPERSEDED`,
+        {
+          missionVersionId: version.id,
+          status: version.status,
+          reasonCode:
+            version.status === 'DRAFT' ? 'MISSION_VERSION_DRAFT' : 'MISSION_VERSION_REVOKED',
+        },
+      );
+    }
+
     assertClaimWindowOpen(version, asOf);
 
     if (progress.state !== 'COMPLETED' || progress.progress_count !== progress.target) {

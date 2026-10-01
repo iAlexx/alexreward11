@@ -580,7 +580,7 @@ export interface AdminReviewQueueListResponse {
 }
 
 export interface AdminReviewQueueActionRequest {
-  readonly action: 'ASSIGN' | 'COMMENT' | 'ESCALATE' | 'RESOLVE_AFTER_DOMAIN';
+  readonly action: 'ASSIGN' | 'COMMENT' | 'ESCALATE';
   readonly reason: string;
   readonly expectedVersion: string;
   readonly note?: string;

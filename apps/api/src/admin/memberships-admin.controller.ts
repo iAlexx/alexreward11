@@ -145,7 +145,10 @@ export class MembershipsAdminController {
     }
   }
 
-  /** Issue claim code — plaintext shown once in this response only. */
+  /**
+   * Issue claim code — plaintext shown once in this response only.
+   * Requires CSRF + recent reauth + consumed second confirmation (P19-SEC-001).
+   */
   @Post('memberships/claim-codes/issue')
   @HttpCode(200)
   async issueClaimCode(
@@ -155,6 +158,7 @@ export class MembershipsAdminController {
     body: {
       readonly reason: string;
       readonly expectedVersion: string;
+      readonly confirmationId: string;
       readonly expiresAt?: string;
       readonly issuedForReference?: string;
       readonly reserveFounderNumber?: boolean;
@@ -163,16 +167,46 @@ export class MembershipsAdminController {
     try {
       enforceAdminMutationCsrf(request, this.config);
       const gated = gateHighImpactMutation(session, body);
+
+      // Normalize expiresAt before confirmation payload binding (reject ambiguous shapes).
+      let expiresAtNormalized: string | null = null;
+      let expiresAtDate: Date | null | undefined = undefined;
+      if (body.expiresAt !== undefined) {
+        const parsed = new Date(body.expiresAt);
+        if (Number.isNaN(parsed.getTime())) {
+          throw Object.assign(new Error('expiresAt must be a valid RFC3339 / Date string'), {
+            code: 'VALIDATION',
+          });
+        }
+        expiresAtDate = parsed;
+        expiresAtNormalized = parsed.toISOString();
+      }
+      const issuedForReferenceNormalized =
+        body.issuedForReference !== undefined ? body.issuedForReference.trim() : null;
+      const reserveFounderNumberNormalized = body.reserveFounderNumber === true;
+
+      await requireConsumedConfirmation(this.pool, session, body.confirmationId, {
+        action: 'memberships.founder_claim_code_issue',
+        resourceType: 'membership_plan',
+        resourceId: 'FOUNDER_LIFETIME',
+        expectedVersion: gated.expectedVersion,
+        payload: {
+          reason: gated.reason,
+          expiresAt: expiresAtNormalized,
+          issuedForReference: issuedForReferenceNormalized,
+          reserveFounderNumber: reserveFounderNumberNormalized,
+        },
+      });
+
       const issued = await issueFounderClaimCode(this.pool, {
         adminUserId: session.adminUserId,
         actorSource: 'WEB',
-        ...(body.expiresAt !== undefined ? { expiresAt: new Date(body.expiresAt) } : {}),
-        ...(body.issuedForReference !== undefined
-          ? { issuedForReference: body.issuedForReference }
+        reason: gated.reason,
+        ...(expiresAtDate !== undefined ? { expiresAt: expiresAtDate } : {}),
+        ...(issuedForReferenceNormalized !== null
+          ? { issuedForReference: issuedForReferenceNormalized }
           : {}),
-        ...(body.reserveFounderNumber !== undefined
-          ? { reserveFounderNumber: body.reserveFounderNumber }
-          : {}),
+        reserveFounderNumber: reserveFounderNumberNormalized,
       });
       return {
         contractVersion: '1' as const,
