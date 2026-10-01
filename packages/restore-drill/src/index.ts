@@ -57,6 +57,7 @@ export {
 export {
   RESTORE_DRILL_READONLY_VALIDATE_FLAGS,
   assertStrictTestnetNetworkEnv,
+  deriveChainObservationBounds,
   captureChainScope,
   captureExpectedConfirmedPayouts,
   captureUnresolvedAmbiguityCounts,

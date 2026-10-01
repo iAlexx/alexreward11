@@ -57,6 +57,7 @@ const baseEnv = {
   PHASE18_TEMPORAL_ADDRESS: 'temporal.example:7233',
   PHASE18_TEMPORAL_NAMESPACE: 'default',
   PHASE18_SOURCE_COUNT_CAPTURE_PATH: '/tmp/phase18-source-counts.json',
+  PHASE18_RESTORE_TARGET_AT: '2026-10-01T03:00:00.000Z',
 } as const;
 
 const emptyTables: Record<string, number> = {
@@ -400,6 +401,7 @@ describe('chain reconciliation', () => {
     expect(isChainScopeEmpty(scope)).toBe(true);
     const result = await reconcileChainReadOnly({
       pool,
+      restoreTargetAt: '2026-10-01T03:00:00.000Z',
       validateOverride: async () => {
         providerCalls += 1;
         throw new Error('should not be called');
@@ -422,6 +424,7 @@ describe('chain reconciliation', () => {
     });
     const result = await reconcileChainReadOnly({
       pool,
+      restoreTargetAt: '2026-10-01T03:00:00.000Z',
       env: {
         TON_PRIMARY_PROVIDER_KIND: 'toncenter-mainnet',
         TON_PRIMARY_PROVIDER_URL: 'https://primary.example',
@@ -620,6 +623,11 @@ describe('architecture boundary FULL additions', () => {
     expect(
       findRestoreDrillFinancialImportViolations(
         `import { assertPhase10ReadonlyValidationReportIntegrity } from '@alex-rewards/withdrawals';`,
+      ),
+    ).toHaveLength(0);
+    expect(
+      findRestoreDrillFinancialImportViolations(
+        `import { buildPhase10EconomicKey } from '@alex-rewards/withdrawals';`,
       ),
     ).toHaveLength(0);
     expect(

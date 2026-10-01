@@ -6,6 +6,7 @@
  */
 import {
   assertPhase10ReadonlyValidationReportIntegrity,
+  buildPhase10EconomicKey,
   checkPhase10PayoutInvariants,
   runPhase10ChainHistoryReadonlyValidate,
 } from '@alex-rewards/withdrawals';
@@ -58,6 +59,9 @@ export interface ChainReconciliationResult {
   readonly payoutInvariantFailCount: number | null;
   readonly payoutInvariantFindingCodes: readonly string[];
   readonly mismatchReferences: readonly string[];
+  readonly observationWindowStart: string | null;
+  readonly observationWindowEnd: string | null;
+  readonly restoreTargetAt: string | null;
 }
 
 export interface ChainProviderEnv {
@@ -215,14 +219,6 @@ function nonempty(v: string | undefined): string | null {
   return t === '' ? null : t;
 }
 
-function normalizeComparable(value: string): string {
-  return value.trim().toLowerCase();
-}
-
-function addressesEqual(a: string, b: string): boolean {
-  return normalizeComparable(a) === normalizeComparable(b);
-}
-
 function emptyObservedResult(
   overrides: Partial<ChainReconciliationResult> &
     Pick<ChainReconciliationResult, 'status' | 'reasonCode'>,
@@ -246,6 +242,9 @@ function emptyObservedResult(
     payoutInvariantFailCount: null,
     payoutInvariantFindingCodes: [],
     mismatchReferences: [],
+    observationWindowStart: null,
+    observationWindowEnd: null,
+    restoreTargetAt: null,
     ...overrides,
   };
 }
@@ -386,6 +385,72 @@ export async function captureExpectedConfirmedPayouts(pool: Pool): Promise<
   return { ok: true, expected };
 }
 
+
+export interface ChainObservationBounds {
+  readonly earliestRelevantAt: string;
+  readonly latestRelevantAt: string;
+}
+
+/**
+ * Derive earliest/latest authoritative restored financial/chain timestamps.
+ * Does not use updated_at. Fail-closed when nonempty scope has no valid timestamps.
+ */
+export async function deriveChainObservationBounds(pool: Pool): Promise<
+  | { readonly ok: true; readonly bounds: ChainObservationBounds }
+  | { readonly ok: false; readonly reasonCode: string }
+> {
+  try {
+    const result = await pool.query<{ earliest: string | null; latest: string | null }>(
+      `SELECT MIN(ts)::text AS earliest, MAX(ts)::text AS latest
+         FROM (
+           SELECT requested_at AS ts FROM withdrawals
+           UNION ALL
+           SELECT created_at AS ts FROM withdrawal_attempts
+           UNION ALL
+           SELECT signing_started_at AS ts FROM withdrawal_attempts
+           UNION ALL
+           SELECT broadcast_started_at AS ts FROM withdrawal_attempts
+            WHERE broadcast_started_at IS NOT NULL
+           UNION ALL
+           SELECT broadcast_submitted_at AS ts FROM withdrawal_attempts
+            WHERE broadcast_submitted_at IS NOT NULL
+           UNION ALL
+           SELECT first_seen_at AS ts FROM blockchain_transactions
+           UNION ALL
+           SELECT confirmed_at AS ts FROM blockchain_transactions
+            WHERE confirmed_at IS NOT NULL
+           UNION ALL
+           SELECT observed_at AS ts FROM chain_observations
+           UNION ALL
+           SELECT created_at AS ts FROM withdrawal_payout_reconciliations
+           UNION ALL
+           SELECT resolved_at AS ts FROM withdrawal_payout_reconciliations
+            WHERE resolved_at IS NOT NULL
+         ) relevant
+        WHERE ts IS NOT NULL`,
+    );
+    const earliestRaw = result.rows[0]?.earliest ?? null;
+    const latestRaw = result.rows[0]?.latest ?? null;
+    if (earliestRaw === null || latestRaw === null) {
+      return { ok: false, reasonCode: 'CHAIN_WINDOW_DERIVATION_FAILED' };
+    }
+    const earliestMs = Date.parse(earliestRaw);
+    const latestMs = Date.parse(latestRaw);
+    if (!Number.isFinite(earliestMs) || !Number.isFinite(latestMs)) {
+      return { ok: false, reasonCode: 'CHAIN_WINDOW_DERIVATION_FAILED' };
+    }
+    return {
+      ok: true,
+      bounds: {
+        earliestRelevantAt: new Date(earliestMs).toISOString(),
+        latestRelevantAt: new Date(latestMs).toISOString(),
+      },
+    };
+  } catch {
+    return { ok: false, reasonCode: 'CHAIN_WINDOW_DERIVATION_FAILED' };
+  }
+}
+
 export function matchConfirmedPayoutsToAgreedTransfers(input: {
   readonly expected: readonly ExpectedConfirmedPayout[];
   readonly report: Pick<
@@ -407,25 +472,43 @@ export function matchConfirmedPayoutsToAgreedTransfers(input: {
   let confirmedMatchedCount = 0;
 
   for (const payout of input.expected) {
-    if (
-      !addressesEqual(input.report.hotWalletAddress, payout.hotWallet) ||
-      !addressesEqual(input.report.hotWalletJettonWallet, payout.senderJettonWallet) ||
-      !addressesEqual(input.report.jettonMaster, payout.jettonMaster)
-    ) {
+    const hotWalletBindKey = buildPhase10EconomicKey({
+      queryId: 'restore-drill-hw-bind',
+      amountAtomic: '0',
+      recipient: input.report.hotWalletAddress,
+      jettonMaster: input.report.hotWalletJettonWallet,
+    });
+    const expectedHotWalletBindKey = buildPhase10EconomicKey({
+      queryId: 'restore-drill-hw-bind',
+      amountAtomic: '0',
+      recipient: payout.hotWallet,
+      jettonMaster: payout.senderJettonWallet,
+    });
+    if (hotWalletBindKey !== expectedHotWalletBindKey) {
       mismatchReferences.push(
         hashOpaqueReference('report-identity-mismatch', payout.withdrawalId),
       );
       continue;
     }
 
+    const expectedKey = buildPhase10EconomicKey({
+      queryId: payout.queryId,
+      amountAtomic: payout.amountAtomic,
+      recipient: payout.recipient,
+      jettonMaster: payout.jettonMaster,
+    });
+
     const matches: number[] = [];
     for (let i = 0; i < input.report.agreedTransfers.length; i += 1) {
       if (used.has(i)) continue;
-      const t = input.report.agreedTransfers[i]!;
-      if (t.queryId === null || t.queryId !== payout.queryId) continue;
-      if (t.amountAtomic !== payout.amountAtomic) continue;
-      if (!addressesEqual(t.recipient, payout.recipient)) continue;
-      matches.push(i);
+      const transfer = input.report.agreedTransfers[i]!;
+      const transferKey = buildPhase10EconomicKey({
+        queryId: transfer.queryId,
+        amountAtomic: transfer.amountAtomic,
+        recipient: transfer.recipient,
+        jettonMaster: input.report.jettonMaster,
+      });
+      if (transferKey === expectedKey) matches.push(i);
     }
 
     if (matches.length === 0) {
@@ -504,6 +587,8 @@ function assertReadonlyReportIntegrity(report: Phase10ReadonlyValidationReport):
 export async function reconcileChainReadOnly(input: {
   readonly pool: Pool;
   readonly env?: NodeJS.ProcessEnv;
+  /** Exact restore cutoff (RFC3339 ISO) — required for nonzero chain scope. */
+  readonly restoreTargetAt: string;
   readonly now?: Date;
   /** Test injection — when set, skips real provider call. */
   readonly validateOverride?: (
@@ -511,6 +596,8 @@ export async function reconcileChainReadOnly(input: {
   ) => Promise<Phase10ReadonlyValidationReport>;
   /** Test injection — payout invariant checker. */
   readonly checkPayoutInvariants?: typeof checkPhase10PayoutInvariants;
+  /** Test injection — observation bounds override. */
+  readonly observationBoundsOverride?: ChainObservationBounds;
 }): Promise<ChainReconciliationResult> {
   let scope: ChainScopeCounts;
   try {
@@ -523,6 +610,16 @@ export async function reconcileChainReadOnly(input: {
   }
 
   const requiring = scope.chainSensitiveWithdrawals + scope.chainRelevantAttempts;
+
+  const restoreTargetMs = Date.parse(input.restoreTargetAt);
+  if (!Number.isFinite(restoreTargetMs)) {
+    return emptyObservedResult({
+      status: 'FAIL',
+      reasonCode: 'RESTORE_TARGET_AT_INVALID',
+      restoreTargetAt: input.restoreTargetAt,
+    });
+  }
+  const restoreTargetAt = new Date(restoreTargetMs).toISOString();
 
   if (isChainScopeEmpty(scope)) {
     return {
@@ -546,6 +643,9 @@ export async function reconcileChainReadOnly(input: {
       payoutInvariantFailCount: null,
       payoutInvariantFindingCodes: [],
       mismatchReferences: [],
+      observationWindowStart: null,
+      observationWindowEnd: restoreTargetAt,
+      restoreTargetAt,
     };
   }
 
@@ -637,9 +737,47 @@ export async function reconcileChainReadOnly(input: {
   const ambiguousAttemptCount =
     ambiguity.ambiguousAttemptCount + ambiguity.ambiguousWithdrawalCount;
 
-  const now = input.now ?? new Date();
-  const windowEnd = now.toISOString();
-  const windowStart = new Date(now.getTime() - 365 * 24 * 3600 * 1000).toISOString();
+  let bounds: ChainObservationBounds;
+  if (input.observationBoundsOverride !== undefined) {
+    bounds = input.observationBoundsOverride;
+  } else {
+    const derived = await deriveChainObservationBounds(input.pool);
+    if (!derived.ok) {
+      return emptyObservedResult({
+        status: 'FAIL',
+        reasonCode: derived.reasonCode,
+        withdrawalsRequiringLiveChainCount: requiring,
+        restoreTargetAt,
+        observationWindowEnd: restoreTargetAt,
+      });
+    }
+    bounds = derived.bounds;
+  }
+
+  if (Date.parse(bounds.latestRelevantAt) > Date.parse(restoreTargetAt)) {
+    return emptyObservedResult({
+      status: 'FAIL',
+      reasonCode: 'RESTORED_CHAIN_TIMESTAMP_AFTER_TARGET',
+      withdrawalsRequiringLiveChainCount: requiring,
+      restoreTargetAt,
+      observationWindowStart: bounds.earliestRelevantAt,
+      observationWindowEnd: restoreTargetAt,
+    });
+  }
+  if (Date.parse(bounds.earliestRelevantAt) > Date.parse(restoreTargetAt)) {
+    return emptyObservedResult({
+      status: 'FAIL',
+      reasonCode: 'RESTORED_CHAIN_TIMESTAMP_AFTER_TARGET',
+      withdrawalsRequiringLiveChainCount: requiring,
+      restoreTargetAt,
+      observationWindowStart: bounds.earliestRelevantAt,
+      observationWindowEnd: restoreTargetAt,
+    });
+  }
+
+  const windowStart = bounds.earliestRelevantAt;
+  const windowEnd = restoreTargetAt;
+  const generatedAt = (input.now ?? new Date()).toISOString();
 
   const validate = input.validateOverride ?? runPhase10ChainHistoryReadonlyValidate;
   const validateInput: RunPhase10ChainHistoryReadonlyValidateInput = {
@@ -660,7 +798,7 @@ export async function reconcileChainReadOnly(input: {
     networkCode: 'TON_TESTNET',
     realChainEnabled: RESTORE_DRILL_READONLY_VALIDATE_FLAGS.realChainEnabled,
     fakeChainEnabled: RESTORE_DRILL_READONLY_VALIDATE_FLAGS.fakeChainEnabled,
-    generatedAt: windowEnd,
+    generatedAt,
   };
 
   try {
@@ -759,6 +897,9 @@ export async function reconcileChainReadOnly(input: {
       payoutInvariantFailCount: 0,
       payoutInvariantFindingCodes: [],
       mismatchReferences,
+      observationWindowStart: windowStart,
+      observationWindowEnd: windowEnd,
+      restoreTargetAt,
     };
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);

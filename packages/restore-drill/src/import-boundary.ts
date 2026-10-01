@@ -9,6 +9,7 @@ export const RESTORE_DRILL_ALLOWED_WITHDRAWALS_IMPORTS = [
   'runPhase10ChainHistoryReadonlyValidate',
   'checkPhase10PayoutInvariants',
   'assertPhase10ReadonlyValidationReportIntegrity',
+  'buildPhase10EconomicKey',
 ] as const;
 export const RESTORE_DRILL_ALLOWED_DB_IMPORTS = ['listMigrationFiles'] as const;
 

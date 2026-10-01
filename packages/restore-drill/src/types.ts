@@ -148,6 +148,9 @@ export interface RestoreDrillReport {
     readonly payoutInvariantFailCount: number | null;
     readonly payoutInvariantFindingCodes: readonly string[];
     readonly mismatchReferences: readonly string[];
+    readonly observationWindowStart: string | null;
+    readonly observationWindowEnd: string | null;
+    readonly restoreTargetAt: string | null;
   };
   readonly representativeCounts: {
     readonly status: DrillSectionStatus;

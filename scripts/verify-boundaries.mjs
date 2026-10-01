@@ -457,6 +457,7 @@ for (const key of forbiddenPlaintextEnvKeys) {
         'runPhase10ChainHistoryReadonlyValidate',
         'checkPhase10PayoutInvariants',
         'assertPhase10ReadonlyValidationReportIntegrity',
+        'buildPhase10EconomicKey',
       ]),
     },
     {

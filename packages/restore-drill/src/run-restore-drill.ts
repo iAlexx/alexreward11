@@ -259,7 +259,16 @@ export async function runRestoreDrill(
           );
         }
 
-        if (counts.restoredCapture === null || counts.restoredCaptureStatus === 'FAIL') {
+        const restoreTargetAt = config.restoreTargetAt;
+        if (restoreTargetAt === null) {
+          countStatus = 'FAIL';
+          countComparisonStatus = 'FAIL';
+          countReasonExtra = 'RESTORE_TARGET_AT_MISSING';
+        } else if (new Date(Date.parse(sourceCapture.capturedAt)).toISOString() !== restoreTargetAt) {
+          countStatus = 'FAIL';
+          countComparisonStatus = 'FAIL';
+          countReasonExtra = 'SOURCE_CAPTURE_RESTORE_TARGET_MISMATCH';
+        } else if (counts.restoredCapture === null || counts.restoredCaptureStatus === 'FAIL') {
           countStatus = 'FAIL';
           countComparisonStatus = 'FAIL';
           countReasonExtra = 'RESTORED_COUNT_CAPTURE_FAILED';
@@ -283,9 +292,30 @@ export async function runRestoreDrill(
       }
     }
 
+    const evidenceAlignedForFull =
+      mode !== 'FULL_STEP2B' ||
+      (countReasonExtra !== 'SOURCE_CAPTURE_RESTORE_TARGET_MISMATCH' &&
+        countReasonExtra !== 'RESTORE_TARGET_AT_MISSING' &&
+        countReasonExtra !== 'SOURCE_COUNT_ARTIFACT_FAILED' &&
+        countReasonExtra !== 'SOURCE_COUNT_CAPTURE_MISSING' &&
+        sourceCapture !== null);
+
     // --- Temporal (FULL only) ---
     let workflowSection: RestoreDrillReport['workflowReconciliation'];
-    if (mode === 'FULL_STEP2B') {
+    if (mode === 'FULL_STEP2B' && !evidenceAlignedForFull) {
+      workflowSection = {
+        status: 'FAIL',
+        reasonCode: countReasonExtra ?? 'SOURCE_CAPTURE_RESTORE_TARGET_MISMATCH',
+        dbExpectedWorkflowIdentityCount: 0,
+        temporalObservedWorkflowCount: 0,
+        matchedCount: 0,
+        missingInTemporalCount: 0,
+        unexpectedInTemporalCount: 0,
+        statusCounts: {},
+        mismatchReferences: [],
+        temporalQueried: false,
+      };
+    } else if (mode === 'FULL_STEP2B') {
       let temporalPort: TemporalListPort | null = null;
       if (options.temporalListPort !== undefined) {
         temporalPort = options.temporalListPort;
@@ -325,12 +355,42 @@ export async function runRestoreDrill(
       };
     }
 
-    // --- Chain (FULL only) ---
+        // --- Chain (FULL only) ---
     let chainSection: RestoreDrillReport['blockchainReconciliation'];
-    if (mode === 'FULL_STEP2B') {
+    if (mode === 'FULL_STEP2B' && !evidenceAlignedForFull) {
+      chainSection = {
+        status: 'FAIL',
+        reasonCode: countReasonExtra ?? 'SOURCE_CAPTURE_RESTORE_TARGET_MISMATCH',
+        liveChainReconciliation: 'NOT_OBSERVED',
+        withdrawalsRequiringLiveChainCount: withdrawalRecords.requiringLiveChainCount,
+        liveProviderQueryPerformed: false,
+        chainScopeEmpty: false,
+        providerQueryPerformed: false,
+        primaryHealthy: null,
+        secondaryHealthy: null,
+        providerAgreement: null,
+        windowFullyCovered: null,
+        agreedTransferCount: null,
+        knownExpectedTransferCount: null,
+        confirmedMatchedCount: null,
+        unexpectedOutgoingCount: null,
+        ambiguousAttemptCount: null,
+        providerReportDigest: null,
+        payoutInvariantFailCount: null,
+        payoutInvariantFindingCodes: [],
+        mismatchReferences: [],
+        observationWindowStart: null,
+        observationWindowEnd: config.restoreTargetAt,
+        restoreTargetAt: config.restoreTargetAt,
+      };
+    } else if (mode === 'FULL_STEP2B') {
+      if (config.restoreTargetAt === null) {
+        throw new Error('FULL_STEP2B missing restoreTargetAt after env guard');
+      }
       const chain = await reconcileChainReadOnly({
         pool,
         env,
+        restoreTargetAt: config.restoreTargetAt,
         ...(options.now !== undefined ? { now: options.now } : {}),
         ...(options.chainValidateOverride !== undefined
           ? { validateOverride: options.chainValidateOverride }
@@ -357,6 +417,9 @@ export async function runRestoreDrill(
         payoutInvariantFailCount: chain.payoutInvariantFailCount,
         payoutInvariantFindingCodes: chain.payoutInvariantFindingCodes,
         mismatchReferences: chain.mismatchReferences,
+        observationWindowStart: chain.observationWindowStart,
+        observationWindowEnd: chain.observationWindowEnd,
+        restoreTargetAt: chain.restoreTargetAt,
       };
     } else {
       chainSection = {
@@ -380,6 +443,9 @@ export async function runRestoreDrill(
         payoutInvariantFailCount: null,
         payoutInvariantFindingCodes: [],
         mismatchReferences: [],
+        observationWindowStart: null,
+        observationWindowEnd: null,
+        restoreTargetAt: null,
       };
     }
 

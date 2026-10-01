@@ -29,6 +29,7 @@ export interface RestoreDrillEnvConfig {
   readonly sourceCountCapturePath: string | null;
   readonly temporalAddress: string | null;
   readonly temporalNamespace: string | null;
+  readonly restoreTargetAt: string | null;
   readonly drillMode: 'DB_ONLY_STEP2A' | 'FULL_STEP2B';
   readonly databaseUrlPresent: boolean;
   readonly databaseUrl: string | null;
@@ -54,7 +55,9 @@ export type TargetGuardFailure =
   | 'SOURCE_COUNT_CAPTURE_MISSING'
   | 'TEMPORAL_CONFIG_MISSING'
   | 'VERIFY_ALL_USERS_MODE_INVALID'
-  | 'INVALID_DRILL_MODE';
+  | 'INVALID_DRILL_MODE'
+  | 'RESTORE_TARGET_AT_MISSING'
+  | 'RESTORE_TARGET_AT_INVALID';
 
 export class RestoreTargetGuardError extends Error {
   readonly code: TargetGuardFailure;
@@ -84,6 +87,18 @@ export function parseRestoreDrillEnv(
   const sourceCountCapturePath = nonempty(env.PHASE18_SOURCE_COUNT_CAPTURE_PATH);
   const temporalAddress = nonempty(env.PHASE18_TEMPORAL_ADDRESS);
   const temporalNamespace = nonempty(env.PHASE18_TEMPORAL_NAMESPACE);
+  const restoreTargetAtRaw = nonempty(env.PHASE18_RESTORE_TARGET_AT);
+  let restoreTargetAt: string | null = null;
+  if (restoreTargetAtRaw !== null) {
+    const ms = Date.parse(restoreTargetAtRaw);
+    if (!Number.isFinite(ms)) {
+      throw new RestoreTargetGuardError(
+        'RESTORE_TARGET_AT_INVALID',
+        'PHASE18_RESTORE_TARGET_AT must be a valid RFC3339 timestamp',
+      );
+    }
+    restoreTargetAt = new Date(ms).toISOString();
+  }
   let drillMode: 'DB_ONLY_STEP2A' | 'FULL_STEP2B';
   if (env.PHASE18_RESTORE_DRILL_MODE === undefined) {
     drillMode = 'DB_ONLY_STEP2A';
@@ -111,6 +126,7 @@ export function parseRestoreDrillEnv(
     sourceCountCapturePath,
     temporalAddress,
     temporalNamespace,
+    restoreTargetAt,
     drillMode,
     databaseUrlPresent: databaseUrl !== null,
     databaseUrl,
@@ -254,6 +270,12 @@ export function assertRestoreTargetEnv(
       throw new RestoreTargetGuardError(
         'TEMPORAL_CONFIG_MISSING',
         'PHASE18_TEMPORAL_ADDRESS and PHASE18_TEMPORAL_NAMESPACE are required for FULL_STEP2B',
+      );
+    }
+    if (config.restoreTargetAt === null) {
+      throw new RestoreTargetGuardError(
+        'RESTORE_TARGET_AT_MISSING',
+        'PHASE18_RESTORE_TARGET_AT is required for FULL_STEP2B',
       );
     }
   }
