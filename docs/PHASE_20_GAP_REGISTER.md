@@ -11,13 +11,13 @@ Canonical IDs: `P20-GAP-001` .. contiguous.
 
 ## Summary
 
-| Metric | Count |
-| --- | --- |
-| Total gaps | 18 |
-| Blocks Closed Beta (observation / non-money) | 2 |
-| Blocks real-money beta | 11 |
-| Blocks Phase 20 archive (until resolved or Owner-scoped) | 3 |
-| Carried Phase 19 residuals mapped | 8 |
+| Metric                                                   | Count |
+| -------------------------------------------------------- | ----- |
+| Total gaps                                               | 18    |
+| Blocks Closed Beta (observation / non-money)             | 3     |
+| Blocks real-money beta                                   | 8     |
+| Blocks Phase 20 archive (until resolved or Owner-scoped) | 3     |
+| Carried Phase 19 residuals mapped                        | 8     |
 
 ---
 
@@ -32,9 +32,9 @@ Canonical IDs: `P20-GAP-001` .. contiguous.
 - **impact:** Earn credits unavailable; observation-only Closed Beta for ads money
 - **prerequisite:** Clarifications closed + authenticity/correlation upgrades + Admin APPROVED ceremony
 - **proposed remediation/test:** Keep BLOCKED for Steps 1–7; Owner-gated unlock path in Step 8 only
-- **blocks Closed Beta?** NO (observation allowed)
+- **blocks Closed Beta?** NO — observation allowed while money remains BLOCKED
 - **blocks real-money beta?** YES
-- **blocks Phase 20 archive?** NO if archive scopes money as out-of-scope / still BLOCKED with evidence
+- **blocks Phase 20 archive?** NO — if archive scopes money as out-of-scope / still BLOCKED with evidence
 - **status:** OPEN
 
 ### P20-GAP-002 — AdsGram unsigned / authenticity NONE
@@ -48,7 +48,7 @@ Canonical IDs: `P20-GAP-001` .. contiguous.
 - **proposed remediation/test:** EXTERNAL provider clarification + adapter upgrade + cert harness
 - **blocks Closed Beta?** NO
 - **blocks real-money beta?** YES
-- **blocks Phase 20 archive?** NO if money remains BLOCKED
+- **blocks Phase 20 archive?** NO — if money remains BLOCKED
 - **status:** OPEN / EXTERNAL_CLARIFICATION_REQUIRED
 
 ### P20-GAP-003 — Six OPEN AdsGram clarification items
@@ -62,7 +62,7 @@ Canonical IDs: `P20-GAP-001` .. contiguous.
 - **proposed remediation/test:** Track clarifications; refuse APPROVED (existing tests)
 - **blocks Closed Beta?** NO
 - **blocks real-money beta?** YES
-- **blocks Phase 20 archive?** NO if still BLOCKED documented
+- **blocks Phase 20 archive?** NO — if still BLOCKED documented
 - **status:** OPEN / EXTERNAL_CLARIFICATION_REQUIRED
 
 ### P20-GAP-004 — P19-SEC-010 AdsGram duplicate when provider_event_id NULL
@@ -76,7 +76,7 @@ Canonical IDs: `P20-GAP-001` .. contiguous.
 - **proposed remediation/test:** Unique partial index / synthetic event key; duplicate ingest tests
 - **blocks Closed Beta?** NO
 - **blocks real-money beta?** YES
-- **blocks Phase 20 archive?** NO while money BLOCKED; YES if claiming monetary beta complete
+- **blocks Phase 20 archive?** NO — while money remains BLOCKED (would become YES only if claiming monetary beta complete without fix)
 - **status:** OPEN
 
 ### P20-GAP-005 — P19-SEC-011 placement/blockId not bound to session
@@ -90,7 +90,7 @@ Canonical IDs: `P20-GAP-001` .. contiguous.
 - **proposed remediation/test:** Bind placement/blockId when provider supplies stable fields
 - **blocks Closed Beta?** NO
 - **blocks real-money beta?** YES
-- **blocks Phase 20 archive?** NO while money BLOCKED
+- **blocks Phase 20 archive?** NO — while money remains BLOCKED
 - **status:** OPEN
 
 ### P20-GAP-006 — P19-SEC-012 REQUEST hard ceiling uses inert provider_requests
@@ -104,7 +104,7 @@ Canonical IDs: `P20-GAP-001` .. contiguous.
 - **proposed remediation/test:** Increment or join authorize counts; limit tests
 - **blocks Closed Beta?** NO
 - **blocks real-money beta?** YES
-- **blocks Phase 20 archive?** NO while money BLOCKED
+- **blocks Phase 20 archive?** NO — while money remains BLOCKED
 - **status:** OPEN
 
 ### P20-GAP-007 — Notifications engine stub / draft-only / Mini App unavailable
@@ -116,9 +116,9 @@ Canonical IDs: `P20-GAP-001` .. contiguous.
 - **impact:** Cannot validate real delivery/privacy targeting end-to-end
 - **prerequisite:** Owner scope decision: implement MVP vs accept draft-only honesty for Phase 20
 - **proposed remediation/test:** Either build minimal safe draft+no-send proof or defer send to later phase explicitly
-- **blocks Closed Beta?** YES if Master Spec notification validation interpreted as real send; **NO** if Owner accepts draft-only honesty evidence
+- **blocks Closed Beta?** YES — until Owner explicitly scopes draft-only/no-send behavior as sufficient Phase 20 evidence
 - **blocks real-money beta?** NO
-- **blocks Phase 20 archive?** YES until Owner scopes acceptance criteria
+- **blocks Phase 20 archive?** YES — until Owner scopes acceptance criteria
 - **status:** OPEN
 
 ### P20-GAP-008 — Activity surface PLACEHOLDER
@@ -130,9 +130,9 @@ Canonical IDs: `P20-GAP-001` .. contiguous.
 - **impact:** Incomplete UX surface
 - **prerequisite:** Owner scope (required for Closed Beta UX or defer)
 - **proposed remediation/test:** Implement or document out-of-scope for Phase 20
-- **blocks Closed Beta?** NO (non-core vs Earn/Wallet)
+- **blocks Closed Beta?** NO — non-core vs Earn/Wallet; deferrable with documented scope
 - **blocks real-money beta?** NO
-- **blocks Phase 20 archive?** NO if documented deferred
+- **blocks Phase 20 archive?** NO — if documented deferred
 - **status:** OPEN
 
 ### P20-GAP-009 — Fraud/eligibility production policy seeds Owner-required
@@ -144,9 +144,9 @@ Canonical IDs: `P20-GAP-001` .. contiguous.
 - **impact:** Controlled beta may refuse actions until policies seeded
 - **prerequisite:** Owner-approved policy rows for staging beta
 - **proposed remediation/test:** Seed + evaluateAndPersist scenarios
-- **blocks Closed Beta?** PARTIAL — blocks full fraud validation until seeded
-- **blocks real-money beta?** YES (unsafe to pay without eligibility/fraud ACTIVE)
-- **blocks Phase 20 archive?** YES until fraud/eligibility category evidenced
+- **blocks Closed Beta?** YES — blocks complete Phase 20 fraud/trust/eligibility validation until controlled ACTIVE policies exist
+- **blocks real-money beta?** YES — unsafe to pay without eligibility/fraud ACTIVE
+- **blocks Phase 20 archive?** YES — until fraud/eligibility category evidenced
 - **status:** OPEN
 
 ### P20-GAP-010 — Provider-limit Admin UI ceremony incomplete
@@ -158,9 +158,9 @@ Canonical IDs: `P20-GAP-001` .. contiguous.
 - **impact:** Operator may struggle to safely change limits in UI
 - **prerequisite:** UI wiring or documented API-only ops procedure
 - **proposed remediation/test:** Add UI or runbook API procedure + staging dry-run
-- **blocks Closed Beta?** NO (API path exists)
+- **blocks Closed Beta?** NO — API path exists
 - **blocks real-money beta?** NO
-- **blocks Phase 20 archive?** NO if staging limit change validated via API/runbook
+- **blocks Phase 20 archive?** NO — if staging limit change validated via API/runbook
 - **status:** OPEN
 
 ### P20-GAP-011 — Withdrawal operational freeze still active
@@ -172,9 +172,9 @@ Canonical IDs: `P20-GAP-001` .. contiguous.
 - **impact:** No live payout in Step 1 (correct)
 - **prerequisite:** Multi-step Owner authorization list in readiness matrix R16
 - **proposed remediation/test:** Do not unlock in Step 1; later Owner-gated Step 8 only if in scope
-- **blocks Closed Beta?** NO for non-payout validation
+- **blocks Closed Beta?** NO — non-payout Closed Beta validation may proceed
 - **blocks real-money beta?** YES
-- **blocks Phase 20 archive?** NO if minimal-funds payout deferred/excluded by Owner from Phase 20 exit
+- **blocks Phase 20 archive?** NO — if minimal-funds payout deferred/excluded by Owner from Phase 20 exit
 - **status:** OPEN
 
 ### P20-GAP-012 — P19-SEC-007 Founder grant idempotency not scoped to targetUserId
@@ -256,9 +256,9 @@ Canonical IDs: `P20-GAP-001` .. contiguous.
 - **impact:** Closed Beta UX incomplete until content/config present
 - **prerequisite:** Owner-published ACTIVE mission versions / referral config
 - **proposed remediation/test:** Publish controlled ACTIVE content; UX checklist
-- **blocks Closed Beta?** YES for full Tasks/Friends validation; NO for other categories
+- **blocks Closed Beta?** YES — until ACTIVE mission/referral content exists for Spec category validation (or Owner documents deferral)
 - **blocks real-money beta?** NO
-- **blocks Phase 20 archive?** YES until missions category evidenced OR Owner defers with documented scope
+- **blocks Phase 20 archive?** YES — until missions category evidenced OR Owner defers with documented scope
 - **status:** OPEN
 
 ### P20-GAP-018 — No second rewarded-ad provider
@@ -271,7 +271,7 @@ Canonical IDs: `P20-GAP-001` .. contiguous.
 - **prerequisite:** Phase 24 multi-provider onboarding for additional networks
 - **proposed remediation/test:** Keep UNSUPPORTED; do not enable
 - **blocks Closed Beta?** NO
-- **blocks real-money beta?** NO (AdsGram path only, still BLOCKED)
+- **blocks real-money beta?** NO — AdsGram path only, still BLOCKED; no second provider to enable
 - **blocks Phase 20 archive?** NO
 - **status:** OPEN
 
@@ -279,22 +279,35 @@ Canonical IDs: `P20-GAP-001` .. contiguous.
 
 ## Blocking tallies (Step 1 interpretation)
 
-**P20_BLOCKING_CLOSED_BETA_GAPS** (observation completeness / Spec category evidence):
+Counts below MUST match mechanical derivation from each gap section (`YES` / `NO` first token).
+Do not add inferred items that lack a canonical `P20-GAP-xxx` entry.
 
-- P20-GAP-007 (notifications scope)
-- P20-GAP-009 (fraud/eligibility policies for validation)
-- P20-GAP-017 (missions/friends content) — category-dependent
+**P20_BLOCKING_CLOSED_BETA_GAPS** (count = 3):
 
-**P20_BLOCKING_REAL_MONEY_GAPS:**
+- P20-GAP-007
+- P20-GAP-009
+- P20-GAP-017
 
-- P20-GAP-001, 002, 003, 004, 005, 006, 009, 011 (+ economic Owner constants)
+**P20_BLOCKING_REAL_MONEY_GAPS** (count = 8):
 
-**P20_BLOCKING_ARCHIVE_GAPS** (until Owner scopes or remediates):
+- P20-GAP-001
+- P20-GAP-002
+- P20-GAP-003
+- P20-GAP-004
+- P20-GAP-005
+- P20-GAP-006
+- P20-GAP-009
+- P20-GAP-011
 
-- P20-GAP-007, 009, 017 (Spec-required categories need evidenced validation or explicit Owner deferral recorded in acceptance)
+**P20_BLOCKING_ARCHIVE_GAPS** (count = 3):
+
+- P20-GAP-007
+- P20-GAP-009
+- P20-GAP-017
 
 ---
 
 ## Non-goals for Step 1 remediations
 
 Do not implement broad product features in Step 1. This register is discovery-only.
+Integrity check: `pnpm phase20:gap-register:check`.

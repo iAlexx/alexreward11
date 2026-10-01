@@ -54,7 +54,8 @@
     "smoke": "node scripts/phase1-smoke.mjs",
     "archive:phase": "node scripts/create-phase-archive.mjs",
     "test:archive": "node --test scripts/create-phase-archive.test.mjs",
-    "test:phase19-security": "node scripts/phase19-security-review.mjs"
+    "test:phase19-security": "node scripts/phase19-security-review.mjs",
+    "phase20:gap-register:check": "node scripts/phase20-gap-register-check.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
