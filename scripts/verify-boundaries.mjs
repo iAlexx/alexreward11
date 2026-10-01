@@ -434,8 +434,7 @@ for (const key of forbiddenPlaintextEnvKeys) {
   }
 }
 
-// Phase 18 Step 2A: restore-drill may orchestrate read-only ledger/withdrawals scanners,
-// but must not import signer/TON/ads mutation surfaces or execute SQL mutations.
+// Phase 18 Step 2A: restore-drill may only import exact read-only financial symbols.
 {
   const forbiddenRestoreDrillImports = [
     '@alex-rewards/signing',
@@ -446,6 +445,49 @@ for (const key of forbiddenPlaintextEnvKeys) {
     '@alex-rewards/fraud',
     '@alex-rewards/wallets',
   ];
+  const allowedLedger = new Set(['checkLedgerInvariants']);
+  const allowedWithdrawals = new Set(['runPhase10RestoreReconcileScan']);
+  const allowedDb = new Set(['listMigrationFiles']);
+  const forbiddenNamedSurfaces = [
+    'createDatabasePool',
+    'migrateDatabase',
+    'postLedger',
+    'decideWithdrawal',
+    'approveWithdrawal',
+    'rejectWithdrawal',
+    'dispatchPayout',
+    'replayOutbox',
+    'sendBoc',
+    'workflow.start',
+  ];
+
+  function namedImportsFrom(source, pkg) {
+    const escaped = pkg.replace('/', '\\/');
+    const re = new RegExp(
+      `import\\s+(?:type\\s+)?\\{([^}]+)\\}\\s+from\\s+['"]${escaped}['"]`,
+      'g',
+    );
+    const names = [];
+    let match;
+    while ((match = re.exec(source)) !== null) {
+      for (const part of match[1].split(',')) {
+        const cleaned = part
+          .replace(/\btype\b/g, '')
+          .replace(/\bas\s+\w+/g, '')
+          .trim();
+        if (cleaned) names.push(cleaned);
+      }
+    }
+    // Reject namespace / default imports from these packages.
+    if (
+      new RegExp(`import\\s+\\*\\s+as\\s+\\w+\\s+from\\s+['"]${escaped}['"]`).test(source) ||
+      new RegExp(`import\\s+\\w+\\s+from\\s+['"]${escaped}['"]`).test(source)
+    ) {
+      names.push('*');
+    }
+    return names;
+  }
+
   const restoreDrillSrc = (await walk('packages/restore-drill/src/')).filter((path) =>
     /\.(?:ts|tsx|js|mjs)$/.test(path.replaceAll('\\', '/')),
   );
@@ -464,6 +506,29 @@ for (const key of forbiddenPlaintextEnvKeys) {
         );
       }
     }
+
+    for (const name of namedImportsFrom(source, '@alex-rewards/ledger')) {
+      if (name === '*' || !allowedLedger.has(name)) {
+        failures.push(
+          `${path}: restore-drill may only import { ${[...allowedLedger].join(', ')} } from @alex-rewards/ledger (found ${name})`,
+        );
+      }
+    }
+    for (const name of namedImportsFrom(source, '@alex-rewards/withdrawals')) {
+      if (name === '*' || !allowedWithdrawals.has(name)) {
+        failures.push(
+          `${path}: restore-drill may only import { ${[...allowedWithdrawals].join(', ')} } from @alex-rewards/withdrawals (found ${name})`,
+        );
+      }
+    }
+    for (const name of namedImportsFrom(source, '@alex-rewards/db')) {
+      if (name === '*' || !allowedDb.has(name)) {
+        failures.push(
+          `${path}: restore-drill may only import { ${[...allowedDb].join(', ')} } from @alex-rewards/db (found ${name})`,
+        );
+      }
+    }
+
     const withoutBlock = source.replace(/\/\*[\s\S]*?\*\//g, ' ');
     const withoutLine = withoutBlock
       .replace(/(^|[^:])\/\/[^\n]*/g, '$1')
@@ -476,8 +541,11 @@ for (const key of forbiddenPlaintextEnvKeys) {
     ) {
       failures.push(`${path}: restore-drill production source must not execute SQL mutations`);
     }
-    if (/\bsendBoc\b/.test(withoutLine) || /\bworkflow\.start\b/i.test(withoutLine)) {
-      failures.push(`${path}: restore-drill must not broadcast chain txs or start workflows`);
+    for (const surface of forbiddenNamedSurfaces) {
+      const escaped = surface.replace('.', '\\.');
+      if (new RegExp(`\\b${escaped}\\b`).test(withoutLine)) {
+        failures.push(`${path}: restore-drill must not reference ${surface}`);
+      }
     }
   }
 }

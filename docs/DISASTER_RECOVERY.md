@@ -27,6 +27,24 @@ pgBackRest integration.
 
 **Do NOT** build a custom WAL archive mechanism in application code.
 
+### Isolation model (host/service based)
+
+A Railway managed PITR restore creates a **separate sibling PostgreSQL service** while
+restoring the source database cluster contents. A legitimate isolated restore may therefore
+preserve the **same database name** as source (for example `alex_rewards` or `railway`).
+
+Isolation evidence is therefore:
+
+- explicit target host binding (`PHASE18_RESTORE_EXPECTED_HOST`)
+- optional/required source host identity (`PHASE18_SOURCE_DATABASE_HOST`)
+- target host **must differ** from source host
+- target endpoint identity must differ from operational `DATABASE_URL` endpoint
+  (normalized host/port/database — credentials ignored)
+- exact `current_database()` binding to `PHASE18_RESTORE_EXPECTED_DATABASE_NAME`
+
+Database name alone is **not** proof that the target is operational. Template/system names
+(`postgres`, `template0`, `template1`) remain forbidden.
+
 Step 2A ships **code + DR tooling + runbook only**. Step 2B (Owner-approved) enables
 Railway-managed PITR, creates an isolated restore target, and runs the drill.
 
@@ -46,20 +64,32 @@ Required env (fail-closed; **never** falls back to `DATABASE_URL`):
 | --- | --- |
 | `PHASE18_RESTORE_DRILL_ENABLED` | Must be `true` (default `false`) |
 | `PHASE18_RESTORE_DATABASE_URL` | Explicit restore-only connection string |
-| `PHASE18_RESTORE_EXPECTED_DATABASE_NAME` | Exact `current_database()` match; rejects known operational names |
+| `PHASE18_RESTORE_EXPECTED_DATABASE_NAME` | Exact `current_database()` match |
+| `PHASE18_RESTORE_EXPECTED_HOST` | Exact hostname match against restore URL host |
 | `PHASE18_RESTORE_FEATURE_FLAG_ENVIRONMENT` | Environment for `PAYOUT_DISPATCH_PAUSE` read |
+| `PHASE18_SOURCE_DATABASE_HOST` | Optional in Step 2A; **required** for FULL_STEP2B; must differ from target host |
 | `PHASE18_RESTORE_VERIFY_USER_IDS` | Optional UUID allowlist (omit → `NOT_EXECUTED`) |
+
+Production pool path enforces PostgreSQL `default_transaction_read_only=on` with
+application_name `alex-rewards-restore-drill` and verifies read-only mode on connect.
 
 The CLI is **read-only**: schema check, ledger invariants (`checkLedgerInvariants`), Phase 10
 restore reconcile (`runPhase10RestoreReconcileScan` with `autoResend: false` /
-`autoUnpause: false`), outbox observation, representative counts, optional user-history
-aggregates, RTO/RPO **observations** (targets remain `OWNER_POLICY_REQUIRED`).
+`autoUnpause: false`), outbox observation (FAILED/DEAD_LETTER and `withdrawal.approved`
+PENDING require Owner review), representative counts (fail-closed; source comparison
+`NOT_EXECUTED` in Step 2A), optional user-history aggregates (existence-verified), RTO/RPO
+**observations** (targets remain `OWNER_POLICY_REQUIRED`).
 
 Step 2A / DB-only mode always reports:
 
 - Temporal workflow live reconciliation = `NOT_OBSERVED`
 - Live chain reconciliation = `NOT_OBSERVED`
+- Count comparison = `NOT_EXECUTED`
+- `fullRestoreGatePass = false`
 - `PAYOUT_RESUME_ALLOWED = false`
+
+`restoreValidationPass` means DB-side evidence checks passed — it is **not** the Phase 18
+full restore gate.
 
 Evidence artifacts (gitignored): `phase18-restore-drill-<UTC>.json` / `.md`
 
@@ -68,10 +98,10 @@ Evidence artifacts (gitignored): `phase18-restore-drill-<UTC>.json` / `.md`
 1. Verify payout dispatch pause on source staging
 2. Enable/configure Railway-managed PITR
 3. Establish backup recovery point
-4. Create isolated restore target
+4. Create isolated restore target (sibling service — distinct host)
 5. Restore to isolated target
 6. Record restore start/availability timestamps
-7. Bind restore validator **ONLY** to isolated DB (`PHASE18_RESTORE_*`)
+7. Bind restore validator **ONLY** to isolated DB (`PHASE18_RESTORE_*` + expected host)
 8. Verify schema (no auto-migrate)
 9. Verify `PAYOUT_DISPATCH_PAUSE = true` (validator does not set it)
 10. Run ledger invariants

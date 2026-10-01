@@ -1,40 +1,49 @@
 /**
  * Fail-closed isolated restore-target guard.
- * NEVER falls back to DATABASE_URL.
+ * Isolation is host/service based — NEVER DATABASE_URL fallback.
+ * Application DB names (e.g. alex_rewards) may legitimately match source after PITR restore.
  */
 
 import type { Pool } from 'pg';
 
 import type { RestoreTargetFingerprint } from './types.js';
 
-/** Known operational / default names that must never be restore-drill targets. */
-export const FORBIDDEN_RESTORE_DATABASE_NAMES = [
-  'alex_rewards',
-  'postgres',
-  'template0',
-  'template1',
-  'railway',
-] as const;
+/** Template / system catalogs only — NOT application DB names. */
+export const FORBIDDEN_RESTORE_DATABASE_NAMES = ['postgres', 'template0', 'template1'] as const;
+
+export interface PostgresEndpointIdentity {
+  readonly host: string;
+  readonly port: string;
+  readonly database: string;
+}
 
 export interface RestoreDrillEnvConfig {
   readonly enabled: boolean;
   readonly restoreDatabaseUrl: string | null;
   readonly expectedDatabaseName: string | null;
+  readonly expectedHost: string | null;
+  readonly sourceDatabaseHost: string | null;
   readonly featureFlagEnvironment: string | null;
   readonly verifyUserIds: readonly string[];
   readonly databaseUrlPresent: boolean;
-  readonly databaseUrlEqualsRestoreUrl: boolean;
+  readonly databaseUrl: string | null;
 }
 
 export type TargetGuardFailure =
   | 'DRILL_DISABLED'
   | 'RESTORE_DATABASE_URL_MISSING'
   | 'EXPECTED_DATABASE_NAME_MISSING'
+  | 'EXPECTED_HOST_MISSING'
+  | 'EXPECTED_HOST_MISMATCH'
+  | 'SOURCE_HOST_MISSING'
+  | 'SOURCE_TARGET_HOST_NOT_DISTINCT'
   | 'FEATURE_FLAG_ENVIRONMENT_MISSING'
   | 'DATABASE_URL_FALLBACK_REFUSED'
-  | 'RESTORE_URL_EQUALS_DATABASE_URL'
-  | 'FORBIDDEN_OPERATIONAL_DATABASE_NAME'
+  | 'RESTORE_ENDPOINT_EQUALS_DATABASE_URL'
+  | 'FORBIDDEN_TEMPLATE_DATABASE_NAME'
   | 'CURRENT_DATABASE_MISMATCH'
+  | 'UNPARSEABLE_RESTORE_URL'
+  | 'READ_ONLY_NOT_ENFORCED'
   | 'CONNECT_FAILED';
 
 export class RestoreTargetGuardError extends Error {
@@ -52,6 +61,8 @@ export function parseRestoreDrillEnv(
   const enabled = (env.PHASE18_RESTORE_DRILL_ENABLED ?? 'false').trim().toLowerCase() === 'true';
   const restoreDatabaseUrl = nonempty(env.PHASE18_RESTORE_DATABASE_URL);
   const expectedDatabaseName = nonempty(env.PHASE18_RESTORE_EXPECTED_DATABASE_NAME);
+  const expectedHost = nonempty(env.PHASE18_RESTORE_EXPECTED_HOST);
+  const sourceDatabaseHost = nonempty(env.PHASE18_SOURCE_DATABASE_HOST);
   const featureFlagEnvironment = nonempty(env.PHASE18_RESTORE_FEATURE_FLAG_ENVIRONMENT);
   const databaseUrl = nonempty(env.DATABASE_URL);
   const verifyUserIds = (env.PHASE18_RESTORE_VERIFY_USER_IDS ?? '')
@@ -63,13 +74,12 @@ export function parseRestoreDrillEnv(
     enabled,
     restoreDatabaseUrl,
     expectedDatabaseName,
+    expectedHost,
+    sourceDatabaseHost,
     featureFlagEnvironment,
     verifyUserIds,
     databaseUrlPresent: databaseUrl !== null,
-    databaseUrlEqualsRestoreUrl:
-      databaseUrl !== null &&
-      restoreDatabaseUrl !== null &&
-      databaseUrl === restoreDatabaseUrl,
+    databaseUrl,
   };
 }
 
@@ -77,6 +87,33 @@ function nonempty(value: string | undefined): string | null {
   if (value === undefined) return null;
   const trimmed = value.trim();
   return trimmed === '' ? null : trimmed;
+}
+
+/** Normalize postgres URL to host/port/database — ignores credentials. */
+export function parseEndpointIdentity(connectionString: string): PostgresEndpointIdentity | null {
+  try {
+    const url = new URL(connectionString);
+    const host = url.hostname.trim().toLowerCase();
+    if (host === '') return null;
+    const defaultPort =
+      url.protocol === 'postgres:' || url.protocol === 'postgresql:' ? '5432' : '';
+    const port = (url.port || defaultPort).trim();
+    const database = decodeURIComponent(url.pathname.replace(/^\//, '')).trim().toLowerCase();
+    return { host, port, database };
+  } catch {
+    return null;
+  }
+}
+
+export function endpointIdentitiesEqual(
+  a: PostgresEndpointIdentity,
+  b: PostgresEndpointIdentity,
+): boolean {
+  return a.host === b.host && a.port === b.port && a.database === b.database;
+}
+
+export function normalizeHostname(host: string): string {
+  return host.trim().toLowerCase();
 }
 
 export function assertRestoreDrillEnabled(config: RestoreDrillEnvConfig): void {
@@ -88,14 +125,24 @@ export function assertRestoreDrillEnabled(config: RestoreDrillEnvConfig): void {
   }
 }
 
-/**
- * Validate env before any DB connect. Refuses DATABASE_URL fallback.
- */
-export function assertRestoreTargetEnv(config: RestoreDrillEnvConfig): {
+export interface BoundRestoreTarget {
   readonly restoreDatabaseUrl: string;
   readonly expectedDatabaseName: string;
+  readonly expectedHost: string;
+  readonly sourceDatabaseHost: string | null;
   readonly featureFlagEnvironment: string;
-} {
+  readonly targetEndpoint: PostgresEndpointIdentity;
+}
+
+/**
+ * Validate env before any DB connect. Refuses DATABASE_URL fallback.
+ * Isolation evidence is host/service based — DB name may match source.
+ */
+export function assertRestoreTargetEnv(
+  config: RestoreDrillEnvConfig,
+  options: { readonly mode?: 'DB_ONLY_STEP2A' | 'FULL_STEP2B' } = {},
+): BoundRestoreTarget {
+  const mode = options.mode ?? 'DB_ONLY_STEP2A';
   assertRestoreDrillEnabled(config);
 
   if (config.restoreDatabaseUrl === null) {
@@ -110,31 +157,77 @@ export function assertRestoreTargetEnv(config: RestoreDrillEnvConfig): {
       'PHASE18_RESTORE_EXPECTED_DATABASE_NAME is required',
     );
   }
+  if (config.expectedHost === null) {
+    throw new RestoreTargetGuardError(
+      'EXPECTED_HOST_MISSING',
+      'PHASE18_RESTORE_EXPECTED_HOST is required',
+    );
+  }
   if (config.featureFlagEnvironment === null) {
     throw new RestoreTargetGuardError(
       'FEATURE_FLAG_ENVIRONMENT_MISSING',
       'PHASE18_RESTORE_FEATURE_FLAG_ENVIRONMENT is required',
     );
   }
-  if (config.databaseUrlEqualsRestoreUrl) {
+
+  const targetEndpoint = parseEndpointIdentity(config.restoreDatabaseUrl);
+  if (targetEndpoint === null) {
     throw new RestoreTargetGuardError(
-      'RESTORE_URL_EQUALS_DATABASE_URL',
-      'PHASE18_RESTORE_DATABASE_URL must not equal DATABASE_URL (operational target refusal)',
+      'UNPARSEABLE_RESTORE_URL',
+      'PHASE18_RESTORE_DATABASE_URL could not be parsed for host identity',
     );
   }
 
-  const normalizedExpected = config.expectedDatabaseName.toLowerCase();
-  if ((FORBIDDEN_RESTORE_DATABASE_NAMES as readonly string[]).includes(normalizedExpected)) {
+  const expectedHost = normalizeHostname(config.expectedHost);
+  if (targetEndpoint.host !== expectedHost) {
     throw new RestoreTargetGuardError(
-      'FORBIDDEN_OPERATIONAL_DATABASE_NAME',
-      `expected database name "${config.expectedDatabaseName}" is a forbidden operational/default name`,
+      'EXPECTED_HOST_MISMATCH',
+      `restore URL host "${targetEndpoint.host}" does not equal PHASE18_RESTORE_EXPECTED_HOST`,
+    );
+  }
+
+  if (config.databaseUrl !== null) {
+    const operational = parseEndpointIdentity(config.databaseUrl);
+    if (operational !== null && endpointIdentitiesEqual(targetEndpoint, operational)) {
+      throw new RestoreTargetGuardError(
+        'RESTORE_ENDPOINT_EQUALS_DATABASE_URL',
+        'PHASE18_RESTORE_DATABASE_URL endpoint identity must differ from DATABASE_URL (credentials ignored)',
+      );
+    }
+  }
+
+  const sourceHostRaw = config.sourceDatabaseHost;
+  if (mode === 'FULL_STEP2B' && sourceHostRaw === null) {
+    throw new RestoreTargetGuardError(
+      'SOURCE_HOST_MISSING',
+      'PHASE18_SOURCE_DATABASE_HOST is required for FULL_STEP2B',
+    );
+  }
+  if (sourceHostRaw !== null) {
+    const sourceHost = normalizeHostname(sourceHostRaw);
+    if (sourceHost === targetEndpoint.host) {
+      throw new RestoreTargetGuardError(
+        'SOURCE_TARGET_HOST_NOT_DISTINCT',
+        'restore target host must differ from PHASE18_SOURCE_DATABASE_HOST',
+      );
+    }
+  }
+
+  const normalizedExpectedDb = config.expectedDatabaseName.trim().toLowerCase();
+  if ((FORBIDDEN_RESTORE_DATABASE_NAMES as readonly string[]).includes(normalizedExpectedDb)) {
+    throw new RestoreTargetGuardError(
+      'FORBIDDEN_TEMPLATE_DATABASE_NAME',
+      `expected database name "${config.expectedDatabaseName}" is a forbidden template/system name`,
     );
   }
 
   return {
     restoreDatabaseUrl: config.restoreDatabaseUrl,
     expectedDatabaseName: config.expectedDatabaseName,
+    expectedHost,
+    sourceDatabaseHost: sourceHostRaw === null ? null : normalizeHostname(sourceHostRaw),
     featureFlagEnvironment: config.featureFlagEnvironment,
+    targetEndpoint,
   };
 }
 
@@ -152,19 +245,24 @@ export function redactDatabaseUrl(connectionString: string): string {
 
 export async function assertConnectedRestoreTarget(
   pool: Pool,
-  expectedDatabaseName: string,
-  restoreDatabaseUrl: string,
+  bound: BoundRestoreTarget,
+  options: { readonly databaseReadOnlyEnforced: boolean },
 ): Promise<RestoreTargetFingerprint> {
   let currentDatabase: string;
   let postgresVersion: string | null = null;
   try {
-    const db = await pool.query<{ current_database: string }>('SELECT current_database() AS current_database');
+    const db = await pool.query<{ current_database: string }>(
+      'SELECT current_database() AS current_database',
+    );
     currentDatabase = db.rows[0]?.current_database ?? '';
     const ver = await pool.query<{ version: string }>('SELECT version() AS version');
     postgresVersion = ver.rows[0]?.version ?? null;
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new RestoreTargetGuardError('CONNECT_FAILED', `restore target connect/query failed: ${message}`);
+    throw new RestoreTargetGuardError(
+      'CONNECT_FAILED',
+      `restore target connect/query failed: ${message}`,
+    );
   }
 
   if (currentDatabase.trim() === '') {
@@ -174,15 +272,17 @@ export async function assertConnectedRestoreTarget(
   const normalizedCurrent = currentDatabase.trim().toLowerCase();
   if ((FORBIDDEN_RESTORE_DATABASE_NAMES as readonly string[]).includes(normalizedCurrent)) {
     throw new RestoreTargetGuardError(
-      'FORBIDDEN_OPERATIONAL_DATABASE_NAME',
-      `current_database()="${currentDatabase}" is a forbidden operational/default name`,
+      'FORBIDDEN_TEMPLATE_DATABASE_NAME',
+      `current_database()="${currentDatabase}" is a forbidden template/system name`,
     );
   }
 
-  if (normalizedCurrent !== expectedDatabaseName.trim().toLowerCase()) {
+  const targetDatabaseNameMatchesExpected =
+    normalizedCurrent === bound.expectedDatabaseName.trim().toLowerCase();
+  if (!targetDatabaseNameMatchesExpected) {
     throw new RestoreTargetGuardError(
       'CURRENT_DATABASE_MISMATCH',
-      `current_database()="${currentDatabase}" does not match expected "${expectedDatabaseName}"`,
+      `current_database()="${currentDatabase}" does not match expected "${bound.expectedDatabaseName}"`,
     );
   }
 
@@ -206,13 +306,25 @@ export async function assertConnectedRestoreTarget(
     schemaMigrationCount = null;
   }
 
+  const targetHost = bound.targetEndpoint.host;
+  const sourceHostProvided = bound.sourceDatabaseHost !== null;
+  const targetDistinctFromSource =
+    bound.sourceDatabaseHost === null ? null : bound.sourceDatabaseHost !== targetHost;
+
   return {
     currentDatabase,
-    expectedDatabase: expectedDatabaseName,
+    expectedDatabase: bound.expectedDatabaseName,
+    targetHost,
+    sourceHostProvided,
+    sourceHost: bound.sourceDatabaseHost,
+    targetDistinctFromSource,
+    targetDatabaseName: currentDatabase,
+    targetDatabaseNameMatchesExpected: true,
+    databaseReadOnlyEnforced: options.databaseReadOnlyEnforced,
     postgresVersion,
     schemaMigrationHead,
     schemaMigrationCount,
-    redactedTargetSummary: redactDatabaseUrl(restoreDatabaseUrl),
+    redactedTargetSummary: redactDatabaseUrl(bound.restoreDatabaseUrl),
   };
 }
 

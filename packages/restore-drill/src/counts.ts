@@ -2,7 +2,7 @@ import type { Pool } from 'pg';
 
 import type { CountCapture, DrillSectionStatus } from './types.js';
 
-const COUNT_TABLES = [
+export const REPRESENTATIVE_COUNT_TABLES = [
   'users',
   'ledger_transactions',
   'ledger_entries',
@@ -17,21 +17,40 @@ const COUNT_TABLES = [
 
 export async function captureRepresentativeCounts(pool: Pool): Promise<{
   readonly status: DrillSectionStatus;
-  readonly restoredCapture: CountCapture;
+  readonly restoredCaptureStatus: DrillSectionStatus;
+  readonly comparisonStatus: DrillSectionStatus;
+  readonly failedTables: readonly string[];
+  readonly restoredCapture: CountCapture | null;
 }> {
   const tables: Record<string, number> = {};
-  for (const table of COUNT_TABLES) {
+  const failedTables: string[] = [];
+
+  for (const table of REPRESENTATIVE_COUNT_TABLES) {
     try {
       // Whitelisted table identifiers only — never interpolate untrusted input.
       const sql = `SELECT COUNT(*)::text AS count FROM ${table}`;
       const result = await pool.query<{ count: string }>(sql);
       tables[table] = Number(result.rows[0]?.count ?? 0);
     } catch {
-      tables[table] = -1;
+      failedTables.push(table);
     }
   }
+
+  if (failedTables.length > 0) {
+    return {
+      status: 'FAIL',
+      restoredCaptureStatus: 'FAIL',
+      comparisonStatus: 'NOT_EXECUTED',
+      failedTables,
+      restoredCapture: null,
+    };
+  }
+
   return {
     status: 'PASS',
+    restoredCaptureStatus: 'PASS',
+    comparisonStatus: 'NOT_EXECUTED',
+    failedTables: [],
     restoredCapture: {
       capturedAt: new Date().toISOString(),
       tables,

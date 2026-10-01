@@ -6,12 +6,14 @@
  *   PHASE18_RESTORE_DRILL_ENABLED=true
  *   PHASE18_RESTORE_DATABASE_URL=...
  *   PHASE18_RESTORE_EXPECTED_DATABASE_NAME=...
+ *   PHASE18_RESTORE_EXPECTED_HOST=...
  *   PHASE18_RESTORE_FEATURE_FLAG_ENVIRONMENT=STAGING|LOCAL|...
  *
  * Optional:
+ *   PHASE18_SOURCE_DATABASE_HOST=... (required for FULL_STEP2B)
  *   PHASE18_RESTORE_VERIFY_USER_IDS=uuid,uuid
  *
- * Never uses DATABASE_URL as fallback.
+ * Never uses DATABASE_URL as fallback. Isolation is host/service based.
  */
 
 import { writeFile } from 'node:fs/promises';
@@ -30,11 +32,11 @@ async function main(): Promise<void> {
     await writeFile(mdPath, renderRestoreDrillMarkdown(report), 'utf8');
     process.stdout.write(renderRestoreDrillMarkdown(report));
     process.stdout.write(`\nWrote ${jsonPath}\nWrote ${mdPath}\n`);
-    // Non-zero when validation failed OR resume not allowed (expected for Step 2A).
-    process.exitCode = report.restoreValidationPass && report.payoutResumeAllowed ? 0 : 2;
     if (report.mode === 'DB_ONLY_STEP2A') {
-      // Step 2A never allows resume; exit 0 only when DB validation itself passed.
+      // Step 2A never allows resume; exit 0 only when DB-side validation itself passed.
       process.exitCode = report.restoreValidationPass ? 0 : 2;
+    } else {
+      process.exitCode = report.fullRestoreGatePass && report.payoutResumeAllowed ? 0 : 2;
     }
   } catch (error: unknown) {
     if (error instanceof RestoreTargetGuardError) {

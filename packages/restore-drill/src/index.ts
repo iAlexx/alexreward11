@@ -11,14 +11,30 @@ export {
   RestoreTargetGuardError,
   assertRestoreDrillEnabled,
   assertRestoreTargetEnv,
+  endpointIdentitiesEqual,
+  normalizeHostname,
+  parseEndpointIdentity,
   parseRestoreDrillEnv,
   redactDatabaseUrl,
+  type BoundRestoreTarget,
+  type PostgresEndpointIdentity,
   type RestoreDrillEnvConfig,
   type TargetGuardFailure,
 } from './target-guard.js';
-export { runRestoreDrill, type RunRestoreDrillOptions } from './run-restore-drill.js';
+export {
+  computeObservedRpoSeconds,
+  runRestoreDrill,
+  type RunRestoreDrillOptions,
+} from './run-restore-drill.js';
 export { renderRestoreDrillMarkdown, serializeRestoreDrillReport } from './report.js';
 export { verifyPayoutDispatchPaused } from './payout-pause.js';
 export { validateRestoredSchema } from './schema.js';
 export { reconcileOutboxReadOnly } from './outbox.js';
+export { captureRepresentativeCounts } from './counts.js';
+export { verifySelectedUserHistory } from './user-history.js';
+export {
+  RESTORE_DRILL_APPLICATION_NAME,
+  assertSessionReadOnlyEnforced,
+  createRestoreDrillReadOnlyPool,
+} from './pool-ro.js';
 export { RESTORE_DRILL_FORBIDDEN_CAPABILITIES, RESTORE_DRILL_FORBIDDEN_IMPORTS } from './safety.js';

@@ -8,12 +8,17 @@ export interface SelectedUserHistoryResult {
   readonly userCountConfigured: number;
   readonly usersVerified: number;
   readonly aggregates: readonly {
-    readonly userIdPresent: true;
+    readonly userIdPresent: boolean;
     readonly ledgerAccountCount: number;
+    readonly ledgerProjectionRowCount: number;
     readonly rewardEventCount: number;
     readonly withdrawalCount: number;
+    readonly withdrawalsByState: Readonly<Record<string, number>>;
   }[];
 }
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /**
  * Optional Owner allowlist verification. No IDs => NOT_EXECUTED (not PASS).
@@ -33,15 +38,45 @@ export async function verifySelectedUserHistory(
     };
   }
 
+  for (const userId of userIds) {
+    if (!UUID_RE.test(userId)) {
+      return {
+        status: 'FAIL',
+        reasonCode: 'INVALID_USER_ID',
+        userCountConfigured: userIds.length,
+        usersVerified: 0,
+        aggregates: [],
+      };
+    }
+  }
+
   const aggregates: SelectedUserHistoryResult['aggregates'][number][] = [];
   for (const userId of userIds) {
-    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(userId)) {
-      continue;
+    const exists = await pool.query<{ present: boolean }>(
+      `SELECT EXISTS(SELECT 1 FROM users WHERE id = $1::uuid) AS present`,
+      [userId],
+    );
+    if (exists.rows[0]?.present !== true) {
+      return {
+        status: 'FAIL',
+        reasonCode: 'SELECTED_USER_MISSING',
+        userCountConfigured: userIds.length,
+        usersVerified: aggregates.length,
+        aggregates,
+      };
     }
+
     const accounts = await pool.query<{ count: string }>(
       `SELECT COUNT(*)::text AS count
          FROM ledger_accounts
         WHERE owner_type = 'USER' AND owner_id = $1::uuid`,
+      [userId],
+    );
+    const projections = await pool.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count
+         FROM ledger_account_balances b
+         INNER JOIN ledger_accounts a ON a.id = b.ledger_account_id
+        WHERE a.owner_type = 'USER' AND a.owner_id = $1::uuid`,
       [userId],
     );
     const rewards = await pool.query<{ count: string }>(
@@ -52,11 +87,25 @@ export async function verifySelectedUserHistory(
       `SELECT COUNT(*)::text AS count FROM withdrawals WHERE user_id = $1::uuid`,
       [userId],
     );
+    const byStateRows = await pool.query<{ state: string; count: string }>(
+      `SELECT state::text AS state, COUNT(*)::text AS count
+         FROM withdrawals
+        WHERE user_id = $1::uuid
+        GROUP BY state`,
+      [userId],
+    );
+    const withdrawalsByState: Record<string, number> = {};
+    for (const row of byStateRows.rows) {
+      withdrawalsByState[row.state] = Number(row.count);
+    }
+
     aggregates.push({
       userIdPresent: true,
       ledgerAccountCount: Number(accounts.rows[0]?.count ?? 0),
+      ledgerProjectionRowCount: Number(projections.rows[0]?.count ?? 0),
       rewardEventCount: Number(rewards.rows[0]?.count ?? 0),
       withdrawalCount: Number(withdrawals.rows[0]?.count ?? 0),
+      withdrawalsByState,
     });
   }
 

@@ -238,22 +238,23 @@ Do not mark operational infrastructure complete merely because application code 
 | Status | `EXTERNAL_INFRA_REQUIRED` / `OWNER_POLICY_REQUIRED` |
 | Existing | Docs + Step 2A restore-drill validator; Railway managed PITR direction documented |
 | Missing | Enable Railway-managed PITR / pgBackRest; retention; verified recovery point (Step 2B) |
-| Tests | App unit tests refuse operational DB / `DATABASE_URL` fallback; no DIY WAL config in repo |
+| Tests | App unit tests refuse same host / semantic DATABASE_URL endpoint equality; no DIY WAL config |
 | DB migration | No |
 | Railway/external | **Yes — managed PITR only; do not edit `postgresql.conf` / archive_command** |
 | Owner approval | Retention / RPO / RTO targets; Step 2B enablement |
 | Verified staging state (Step 2A) | Volume present; **PITR disabled**; no isolated restore env yet |
+| Isolation model | Sibling **service/host** identity; DB name may match source |
 
 ## 20. Restore drill
 
 | Field | Value |
 | --- | --- |
 | Status | `PARTIAL` (Step 2A tooling) / `MISSING` (executed drill evidence) |
-| Existing | `@alex-rewards/restore-drill` + `pnpm phase18:restore-drill`; reuses `checkLedgerInvariants` + `runPhase10RestoreReconcileScan`; fail-closed `PHASE18_RESTORE_*` gates; pause verify-only; RTO/RPO observations |
-| Missing | Successful isolated restore + Temporal + live chain evidence (Step 2B) |
-| Tests | Guard refusal; pause FAIL; CRITICAL/DANGER ⇒ FAIL; Step 2A resume always false; no SQL mutation / sendBoc |
+| Existing | `@alex-rewards/restore-drill` + `pnpm phase18:restore-drill`; host binding; read-only pool; reuses `checkLedgerInvariants` + `runPhase10RestoreReconcileScan`; fail-closed counts/user-history/outbox; `fullRestoreGatePass=false` in Step 2A |
+| Missing | Successful isolated restore + Temporal + live chain + source/restored count comparison (Step 2B) |
+| Tests | Host isolation; read-only; count FAIL; user existence; RPO direction; outbox OWNER_REVIEW; import allowlists |
 | DB migration | No |
-| Railway/external | Isolated restore environment (Step 2B) |
+| Railway/external | Isolated restore environment / sibling host (Step 2B) |
 | Owner approval | Drill window + resume ceremony |
 
 ## 21. Archive / restore procedures
@@ -309,13 +310,15 @@ Do not mark operational infrastructure complete merely because application code 
 
 | Deliverable | Module |
 | --- | --- |
-| Isolated target guard | `packages/restore-drill/src/target-guard.ts` |
+| Host/service isolation guard | `packages/restore-drill/src/target-guard.ts` |
+| Read-only pool | `packages/restore-drill/src/pool-ro.ts` |
 | Restore-drill orchestrator | `packages/restore-drill/src/run-restore-drill.ts` |
 | CLI | `pnpm phase18:restore-drill` |
 | Schema / pause / outbox / counts | `packages/restore-drill/src/*.ts` |
-| Ledger reuse | `checkLedgerInvariants` |
-| Withdrawal restore reuse | `runPhase10RestoreReconcileScan` (`autoResend`/`autoUnpause` false) |
-| Report contract | `phase18-restore-drill-v1` JSON + Markdown |
+| Ledger reuse (allowlisted) | `checkLedgerInvariants` only |
+| Withdrawal restore reuse (allowlisted) | `runPhase10RestoreReconcileScan` only |
+| DB reuse (allowlisted) | `listMigrationFiles` only |
+| Report contract | `phase18-restore-drill-v1` JSON + Markdown (`fullRestoreGatePass`) |
 | Docs | `DISASTER_RECOVERY.md`, `OPERATIONS_RUNBOOK.md`, this plan |
 
 ### Step 2B planned sequence (NOT started)
@@ -323,10 +326,10 @@ Do not mark operational infrastructure complete merely because application code 
 1. Verify payout dispatch pause on source staging
 2. Enable/configure Railway-managed PITR
 3. Establish backup recovery point
-4. Create isolated restore target
+4. Create isolated restore target (sibling host/service)
 5. Restore to isolated target
 6. Record restore start/availability timestamps
-7. Bind restore validator ONLY to isolated DB
+7. Bind restore validator ONLY to isolated DB + expected host
 8. Verify schema
 9. Verify pause flag
 10. Run ledger invariants

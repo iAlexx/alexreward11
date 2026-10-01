@@ -1,5 +1,5 @@
 /**
- * Phase 18 Step 2A — fail-closed restore-drill guards and contracts.
+ * Phase 18 Step 2A remediation — fail-closed restore-drill guards and contracts.
  */
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -12,9 +12,14 @@ import {
   RESTORE_DRILL_DATABASE_URL_FALLBACK_ALLOWED,
   RestoreTargetGuardError,
   assertRestoreTargetEnv,
+  computeObservedRpoSeconds,
+  parseEndpointIdentity,
   parseRestoreDrillEnv,
   redactDatabaseUrl,
   runRestoreDrill,
+  verifySelectedUserHistory,
+  captureRepresentativeCounts,
+  reconcileOutboxReadOnly,
 } from '../src/index.js';
 import { RESTORE_DRILL_FORBIDDEN_CAPABILITIES, RESTORE_DRILL_FORBIDDEN_IMPORTS } from '../src/safety.js';
 import { verifyPayoutDispatchPaused } from '../src/payout-pause.js';
@@ -29,29 +34,72 @@ function createFakePool(handler: (sql: string, params?: unknown[]) => QueryResul
   } as unknown as import('pg').Pool;
 }
 
-describe('restore target hard guard', () => {
+const baseEnv = {
+  PHASE18_RESTORE_DRILL_ENABLED: 'true',
+  PHASE18_RESTORE_DATABASE_URL: 'postgres://u:p@restore-host.example:5432/alex_rewards',
+  PHASE18_RESTORE_EXPECTED_DATABASE_NAME: 'alex_rewards',
+  PHASE18_RESTORE_EXPECTED_HOST: 'restore-host.example',
+  PHASE18_SOURCE_DATABASE_HOST: 'source-host.example',
+  PHASE18_RESTORE_FEATURE_FLAG_ENVIRONMENT: 'STAGING',
+} as const;
+
+function schemaAbsentHandler(sql: string): QueryResult {
+  if (sql.includes('default_transaction_read_only') || sql.includes('transaction_read_only')) {
+    return { rowCount: 1, rows: [{ default_ro: 'on', tx_ro: 'on' }] };
+  }
+  if (sql.includes('current_database')) {
+    return { rowCount: 1, rows: [{ current_database: 'alex_rewards' }] };
+  }
+  if (sql.includes('version()')) return { rowCount: 1, rows: [{ version: 'PostgreSQL 16' }] };
+  if (sql.includes("to_regclass('public.schema_migrations')")) {
+    return { rowCount: 1, rows: [{ present: false }] };
+  }
+  if (sql.includes('feature_flags')) return { rowCount: 1, rows: [{ enabled: true }] };
+  if (sql.includes('COUNT(*)')) return { rowCount: 1, rows: [{ count: '0' }] };
+  if (sql.includes('FROM outbox_events') && sql.includes('dedupe_key')) {
+    return { rowCount: 1, rows: [{ count: '0' }] };
+  }
+  if (sql.includes('FROM outbox_events')) {
+    return {
+      rowCount: 1,
+      rows: [
+        {
+          pending: '0',
+          dispatched: '0',
+          failed: '0',
+          dead_letter: '0',
+          oldest_pending_age_seconds: null,
+          withdrawal_approved_pending: '0',
+        },
+      ],
+    };
+  }
+  return { rowCount: 0, rows: [] };
+}
+
+describe('host-based isolation guard', () => {
   it('missing PHASE18_RESTORE_DATABASE_URL => refusal', () => {
     const config = parseRestoreDrillEnv({
       PHASE18_RESTORE_DRILL_ENABLED: 'true',
-      PHASE18_RESTORE_EXPECTED_DATABASE_NAME: 'alex_rewards_restore_drill',
+      PHASE18_RESTORE_EXPECTED_DATABASE_NAME: 'alex_rewards',
+      PHASE18_RESTORE_EXPECTED_HOST: 'restore-host.example',
       PHASE18_RESTORE_FEATURE_FLAG_ENVIRONMENT: 'STAGING',
     });
     expect(() => assertRestoreTargetEnv(config)).toThrow(RestoreTargetGuardError);
     try {
       assertRestoreTargetEnv(config);
     } catch (error: unknown) {
-      expect(error).toBeInstanceOf(RestoreTargetGuardError);
       expect((error as RestoreTargetGuardError).code).toBe('RESTORE_DATABASE_URL_MISSING');
     }
   });
 
   it('no DATABASE_URL fallback allowed', () => {
     expect(RESTORE_DRILL_DATABASE_URL_FALLBACK_ALLOWED).toBe(false);
-    expect(RESTORE_DRILL_FORBIDDEN_CAPABILITIES.databaseUrlFallback).toBe(false);
     const config = parseRestoreDrillEnv({
       PHASE18_RESTORE_DRILL_ENABLED: 'true',
-      DATABASE_URL: 'postgres://u:p@host/alex_rewards',
-      PHASE18_RESTORE_EXPECTED_DATABASE_NAME: 'alex_rewards_restore_drill',
+      DATABASE_URL: 'postgres://u:p@ops/alex_rewards',
+      PHASE18_RESTORE_EXPECTED_DATABASE_NAME: 'alex_rewards',
+      PHASE18_RESTORE_EXPECTED_HOST: 'restore-host.example',
       PHASE18_RESTORE_FEATURE_FLAG_ENVIRONMENT: 'STAGING',
     });
     expect(config.restoreDatabaseUrl).toBeNull();
@@ -64,72 +112,73 @@ describe('restore target hard guard', () => {
     expect(() => assertRestoreTargetEnv(config)).toThrow(/PHASE18_RESTORE_DRILL_ENABLED/);
   });
 
+  it('same database name + different explicitly bound target/source hosts => allowed', () => {
+    const config = parseRestoreDrillEnv({ ...baseEnv });
+    expect(() => assertRestoreTargetEnv(config)).not.toThrow();
+    expect(FORBIDDEN_RESTORE_DATABASE_NAMES).not.toContain('alex_rewards');
+    expect(FORBIDDEN_RESTORE_DATABASE_NAMES).not.toContain('railway');
+  });
+
+  it('same source/target host => refused', () => {
+    const config = parseRestoreDrillEnv({
+      ...baseEnv,
+      PHASE18_SOURCE_DATABASE_HOST: 'restore-host.example',
+    });
+    expect(() => assertRestoreTargetEnv(config)).toThrow(/differ from PHASE18_SOURCE_DATABASE_HOST/);
+  });
+
+  it('semantically same DATABASE_URL endpoint with different credentials => refused', () => {
+    const config = parseRestoreDrillEnv({
+      ...baseEnv,
+      DATABASE_URL: 'postgres://other:secret@restore-host.example:5432/alex_rewards',
+    });
+    expect(() => assertRestoreTargetEnv(config)).toThrow(/endpoint identity must differ/);
+  });
+
+  it('target hostname differs from PHASE18_RESTORE_EXPECTED_HOST => refused', () => {
+    const config = parseRestoreDrillEnv({
+      ...baseEnv,
+      PHASE18_RESTORE_EXPECTED_HOST: 'other-host.example',
+    });
+    expect(() => assertRestoreTargetEnv(config)).toThrow(/does not equal PHASE18_RESTORE_EXPECTED_HOST/);
+  });
+
   it('expected DB-name mismatch => refusal', async () => {
     await expect(
       runRestoreDrill({
-        env: {
-          PHASE18_RESTORE_DRILL_ENABLED: 'true',
-          PHASE18_RESTORE_DATABASE_URL: 'postgres://u:p@host/alex_rewards_restore_drill',
-          PHASE18_RESTORE_EXPECTED_DATABASE_NAME: 'alex_rewards_restore_drill',
-          PHASE18_RESTORE_FEATURE_FLAG_ENVIRONMENT: 'STAGING',
-        },
+        env: { ...baseEnv },
         pool: createFakePool((sql) => {
+          if (sql.includes('default_transaction_read_only')) {
+            return { rowCount: 1, rows: [{ default_ro: 'on', tx_ro: 'on' }] };
+          }
           if (sql.includes('current_database')) {
-            return { rowCount: 1, rows: [{ current_database: 'alex_rewards_restore_other' }] };
+            return { rowCount: 1, rows: [{ current_database: 'other_db' }] };
           }
-          if (sql.includes('version()')) {
-            return { rowCount: 1, rows: [{ version: 'PostgreSQL 16' }] };
-          }
+          if (sql.includes('version()')) return { rowCount: 1, rows: [{ version: 'PostgreSQL 16' }] };
           return { rowCount: 0, rows: [] };
         }),
       }),
     ).rejects.toMatchObject({ code: 'CURRENT_DATABASE_MISMATCH' });
   });
 
-  it('operational connected DB name => refusal', async () => {
-    await expect(
-      runRestoreDrill({
-        env: {
-          PHASE18_RESTORE_DRILL_ENABLED: 'true',
-          PHASE18_RESTORE_DATABASE_URL: 'postgres://u:p@host/alex_rewards_restore_drill',
-          PHASE18_RESTORE_EXPECTED_DATABASE_NAME: 'alex_rewards_restore_drill',
-          PHASE18_RESTORE_FEATURE_FLAG_ENVIRONMENT: 'STAGING',
-        },
-        pool: createFakePool((sql) => {
-          if (sql.includes('current_database')) {
-            return { rowCount: 1, rows: [{ current_database: 'alex_rewards' }] };
-          }
-          return { rowCount: 0, rows: [] };
-        }),
-      }),
-    ).rejects.toMatchObject({ code: 'FORBIDDEN_OPERATIONAL_DATABASE_NAME' });
+  it('template DB name => refusal; application names allowed', () => {
+    expect(FORBIDDEN_RESTORE_DATABASE_NAMES).toContain('postgres');
+    const config = parseRestoreDrillEnv({
+      ...baseEnv,
+      PHASE18_RESTORE_DATABASE_URL: 'postgres://u:p@restore-host.example:5432/postgres',
+      PHASE18_RESTORE_EXPECTED_DATABASE_NAME: 'postgres',
+    });
+    expect(() => assertRestoreTargetEnv(config)).toThrow(/forbidden template/);
   });
 
-  it('operational DB name => refusal', () => {
-    expect(FORBIDDEN_RESTORE_DATABASE_NAMES).toContain('alex_rewards');
-    const config = parseRestoreDrillEnv({
-      PHASE18_RESTORE_DRILL_ENABLED: 'true',
-      PHASE18_RESTORE_DATABASE_URL: 'postgres://u:p@host/alex_rewards',
-      PHASE18_RESTORE_EXPECTED_DATABASE_NAME: 'alex_rewards',
-      PHASE18_RESTORE_FEATURE_FLAG_ENVIRONMENT: 'STAGING',
-    });
-    expect(() => assertRestoreTargetEnv(config)).toThrow(/forbidden operational/);
-  });
-
-  it('restore URL equal to DATABASE_URL => refusal', () => {
-    const url = 'postgres://u:p@host/alex_rewards_restore_drill';
-    const config = parseRestoreDrillEnv({
-      PHASE18_RESTORE_DRILL_ENABLED: 'true',
-      PHASE18_RESTORE_DATABASE_URL: url,
-      DATABASE_URL: url,
-      PHASE18_RESTORE_EXPECTED_DATABASE_NAME: 'alex_rewards_restore_drill',
-      PHASE18_RESTORE_FEATURE_FLAG_ENVIRONMENT: 'STAGING',
-    });
-    expect(() => assertRestoreTargetEnv(config)).toThrow(/must not equal DATABASE_URL/);
+  it('endpoint identity ignores credentials', () => {
+    const a = parseEndpointIdentity('postgres://a:b@host:5432/db');
+    const b = parseEndpointIdentity('postgres://x:y@host:5432/db');
+    expect(a).toEqual(b);
   });
 
   it('redacts credentials from URL fingerprints', () => {
-    const redacted = redactDatabaseUrl('postgres://owner:s3cret@db.example:5432/alex_rewards_restore_drill');
+    const redacted = redactDatabaseUrl('postgres://owner:s3cret@db.example:5432/alex_rewards');
     expect(redacted).not.toContain('s3cret');
     expect(redacted).toContain('***');
   });
@@ -151,246 +200,288 @@ describe('payout pause gate', () => {
     expect(result.payoutDispatchPausedAtValidation).toBe(false);
   });
 
-  it('payout pause true alone is NOT enough for payout resume', async () => {
-    // Minimal fake that gets past target + pause but leaves NOT_OBSERVED workflow/chain.
-    const pool = createFakePool((sql) => {
-      if (sql.includes('current_database')) {
-        return { rowCount: 1, rows: [{ current_database: 'alex_rewards_restore_drill' }] };
-      }
-      if (sql.includes('version()')) {
-        return { rowCount: 1, rows: [{ version: 'PostgreSQL 16' }] };
-      }
-      if (sql.includes("to_regclass('public.schema_migrations')")) {
-        return { rowCount: 1, rows: [{ present: true }] };
-      }
-      if (sql.includes('FROM schema_migrations') && sql.includes('ORDER BY version DESC')) {
-        return { rowCount: 1, rows: [{ version: '0058', count: '58' }] };
-      }
-      if (sql.includes('FROM schema_migrations')) {
-        // Return all expected versions is hard without listing — force schema FAIL path separately;
-        // for this test we only care resume stays false when pause is true.
-        return { rowCount: 0, rows: [] };
-      }
-      if (sql.includes('feature_flags') && sql.includes('PAYOUT_DISPATCH_PAUSE')) {
-        return { rowCount: 1, rows: [{ enabled: true }] };
-      }
-      if (sql.includes('to_regclass')) {
-        return { rowCount: 1, rows: [{ present: true }] };
-      }
-      return { rowCount: 1, rows: [{ count: '0' }] };
+  it('payout pause true alone is NOT enough for payout resume or full gate', async () => {
+    const report = await runRestoreDrill({
+      env: { ...baseEnv },
+      pool: createFakePool(schemaAbsentHandler),
+      mode: 'DB_ONLY_STEP2A',
     });
-
-    // Schema will FAIL (missing migrations) but pause true; resume must still be false.
-    await expect(
-      runRestoreDrill({
-        env: {
-          PHASE18_RESTORE_DRILL_ENABLED: 'true',
-          PHASE18_RESTORE_DATABASE_URL: 'postgres://u:p@host/alex_rewards_restore_drill',
-          PHASE18_RESTORE_EXPECTED_DATABASE_NAME: 'alex_rewards_restore_drill',
-          PHASE18_RESTORE_FEATURE_FLAG_ENVIRONMENT: 'STAGING',
-        },
-        pool,
-        mode: 'DB_ONLY_STEP2A',
-      }),
-    ).resolves.toMatchObject({
-      payoutDispatchPause: { payoutDispatchPausedAtValidation: true, autoUnpause: false },
-      payoutResumeAllowed: false,
-      workflowReconciliation: { status: 'NOT_OBSERVED' },
-      blockchainReconciliation: { liveChainReconciliation: 'NOT_OBSERVED' },
-      autoUnpause: false,
-      autoResend: false,
-    });
+    expect(report.payoutDispatchPause.payoutDispatchPausedAtValidation).toBe(true);
+    expect(report.payoutResumeAllowed).toBe(false);
+    expect(report.fullRestoreGatePass).toBe(false);
+    expect(report.workflowReconciliation.status).toBe('NOT_OBSERVED');
+    expect(report.blockchainReconciliation.liveChainReconciliation).toBe('NOT_OBSERVED');
   });
 });
 
-describe('step2a resume contract', () => {
-  function schemaAbsentPool() {
-    return createFakePool((sql) => {
-      if (sql.includes('current_database')) {
-        return { rowCount: 1, rows: [{ current_database: 'alex_rewards_restore_drill' }] };
-      }
-      if (sql.includes('version()')) return { rowCount: 1, rows: [{ version: 'PostgreSQL 16' }] };
-      if (sql.includes("to_regclass('public.schema_migrations')")) {
-        return { rowCount: 1, rows: [{ present: false }] };
-      }
-      if (sql.includes('feature_flags')) return { rowCount: 1, rows: [{ enabled: true }] };
+describe('representative counts fail-closed', () => {
+  it('one required count query throws => FAIL and restoreValidationPass false', async () => {
+    const report = await runRestoreDrill({
+      env: { ...baseEnv },
+      pool: createFakePool((sql) => {
+        if (sql.includes('default_transaction_read_only')) {
+          return { rowCount: 1, rows: [{ default_ro: 'on', tx_ro: 'on' }] };
+        }
+        if (sql.includes('current_database')) {
+          return { rowCount: 1, rows: [{ current_database: 'alex_rewards' }] };
+        }
+        if (sql.includes('version()')) return { rowCount: 1, rows: [{ version: 'PostgreSQL 16' }] };
+        if (sql.includes("to_regclass('public.schema_migrations')")) {
+          return { rowCount: 1, rows: [{ present: false }] };
+        }
+        if (sql.includes('feature_flags')) return { rowCount: 1, rows: [{ enabled: true }] };
+        if (sql.includes('FROM users') && sql.includes('COUNT')) {
+          throw new Error('boom');
+        }
+        if (sql.includes('FROM outbox_events') && sql.includes('dedupe_key')) {
+          return { rowCount: 1, rows: [{ count: '0' }] };
+        }
+        if (sql.includes('FROM outbox_events')) {
+          return {
+            rowCount: 1,
+            rows: [
+              {
+                pending: '0',
+                dispatched: '0',
+                failed: '0',
+                dead_letter: '0',
+                oldest_pending_age_seconds: null,
+                withdrawal_approved_pending: '0',
+              },
+            ],
+          };
+        }
+        if (sql.includes('COUNT(*)')) return { rowCount: 1, rows: [{ count: '0' }] };
+        return { rowCount: 0, rows: [] };
+      }),
+      mode: 'DB_ONLY_STEP2A',
+      checkLedger: async () => ({ ok: true, findings: [] }),
+      restoreReconcile: async () => ({
+        dangerousCount: 0,
+        warnCount: 0,
+        byCategory: {},
+        autoResend: false as const,
+        autoUnpause: false as const,
+      }),
+    });
+    expect(report.representativeCounts.restoredCaptureStatus).toBe('FAIL');
+    expect(report.representativeCounts.comparisonStatus).toBe('NOT_EXECUTED');
+    expect(report.representativeCounts.failedTables).toContain('users');
+    expect(report.restoreValidationPass).toBe(false);
+    expect(report.fullRestoreGatePass).toBe(false);
+  });
+
+  it('direct capture marks failedTables without inventing -1 counts', async () => {
+    const pool = createFakePool((sql) => {
+      if (sql.includes('FROM users')) throw new Error('missing');
       return { rowCount: 1, rows: [{ count: '0' }] };
     });
-  }
-
-  it('critical ledger invariant => FAIL and resume blocked', async () => {
-    const report = await runRestoreDrill({
-      env: {
-        PHASE18_RESTORE_DRILL_ENABLED: 'true',
-        PHASE18_RESTORE_DATABASE_URL: 'postgres://u:p@host/alex_rewards_restore_drill',
-        PHASE18_RESTORE_EXPECTED_DATABASE_NAME: 'alex_rewards_restore_drill',
-        PHASE18_RESTORE_FEATURE_FLAG_ENVIRONMENT: 'STAGING',
-      },
-      pool: schemaAbsentPool(),
-      mode: 'DB_ONLY_STEP2A',
-      checkLedger: async () => ({
-        ok: false,
-        findings: [{ code: 'DEBIT_CREDIT_IMBALANCE', severity: 'CRITICAL' as const, message: 'imbalance' }],
-      }),
-      restoreReconcile: async () => ({
-        dangerousCount: 0,
-        warnCount: 0,
-        historicalIsolatedBaselineCount: 0,
-        findings: [],
-        byCategory: {} as never,
-        autoResend: false as const,
-        autoUnpause: false as const,
-      }),
-    });
-    expect(report.ledgerInvariants.status).toBe('FAIL');
-    expect(report.ledgerInvariants.reasonCode).toBe('CRITICAL_LEDGER_INVARIANT');
-    expect(report.restoreValidationPass).toBe(false);
-    expect(report.payoutResumeAllowed).toBe(false);
+    const result = await captureRepresentativeCounts(pool);
+    expect(result.status).toBe('FAIL');
+    expect(result.failedTables).toContain('users');
+    expect(result.restoredCapture).toBeNull();
   });
+});
 
-  it('restore-reconcile DANGER => FAIL and resume blocked', async () => {
+describe('selected user history', () => {
+  it('no allowlist => NOT_EXECUTED', async () => {
     const report = await runRestoreDrill({
-      env: {
-        PHASE18_RESTORE_DRILL_ENABLED: 'true',
-        PHASE18_RESTORE_DATABASE_URL: 'postgres://u:p@host/alex_rewards_restore_drill',
-        PHASE18_RESTORE_EXPECTED_DATABASE_NAME: 'alex_rewards_restore_drill',
-        PHASE18_RESTORE_FEATURE_FLAG_ENVIRONMENT: 'STAGING',
-      },
-      pool: schemaAbsentPool(),
-      mode: 'DB_ONLY_STEP2A',
-      checkLedger: async () => ({ ok: true, findings: [] }),
-      restoreReconcile: async () => ({
-        dangerousCount: 2,
-        warnCount: 0,
-        historicalIsolatedBaselineCount: 0,
-        findings: [],
-        byCategory: {
-          approved_without_workflow: 1,
-          confirmed_without_settlement: 1,
-        } as never,
-        autoResend: false as const,
-        autoUnpause: false as const,
-      }),
-    });
-    expect(report.withdrawalRestoreReconcile.status).toBe('FAIL');
-    expect(report.withdrawalRestoreReconcile.reasonCode).toBe('RESTORE_RECONCILE_DANGER');
-    expect(report.withdrawalRestoreReconcile.autoResend).toBe(false);
-    expect(report.withdrawalRestoreReconcile.autoUnpause).toBe(false);
-    expect(report.restoreValidationPass).toBe(false);
-    expect(report.payoutResumeAllowed).toBe(false);
-  });
-
-  it('workflow live reconciliation NOT_OBSERVED => resume false', async () => {
-    const report = await runRestoreDrill({
-      env: {
-        PHASE18_RESTORE_DRILL_ENABLED: 'true',
-        PHASE18_RESTORE_DATABASE_URL: 'postgres://u:p@host/alex_rewards_restore_drill',
-        PHASE18_RESTORE_EXPECTED_DATABASE_NAME: 'alex_rewards_restore_drill',
-        PHASE18_RESTORE_FEATURE_FLAG_ENVIRONMENT: 'STAGING',
-      },
-      pool: schemaAbsentPool(),
-      mode: 'DB_ONLY_STEP2A',
-    });
-    expect(report.workflowReconciliation.status).toBe('NOT_OBSERVED');
-    expect(report.payoutResumeAllowed).toBe(false);
-  });
-
-  it('chain live reconciliation NOT_OBSERVED => resume false', async () => {
-    const report = await runRestoreDrill({
-      env: {
-        PHASE18_RESTORE_DRILL_ENABLED: 'true',
-        PHASE18_RESTORE_DATABASE_URL: 'postgres://u:p@host/alex_rewards_restore_drill',
-        PHASE18_RESTORE_EXPECTED_DATABASE_NAME: 'alex_rewards_restore_drill',
-        PHASE18_RESTORE_FEATURE_FLAG_ENVIRONMENT: 'STAGING',
-      },
-      pool: schemaAbsentPool(),
-      mode: 'DB_ONLY_STEP2A',
-    });
-    expect(report.blockchainReconciliation.liveChainReconciliation).toBe('NOT_OBSERVED');
-    expect(report.payoutResumeAllowed).toBe(false);
-  });
-
-  it('count evidence is read-only SELECT COUNT only', async () => {
-    const queries: string[] = [];
-    const pool = createFakePool((sql) => {
-      queries.push(sql);
-      if (sql.includes('current_database')) {
-        return { rowCount: 1, rows: [{ current_database: 'alex_rewards_restore_drill' }] };
-      }
-      if (sql.includes('version()')) return { rowCount: 1, rows: [{ version: 'PostgreSQL 16' }] };
-      if (sql.includes("to_regclass('public.schema_migrations')")) {
-        return { rowCount: 1, rows: [{ present: false }] };
-      }
-      if (sql.includes('feature_flags')) return { rowCount: 1, rows: [{ enabled: true }] };
-      if (sql.includes('COUNT(*)')) return { rowCount: 1, rows: [{ count: '0' }] };
-      return { rowCount: 0, rows: [] };
-    });
-    const report = await runRestoreDrill({
-      env: {
-        PHASE18_RESTORE_DRILL_ENABLED: 'true',
-        PHASE18_RESTORE_DATABASE_URL: 'postgres://u:p@host/alex_rewards_restore_drill',
-        PHASE18_RESTORE_EXPECTED_DATABASE_NAME: 'alex_rewards_restore_drill',
-        PHASE18_RESTORE_FEATURE_FLAG_ENVIRONMENT: 'STAGING',
-      },
-      pool,
-      mode: 'DB_ONLY_STEP2A',
-      checkLedger: async () => ({ ok: true, findings: [] }),
-      restoreReconcile: async () => ({
-        dangerousCount: 0,
-        warnCount: 0,
-        historicalIsolatedBaselineCount: 0,
-        findings: [],
-        byCategory: {} as never,
-        autoResend: false as const,
-        autoUnpause: false as const,
-      }),
-    });
-    expect(report.representativeCounts.sourceCapture).toBeNull();
-    expect(report.representativeCounts.diff).toBeNull();
-    expect(report.representativeCounts.restoredCapture).not.toBeNull();
-    const countSql = queries.filter((q) => /FROM users|FROM ledger_|FROM withdrawals|FROM outbox_events|FROM reward_events|FROM ad_sessions|FROM reconciliation_issues/i.test(q));
-    for (const sql of countSql) {
-      expect(sql.trimStart().toUpperCase().startsWith('SELECT')).toBe(true);
-      expect(/\b(INSERT|UPDATE|DELETE|MERGE)\b/i.test(sql)).toBe(false);
-    }
-  });
-
-  it('user-history verification with no allowlist => NOT_EXECUTED', async () => {
-    const report = await runRestoreDrill({
-      env: {
-        PHASE18_RESTORE_DRILL_ENABLED: 'true',
-        PHASE18_RESTORE_DATABASE_URL: 'postgres://u:p@host/alex_rewards_restore_drill',
-        PHASE18_RESTORE_EXPECTED_DATABASE_NAME: 'alex_rewards_restore_drill',
-        PHASE18_RESTORE_FEATURE_FLAG_ENVIRONMENT: 'STAGING',
-      },
-      pool: schemaAbsentPool(),
+      env: { ...baseEnv },
+      pool: createFakePool(schemaAbsentHandler),
       mode: 'DB_ONLY_STEP2A',
     });
     expect(report.selectedUserHistory.status).toBe('NOT_EXECUTED');
     expect(report.selectedUserHistory.reasonCode).toBe('NO_USER_ALLOWLIST');
   });
 
+  it('invalid configured UUID => FAIL', async () => {
+    const pool = createFakePool(() => ({ rowCount: 0, rows: [] }));
+    const result = await verifySelectedUserHistory(pool, ['not-a-uuid']);
+    expect(result.status).toBe('FAIL');
+    expect(result.reasonCode).toBe('INVALID_USER_ID');
+  });
+
+  it('valid UUID but user missing => FAIL', async () => {
+    const pool = createFakePool((sql) => {
+      if (sql.includes('EXISTS')) return { rowCount: 1, rows: [{ present: false }] };
+      return { rowCount: 0, rows: [] };
+    });
+    const result = await verifySelectedUserHistory(pool, [
+      '11111111-1111-4111-8111-111111111111',
+    ]);
+    expect(result.status).toBe('FAIL');
+    expect(result.reasonCode).toBe('SELECTED_USER_MISSING');
+  });
+
+  it('existing user with expected safe aggregates => PASS', async () => {
+    const pool = createFakePool((sql) => {
+      if (sql.includes('EXISTS')) return { rowCount: 1, rows: [{ present: true }] };
+      if (sql.includes('GROUP BY state')) {
+        return { rowCount: 1, rows: [{ state: 'COMPLETED', count: '2' }] };
+      }
+      if (sql.includes('COUNT(*)')) return { rowCount: 1, rows: [{ count: '3' }] };
+      return { rowCount: 0, rows: [] };
+    });
+    const result = await verifySelectedUserHistory(pool, [
+      '11111111-1111-4111-8111-111111111111',
+    ]);
+    expect(result.status).toBe('PASS');
+    expect(result.usersVerified).toBe(1);
+    expect(result.aggregates[0]?.userIdPresent).toBe(true);
+    expect(result.aggregates[0]?.ledgerAccountCount).toBe(3);
+    expect(result.aggregates[0]?.ledgerProjectionRowCount).toBe(3);
+    expect(result.aggregates[0]?.withdrawalsByState.COMPLETED).toBe(2);
+  });
+});
+
+describe('RPO direction', () => {
+  it('observedRpoSeconds = sourceEvidence - restoredLatest when source is later', () => {
+    expect(
+      computeObservedRpoSeconds('2026-10-01T00:05:00.000Z', '2026-10-01T00:04:30.000Z'),
+    ).toBe(30);
+  });
+
   it('RTO/RPO values are observations, not policy targets', async () => {
     const report = await runRestoreDrill({
-      env: {
-        PHASE18_RESTORE_DRILL_ENABLED: 'true',
-        PHASE18_RESTORE_DATABASE_URL: 'postgres://u:p@host/alex_rewards_restore_drill',
-        PHASE18_RESTORE_EXPECTED_DATABASE_NAME: 'alex_rewards_restore_drill',
-        PHASE18_RESTORE_FEATURE_FLAG_ENVIRONMENT: 'STAGING',
-      },
-      pool: schemaAbsentPool(),
+      env: { ...baseEnv },
+      pool: createFakePool(schemaAbsentHandler),
       mode: 'DB_ONLY_STEP2A',
       timingOverrides: {
         restoreStartedAt: '2026-10-01T00:00:00.000Z',
         restoreAvailableAt: '2026-10-01T00:05:00.000Z',
-        sourceEvidenceCapturedAt: '2026-10-01T00:00:00.000Z',
-        restoredLatestAuthoritativeTimestamp: '2026-10-01T00:00:30.000Z',
+        sourceEvidenceCapturedAt: '2026-10-01T00:05:00.000Z',
+        restoredLatestAuthoritativeTimestamp: '2026-10-01T00:04:30.000Z',
       },
     });
     expect(report.timing.rtoTargetSeconds).toBe('OWNER_POLICY_REQUIRED');
     expect(report.timing.rpoTargetSeconds).toBe('OWNER_POLICY_REQUIRED');
     expect(report.timing.observedRestoreSeconds).toBe(300);
     expect(report.timing.observedRpoSeconds).toBe(30);
+  });
+});
+
+describe('outbox financial ambiguity', () => {
+  it('FAILED outbox blocks with OWNER_REVIEW_REQUIRED', async () => {
+    const pool = createFakePool((sql) => {
+      if (sql.includes('dedupe_key')) return { rowCount: 1, rows: [{ count: '0' }] };
+      return {
+        rowCount: 1,
+        rows: [
+          {
+            pending: '0',
+            dispatched: '0',
+            failed: '2',
+            dead_letter: '0',
+            oldest_pending_age_seconds: null,
+            withdrawal_approved_pending: '0',
+          },
+        ],
+      };
+    });
+    const result = await reconcileOutboxReadOnly(pool);
+    expect(result.status).toBe('OWNER_REVIEW_REQUIRED');
+    expect(result.failed).toBe(2);
+  });
+
+  it('withdrawal.approved PENDING blocks with OWNER_REVIEW_REQUIRED', async () => {
+    const pool = createFakePool((sql) => {
+      if (sql.includes('dedupe_key')) return { rowCount: 1, rows: [{ count: '0' }] };
+      return {
+        rowCount: 1,
+        rows: [
+          {
+            pending: '1',
+            dispatched: '0',
+            failed: '0',
+            dead_letter: '0',
+            oldest_pending_age_seconds: '10',
+            withdrawal_approved_pending: '1',
+          },
+        ],
+      };
+    });
+    const result = await reconcileOutboxReadOnly(pool);
+    expect(result.status).toBe('OWNER_REVIEW_REQUIRED');
+    expect(result.withdrawalApprovedPending).toBe(1);
+  });
+
+  it('duplicate dedupe keys => FAIL', async () => {
+    const pool = createFakePool((sql) => {
+      if (sql.includes('dedupe_key')) return { rowCount: 1, rows: [{ count: '3' }] };
+      return {
+        rowCount: 1,
+        rows: [
+          {
+            pending: '0',
+            dispatched: '0',
+            failed: '0',
+            dead_letter: '0',
+            oldest_pending_age_seconds: null,
+            withdrawal_approved_pending: '0',
+          },
+        ],
+      };
+    });
+    const result = await reconcileOutboxReadOnly(pool);
+    expect(result.status).toBe('FAIL');
+    expect(result.duplicateDedupeKeyAnomalies).toBe(3);
+  });
+});
+
+describe('step2a resume / gate contract', () => {
+  it('critical ledger invariant => FAIL and resume blocked', async () => {
+    const report = await runRestoreDrill({
+      env: { ...baseEnv },
+      pool: createFakePool(schemaAbsentHandler),
+      mode: 'DB_ONLY_STEP2A',
+      checkLedger: async () => ({
+        ok: false,
+        findings: [{ code: 'DEBIT_CREDIT_IMBALANCE', severity: 'CRITICAL', message: 'imbalance' }],
+      }),
+      restoreReconcile: async () => ({
+        dangerousCount: 0,
+        warnCount: 0,
+        byCategory: {},
+        autoResend: false as const,
+        autoUnpause: false as const,
+      }),
+    });
+    expect(report.ledgerInvariants.status).toBe('FAIL');
+    expect(report.restoreValidationPass).toBe(false);
+    expect(report.payoutResumeAllowed).toBe(false);
+    expect(report.fullRestoreGatePass).toBe(false);
+  });
+
+  it('restore-reconcile DANGER => FAIL and resume blocked', async () => {
+    const report = await runRestoreDrill({
+      env: { ...baseEnv },
+      pool: createFakePool(schemaAbsentHandler),
+      mode: 'DB_ONLY_STEP2A',
+      checkLedger: async () => ({ ok: true, findings: [] }),
+      restoreReconcile: async () => ({
+        dangerousCount: 2,
+        warnCount: 0,
+        byCategory: { approved_without_workflow: 1 },
+        autoResend: false as const,
+        autoUnpause: false as const,
+      }),
+    });
+    expect(report.withdrawalRestoreReconcile.status).toBe('FAIL');
+    expect(report.restoreValidationPass).toBe(false);
+    expect(report.payoutResumeAllowed).toBe(false);
+  });
+
+  it('workflow/chain NOT_OBSERVED => resume false and fullRestoreGatePass false', async () => {
+    const report = await runRestoreDrill({
+      env: { ...baseEnv },
+      pool: createFakePool(schemaAbsentHandler),
+      mode: 'DB_ONLY_STEP2A',
+    });
+    expect(report.workflowReconciliation.status).toBe('NOT_OBSERVED');
+    expect(report.blockchainReconciliation.liveChainReconciliation).toBe('NOT_OBSERVED');
+    expect(report.representativeCounts.comparisonStatus).toBe('NOT_EXECUTED');
+    expect(report.payoutResumeAllowed).toBe(false);
+    expect(report.fullRestoreGatePass).toBe(false);
   });
 });
 

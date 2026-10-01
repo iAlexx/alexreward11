@@ -14,6 +14,13 @@ export type DrillSectionStatus =
 export interface RestoreTargetFingerprint {
   readonly currentDatabase: string;
   readonly expectedDatabase: string;
+  readonly targetHost: string;
+  readonly sourceHostProvided: boolean;
+  readonly sourceHost: string | null;
+  readonly targetDistinctFromSource: boolean | null;
+  readonly targetDatabaseName: string;
+  readonly targetDatabaseNameMatchesExpected: boolean;
+  readonly databaseReadOnlyEnforced: boolean;
   readonly postgresVersion: string | null;
   readonly schemaMigrationHead: string | null;
   readonly schemaMigrationCount: number | null;
@@ -89,8 +96,10 @@ export interface RestoreDrillReport {
     readonly processing: number;
     readonly dispatched: number;
     readonly failed: number;
+    readonly deadLetter: number;
     readonly oldestPendingAgeSeconds: number | null;
     readonly withdrawalApprovedPending: number;
+    readonly duplicateDedupeKeyAnomalies: number;
     readonly lagThreshold: 'THRESHOLD_NOT_CONFIGURED';
   };
   readonly workflowReconciliation: {
@@ -107,6 +116,9 @@ export interface RestoreDrillReport {
   };
   readonly representativeCounts: {
     readonly status: DrillSectionStatus;
+    readonly restoredCaptureStatus: DrillSectionStatus;
+    readonly comparisonStatus: DrillSectionStatus;
+    readonly failedTables: readonly string[];
     readonly sourceCapture: CountCapture | null;
     readonly restoredCapture: CountCapture | null;
     readonly diff: Readonly<Record<string, number>> | null;
@@ -123,7 +135,10 @@ export interface RestoreDrillReport {
     readonly byState: Readonly<Record<string, number>>;
     readonly requiringLiveChainCount: number;
   };
+  /** DB-side validation evidence only — not the Phase 18 full restore gate. */
   readonly restoreValidationPass: boolean;
+  /** Always false in Step 2A (Temporal/chain/count-comparison incomplete). */
+  readonly fullRestoreGatePass: boolean;
   readonly payoutResumeAllowed: boolean;
   readonly autoUnpause: false;
   readonly autoResend: false;

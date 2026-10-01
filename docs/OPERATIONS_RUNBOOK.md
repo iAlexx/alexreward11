@@ -143,6 +143,10 @@ After any database restore:
 Current Railway staging observation: **PITR disabled**; no isolated restore target yet.
 Use Railway **managed** PITR / pgBackRest only — do not hand-edit Postgres WAL archive config.
 
+Isolation is **host/service based**. Managed PITR restore may keep the same database name as
+source; prove isolation via distinct restore host (`PHASE18_RESTORE_EXPECTED_HOST`) vs source
+host (`PHASE18_SOURCE_DATABASE_HOST`), not by requiring a different DB name.
+
 Fail-closed CLI (binds only to `PHASE18_RESTORE_DATABASE_URL`; never `DATABASE_URL`):
 
 ```text
@@ -150,19 +154,24 @@ pnpm phase18:restore-drill
 ```
 
 Required: `PHASE18_RESTORE_DRILL_ENABLED=true`, `PHASE18_RESTORE_DATABASE_URL`,
-`PHASE18_RESTORE_EXPECTED_DATABASE_NAME`, `PHASE18_RESTORE_FEATURE_FLAG_ENVIRONMENT`.
-Optional: `PHASE18_RESTORE_VERIFY_USER_IDS` (comma-separated internal UUIDs; never commit real IDs).
+`PHASE18_RESTORE_EXPECTED_DATABASE_NAME`, `PHASE18_RESTORE_EXPECTED_HOST`,
+`PHASE18_RESTORE_FEATURE_FLAG_ENVIRONMENT`.
+Optional: `PHASE18_SOURCE_DATABASE_HOST` (required for FULL_STEP2B),
+`PHASE18_RESTORE_VERIFY_USER_IDS` (comma-separated internal UUIDs; never commit real IDs).
 
 Behavior:
 
+- Production pool forces PostgreSQL `default_transaction_read_only=on`
 - Read-only schema / ledger / Phase 10 restore-reconcile / outbox / counts
 - Verifies pause flag; does **not** create or flip it
 - `autoUnpause: false`, `autoResend: false`
-- Step 2A DB-only: Temporal + live chain = `NOT_OBSERVED` ⇒ `PAYOUT_RESUME_ALLOWED=false`
+- Step 2A DB-only: Temporal + live chain = `NOT_OBSERVED`; count comparison = `NOT_EXECUTED`
+- `fullRestoreGatePass=false`, `PAYOUT_RESUME_ALLOWED=false`
 - Writes gitignored `phase18-restore-drill-<UTC>.{json,md}`
 
-Step 2B (Owner-approved later) enables PITR, creates isolated restore DB, runs full Temporal +
-chain reconciliation. See `docs/DISASTER_RECOVERY.md` and `docs/PHASE_18_OBSERVABILITY_DR_PLAN.md`.
+Step 2B (Owner-approved later) enables PITR, creates isolated restore DB (sibling host), runs
+full Temporal + chain reconciliation. See `docs/DISASTER_RECOVERY.md` and
+`docs/PHASE_18_OBSERVABILITY_DR_PLAN.md`.
 
 ### Campaign dry-run
 

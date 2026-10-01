@@ -3,7 +3,6 @@
  * NEVER mutates DB, NEVER resumes payout, NEVER calls signer/TON/Temporal replay.
  */
 
-import { createDatabasePool } from '@alex-rewards/db';
 import { checkLedgerInvariants } from '@alex-rewards/ledger';
 import { runPhase10RestoreReconcileScan } from '@alex-rewards/withdrawals';
 import type { Pool } from 'pg';
@@ -11,6 +10,10 @@ import type { Pool } from 'pg';
 import { captureRepresentativeCounts, diffCountCaptures } from './counts.js';
 import { reconcileOutboxReadOnly } from './outbox.js';
 import { verifyPayoutDispatchPaused } from './payout-pause.js';
+import {
+  assertSessionReadOnlyEnforced,
+  createRestoreDrillReadOnlyPool,
+} from './pool-ro.js';
 import { validateRestoredSchema } from './schema.js';
 import {
   assertConnectedRestoreTarget,
@@ -25,7 +28,7 @@ import { summarizeWithdrawalRecords } from './withdrawal-records.js';
 
 export interface RunRestoreDrillOptions {
   readonly env?: NodeJS.ProcessEnv;
-  /** Injected pool for unit tests — still subject to connected DB-name checks. */
+  /** Injected pool for unit tests — still subject to connected target checks. */
   readonly pool?: Pool;
   readonly now?: Date;
   readonly mode?: 'DB_ONLY_STEP2A' | 'FULL_STEP2B';
@@ -49,6 +52,20 @@ export interface RunRestoreDrillOptions {
   }>;
 }
 
+/** RPO = how far restored authoritative data lags behind source evidence (seconds). */
+export function computeObservedRpoSeconds(
+  sourceEvidenceCapturedAt: string | null,
+  restoredLatestAuthoritativeTimestamp: string | null,
+): number | null {
+  if (sourceEvidenceCapturedAt === null || restoredLatestAuthoritativeTimestamp === null) {
+    return null;
+  }
+  const sourceMs = Date.parse(sourceEvidenceCapturedAt);
+  const restoredMs = Date.parse(restoredLatestAuthoritativeTimestamp);
+  if (!Number.isFinite(sourceMs) || !Number.isFinite(restoredMs)) return null;
+  return Math.max(0, Math.round((sourceMs - restoredMs) / 1000));
+}
+
 function secondsBetween(start: string | null, end: string | null): number | null {
   if (start === null || end === null) return null;
   const a = Date.parse(start);
@@ -62,21 +79,20 @@ export async function runRestoreDrill(
 ): Promise<RestoreDrillReport> {
   const env = options.env ?? process.env;
   const config = parseRestoreDrillEnv(env);
-  const bound = assertRestoreTargetEnv(config);
   const mode = options.mode ?? 'DB_ONLY_STEP2A';
+  const bound = assertRestoreTargetEnv(config, { mode });
   const validationStartedAt = (options.now ?? new Date()).toISOString();
 
   const ownsPool = options.pool === undefined;
-  const pool =
-    options.pool ??
-    createDatabasePool(bound.restoreDatabaseUrl);
+  const pool = options.pool ?? createRestoreDrillReadOnlyPool(bound.restoreDatabaseUrl);
 
   try {
-    const target = await assertConnectedRestoreTarget(
-      pool,
-      bound.expectedDatabaseName,
-      bound.restoreDatabaseUrl,
-    );
+    // Production-owned pool must prove PostgreSQL read-only. Injected test pools also verify.
+    await assertSessionReadOnlyEnforced(pool);
+
+    const target = await assertConnectedRestoreTarget(pool, bound, {
+      databaseReadOnlyEnforced: true,
+    });
 
     const schema = await validateRestoredSchema(pool);
     const pause = await verifyPayoutDispatchPaused(pool, bound.featureFlagEnvironment);
@@ -157,7 +173,7 @@ export async function runRestoreDrill(
       sourceEvidenceCapturedAt: options.timingOverrides?.sourceEvidenceCapturedAt ?? null,
       restoredLatestAuthoritativeTimestamp:
         options.timingOverrides?.restoredLatestAuthoritativeTimestamp ?? null,
-      observedRpoSeconds: secondsBetween(
+      observedRpoSeconds: computeObservedRpoSeconds(
         options.timingOverrides?.sourceEvidenceCapturedAt ?? null,
         options.timingOverrides?.restoredLatestAuthoritativeTimestamp ?? null,
       ),
@@ -175,13 +191,15 @@ export async function runRestoreDrill(
       pause.status === 'FAIL',
       ledgerStatus === 'FAIL',
       withdrawStatus === 'FAIL' || withdrawStatus === 'OWNER_REVIEW_REQUIRED',
-      outbox.status === 'FAIL',
+      outbox.status === 'FAIL' || outbox.status === 'OWNER_REVIEW_REQUIRED',
+      counts.status === 'FAIL',
+      userHistory.status === 'FAIL',
       withdrawalRecords.status === 'FAIL',
     ];
     const restoreValidationPass = !hardFails.some(Boolean);
 
-    // Step 2A DB-only: Temporal + live chain remain NOT_OBSERVED.
-    // FULL_STEP2B live observation is not implemented in this package yet ⇒ never allow resume.
+    // Step 2A: Temporal / live chain / source-restored comparison incomplete ⇒ full gate false.
+    const fullRestoreGatePass = false;
     const payoutResumeAllowedFinal = false;
 
     return {
@@ -216,8 +234,10 @@ export async function runRestoreDrill(
         processing: outbox.processing,
         dispatched: outbox.dispatched,
         failed: outbox.failed,
+        deadLetter: outbox.deadLetter,
         oldestPendingAgeSeconds: outbox.oldestPendingAgeSeconds,
         withdrawalApprovedPending: outbox.withdrawalApprovedPending,
+        duplicateDedupeKeyAnomalies: outbox.duplicateDedupeKeyAnomalies,
         lagThreshold: 'THRESHOLD_NOT_CONFIGURED',
       },
       workflowReconciliation: {
@@ -234,6 +254,9 @@ export async function runRestoreDrill(
       },
       representativeCounts: {
         status: counts.status,
+        restoredCaptureStatus: counts.restoredCaptureStatus,
+        comparisonStatus: counts.comparisonStatus,
+        failedTables: counts.failedTables,
         sourceCapture: null,
         restoredCapture: counts.restoredCapture,
         diff: diffCountCaptures(null, counts.restoredCapture),
@@ -251,13 +274,15 @@ export async function runRestoreDrill(
         requiringLiveChainCount: withdrawalRecords.requiringLiveChainCount,
       },
       restoreValidationPass,
+      fullRestoreGatePass,
       payoutResumeAllowed: payoutResumeAllowedFinal,
       autoUnpause: false,
       autoResend: false,
       financialAuthority: false,
       notes: [
         'DATABASE_URL_FALLBACK_ALLOWED=' + String(RESTORE_DRILL_DATABASE_URL_FALLBACK_ALLOWED),
-        'Step 2A is DB-only; Temporal and live chain remain NOT_OBSERVED.',
+        'Isolation is host/service based; DB name may match source after managed PITR restore.',
+        'Step 2A is DB-only preparation; fullRestoreGatePass=false (Temporal/chain/count comparison NOT complete).',
         'PAYOUT_RESUME_ALLOWED is false until Step 2B completes all required evidence.',
         'Do not enable Railway PITR or create restore resources from this CLI.',
       ],
