@@ -67,4 +67,30 @@ describe('Phase 18 documentation truth', () => {
     expect(doc).not.toMatch(/Step 2B planned sequence \(NOT started\)/);
     expect(doc).not.toMatch(/PITR\/infra not yet enabled/);
   });
+  it('OPERATIONS_RUNBOOK.md matches live Admin surfaces for withdrawals and reward rules', () => {
+    const doc = readDoc('docs/OPERATIONS_RUNBOOK.md');
+    expect(doc).toMatch(/WITHDRAWALS_PAGE_READ_ONLY/);
+    expect(doc).toMatch(/WithdrawalsPage[\s\S]{0,120}read-only/i);
+    expect(doc).toContain('/v1/admin/withdrawals/:id/approve');
+    expect(doc).toContain('/v1/admin/withdrawals/:id/hold');
+    expect(doc).toMatch(/WITHDRAWAL_APPROVE_ROUTE/);
+    expect(doc).toMatch(/WITHDRAWAL_HOLD_ROUTE/);
+    expect(doc).toMatch(/DIRECT_SQL_FORBIDDEN/);
+    expect(doc).toMatch(/direct SQL/i);
+    expect(doc).not.toMatch(
+      /hold\/quarantine via Admin controls where present[\s\S]{0,80}open Review Queue case/,
+    );
+    expect(doc).toMatch(/WITHDRAWAL_REVIEW_CASE_PROJECTION/);
+    expect(doc).toMatch(/does\s*(?:\*\*not\*\*|not)\s+itself\s+open\s+a\s+Review\s+Queue\s+case/i);
+
+    expect(doc).toMatch(/POLICY_CENTER_PAGE_READ_ONLY/);
+    expect(doc).toMatch(/PolicyCenterPage[\s\S]{0,120}read-only/i);
+    expect(doc).toContain('/v1/admin/reward-rules');
+    expect(doc).toMatch(/REWARD_RULES_CREATE_VERSION_ROUTE/);
+    expect(doc).toMatch(/REWARD_RULES_NEW_VERSION_ONLY/);
+    expect(doc).toMatch(/new[\s\S]{0,40}reward rule version/i);
+    expect(doc).toMatch(/applied=false|does not apply[\s\S]{0,40}REWARD_RULES/i);
+    expect(doc).not.toMatch(/create new rule version via structured forms/);
+  });
+
 });

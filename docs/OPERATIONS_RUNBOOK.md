@@ -194,21 +194,30 @@ Current STAGING state during Phase 18 closure: `PAYOUT_DISPATCH_PAUSE=true`. Do 
 
 ### 3. Approve withdrawal
 
-- Preconditions: Owner Admin authenticated; payout pause policy understood; withdrawal in approvable state.
-- Authoritative system: Admin Withdrawals page + high-impact Admin API ceremony (`apps/admin` Withdrawals / reauth).
-- Safe sequence: review fraud/review-queue signals → reauth ceremony → approve action → confirm workflow/outbox created.
-- Verification: withdrawal state transition visible in Admin; no blind CLI approve for production.
-- Forbidden: direct SQL status edits; approving while financial ambiguity open without Owner note.
-- Audit: Admin action audit trail.
+Semantic markers: WITHDRAWALS_PAGE_READ_ONLY, WITHDRAWAL_APPROVE_ROUTE, DIRECT_SQL_FORBIDDEN.
+
+- Preconditions: Owner/authorized Admin authenticated; payout pause policy understood; withdrawal in expected approvable state/version.
+- Authoritative system: **MANUAL OWNER / AUTHORIZED ADMIN API PROCEDURE**.
+  - `WithdrawalsPage` is currently a **read-only** review/list surface (queue/status only). It does **not** expose approve/hold/reject HighImpactCeremony controls.
+  - Mutation authority is `POST /v1/admin/withdrawals/:id/approve` in `apps/api` (`WithdrawalsAdminController`), requiring AdminSessionGuard, CSRF enforcement, `gateHighImpactMutation`, consumed confirmation, expected state/version semantics, idempotency key, then authoritative `decideWithdrawal`.
+- Safe sequence: review list/detail read-only → complete high-impact confirmation ceremony binding the exact decision payload → call the approve Admin API route → confirm state becomes APPROVED and Outbox/workflow identity is created by domain (no direct Temporal call from Admin).
+- Verification: withdrawal state transition visible via Admin list/detail reads; domain result returned by API.
+- Forbidden: direct SQL status edits (`DIRECT_SQL_FORBIDDEN`); inventing a WithdrawalsPage mutation UI claim; embedding credentials/tokens in runbook examples.
+- Audit: Admin confirmation + `WITHDRAWAL_DECIDE_APPROVE` audit/outbox evidence.
 
 ### 4. Hold suspicious withdrawal
 
-- Preconditions: suspicion signal (fraud, reconcile danger, unexpected chain).
-- Authoritative system: Admin Withdrawals / Review Queue; pause payouts if systemic.
-- Safe sequence: hold/quarantine via Admin controls where present → pause dispatch if blast radius unclear → open Review Queue case.
-- Verification: withdrawal cannot dispatch; pause flag true if freeze required.
-- Forbidden: deleting withdrawal rows; blind resend after hold.
-- Audit: hold reason + case id digests.
+Semantic markers: WITHDRAWAL_HOLD_ROUTE, WITHDRAWAL_REVIEW_CASE_PROJECTION.
+
+- Preconditions: suspicion signal (fraud, reconcile danger, unexpected chain); expected state/version known.
+- Authoritative system: **MANUAL OWNER / AUTHORIZED ADMIN API PROCEDURE**.
+  - `WithdrawalsPage` remains **read-only**.
+  - Hold mutation authority is `POST /v1/admin/withdrawals/:id/hold` (same CSRF / high-impact / confirmation / idempotency / `decideWithdrawal` contract as approve).
+- Safe sequence: pause payouts if systemic blast radius is unclear → hold via Admin API ceremony → confirm state HELD.
+- Review Queue note: Admin API hold/`decideWithdrawal` does **not** itself open a Review Queue case. `WITHDRAWAL_REVIEW` cases are an operational projection; when present, verify/reuse the existing case. Case ensure/open for withdrawals is not exposed as a current Admin UI/API “ensure withdrawal review” action on this path (Telegram Control Center approval-card issuance may ensure a case elsewhere — that is not the Admin hold route). Do not invent a case-creation step from this runbook. Review Queue is not financial source of truth.
+- Verification: withdrawal cannot dispatch while HELD; pause flag true if freeze required.
+- Forbidden: deleting withdrawal rows; blind resend; direct SQL; claiming Hold opens Review Queue unless using a separate authoritative path that actually does.
+- Audit: hold reason + decision digests; existing WITHDRAWAL_REVIEW case id only when already present.
 
 ### 5. Review fraud flag
 
@@ -231,12 +240,17 @@ Current STAGING state during Phase 18 closure: `PAYOUT_DISPATCH_PAUSE=true`. Do 
 
 ### 7. Change reward rule
 
-- Preconditions: Owner Admin; Policy Center access.
-- Authoritative system: Admin Policy Center (`PolicyCenterPage` / policy-center Admin API) — typed versioned rules only.
-- Safe sequence: create new rule version via structured forms → bind entitlements through existing rewards/control-center paths → verify no historical ledger rewrite.
-- Verification: new version visible; issuance uses new version only going forward.
-- Forbidden: editing historical reward ledger entries; free-form SQL policy edits.
-- Audit: policy version ids.
+Semantic markers: POLICY_CENTER_PAGE_READ_ONLY, REWARD_RULES_CREATE_VERSION_ROUTE, REWARD_RULES_NEW_VERSION_ONLY.
+
+- Preconditions: Owner/authorized Admin authenticated; high-impact reauth/confirmation available.
+- Authoritative system: **MANUAL OWNER / AUTHORIZED ADMIN API PROCEDURE**.
+  - `PolicyCenterPage` is currently a **read-only** policy overview (lists typed families/versions). It does **not** contain structured mutation forms.
+  - Generic `POST /v1/admin/policy/change` does **not** apply `REWARD_RULES` (returns `applied=false` / use dedicated typed endpoint).
+  - Executable mutation authority is `POST /v1/admin/reward-rules` (`RewardEngineAdminController`): AdminSessionGuard, CSRF, `gateHighImpactMutation`, consumed confirmation, then creates a **new** reward rule version via `createRewardRuleVersion` — never edits historical reward rule rows in place.
+- Safe sequence: review read-only Policy Center / reward-rules list → complete high-impact confirmation → POST new reward-rule version → optionally activate per command fields → verify issuance uses the new version going forward.
+- Verification: new version visible via `GET /v1/admin/reward-rules` / Policy Center overview; no historical row rewrite.
+- Forbidden: rewriting historical reward rule rows; editing reward ledger history; claiming PolicyCenterPage forms perform the mutation; direct SQL.
+- Audit: new rule version id + confirmation ceremony records.
 
 ### 8. Respond to AdsGram outage
 
