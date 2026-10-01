@@ -17,6 +17,10 @@ import {
   type EligibilityActionPolicyConfig,
   type ResolvedEligibilityPolicyVersion,
 } from './eligibility-policy.js';
+import {
+  classifyAccountStateForAction,
+  resolveEligibilityFeatureFlagBinding,
+} from './eligibility-gate-semantics.js';
 import { FraudDomainError } from './errors.js';
 import {
   evaluateAndPersistRisk,
@@ -53,13 +57,6 @@ export interface EvaluateAndPersistEligibilityResult {
   readonly decision: PersistedEligibilityDecision;
   readonly risk?: EvaluateAndPersistRiskResult;
 }
-
-type AccountStateClass =
-  | 'NON_ACTIVE'
-  | 'BLOCKED'
-  | 'COOLDOWN'
-  | 'RESTRICTED'
-  | 'ACTIVE_ALLOWED';
 
 interface MissionVersionEligibilityContext {
   readonly id: string;
@@ -123,7 +120,7 @@ async function requireMissionContext(
 
 async function collectAccountStateGate(
   client: PoolClient,
-  userId: string,
+  input: { readonly userId: string; readonly actionType: EligibilityActionType },
 ): Promise<EligibilityGateFact> {
   const result = await client.query<{
     status: string;
@@ -135,56 +132,157 @@ async function collectAccountStateGate(
             withdrawal_cooldown_until
      FROM users
      WHERE id = $1::uuid`,
-    [userId],
+    [input.userId],
   );
   const row = result.rows[0];
   if (row === undefined) {
     throw new FraudDomainError(
       'ELIGIBILITY_GATE_SOURCE_UNAVAILABLE',
       'userId does not identify an existing user for ACCOUNT_STATE',
-      { userId },
+      { userId: input.userId },
     );
   }
 
-  const now = new Date();
-  const cooldownActive =
-    row.withdrawal_cooldown_until !== null && row.withdrawal_cooldown_until > now;
-
-  let stateClass: AccountStateClass;
-  let eligible: boolean;
-  let reasonCode: string;
-
-  if (row.status !== 'ACTIVE') {
-    stateClass = 'NON_ACTIVE';
-    eligible = false;
-    reasonCode = 'ACCOUNT_STATE_NOT_ACTIVE';
-  } else if (row.withdrawal_status === 'BLOCKED') {
-    stateClass = 'BLOCKED';
-    eligible = false;
-    reasonCode = 'ACCOUNT_STATE_WITHDRAWAL_BLOCKED';
-  } else if (cooldownActive) {
-    stateClass = 'COOLDOWN';
-    eligible = false;
-    reasonCode = 'ACCOUNT_STATE_COOLDOWN_ACTIVE';
-  } else if (row.withdrawal_status === 'RESTRICTED') {
-    stateClass = 'RESTRICTED';
-    eligible = true;
-    reasonCode = 'ACCOUNT_STATE_RESTRICTED';
-  } else {
-    stateClass = 'ACTIVE_ALLOWED';
-    eligible = true;
-    reasonCode = 'ACCOUNT_STATE_OK';
-  }
+  const classified = classifyAccountStateForAction(input.actionType, {
+    status: row.status,
+    withdrawalStatus: row.withdrawal_status,
+    withdrawalCooldownUntil: row.withdrawal_cooldown_until,
+    now: new Date(),
+  });
 
   return {
     code: 'ACCOUNT_STATE',
-    eligible,
-    reasonCode,
+    eligible: classified.eligible,
+    reasonCode: classified.reasonCode,
     safeDetails: {
-      stateClass,
+      stateClass: classified.stateClass,
       status: row.status,
       withdrawalStatus: row.withdrawal_status,
-      cooldownActive,
+      cooldownActive: classified.cooldownActive,
+      withdrawalScopedChecksApplied: classified.withdrawalScopedChecksApplied,
+      actionType: input.actionType,
+    },
+  };
+}
+
+async function collectPauseFlag(
+  client: PoolClient,
+  input: {
+    readonly flagKey: 'WITHDRAWAL_REQUESTS_PAUSE' | 'REFERRAL_REWARD_PAUSE';
+    readonly deploymentEnvironment: DeploymentEnvironment;
+  },
+): Promise<EligibilityGateFact> {
+  const result = await client.query<{ enabled: boolean }>(
+    `SELECT enabled
+     FROM feature_flags
+     WHERE flag_key = $1
+       AND environment = $2::environment_name`,
+    [input.flagKey, input.deploymentEnvironment],
+  );
+  const row = result.rows[0];
+  if (row === undefined) {
+    throw new FraudDomainError(
+      'ELIGIBILITY_GATE_SOURCE_UNAVAILABLE',
+      `${input.flagKey} feature flag is missing for deployment environment`,
+      {
+        flagKey: input.flagKey,
+        deploymentEnvironment: input.deploymentEnvironment,
+      },
+    );
+  }
+
+  if (row.enabled === true) {
+    return {
+      code: 'FEATURE_FLAG',
+      eligible: false,
+      reasonCode: 'FEATURE_FLAG_DISABLED',
+      safeDetails: {
+        flagKey: input.flagKey,
+        enabled: true,
+        deploymentEnvironment: input.deploymentEnvironment,
+      },
+    };
+  }
+
+  return {
+    code: 'FEATURE_FLAG',
+    eligible: true,
+    reasonCode: 'FEATURE_FLAG_OK',
+    safeDetails: {
+      flagKey: input.flagKey,
+      enabled: false,
+      deploymentEnvironment: input.deploymentEnvironment,
+    },
+  };
+}
+
+async function collectMissionRewardPauseFlag(
+  client: PoolClient,
+  input: {
+    readonly deploymentEnvironment: DeploymentEnvironment;
+    readonly actionType: EligibilityActionType;
+    readonly missionVersionId: string | null | undefined;
+  },
+): Promise<EligibilityGateFact> {
+  const mission = await requireMissionContext(client, {
+    actionType: input.actionType,
+    gateCode: 'FEATURE_FLAG',
+    missionVersionId: input.missionVersionId,
+  });
+
+  // Non-monetary missions (null reward_rule_id) do not require MISSION_REWARD_PAUSE.
+  if (mission.rewardRuleId === null) {
+    return {
+      code: 'FEATURE_FLAG',
+      eligible: true,
+      reasonCode: 'FEATURE_FLAG_NOT_REQUIRED',
+      safeDetails: {
+        flagKey: 'MISSION_REWARD_PAUSE',
+        monetary: false,
+        deploymentEnvironment: input.deploymentEnvironment,
+      },
+    };
+  }
+
+  const result = await client.query<{ enabled: boolean }>(
+    `SELECT enabled
+     FROM feature_flags
+     WHERE flag_key = 'MISSION_REWARD_PAUSE'
+       AND environment = $1::environment_name`,
+    [input.deploymentEnvironment],
+  );
+  const row = result.rows[0];
+  if (row === undefined) {
+    throw new FraudDomainError(
+      'ELIGIBILITY_GATE_SOURCE_UNAVAILABLE',
+      'MISSION_REWARD_PAUSE feature flag is missing for deployment environment',
+      { deploymentEnvironment: input.deploymentEnvironment },
+    );
+  }
+
+  if (row.enabled === true) {
+    return {
+      code: 'FEATURE_FLAG',
+      eligible: false,
+      reasonCode: 'FEATURE_FLAG_DISABLED',
+      safeDetails: {
+        flagKey: 'MISSION_REWARD_PAUSE',
+        enabled: true,
+        monetary: true,
+        deploymentEnvironment: input.deploymentEnvironment,
+      },
+    };
+  }
+
+  return {
+    code: 'FEATURE_FLAG',
+    eligible: true,
+    reasonCode: 'FEATURE_FLAG_OK',
+    safeDetails: {
+      flagKey: 'MISSION_REWARD_PAUSE',
+      enabled: false,
+      monetary: true,
+      deploymentEnvironment: input.deploymentEnvironment,
     },
   };
 }
@@ -197,109 +295,25 @@ async function collectFeatureFlagGate(
     readonly missionVersionId: string | null | undefined;
   },
 ): Promise<EligibilityGateFact> {
-  if (input.actionType === 'MISSION_CLAIM') {
-    const mission = await requireMissionContext(client, {
-      actionType: input.actionType,
-      gateCode: 'FEATURE_FLAG',
-      missionVersionId: input.missionVersionId,
-    });
-
-    // Non-monetary missions (null reward_rule_id) do not require MISSION_REWARD_PAUSE.
-    if (mission.rewardRuleId === null) {
-      return {
-        code: 'FEATURE_FLAG',
-        eligible: true,
-        reasonCode: 'FEATURE_FLAG_NOT_REQUIRED',
-        safeDetails: {
-          flagKey: 'MISSION_REWARD_PAUSE',
-          monetary: false,
-          deploymentEnvironment: input.deploymentEnvironment,
-        },
-      };
-    }
-
-    const result = await client.query<{ enabled: boolean }>(
-      `SELECT enabled
-       FROM feature_flags
-       WHERE flag_key = 'MISSION_REWARD_PAUSE'
-         AND environment = $1::environment_name`,
-      [input.deploymentEnvironment],
-    );
-    const row = result.rows[0];
-    if (row === undefined) {
-      throw new FraudDomainError(
-        'ELIGIBILITY_GATE_SOURCE_UNAVAILABLE',
-        'MISSION_REWARD_PAUSE feature flag is missing for deployment environment',
-        { deploymentEnvironment: input.deploymentEnvironment },
-      );
-    }
-
-    if (row.enabled === true) {
-      return {
-        code: 'FEATURE_FLAG',
-        eligible: false,
-        reasonCode: 'FEATURE_FLAG_DISABLED',
-        safeDetails: {
-          flagKey: 'MISSION_REWARD_PAUSE',
-          enabled: true,
-          monetary: true,
-          deploymentEnvironment: input.deploymentEnvironment,
-        },
-      };
-    }
-
-    return {
-      code: 'FEATURE_FLAG',
-      eligible: true,
-      reasonCode: 'FEATURE_FLAG_OK',
-      safeDetails: {
-        flagKey: 'MISSION_REWARD_PAUSE',
-        enabled: false,
-        monetary: true,
-        deploymentEnvironment: input.deploymentEnvironment,
-      },
-    };
-  }
-
-  const result = await client.query<{ enabled: boolean }>(
-    `SELECT enabled
-     FROM feature_flags
-     WHERE flag_key = 'WITHDRAWAL_REQUESTS_PAUSE'
-       AND environment = $1::environment_name`,
-    [input.deploymentEnvironment],
-  );
-  const row = result.rows[0];
-  if (row === undefined) {
+  const binding = resolveEligibilityFeatureFlagBinding(input.actionType);
+  if (binding.kind === 'unsupported') {
     throw new FraudDomainError(
       'ELIGIBILITY_GATE_SOURCE_UNAVAILABLE',
-      'WITHDRAWAL_REQUESTS_PAUSE feature flag is missing for deployment environment',
-      { deploymentEnvironment: input.deploymentEnvironment },
+      `eligibility action ${input.actionType} has no approved FEATURE_FLAG collector binding`,
+      {
+        actionType: input.actionType,
+        gateCode: 'FEATURE_FLAG',
+        reasonCode: 'FEATURE_FLAG_BINDING_UNSUPPORTED',
+      },
     );
   }
-
-  if (row.enabled === true) {
-    return {
-      code: 'FEATURE_FLAG',
-      eligible: false,
-      reasonCode: 'FEATURE_FLAG_DISABLED',
-      safeDetails: {
-        flagKey: 'WITHDRAWAL_REQUESTS_PAUSE',
-        enabled: true,
-        deploymentEnvironment: input.deploymentEnvironment,
-      },
-    };
+  if (binding.kind === 'mission_reward_pause') {
+    return collectMissionRewardPauseFlag(client, input);
   }
-
-  return {
-    code: 'FEATURE_FLAG',
-    eligible: true,
-    reasonCode: 'FEATURE_FLAG_OK',
-    safeDetails: {
-      flagKey: 'WITHDRAWAL_REQUESTS_PAUSE',
-      enabled: false,
-      deploymentEnvironment: input.deploymentEnvironment,
-    },
-  };
+  return collectPauseFlag(client, {
+    flagKey: binding.flagKey,
+    deploymentEnvironment: input.deploymentEnvironment,
+  });
 }
 
 async function collectMembershipGate(
@@ -563,7 +577,12 @@ export async function evaluateAndPersistEligibility(
 
     switch (gateCode) {
       case 'ACCOUNT_STATE': {
-        gateFacts.push(await collectAccountStateGate(client, input.userId));
+        gateFacts.push(
+          await collectAccountStateGate(client, {
+            userId: input.userId,
+            actionType: input.actionType,
+          }),
+        );
         break;
       }
       case 'FEATURE_FLAG': {

@@ -154,6 +154,7 @@ Canonical IDs: `P20-GAP-001` .. contiguous.
 - **status:** OPEN / READY_FOR_OWNER_POLICY_APPROVAL
 - **step2 note:** Disposable fail-closed + ACTIVE fixture proofs exist; TEST fixture numbers are REFERENCE ONLY — NOT APPROVED FOR STAGING.
 - **step4a note:** Owner decision matrix + proposed Closed-Beta profiles published; **not activated**. See `docs/PHASE_20_STEP4_OWNER_POLICY_DECISION.md`.
+- **step4a.1 note:** Source ACCOUNT_STATE action-aware + FEATURE_FLAG binding corrections completed; proposed values still await Owner approval (not activated).
 
 ### P20-GAP-010 — Provider-limit Admin UI ceremony incomplete
 

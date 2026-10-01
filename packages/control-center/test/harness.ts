@@ -327,16 +327,16 @@ export async function seedPhase14WithdrawalPoliciesForPhase8(pool: Pool): Promis
               riskAllowedActions: ['ALLOW', 'EXTEND_PENDING', 'MANUAL_REVIEW', 'HELD'],
             },
             AD_SESSION_START: {
-              requiredGates: ['ACCOUNT_STATE', 'FEATURE_FLAG'],
-              precedence: ['ACCOUNT_STATE', 'FEATURE_FLAG'],
+              requiredGates: ['ACCOUNT_STATE'],
+              precedence: ['ACCOUNT_STATE'],
             },
             MISSION_CLAIM: {
               requiredGates: ['ACCOUNT_STATE', 'FEATURE_FLAG'],
               precedence: ['ACCOUNT_STATE', 'FEATURE_FLAG'],
             },
             TASK_CLAIM: {
-              requiredGates: ['ACCOUNT_STATE', 'FEATURE_FLAG'],
-              precedence: ['ACCOUNT_STATE', 'FEATURE_FLAG'],
+              requiredGates: ['ACCOUNT_STATE'],
+              precedence: ['ACCOUNT_STATE'],
             },
           },
         }),

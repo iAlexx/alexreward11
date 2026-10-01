@@ -1,7 +1,7 @@
 # Phase 20 Step 4A — Owner Fraud / Trust / Eligibility Policy Decision Pack
 
 **PHASE20_GATE:** HOLD  
-**Step:** 4A — OWNER DECISION PACK ONLY (no activation)  
+**Step:** 4A / 4A.1 — OWNER DECISION PACK (source semantics corrected; no activation)  
 **Branch:** `phase20-closed-beta`  
 **Related gap:** `P20-GAP-009` status remains `OPEN / READY_FOR_OWNER_POLICY_APPROVAL`  
 **Companion (historical Step 2):** `docs/PHASE_20_FRAUD_ELIGIBILITY_POLICY_PROPOSAL.md`
@@ -76,14 +76,14 @@ Step 4A proposes configuring the first four only (matches TEST fixture coverage)
 
 ### 2.5 Eligibility — gates
 
-| Gate             | Collector behavior (authoritative)                                                                                                     |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `ACCOUNT_STATE`  | ACTIVE user; fails if status≠ACTIVE, withdrawal_status=BLOCKED, or withdrawal cooldown active; RESTRICTED still eligible               |
-| `RISK_POLICY`    | runs evaluateAndPersistRisk; eligible iff configuredAction ∈ `riskAllowedActions`                                                      |
-| `FEATURE_FLAG`   | `MISSION_CLAIM` → `MISSION_REWARD_PAUSE`; **all other configured actions currently → `WITHDRAWAL_REQUESTS_PAUSE`** (source V1 binding) |
-| `MEMBERSHIP`     | mission-required plan + EXCLUSIVE_MISSION_ACCESS entitlement                                                                           |
-| `COUNTRY_POLICY` | not-required if mission countryGroup null; else fail-closed (no country collector)                                                     |
-| `PROVIDER_LIMIT` | unimplemented → fail-closed if required                                                                                                |
+| Gate             | Collector behavior (authoritative)                                                                                                                                                                         |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ACCOUNT_STATE`  | **4A.1 action-aware:** all actions require status=ACTIVE; withdrawal_status/cooldown apply **only** to WITHDRAWAL_REQUEST; RESTRICTED still eligible for withdrawals                                       |
+| `RISK_POLICY`    | runs evaluateAndPersistRisk; eligible iff configuredAction ∈ `riskAllowedActions`                                                                                                                          |
+| `FEATURE_FLAG`   | **4A.1 explicit bindings:** WITHDRAWAL→`WITHDRAWAL_REQUESTS_PAUSE`; MISSION→`MISSION_REWARD_PAUSE`; REFERRAL→`REFERRAL_REWARD_PAUSE`; AD/TASK/MEMBERSHIP unsupported (fail-closed; no withdrawal fallback) |
+| `MEMBERSHIP`     | mission-required plan + EXCLUSIVE_MISSION_ACCESS entitlement                                                                                                                                               |
+| `COUNTRY_POLICY` | not-required if mission countryGroup null; else fail-closed (no country collector)                                                                                                                         |
+| `PROVIDER_LIMIT` | unimplemented → fail-closed if required                                                                                                                                                                    |
 
 ---
 
@@ -120,7 +120,9 @@ WITHDRAWAL_REQUEST:
   requiredGates: [ACCOUNT_STATE, RISK_POLICY, FEATURE_FLAG]
   precedence: [RISK_POLICY, ACCOUNT_STATE, FEATURE_FLAG]
   riskAllowedActions: [ALLOW, EXTEND_PENDING, MANUAL_REVIEW, HELD]
-AD_SESSION_START / MISSION_CLAIM / TASK_CLAIM:
+AD_SESSION_START / TASK_CLAIM (harness after 4A.1):
+  requiredGates: [ACCOUNT_STATE]
+MISSION_CLAIM:
   requiredGates: [ACCOUNT_STATE, FEATURE_FLAG]
   precedence: [ACCOUNT_STATE, FEATURE_FLAG]
 ```
@@ -160,9 +162,9 @@ Legend: **TEST REFERENCE** = harness only. **PROPOSED** = Closed-Beta candidate 
 | Eligibility | `WITHDRAWAL_REQUEST.requiredGates`           | gate allowlist                 | ACCOUNT_STATE, RISK_POLICY, FEATURE_FLAG | **PROPOSED same**                                                   | pause + risk + account must pass        | skip risk/pause                  | over-block (intended while frozen)                | High if later unpaused      | High                        | SUPERSEDE policy  | YES                     |
 | Eligibility | `WITHDRAWAL_REQUEST.precedence`              | permutation of required        | RISK, ACCOUNT, FLAG                      | **PROPOSED same**                                                   | primary blocked reason order            | wrong audit reason               | same                                              | Low                         | Med                         | SUPERSEDE         | YES                     |
 | Eligibility | `WITHDRAWAL_REQUEST.riskAllowedActions`      | subset of risk actions         | includes HELD                            | **PROPOSED ALLOW, EXTEND_PENDING, MANUAL_REVIEW** (exclude HELD)    | HELD cannot request withdraw            | HELD can withdraw (TEST)         | over-block withdraw                               | High if money on            | High                        | SUPERSEDE         | YES                     |
-| Eligibility | `AD_SESSION_START.requiredGates`             | gate allowlist                 | ACCOUNT_STATE, FEATURE_FLAG              | **PROPOSED ACCOUNT_STATE, RISK_POLICY** (no FEATURE_FLAG)           | see §5.1 FEATURE_FLAG binding           | no risk on ads                   | over-block ads                                    | Low while BLOCKED           | Med                         | SUPERSEDE         | YES                     |
+| Eligibility | `AD_SESSION_START.requiredGates`             | gate allowlist                 | ACCOUNT_STATE (, FEATURE_FLAG invalid)   | **PROPOSED ACCOUNT_STATE, RISK_POLICY** (FEATURE_FLAG unsupported)  | Earn observation under risk             | no risk on ads                   | over-block ads                                    | Low while BLOCKED           | Med                         | SUPERSEDE         | YES                     |
 | Eligibility | `AD_SESSION_START.riskAllowedActions`        | required with RISK             | n/a in TEST                              | **PROPOSED ALLOW, EXTEND_PENDING, MANUAL_REVIEW**                   | HELD/CRITICAL labels block ad start     | HELD watches ads                 | false+ block Earn                                 | Low while BLOCKED           | Med                         | SUPERSEDE         | YES                     |
-| Eligibility | `MISSION_CLAIM` / `TASK_CLAIM`               | gates                          | ACCOUNT_STATE, FEATURE_FLAG              | **PROPOSED keep TEST shape** but **do not activate missions in 4A** | ready for later content step            | skip account/pause               | block claims                                      | Med when content live       | Med                         | SUPERSEDE         | YES                     |
+| Eligibility | `MISSION_CLAIM` / `TASK_CLAIM`               | gates                          | historically FEATURE_FLAG on both        | **PROPOSED MISSION=ACCOUNT_STATE+FEATURE_FLAG; TASK=ACCOUNT_STATE** | mission pause meaningful; task no flag  | skip account checks              | FEATURE_FLAG on TASK fails closed                 | Med when content live       | Med                         | SUPERSEDE         | YES                     |
 | Eligibility | `REFERRAL_ACTIVATION` / `MEMBERSHIP_CLAIM`   | optional actions               | unset                                    | **PROPOSED omit**                                                   | fail-closed if called without config    | accidental open                  | intentional omit                                  | Low                         | Low                         | add later         | YES to add              |
 
 ---
@@ -216,7 +218,7 @@ All values below are **PROPOSED — requires Owner approval**. Not approved. Not
 
 **Money authority change:** NO.
 
-### 5.3 Eligibility — PROPOSED BETA PROFILE
+### 5.3 Eligibility — PROPOSED BETA PROFILE (reassessed after 4A.1)
 
 ```json
 {
@@ -236,20 +238,34 @@ All values below are **PROPOSED — requires Owner approval**. Not approved. Not
       "precedence": ["ACCOUNT_STATE", "FEATURE_FLAG"]
     },
     "TASK_CLAIM": {
-      "requiredGates": ["ACCOUNT_STATE", "FEATURE_FLAG"],
-      "precedence": ["ACCOUNT_STATE", "FEATURE_FLAG"]
+      "requiredGates": ["ACCOUNT_STATE"],
+      "precedence": ["ACCOUNT_STATE"]
     }
   }
 }
 ```
 
-#### 5.3.1 FEATURE_FLAG binding caveat (must read)
+#### 5.3.1 FEATURE_FLAG binding (corrected source — 4A.1)
 
-For non-`MISSION_CLAIM` actions, source currently evaluates `WITHDRAWAL_REQUESTS_PAUSE`. If that pause flag is **enabled** (expected under payout freeze), requiring `FEATURE_FLAG` on `AD_SESSION_START` would make **every ad session ineligible** even though AdsGram observation is desired while money is BLOCKED.
+| Action                | Approved FEATURE_FLAG binding                                           |
+| --------------------- | ----------------------------------------------------------------------- |
+| `WITHDRAWAL_REQUEST`  | `WITHDRAWAL_REQUESTS_PAUSE`                                             |
+| `MISSION_CLAIM`       | `MISSION_REWARD_PAUSE` (monetary missions; non-monetary → not required) |
+| `REFERRAL_ACTIVATION` | `REFERRAL_REWARD_PAUSE`                                                 |
+| `AD_SESSION_START`    | **unsupported** (fail-closed if policy requires FEATURE_FLAG)           |
+| `TASK_CLAIM`          | **unsupported** (fail-closed if policy requires FEATURE_FLAG)           |
+| `MEMBERSHIP_CLAIM`    | **unsupported**                                                         |
 
-Therefore PROPOSED `AD_SESSION_START` **omits FEATURE_FLAG** and uses ACCOUNT_STATE + RISK_POLICY instead. This does **not** enable monetary issuance; AdsGram production monetary remains BLOCKED by provider gates.
+Omitting FEATURE_FLAG from AD_SESSION_START / TASK_CLAIM is **correct semantics** after 4A.1, not a workaround for a withdrawal-pause bug. No silent fallback to `WITHDRAWAL_REQUESTS_PAUSE`.
 
-#### 5.3.2 Withdrawal safety
+#### 5.3.2 ACCOUNT_STATE (corrected source — 4A.1)
+
+- All actions: `users.status === ACTIVE`.
+- `WITHDRAWAL_REQUEST` only: also refuse `withdrawal_status=BLOCKED` and active `withdrawal_cooldown_until`.
+- Wallet-change cooldown does **not** refuse AD_SESSION_START / MISSION / TASK / REFERRAL / MEMBERSHIP via ACCOUNT_STATE.
+- Withdrawal Engine still enforces wallet/cooldown independently for withdrawals.
+
+#### 5.3.3 Withdrawal safety
 
 Proposed withdrawal eligibility still requires FEATURE_FLAG (`WITHDRAWAL_REQUESTS_PAUSE`). With pause enabled, withdrawals stay ineligible. Proposal does **not**:
 
@@ -265,15 +281,16 @@ Proposed withdrawal eligibility still requires FEATURE_FLAG (`WITHDRAWAL_REQUEST
 
 Assumes PROPOSED profiles; Trust not used as eligibility gate.
 
-| Scenario                                                    | Risk (typical)                                                | Trust state                                                                                                              | Eligibility AD_SESSION_START                                        | Eligibility WITHDRAWAL_REQUEST                        |
-| ----------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------- | ----------------------------------------------------- |
-| Brand-new account + new wallet, no flags                    | score 0 → LOW → MANUAL_REVIEW → allowed by riskAllowedActions | score 0 → **NEW** (or BASIC if age/wallet ≥1 day and both satisfy → 80 → TRUSTED only if both age signals met: 40+40=80) | ELIGIBLE if ACTIVE account                                          | INELIGIBLE if pause enabled (FEATURE_FLAG) — expected |
-| Established account + verified primary wallet ≥1d, no fraud | LOW / MANUAL_REVIEW                                           | often BASIC or higher from age+wallet; ad/payout history still unmet while frozen                                        | ELIGIBLE                                                            | blocked by pause / risk if elevated                   |
-| Shared payout wallet signal active (+35)                    | likely MEDIUM or HIGH depending on stack                      | unchanged by risk                                                                                                        | may become INELIGIBLE_RISK_POLICY if action HELD/WITHDRAWAL_BLOCKED | blocked                                               |
-| OPEN CRITICAL fraud flag (+60)                              | HIGH or CRITICAL                                              | n/a                                                                                                                      | blocked if action not in allowlist                                  | blocked                                               |
-| Account withdrawal_status BLOCKED                           | n/a for risk                                                  | n/a                                                                                                                      | INELIGIBLE_ACCOUNT_STATE                                            | INELIGIBLE_ACCOUNT_STATE                              |
+| Scenario                                                    | Risk (typical)                                                | Trust state                                                                       | Eligibility AD_SESSION_START                                        | Eligibility WITHDRAWAL_REQUEST                        |
+| ----------------------------------------------------------- | ------------------------------------------------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------- | ----------------------------------------------------- |
+| Brand-new account + **first** verified wallet (no cooldown) | score 0 → LOW → MANUAL_REVIEW → allowed by riskAllowedActions | often NEW or BASIC/TRUSTED from age+wallet weights                                | AD_SESSION_START **ELIGIBLE** if ACTIVE + risk allowlisted          | INELIGIBLE if pause enabled (FEATURE_FLAG) — expected |
+| ACTIVE user after **primary wallet change** (24h cooldown)  | unchanged                                                     | unchanged                                                                         | AD ACCOUNT_STATE **OK**; session may proceed to risk                | INELIGIBLE_ACCOUNT_STATE (cooldown)                   |
+| Established account + verified primary wallet ≥1d, no fraud | LOW / MANUAL_REVIEW                                           | often BASIC or higher from age+wallet; ad/payout history still unmet while frozen | ELIGIBLE                                                            | blocked by pause / risk if elevated                   |
+| Shared payout wallet signal active (+35)                    | likely MEDIUM or HIGH depending on stack                      | unchanged by risk                                                                 | may become INELIGIBLE_RISK_POLICY if action HELD/WITHDRAWAL_BLOCKED | blocked                                               |
+| OPEN CRITICAL fraud flag alone (+60)                        | **HIGH / HELD** (not CRITICAL; see §12)                       | n/a                                                                               | **BLOCK** under proposed allowlist                                  | **BLOCK**                                             |
+| Account withdrawal_status BLOCKED                           | n/a for risk                                                  | n/a                                                                               | AD ACCOUNT_STATE **OK** (withdrawal-scoped)                         | INELIGIBLE_ACCOUNT_STATE                              |
 
-**Brand-new tester usability:** Earn observation remains usable under PROPOSED AD_SESSION_START (no FEATURE_FLAG pause coupling). Trust NEW is expected and **non-blocking**. Withdrawals remain frozen.
+**Brand-new tester usability:** Earn observation remains usable under PROPOSED AD_SESSION_START (ACCOUNT_STATE + RISK only; FEATURE_FLAG unsupported for ads). Primary **wallet change** starts a 24h **withdrawal** cooldown — that blocks WITHDRAWAL_REQUEST via ACCOUNT_STATE, **not** AD_SESSION_START. Trust NEW is **non-blocking**. Withdrawals remain frozen by pause + engine gates.
 
 ---
 
@@ -331,14 +348,14 @@ OWNER_DECISION_06_WITHDRAWAL_ELIGIBILITY=
   risk: including HELD (TEST) would allow held users to request withdraw when pause later lifts
 
 OWNER_DECISION_07_AD_SESSION_ELIGIBILITY=
-  recommended: ACCOUNT_STATE+RISK_POLICY; omit FEATURE_FLAG (pause binding caveat)
+  recommended: ACCOUNT_STATE+RISK_POLICY; omit FEATURE_FLAG (unsupported binding — correct, not a workaround)
   effect: allow controlled Earn observation while payouts paused; risk can still block
-  risk: requiring FEATURE_FLAG today couples ads to WITHDRAWAL_REQUESTS_PAUSE and blocks observation
+  risk: inventing an ad pause flag without Owner/spec approval would expand kill-switch surface
 
 OWNER_DECISION_08_MISSION_TASK_ELIGIBILITY=
-  recommended: keep TEST ACCOUNT_STATE+FEATURE_FLAG shapes; do not activate content in 4A
-  effect: policy ready for later P20-GAP-017 content step
-  risk: activating without content/policy ceremony creates empty or unsafe claim paths
+  recommended: MISSION_CLAIM=ACCOUNT_STATE+FEATURE_FLAG; TASK_CLAIM=ACCOUNT_STATE only; do not activate content in 4A
+  effect: mission pause remains meaningful; task has no approved FEATURE_FLAG binding yet
+  risk: requiring FEATURE_FLAG on TASK_CLAIM fails closed; activating without content ceremony is unsafe
 ```
 
 ---
@@ -359,3 +376,25 @@ OWNER_DECISION_08_MISSION_TASK_ELIGIBILITY=
 - `packages/fraud/src/eligibility-policy.ts`, `eligibility-evaluator.ts`, `evaluate-and-persist-eligibility.ts`
 - `packages/fraud/test/harness.ts` (TEST REFERENCE only)
 - `docs/PHASE_20_GAP_REGISTER.md` → P20-GAP-009
+
+---
+
+## 12. SINGLE-SIGNAL RISK OUTCOME MATRIX (proposed weights × thresholds 20/50/75)
+
+Assumptions: only the listed signal is active; other weights contribute 0.  
+`score = weight` (capped 100). Tier: ≤20 LOW; ≤50 MEDIUM; ≤75 HIGH; else CRITICAL.  
+Proposed actions: LOW/MEDIUM=`MANUAL_REVIEW`; HIGH=`HELD`; CRITICAL=`WITHDRAWAL_BLOCKED`.  
+Proposed eligibility `riskAllowedActions` for WITHDRAWAL_REQUEST and AD_SESSION_START:  
+`ALLOW`, `EXTEND_PENDING`, `MANUAL_REVIEW` (**HELD not allowed**).
+
+| Signal                   | Weight | Score | Tier     | Configured action | AD_SESSION_START (proposed) | WITHDRAWAL_REQUEST (proposed) | Surprise?                                                            |
+| ------------------------ | -----: | ----: | -------- | ----------------- | --------------------------- | ----------------------------- | -------------------------------------------------------------------- |
+| OPEN_HIGH_FRAUD_FLAG     |     40 |    40 | MEDIUM   | MANUAL_REVIEW     | ALLOW                       | ALLOW                         | No                                                                   |
+| OPEN_CRITICAL_FRAUD_FLAG |     60 |    60 | **HIGH** | **HELD**          | **BLOCK**                   | **BLOCK**                     | **Yes — weight 60 is HIGH, not CRITICAL (CRITICAL needs score >75)** |
+| CONFIRMED_FRAUD_FLAG     |     50 |    50 | MEDIUM   | MANUAL_REVIEW     | ALLOW                       | ALLOW                         | Borderline: exactly mediumMax stays MEDIUM                           |
+| SHARED_PAYOUT_WALLET     |     35 |    35 | MEDIUM   | MANUAL_REVIEW     | ALLOW                       | ALLOW                         | No                                                                   |
+| SHARED_DEVICE_SIGNAL     |     25 |    25 | MEDIUM   | MANUAL_REVIEW     | ALLOW                       | ALLOW                         | No                                                                   |
+| SHARED_NETWORK_SIGNAL    |     20 |    20 | LOW      | MANUAL_REVIEW     | ALLOW                       | ALLOW                         | No                                                                   |
+| NETWORK_COUNTRY_CHANGED  |     15 |    15 | LOW      | MANUAL_REVIEW     | ALLOW                       | ALLOW                         | No                                                                   |
+
+**Owner note:** A lone OPEN_CRITICAL flag (weight 60) yields **HELD**, which the proposed eligibility allowlist **blocks**. To reach CRITICAL/`WITHDRAWAL_BLOCKED` from a single signal, weight must be **≥76** under these thresholds — or combine signals / raise weight / change thresholds. Do not silently change proposed weights in this step.

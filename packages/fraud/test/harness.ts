@@ -172,17 +172,19 @@ export const TEST_ELIGIBILITY_POLICY_CONFIG = {
       precedence: ['RISK_POLICY', 'ACCOUNT_STATE', 'FEATURE_FLAG'],
       riskAllowedActions: ['ALLOW', 'EXTEND_PENDING', 'MANUAL_REVIEW', 'HELD'],
     },
+    // AD_SESSION_START / TASK_CLAIM must not require FEATURE_FLAG until a dedicated
+    // approved pause flag exists (no silent WITHDRAWAL_REQUESTS_PAUSE fallback).
     AD_SESSION_START: {
-      requiredGates: ['ACCOUNT_STATE', 'FEATURE_FLAG'],
-      precedence: ['ACCOUNT_STATE', 'FEATURE_FLAG'],
+      requiredGates: ['ACCOUNT_STATE'],
+      precedence: ['ACCOUNT_STATE'],
     },
     MISSION_CLAIM: {
       requiredGates: ['ACCOUNT_STATE', 'FEATURE_FLAG'],
       precedence: ['ACCOUNT_STATE', 'FEATURE_FLAG'],
     },
     TASK_CLAIM: {
-      requiredGates: ['ACCOUNT_STATE', 'FEATURE_FLAG'],
-      precedence: ['ACCOUNT_STATE', 'FEATURE_FLAG'],
+      requiredGates: ['ACCOUNT_STATE'],
+      precedence: ['ACCOUNT_STATE'],
     },
   },
 } as const;

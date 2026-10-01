@@ -158,3 +158,11 @@ export {
   type EvaluateAndPersistEligibilityInput,
   type EvaluateAndPersistEligibilityResult,
 } from './evaluate-and-persist-eligibility.js';
+export {
+  classifyAccountStateForAction,
+  resolveEligibilityFeatureFlagBinding,
+  type AccountStateClassification,
+  type AccountStateClass,
+  type AccountStateSnapshot,
+  type EligibilityFeatureFlagBinding,
+} from './eligibility-gate-semantics.js';

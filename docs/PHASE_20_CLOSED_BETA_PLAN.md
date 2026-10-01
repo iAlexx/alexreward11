@@ -243,6 +243,6 @@ Provider/no-fill/Earn observation validated with AdsGram monetary **BLOCKED**. R
 Harness: `pnpm phase20:step3` with `PHASE20_STEP3_REQUIRE_DB_GATES=1` + `PHASE20_DATABASE_URL`.
 Evidence: `docs/PHASE_20_STEP3_PROVIDER_NO_FILL_EVIDENCE.md`.
 
-## Step 4A notes
+## Step 4A / 4A.1 notes
 
-Owner decision pack for P20-GAP-009 published: `docs/PHASE_20_STEP4_OWNER_POLICY_DECISION.md`. **No policy activation.** Step 4 activation not started.
+Owner decision pack for P20-GAP-009 published: `docs/PHASE_20_STEP4_OWNER_POLICY_DECISION.md`. Step 4A.1 corrected ACCOUNT_STATE (withdrawal-scoped) and FEATURE_FLAG bindings (no withdrawal-pause fallback). **No policy activation.** Owner has not approved values. Step 4 activation not started.

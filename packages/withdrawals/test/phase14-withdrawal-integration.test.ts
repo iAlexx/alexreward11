@@ -392,16 +392,16 @@ describe.skipIf(phase7DatabaseUrl === '')('Phase 14 withdrawal risk/eligibility 
             riskAllowedActions: ['ALLOW'],
           },
           AD_SESSION_START: {
-            requiredGates: ['ACCOUNT_STATE', 'FEATURE_FLAG'],
-            precedence: ['ACCOUNT_STATE', 'FEATURE_FLAG'],
+            requiredGates: ['ACCOUNT_STATE'],
+            precedence: ['ACCOUNT_STATE'],
           },
           MISSION_CLAIM: {
             requiredGates: ['ACCOUNT_STATE', 'FEATURE_FLAG'],
             precedence: ['ACCOUNT_STATE', 'FEATURE_FLAG'],
           },
           TASK_CLAIM: {
-            requiredGates: ['ACCOUNT_STATE', 'FEATURE_FLAG'],
-            precedence: ['ACCOUNT_STATE', 'FEATURE_FLAG'],
+            requiredGates: ['ACCOUNT_STATE'],
+            precedence: ['ACCOUNT_STATE'],
           },
         },
       },

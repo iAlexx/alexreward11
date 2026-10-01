@@ -229,12 +229,12 @@ export const TEST_MISSION_CLAIM_ELIGIBILITY_POLICY = {
       precedence: ['ACCOUNT_STATE', 'FEATURE_FLAG'],
     },
     AD_SESSION_START: {
-      requiredGates: ['ACCOUNT_STATE', 'FEATURE_FLAG'],
-      precedence: ['ACCOUNT_STATE', 'FEATURE_FLAG'],
+      requiredGates: ['ACCOUNT_STATE'],
+      precedence: ['ACCOUNT_STATE'],
     },
     TASK_CLAIM: {
-      requiredGates: ['ACCOUNT_STATE', 'FEATURE_FLAG'],
-      precedence: ['ACCOUNT_STATE', 'FEATURE_FLAG'],
+      requiredGates: ['ACCOUNT_STATE'],
+      precedence: ['ACCOUNT_STATE'],
     },
   },
 } as const;
