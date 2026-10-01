@@ -1,6 +1,6 @@
-# Phase 20 — Closed Beta / Minimal Funds Plan (Step 1)
+# Phase 20 — Closed Beta / Minimal Funds Plan (Step 1–2)
 
-**PHASE20_STATUS:** `IN_PROGRESS` (Step 1 discovery)
+**PHASE20_STATUS:** `IN_PROGRESS` (Step 2 source/config readiness; HOLD)
 **PHASE20_GATE:** `HOLD`
 **PHASE20_ARCHIVE:** `NOT CREATED`
 **Phase 21:** `NOT STARTED`
@@ -40,18 +40,18 @@ Phase 20 remains isolated from Phase 21 Mainnet Micro-Launch.
 
 ## 2. Authority freeze (Step 1 baseline — do not change)
 
-| Flag / posture | Value |
-| --- | --- |
-| MAINNET_ALLOWED | false |
-| PRODUCTION_MONETARY_ALLOWED | false |
-| PAYOUT_RESUME_AUTHORIZED | false |
-| AUTO_UNPAUSE | false |
-| AUTO_RESEND | false |
-| ADSGRAM_PRODUCTION_MONETARY | BLOCKED |
-| PHASE20_REAL_MONEY_EXECUTION_AUTHORIZED | false |
-| STAGING PAYOUT_DISPATCH_PAUSE | true (unchanged; do not unpause in Step 1) |
-| Signer | LOCKED (do not unlock in Step 1) |
-| WITHDRAWAL_REAL_CHAIN_ENABLED | false (do not enable in Step 1) |
+| Flag / posture                          | Value                                      |
+| --------------------------------------- | ------------------------------------------ |
+| MAINNET_ALLOWED                         | false                                      |
+| PRODUCTION_MONETARY_ALLOWED             | false                                      |
+| PAYOUT_RESUME_AUTHORIZED                | false                                      |
+| AUTO_UNPAUSE                            | false                                      |
+| AUTO_RESEND                             | false                                      |
+| ADSGRAM_PRODUCTION_MONETARY             | BLOCKED                                    |
+| PHASE20_REAL_MONEY_EXECUTION_AUTHORIZED | false                                      |
+| STAGING PAYOUT_DISPATCH_PAUSE           | true (unchanged; do not unpause in Step 1) |
+| Signer                                  | LOCKED (do not unlock in Step 1)           |
+| WITHDRAWAL_REAL_CHAIN_ENABLED           | false (do not enable in Step 1)            |
 
 The Railway environment may be named `production`, but it remains operationally treated as
 **staging** until separately authorized.
@@ -97,16 +97,16 @@ The Railway environment may be named `production`, but it remains operationally 
 
 ## 6. Phase 19 residual findings (carry-forward — not discarded)
 
-| ID | Severity | Closed Beta note |
-| --- | --- | --- |
-| P19-SEC-004 | LOW | Founder claim blocked-user oracle — observe in controlled tests |
-| P19-SEC-005 | LOW | Membership expires_at filter — observe |
-| P19-SEC-006 | INFO | Entitlements exposure by design — document |
-| P19-SEC-007 | MEDIUM | Founder grant idempotency scoping — test carefully |
-| P19-SEC-008 | INFO | Telegram CC Founder ceremony differs from web |
+| ID              | Severity   | Closed Beta note                                                                             |
+| --------------- | ---------- | -------------------------------------------------------------------------------------------- |
+| P19-SEC-004     | LOW        | Founder claim blocked-user oracle — observe in controlled tests                              |
+| P19-SEC-005     | LOW        | Membership expires_at filter — observe                                                       |
+| P19-SEC-006     | INFO       | Entitlements exposure by design — document                                                   |
+| P19-SEC-007     | MEDIUM     | Founder grant idempotency scoping — test carefully                                           |
+| P19-SEC-008     | INFO       | Telegram CC Founder ceremony differs from web                                                |
 | **P19-SEC-010** | **MEDIUM** | AdsGram duplicate when `provider_event_id` NULL — **reconsider before any production money** |
-| **P19-SEC-011** | **LOW** | placement/blockId correlation — **reconsider before production money** |
-| **P19-SEC-012** | **LOW** | REQUEST hard ceiling vs inert `provider_requests` — **reconsider before production money** |
+| **P19-SEC-011** | **LOW**    | placement/blockId correlation — **reconsider before production money**                       |
+| **P19-SEC-012** | **LOW**    | REQUEST hard ceiling vs inert `provider_requests` — **reconsider before production money**   |
 
 See `docs/PHASE_20_GAP_REGISTER.md` for mapped gaps.
 
@@ -114,18 +114,18 @@ See `docs/PHASE_20_GAP_REGISTER.md` for mapped gaps.
 
 ## 7. Required validation categories (traceability)
 
-| # | Category | Primary companions |
-| --- | --- | --- |
-| 1 | Provider moderation / compliance | AdsGram status, clarifications, Admin monetary approval gate |
-| 2 | Reward economics | Reward Engine rules, margin refuse, budgets, exposure |
-| 3 | No-fill | Session lifecycle, Mini App Earn states |
-| 4 | UI / UX | Mini App flows readiness matrix |
-| 5 | Fraud / trust / eligibility | packages/fraud; client authority NONE |
-| 6 | Support | tickets; no balance editor |
-| 7 | Founder controlled | claim/grant/benefits; no security bypass |
-| 8 | Budget / exposure | limits, flags, kill switches |
-| 9 | Provider-limit staging changes | Admin ceremony + planned test procedure only in Step 1 |
-| 10 | Notifications / missions | missions READY/PARTIAL; notifications stub |
+| #   | Category                         | Primary companions                                           |
+| --- | -------------------------------- | ------------------------------------------------------------ |
+| 1   | Provider moderation / compliance | AdsGram status, clarifications, Admin monetary approval gate |
+| 2   | Reward economics                 | Reward Engine rules, margin refuse, budgets, exposure        |
+| 3   | No-fill                          | Session lifecycle, Mini App Earn states                      |
+| 4   | UI / UX                          | Mini App flows readiness matrix                              |
+| 5   | Fraud / trust / eligibility      | packages/fraud; client authority NONE                        |
+| 6   | Support                          | tickets; no balance editor                                   |
+| 7   | Founder controlled               | claim/grant/benefits; no security bypass                     |
+| 8   | Budget / exposure                | limits, flags, kill switches                                 |
+| 9   | Provider-limit staging changes   | Admin ceremony + planned test procedure only in Step 1       |
+| 10  | Notifications / missions         | missions READY/PARTIAL; notifications stub                   |
 
 ---
 
@@ -133,8 +133,8 @@ See `docs/PHASE_20_GAP_REGISTER.md` for mapped gaps.
 
 Derived from repository evidence (not started by this Step 1 commit):
 
-1. **Step 1 (this task):** readiness discovery / plan / matrix / gap register — **HOLD for review**
-2. **Step 2:** close Closed-Beta-blocking source/config gaps that do **not** require real money
+1. **Step 1:** readiness discovery / plan / matrix / gap register — complete / HOLD
+2. **Step 2 (this task):** close Closed-Beta-blocking source/config gaps that do **not** require real money — **HOLD for Owner decisions** (draft-only notifications proofs; fraud/eligibility proposals; controlled content proposals; no staging activation)
 3. **Step 3:** controlled provider session / no-fill / unavailable UX validation (AdsGram money still BLOCKED)
 4. **Step 4:** controlled fraud / trust / eligibility validation with Active policies as Owner-approved
 5. **Step 5:** controlled Founder / support / mission validation; notifications honesty (draft-only)
@@ -145,20 +145,21 @@ Derived from repository evidence (not started by this Step 1 commit):
 9. **Step 9:** observe / reconcile / document results
 10. **Step 10:** final Phase 20 acceptance + `PHASE_20_CLOSED_BETA` archive — then **STOP**
 
-Do **not** start Step 2 in this task.
+Step 2 remains HOLD: do not activate staging policies/content/send; Owner must approve proposals.
 
 ---
 
 ## 9. Stop / go gates
 
-| Gate | Rule |
-| --- | --- |
-| Step 1 exit | Plan + matrix + gap register committed; `PHASE20_GATE=HOLD`; independent review |
-| Closed Beta observation go | Residual Critical/High product blockers for observation = none; AdsGram money stays BLOCKED |
-| Real-money AdsGram go | Owner closes clarifications; P19-SEC-010/011/012 reconsidered/remediated; authenticity/correlation gates; monetary APPROVED ceremony; re-certify |
-| Minimal-funds payout go | Explicit Owner authorization + Jetton/providers/Hot Wallet + REAL chain + brief signer unlock + pause unpause ceremony + preflight READY |
-| Archive go | Required validation categories evidenced; no unauthorized money; Phase 21 not started |
-| Abort | Any Critical money leak, blind resend, pause bypass, signer isolation break, or Mainnet enablement without Owner |
+| Gate                       | Rule                                                                                                                                             |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Step 1 exit                | Plan + matrix + gap register committed; `PHASE20_GATE=HOLD`; independent review                                                                  |
+| Step 2 exit                | Disposable proofs + Owner proposals committed; gap 007/009/017 READY_FOR_OWNER_*; `PHASE20_GATE=HOLD`; no staging activation                     |
+| Closed Beta observation go | Residual Critical/High product blockers for observation = none; AdsGram money stays BLOCKED                                                      |
+| Real-money AdsGram go      | Owner closes clarifications; P19-SEC-010/011/012 reconsidered/remediated; authenticity/correlation gates; monetary APPROVED ceremony; re-certify |
+| Minimal-funds payout go    | Explicit Owner authorization + Jetton/providers/Hot Wallet + REAL chain + brief signer unlock + pause unpause ceremony + preflight READY         |
+| Archive go                 | Required validation categories evidenced; no unauthorized money; Phase 21 not started                                                            |
+| Abort                      | Any Critical money leak, blind resend, pause bypass, signer isolation break, or Mainnet enablement without Owner                                 |
 
 ---
 
@@ -204,14 +205,18 @@ API ceremony exists (`providers-admin` / `admin-limits`). Admin UI for limit cer
 
 - `docs/PHASE_20_READINESS_MATRIX.md`
 - `docs/PHASE_20_GAP_REGISTER.md`
+- `docs/PHASE_20_FRAUD_ELIGIBILITY_POLICY_PROPOSAL.md`
+- `docs/PHASE_20_CONTROLLED_CONTENT_PROPOSAL.md`
 - `docs/PHASE_19_SECURITY_FINDINGS.md` (residuals)
 - `docs/ADSGRAM_CLARIFICATION_REGISTER.md`
 - `docs/WITHDRAWALS.md` / `docs/OPERATIONS_RUNBOOK.md`
 
 ---
 
-## 14. Step 1 exit statement
+## 14. Step exit statements
 
 `PHASE 20 STEP 1 = DISCOVERY COMPLETE / HOLD FOR INDEPENDENT REVIEW`
+
+`PHASE 20 STEP 2 = SOURCE/CONFIG PROOFS + OWNER PROPOSALS / HOLD (NO STAGING ACTIVATION)`
 
 No Phase 20 archive. No Phase 21. No real-money execution authorized.

@@ -1,6 +1,7 @@
-# Phase 20 — Gap Register (Step 1)
+# Phase 20 — Gap Register (Step 1–2)
 
 **PHASE20_GATE:** HOLD
+**Step:** 2 (source/config readiness; Owner decisions still required)
 **Register scope:** Closed Beta readiness gaps + carried Phase 19 residuals
 **Rule:** Do not hide issues because they originated in an older phase.
 **Status values:** OPEN | DEFERRED | REMEDIATED | ACCEPTED_RESIDUAL (Owner only for Critical/High)
@@ -115,11 +116,12 @@ Canonical IDs: `P20-GAP-001` .. contiguous.
 - **evidence:** package "intentionally not implemented"; Admin "draft metadata only"; UnavailableShell
 - **impact:** Cannot validate real delivery/privacy targeting end-to-end
 - **prerequisite:** Owner scope decision: implement MVP vs accept draft-only honesty for Phase 20
-- **proposed remediation/test:** Either build minimal safe draft+no-send proof or defer send to later phase explicitly
+- **proposed remediation/test:** Step 2 added draft/no-send automated proofs; Owner must choose draft-only scope vs delivery MVP (see plan § notifications scope decision)
 - **blocks Closed Beta?** YES — until Owner explicitly scopes draft-only/no-send behavior as sufficient Phase 20 evidence
 - **blocks real-money beta?** NO
 - **blocks Phase 20 archive?** YES — until Owner scopes acceptance criteria
-- **status:** OPEN
+- **status:** OPEN / READY_FOR_OWNER_SCOPE_DECISION
+- **step2 note:** Draft-only / no-send unit+DB proofs exist; Owner must still accept draft-only scope for Phase 20 (no send engine).
 
 ### P20-GAP-008 — Activity surface PLACEHOLDER
 
@@ -143,11 +145,12 @@ Canonical IDs: `P20-GAP-001` .. contiguous.
 - **evidence:** engines fail-closed without ACTIVE rules; Phase 14 noted seeds Owner-required
 - **impact:** Controlled beta may refuse actions until policies seeded
 - **prerequisite:** Owner-approved policy rows for staging beta
-- **proposed remediation/test:** Seed + evaluateAndPersist scenarios
+- **proposed remediation/test:** Step 2 disposable fixtures + fail-closed proofs + `docs/PHASE_20_FRAUD_ELIGIBILITY_POLICY_PROPOSAL.md`; staging ACTIVE still Owner-gated
 - **blocks Closed Beta?** YES — blocks complete Phase 20 fraud/trust/eligibility validation until controlled ACTIVE policies exist
 - **blocks real-money beta?** YES — unsafe to pay without eligibility/fraud ACTIVE
 - **blocks Phase 20 archive?** YES — until fraud/eligibility category evidenced
-- **status:** OPEN
+- **status:** OPEN / READY_FOR_OWNER_POLICY_APPROVAL
+- **step2 note:** Disposable fail-closed + ACTIVE fixture proofs exist; TEST fixture numbers are REFERENCE ONLY — NOT APPROVED FOR STAGING. See `docs/PHASE_20_FRAUD_ELIGIBILITY_POLICY_PROPOSAL.md`.
 
 ### P20-GAP-010 — Provider-limit Admin UI ceremony incomplete
 
@@ -255,11 +258,12 @@ Canonical IDs: `P20-GAP-001` .. contiguous.
 - **evidence:** ENGINE_NOT_ENABLED empty states; refuse invented data
 - **impact:** Closed Beta UX incomplete until content/config present
 - **prerequisite:** Owner-published ACTIVE mission versions / referral config
-- **proposed remediation/test:** Publish controlled ACTIVE content; UX checklist
+- **proposed remediation/test:** Step 2 empty-list / authority proofs + `docs/PHASE_20_CONTROLLED_CONTENT_PROPOSAL.md`; no operational publish
 - **blocks Closed Beta?** YES — until ACTIVE mission/referral content exists for Spec category validation (or Owner documents deferral)
 - **blocks real-money beta?** NO
 - **blocks Phase 20 archive?** YES — until missions category evidenced OR Owner defers with documented scope
-- **status:** OPEN
+- **status:** OPEN / READY_FOR_OWNER_CONTENT_APPROVAL
+- **step2 note:** Empty mission list honesty + referral self-referral/ALREADY_ATTRIBUTED proofs exist; do not activate live content without Owner. See `docs/PHASE_20_CONTROLLED_CONTENT_PROPOSAL.md`.
 
 ### P20-GAP-018 — No second rewarded-ad provider
 
@@ -276,6 +280,15 @@ Canonical IDs: `P20-GAP-001` .. contiguous.
 - **status:** OPEN
 
 ---
+
+## Notifications scope decision (Owner — not chosen in Step 2)
+
+P20-GAP-007 remains OPEN until Owner selects one:
+
+1. **Phase 20 validates notification draft/no-send privacy behavior only** (automated proofs exist; no delivery MVP).
+2. **Build a real notification delivery MVP before Phase 20 archive** (new implementation work; out of Step 2).
+
+Cursor must not choose for the Owner.
 
 ## Blocking tallies (Step 1 interpretation)
 
@@ -307,7 +320,7 @@ Do not add inferred items that lack a canonical `P20-GAP-xxx` entry.
 
 ---
 
-## Non-goals for Step 1 remediations
+## Non-goals for Step 1–2 remediations
 
-Do not implement broad product features in Step 1. This register is discovery-only.
+Do not implement broad product features or activate staging policies/content in Step 2. Draft-only / disposable proofs + Owner proposals only.
 Integrity check: `pnpm phase20:gap-register:check`.
