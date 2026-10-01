@@ -168,7 +168,7 @@ async function collectAccountStateGate(
 async function collectPauseFlag(
   client: PoolClient,
   input: {
-    readonly flagKey: 'WITHDRAWAL_REQUESTS_PAUSE' | 'REFERRAL_REWARD_PAUSE';
+    readonly flagKey: 'WITHDRAWAL_REQUESTS_PAUSE';
     readonly deploymentEnvironment: DeploymentEnvironment;
   },
 ): Promise<EligibilityGateFact> {

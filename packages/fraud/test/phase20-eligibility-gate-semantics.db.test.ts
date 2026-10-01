@@ -266,4 +266,58 @@ describe.skipIf(dbUrl === '')('Phase 20 eligibility gate semantics (DB)', () => 
       await setFlag(pool, 'WITHDRAWAL_REQUESTS_PAUSE', false);
     }
   });
+
+  it(
+    'REFERRAL_ACTIVATION FEATURE_FLAG requirement fails closed (no REFERRAL_REWARD_PAUSE fallback)',
+    async () => {
+      const uid = await createTestUser(pool, String(Date.now() + 5));
+      await pool.query(
+        `UPDATE eligibility_policy_versions SET status = 'SUPERSEDED'::rule_version_status WHERE status = 'ACTIVE'`,
+      );
+      await insertEligibilityPolicy(pool, {
+        policyVersion: 101,
+        status: 'ACTIVE',
+        effectiveFrom: new Date('2020-01-01T00:00:00.000Z'),
+        policyConfig: {
+          actions: {
+            REFERRAL_ACTIVATION: {
+              requiredGates: ['ACCOUNT_STATE', 'FEATURE_FLAG'],
+              precedence: ['ACCOUNT_STATE', 'FEATURE_FLAG'],
+            },
+          },
+        },
+      });
+      // Ensure REFERRAL_REWARD_PAUSE exists and is disabled — must still fail closed (unsupported binding).
+      await setFlag(pool, 'REFERRAL_REWARD_PAUSE', false);
+      await setFlag(pool, 'WITHDRAWAL_REQUESTS_PAUSE', false);
+
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await expect(
+          evaluateAndPersistEligibility(client, {
+            userId: uid,
+            actionType: 'REFERRAL_ACTIVATION',
+            serverContext: { deploymentEnvironment: 'LOCAL' },
+          }),
+        ).rejects.toMatchObject({
+          code: 'ELIGIBILITY_GATE_SOURCE_UNAVAILABLE',
+        });
+        await client.query('ROLLBACK');
+      } finally {
+        client.release();
+      }
+
+      await pool.query(
+        `UPDATE eligibility_policy_versions SET status = 'SUPERSEDED'::rule_version_status WHERE status = 'ACTIVE'`,
+      );
+      await insertEligibilityPolicy(pool, {
+        policyVersion: 102,
+        status: 'ACTIVE',
+        effectiveFrom: new Date('2020-01-01T00:00:00.000Z'),
+        policyConfig: TEST_ELIGIBILITY_POLICY_CONFIG,
+      });
+    },
+    30_000,
+  );
 });

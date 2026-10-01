@@ -34,7 +34,7 @@ export interface AccountStateClassification {
 export type EligibilityFeatureFlagBinding =
   | {
       readonly kind: 'pause_flag';
-      readonly flagKey: 'WITHDRAWAL_REQUESTS_PAUSE' | 'REFERRAL_REWARD_PAUSE';
+      readonly flagKey: 'WITHDRAWAL_REQUESTS_PAUSE';
     }
   | { readonly kind: 'mission_reward_pause' }
   | { readonly kind: 'unsupported' };
@@ -126,10 +126,9 @@ export function resolveEligibilityFeatureFlagBinding(
       return { kind: 'pause_flag', flagKey: 'WITHDRAWAL_REQUESTS_PAUSE' };
     case 'MISSION_CLAIM':
       return { kind: 'mission_reward_pause' };
-    case 'REFERRAL_ACTIVATION':
-      return { kind: 'pause_flag', flagKey: 'REFERRAL_REWARD_PAUSE' };
     case 'AD_SESSION_START':
     case 'TASK_CLAIM':
+    case 'REFERRAL_ACTIVATION':
     case 'MEMBERSHIP_CLAIM':
       return { kind: 'unsupported' };
     default: {

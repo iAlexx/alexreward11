@@ -96,22 +96,25 @@ describe('eligibility FEATURE_FLAG action bindings', () => {
     });
   });
 
-  it('REFERRAL_ACTIVATION binds REFERRAL_REWARD_PAUSE', () => {
+  it('REFERRAL_ACTIVATION is unsupported (REFERRAL_REWARD_PAUSE is reward issuance, not activation)', () => {
     expect(resolveEligibilityFeatureFlagBinding('REFERRAL_ACTIVATION')).toEqual({
-      kind: 'pause_flag',
-      flagKey: 'REFERRAL_REWARD_PAUSE',
+      kind: 'unsupported',
     });
+    expect(JSON.stringify(resolveEligibilityFeatureFlagBinding('REFERRAL_ACTIVATION'))).not.toMatch(
+      /REFERRAL_REWARD_PAUSE|WITHDRAWAL_REQUESTS_PAUSE/,
+    );
   });
 
-  it('AD_SESSION_START / TASK_CLAIM / MEMBERSHIP_CLAIM are unsupported (no withdrawal fallback)', () => {
-    expect(resolveEligibilityFeatureFlagBinding('AD_SESSION_START')).toEqual({
-      kind: 'unsupported',
-    });
-    expect(resolveEligibilityFeatureFlagBinding('TASK_CLAIM')).toEqual({
-      kind: 'unsupported',
-    });
-    expect(resolveEligibilityFeatureFlagBinding('MEMBERSHIP_CLAIM')).toEqual({
-      kind: 'unsupported',
-    });
+  it('AD_SESSION_START / TASK_CLAIM / MEMBERSHIP_CLAIM / REFERRAL_ACTIVATION are unsupported (no unrelated pause fallback)', () => {
+    for (const actionType of [
+      'AD_SESSION_START',
+      'TASK_CLAIM',
+      'MEMBERSHIP_CLAIM',
+      'REFERRAL_ACTIVATION',
+    ] as const) {
+      expect(resolveEligibilityFeatureFlagBinding(actionType)).toEqual({
+        kind: 'unsupported',
+      });
+    }
   });
 });
