@@ -1,15 +1,22 @@
-# Phase 19 — Security Findings (Step 2C)
+# Phase 19 — Security Findings (ARCHIVED)
 
-**PHASE19_STATUS:** IN_PROGRESS
-**PHASE19_GATE:** HOLD
+**PHASE19_STATUS:** CLOSED / PASS / ARCHIVED
+**PHASE19_GATE:** PASS
+**PHASE19_ARCHIVE:** PASS
+**Canonical accepted source HEAD:** `b5110524f90f29dc2a9235aac91ee9de731a03c0`
+**Step 2C remediation HEAD:** `b5110524f90f29dc2a9235aac91ee9de731a03c0`
 **Step 2B remediation HEAD:** `6f3d20d37ad5e250374bd0837fd28ca8f9d5b4bf`
 **Step 2A remediation HEAD:** `1da5a6c5c9fb14beeb145daa5823517d778c48b8`
 **Step 1 discovery HEAD:** `616fe53dbc30494bac0f9d9ee538a2e84b6d8307`
 **Starting source HEAD:** `6c195dd826fcaa3eb720be2d6bcbb0c00e75c7af`
 **Canonical Phase 18 source (unchanged):** `654a7097456d7d18ad6e6a7072793ee6d353ca33`
 
-Step 2C patches residual `brace-expansion` High advisories (P19-SEC-023) that remained after Step 2B
-dependency patches. Cursor does **not** Owner-accept findings.
+**Wording:** `PHASE 19 SECURITY REVIEW = PASS / ARCHIVED`
+
+Final archive gate preserved residual OPEN Medium/Low/Info findings (004–008, 010–012) as
+accepted residual / non-Mainnet-blocking carry-forward backlog. This is **not** Owner risk
+acceptance of a Critical/High issue. Phase 20 has **not** started. Historical Step 1 / 2A / 2B /
+2C evidence below is retained.
 
 ---
 

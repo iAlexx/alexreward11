@@ -114,17 +114,30 @@ See `docs/OWNER_ADMIN_AUTH.md`, `docs/ADMIN_POLICY_CENTER.md`, ADR-023.
 
 ## Phase 19 — Pre-Mainnet security review
 
-Phase 19 is **IN_PROGRESS** (Step 2C). `PHASE19_GATE=HOLD` until independent review of remaining
-non-blocking Medium/Low/Info findings. Product + dependency Mainnet blockers
+Phase 19 is **CLOSED / PASS / ARCHIVED**. `PHASE19_GATE=PASS`. Archive slug
+`PHASE_19_SECURITY_REVIEW`. Canonical accepted source
+`b5110524f90f29dc2a9235aac91ee9de731a03c0`.
+
+`PHASE 19 SECURITY REVIEW = PASS / ARCHIVED`.
+
+OPEN Critical = 0. OPEN High = 0. Residual OPEN Medium/Low/Info findings
+(P19-SEC-004, 005, 006, 007, 008, 010, 011, 012) remain visible as accepted residual /
+non-Mainnet-blocking carry-forward backlog (not silently closed; not Owner acceptance of
+Critical/High). Product + dependency Mainnet blockers
 P19-SEC-001/009/014/016/017/018/019/020/021/022/023 are RESOLVED in source.
+
+Phase 20 has **not** started. Mainnet / production monetary / AdsGram monetary / payout resume
+remain unauthorized. This archive does **not** approve Mainnet or production monetary behavior.
 
 Authoritative review artifacts:
 
+- `docs/PHASE_19_ACCEPTANCE_REPORT.md`
+- `docs/PHASE_19_SECURITY_REVIEW_ACCEPTANCE.md` (same content alias)
 - `docs/PHASE_19_SECURITY_REVIEW_PLAN.md`
 - `docs/PHASE_19_SECURITY_FINDINGS.md`
 - `docs/PHASE_19_ATTACK_SURFACE.md`
 
-Verified-from-code statements for Phase 19 Step 2B (not aspirational):
+Verified-from-code statements for Phase 19 (not aspirational):
 
 - Founder claim **consume** stores hash only, is single-use under row lock, uses session `userId` authority, and issues zero ledger money.
 - Admin Founder **grant** requires CSRF + recent reauth + consumed confirmation with target binding; reassignment is unavailable.

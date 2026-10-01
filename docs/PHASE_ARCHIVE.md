@@ -62,4 +62,19 @@ Example (do **not** run during Step 3):
 pnpm archive:phase -- --phase 18 --slug OBSERVABILITY_DR --commit <accepted-sha> --report docs/PHASE_18_ACCEPTANCE_REPORT.md
 ```
 
-Phase 18 status: **CLOSED / PASS** — `PHASE18_GATE=PASS`, `PHASE18_ARCHIVE=PASS`. Canonical source `654a7097456d7d18ad6e6a7072793ee6d353ca33`. Phase 19 NOT STARTED. Archive acceptance does not authorize payout resume.
+Phase 18 status: **CLOSED / PASS** — `PHASE18_GATE=PASS`, `PHASE18_ARCHIVE=PASS`. Canonical source `654a7097456d7d18ad6e6a7072793ee6d353ca33`. Archive acceptance does not authorize payout resume.
+
+## Phase 19 archive slug (CLOSED / PASS / ARCHIVED)
+
+When Phase 19 is accepted after independent review of Step 2C, archive with:
+
+- phase: `19`
+- slug: `PHASE_19_SECURITY_REVIEW` (helper argument typically `SECURITY_REVIEW`)
+
+Example:
+
+```powershell
+pnpm archive:phase -- --phase 19 --slug SECURITY_REVIEW --commit <accepted-sha> --report docs/PHASE_19_ACCEPTANCE_REPORT.md
+```
+
+Phase 19 status: **CLOSED / PASS / ARCHIVED** — `PHASE19_GATE=PASS`, `PHASE19_ARCHIVE=PASS`. Canonical source `b5110524f90f29dc2a9235aac91ee9de731a03c0`. Phase 20 NOT STARTED. Archive acceptance does not authorize Mainnet, production monetary, AdsGram monetary, or payout resume.

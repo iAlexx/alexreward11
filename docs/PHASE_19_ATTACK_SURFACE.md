@@ -1,4 +1,12 @@
-# Phase 19 — Attack Surface Inventory (Step 2A)
+# Phase 19 — Attack Surface Inventory
+
+**PHASE19_STATUS:** CLOSED / PASS / ARCHIVED
+**PHASE19_GATE:** PASS
+**Canonical accepted source:** `b5110524f90f29dc2a9235aac91ee9de731a03c0`
+
+Historical Step 2A inventory retained below.
+
+---
 
 ## Primary HTTP surfaces
 
