@@ -53,6 +53,11 @@ function buildDbEnv() {
     PHASE16_MISSION_TESTS: '1',
     PHASE5_REWARD_TESTS: '1',
     PHASE19_FEATURE_FLAG_TESTS: '1',
+    PHASE19_CLAIM_CODE_TESTS: '1',
+    PHASE19_POLICY_CENTER_TESTS: '1',
+    PHASE19_PAYOUT_PAUSE_TESTS: '1',
+    PHASE7_WITHDRAWAL_TESTS: '1',
+    PHASE7_DATABASE_URL: normalized,
     OWNER_BOOTSTRAP_TESTS: '1',
     OWNER_ADMIN_AUTH_TESTS: '1',
     ALEX_OWNER_BOOTSTRAP_TEST_HOOKS: '1',
@@ -159,6 +164,8 @@ console.log('[phase19-security-review] harness');
 console.log('[phase19-security-review] no live AdsGram/Telegram/Railway/Mainnet/signer attacks');
 console.log(`[phase19-security-review] PHASE19_REQUIRE_DB_GATES=${requireDbGates ? '1' : '0'}`);
 
+run('phase19-findings-register', 'node', ['scripts/phase19-findings-register-check.mjs']);
+
 run('phase19-discovery-source', 'pnpm', [
   '--filter',
   '@alex-rewards/api',
@@ -257,6 +264,45 @@ const dbSuites = [
       'run',
       '--fileParallelism=false',
       'test/phase19-mission-revoke-issuance.db.test.ts',
+    ],
+  ],
+  [
+    'phase19-claim-code-confirmation-db',
+    'pnpm',
+    [
+      '--filter',
+      '@alex-rewards/api',
+      'exec',
+      'vitest',
+      'run',
+      '--fileParallelism=false',
+      'test/phase19-claim-code-confirmation.db.test.ts',
+    ],
+  ],
+  [
+    'phase19-policy-center-feature-flags-db',
+    'pnpm',
+    [
+      '--filter',
+      '@alex-rewards/api',
+      'exec',
+      'vitest',
+      'run',
+      '--fileParallelism=false',
+      'test/phase19-policy-center-feature-flags.db.test.ts',
+    ],
+  ],
+  [
+    'phase19-payout-pause-pipeline-db',
+    'pnpm',
+    [
+      '--filter',
+      '@alex-rewards/withdrawals',
+      'exec',
+      'vitest',
+      'run',
+      '--fileParallelism=false',
+      'test/phase19-payout-pause-pipeline.db.test.ts',
     ],
   ],
 ];

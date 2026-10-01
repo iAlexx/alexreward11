@@ -6,13 +6,13 @@
 | --- | --- | --- |
 | `POST /v1/membership/founder/claim` | AccessSessionGuard | Body claimCode only; session userId authority |
 | `POST /v1/admin/memberships/founder/grant` | AdminSessionGuard | CSRF + gate + confirmation |
-| `POST /v1/admin/memberships/claim-codes/issue` | AdminSessionGuard | CSRF + gate + **consumed confirmation** (P19-SEC-001 RESOLVED) |
-| `POST /v1/admin/policy/change` | AdminSessionGuard | FEATURE_FLAGS / PROVIDER_LIMITS / REWARD_RULES / BENEFIT_RULES / WITHDRAWAL_LIMITS → `applied=false` |
+| `POST /v1/admin/memberships/claim-codes/issue` | AdminSessionGuard | CSRF + gate + consumed confirmation (DB proofs Step 2B) |
+| `POST /v1/admin/policy/change` | AdminSessionGuard | FEATURE_FLAGS → applied=false (DB proof Step 2B) |
 | `POST /v1/admin/feature-flags` | AdminSessionGuard | Sole web FEATURE_FLAGS mutation authority |
-| `POST /v1/admin/review-queue/:id/actions` | AdminSessionGuard | ASSIGN/COMMENT/ESCALATE only; RESOLVE_AFTER_DOMAIN removed from public union |
+| `POST /v1/admin/review-queue/:id/actions` | AdminSessionGuard | ASSIGN/COMMENT/ESCALATE only |
 | `GET /webhooks/adsgram/reward` | Unauthenticated (provider design) | Uniform accepted; rewardCredited false |
 | `POST /v1/ads/*` | AccessSessionGuard | Client authority fields refused |
-| Mission claim `POST .../tasks/.../claim` | AccessSessionGuard | NEW claims refuse DRAFT/REVOKED versions; issuance also refuse DRAFT/REVOKED |
+| Mission claim `POST .../tasks/.../claim` | AccessSessionGuard | NEW claims refuse DRAFT/REVOKED; issuance refuse DRAFT/REVOKED |
 
 ## Domain packages
 
@@ -23,13 +23,14 @@
 - `packages/notifications` — stub / draft-only Admin
 - `packages/withdrawals` — pause flag fail-closed for STAGING/PRODUCTION when missing
 
-## Dependency attack surface (open)
+## Dependency attack surface (Step 2B)
 
-- Next.js 16.3.4 ImageResponse RCE (P19-SEC-019)
-- `@nestjs/platform-fastify` 12.0.1 middleware bypass (P19-SEC-020)
-- `@grpc/grpc-js` 1.14.4 Temporal path (P19-SEC-021)
-- `fast-uri` 4.1.3 via Fastify runtime (P19-SEC-022)
-- Fastify itself pinned to 5.12.2 (P19-SEC-018 RESOLVED)
+- Next.js **16.3.6** (P19-SEC-019 RESOLVED; no ImageResponse usage observed)
+- `@nestjs/platform-fastify` **12.0.3** (P19-SEC-020 RESOLVED; no MiddlewareConsumer observed)
+- `@grpc/grpc-js` **1.14.5** via Temporal (P19-SEC-021 RESOLVED; address-only Temporal connect)
+- `fast-uri` **4.1.4** runtime / **3.1.7** build-dev (P19-SEC-022 RESOLVED)
+- Fastify **5.12.2** (P19-SEC-018 RESOLVED)
+- Remaining audit High: `brace-expansion` (eslint build/dev + otel transitive nested-brace DoS path not used) — build/dev or unused path; not production-reachable Mainnet blockers
 
 ## Out of scope for Phase 19 live attack
 

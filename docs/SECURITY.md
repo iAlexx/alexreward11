@@ -114,9 +114,9 @@ See `docs/OWNER_ADMIN_AUTH.md`, `docs/ADMIN_POLICY_CENTER.md`, ADR-023.
 
 ## Phase 19 — Pre-Mainnet security review
 
-Phase 19 is **IN_PROGRESS** (Step 2A remediation). `PHASE19_GATE=HOLD` while Critical/High
-dependency findings remain OPEN (P19-SEC-019..022). Product Mainnet blockers from Step 1
-(P19-SEC-001/009/014/016/017/018) are RESOLVED in source.
+Phase 19 is **IN_PROGRESS** (Step 2B). `PHASE19_GATE=HOLD` until independent review of remaining
+non-blocking Medium/Low/Info findings and residual audit triage. Product + dependency Mainnet
+blockers P19-SEC-001/009/014/016/017/018/019/020/021/022 are RESOLVED in source.
 
 Authoritative review artifacts:
 
@@ -124,16 +124,16 @@ Authoritative review artifacts:
 - `docs/PHASE_19_SECURITY_FINDINGS.md`
 - `docs/PHASE_19_ATTACK_SURFACE.md`
 
-Verified-from-code statements for Phase 19 Step 2A (not aspirational):
+Verified-from-code statements for Phase 19 Step 2B (not aspirational):
 
 - Founder claim **consume** stores hash only, is single-use under row lock, uses session `userId` authority, and issues zero ledger money.
 - Admin Founder **grant** requires CSRF + recent reauth + consumed confirmation with target binding; reassignment is unavailable.
-- Admin claim-code **issue** requires CSRF + recent reauth + consumed confirmation (`memberships.founder_claim_code_issue`) with payload binding reason / normalized expiresAt / issuedForReference / reserveFounderNumber (`P19-SEC-001` RESOLVED).
+- Admin claim-code **issue** requires CSRF + recent reauth + consumed confirmation (`memberships.founder_claim_code_issue`) with payload binding reason / normalized expiresAt / issuedForReference / reserveFounderNumber (`P19-SEC-001` RESOLVED; route DB proofs added Step 2B).
 - AdsGram production monetary remains **BLOCKED**; client completion and AdsGram webhook do not issue money.
-- Policy Center refuses arbitrary code and returns `applied=false` for REWARD_RULES / PROVIDER_LIMITS / FEATURE_FLAGS / BENEFIT_RULES / WITHDRAWAL_LIMITS; sole FEATURE_FLAGS web mutation is dedicated Feature Flags route (`P19-SEC-009` RESOLVED).
+- Policy Center refuses arbitrary code and returns `applied=false` for REWARD_RULES / PROVIDER_LIMITS / FEATURE_FLAGS / BENEFIT_RULES / WITHDRAWAL_LIMITS; sole FEATURE_FLAGS web mutation is dedicated Feature Flags route (`P19-SEC-009` RESOLVED; DB proof Step 2B).
 - Review Queue is not financial source of truth; Admin HTTP `RESOLVE_AFTER_DOMAIN` removed (`P19-SEC-017` RESOLVED).
 - Mission NEW claims and PENDING issuance refuse DRAFT/REVOKED mission versions (`P19-SEC-014` RESOLVED).
-- Missing `PAYOUT_DISPATCH_PAUSE` fails closed in STAGING/PRODUCTION (`P19-SEC-016` RESOLVED). Live STAGING pause flag unchanged.
-- Fastify runtime pins updated to 5.12.2 (`P19-SEC-018` RESOLVED). Remaining Critical/High dependency clusters tracked as P19-SEC-019..022.
+- Missing `PAYOUT_DISPATCH_PAUSE` fails closed in STAGING/PRODUCTION (`P19-SEC-016` RESOLVED; pipeline DB proof Step 2B). Live STAGING pause flag unchanged.
+- Fastify 5.12.2; Next 16.3.6; `@nestjs/platform-fastify` 12.0.3; `@grpc/grpc-js` 1.14.5; `fast-uri` 4.1.4/3.1.7 (`P19-SEC-018..022` RESOLVED).
 
 Mainnet / production monetary / AdsGram monetary / payout resume remain unauthorized.

@@ -1,34 +1,33 @@
-# Phase 19 — Security Findings (Step 2A Remediation)
+# Phase 19 — Security Findings (Step 2B)
 
 **PHASE19_STATUS:** IN_PROGRESS
 **PHASE19_GATE:** HOLD
+**Step 2A remediation HEAD:** `1da5a6c5c9fb14beeb145daa5823517d778c48b8`
 **Step 1 discovery HEAD:** `616fe53dbc30494bac0f9d9ee538a2e84b6d8307`
 **Starting source HEAD:** `6c195dd826fcaa3eb720be2d6bcbb0c00e75c7af`
 **Canonical Phase 18 source (unchanged):** `654a7097456d7d18ad6e6a7072793ee6d353ca33`
 
-Step 2A applies independent-review severity/status corrections, remediates confirmed product
-Mainnet blockers, runs disposable-DB security gates, and triages Critical/High dependency clusters
-into findings. Cursor does **not** Owner-accept findings.
+Step 2B patches remaining dependency Mainnet blockers (P19-SEC-019..022), restores finding-register
+heading integrity, and adds disposable-DB / route proofs for claim-code confirmation, Policy Center
+FEATURE_FLAGS refuse, and payout-pause pipeline fail-closed. Cursor does **not** Owner-accept findings.
 
 ---
 
-## Summary (recalculated after Step 2A)
+## Summary (recalculated after Step 2B)
 
 | Severity | Open count | Notes |
 | --- | --- | --- |
-| CRITICAL | 1 | P19-SEC-019 |
-| HIGH | 3 | P19-SEC-020, P19-SEC-021, P19-SEC-022 |
+| CRITICAL | 0 | |
+| HIGH | 0 | |
 | MEDIUM | 2 | P19-SEC-007, P19-SEC-010 |
 | LOW | 4 | P19-SEC-004, P19-SEC-005, P19-SEC-011, P19-SEC-012 |
 | INFO | 2 | P19-SEC-006, P19-SEC-008 |
-| **TOTAL OPEN** | **12** | |
+| **TOTAL OPEN** | **8** | |
 | FALSE_POSITIVE | 2 | P19-SEC-013, P19-SEC-015 |
-| RESOLVED | 8 | P19-SEC-001, 002, 003, 009, 014, 016, 017, 018 |
+| RESOLVED | 12 | P19-SEC-001..003, 009, 014, 016..022 |
 
-**Mainnet-blocking open IDs:** P19-SEC-019, P19-SEC-020, P19-SEC-021, P19-SEC-022
+**Mainnet-blocking open IDs:** none
 
-Product blockers 001/009/014/016/017/018 are RESOLVED in source. HOLD continues due to remaining
-production-reachable Critical/High dependency findings.
 
 ---
 
@@ -46,7 +45,7 @@ production-reachable Critical/High dependency findings.
 | CATEGORY_8_NOTIFICATION_LEAKAGE | YES | EXISTING | 0 | 0 | 0 | 0 | PASS |
 | CATEGORY_9_FEATURE_FLAGS | YES | EXISTING + ADDED | 0 | 0 | 0 | 0 | REMEDIATED + FP |
 | CATEGORY_10_REVIEW_QUEUE | YES | EXISTING + ADDED | 0 | 0 | 0 | 0 | REMEDIATED |
-| DEPENDENCY_SUPPLY_CHAIN | YES | AUDIT | 1 | 3 | 0 | 0 | FINDINGS |
+| DEPENDENCY_SUPPLY_CHAIN | YES | AUDIT | 0 | 0 | 0 | 0 | REMEDIATED |
 
 ---
 
@@ -163,6 +162,8 @@ Non-hard scopes cannot exceed active hard ceiling (`wouldExceedProviderHardLimit
 - **status:** OPEN
 - **Step 2A note:** Remains OPEN; not Mainnet-blocking under current evidence.
 
+### P19-SEC-005 — Membership view may omit expires_at filter
+
 - **title:** Public membership view ACTIVE filter may diverge from financial engine expiry checks
 - **category:** CATEGORY_2_ENTITLEMENT_ESCALATION
 - **affected:** `packages/auth/src/membership.ts` (`getMembershipView`)
@@ -180,6 +181,8 @@ Non-hard scopes cannot exceed active hard ceiling (`wouldExceedProviderHardLimit
 - **Owner acceptance permitted:** YES
 - **status:** OPEN
 - **Step 2A note:** Remains OPEN; not Mainnet-blocking under current evidence.
+
+### P19-SEC-006 — Public/internal entitlements exposed on membership API (by design)
 
 - **title:** Non-FINANCIAL entitlements visible to authenticated member
 - **category:** CATEGORY_2_ENTITLEMENT_ESCALATION
@@ -218,6 +221,8 @@ Non-hard scopes cannot exceed active hard ceiling (`wouldExceedProviderHardLimit
 - **status:** OPEN
 - **Step 2A note:** Remains OPEN; not Mainnet-blocking under current evidence.
 
+### P19-SEC-008 — Telegram Control Center Founder actions lack web confirmation ceremony
+
 - **title:** CC Owner grant/issue uses Telegram Owner authz model, not Admin web confirmationId
 - **category:** CATEGORY_3_FOUNDER_ADMIN
 - **affected:** `packages/control-center/src/founder-admin.ts`, `authorize.ts`
@@ -235,6 +240,8 @@ Non-hard scopes cannot exceed active hard ceiling (`wouldExceedProviderHardLimit
 - **Owner acceptance permitted:** YES
 - **status:** OPEN
 - **Step 2A note:** Remains OPEN INFO; distinct Telegram Owner authz model, not Mainnet-blocking.
+
+### P19-SEC-009 — Policy Center FEATURE_FLAGS weaker than dedicated Feature Flags route
 
 - **title:** Generic policy FEATURE_FLAGS mutates flags without version history / silent-flip refuse / mutate audit
 - **category:** CATEGORY_6_POLICY_CENTER (cross-cut CATEGORY_9_FEATURE_FLAGS)
@@ -274,6 +281,8 @@ Non-hard scopes cannot exceed active hard ceiling (`wouldExceedProviderHardLimit
 - **status:** OPEN
 - **Step 2A note:** Remains OPEN; not Mainnet-blocking while AdsGram monetary BLOCKED.
 
+### P19-SEC-011 — Webhook placement/blockId not bound to session unit
+
 - **title:** Correlation does not enforce placement/blockId match
 - **category:** CATEGORY_4_PROVIDER_TRUST
 - **affected:** `packages/ads` AdsGram reward correlation
@@ -292,6 +301,8 @@ Non-hard scopes cannot exceed active hard ceiling (`wouldExceedProviderHardLimit
 - **status:** OPEN
 - **Step 2A note:** Remains OPEN; not Mainnet-blocking while unsigned + BLOCKED.
 
+### P19-SEC-012 — Monetary REQUEST hard ceiling uses inert provider_requests counter
+
 - **title:** Issue-path REQUEST hard check vs authorize never incrementing provider_requests
 - **category:** CATEGORY_5_PROVIDER_LIMITS
 - **affected:** `packages/ads` authorize + lifecycle issue path
@@ -309,6 +320,8 @@ Non-hard scopes cannot exceed active hard ceiling (`wouldExceedProviderHardLimit
 - **Owner acceptance permitted:** YES
 - **status:** OPEN
 - **Step 2A note:** Remains OPEN; not Mainnet-blocking while AdsGram monetary BLOCKED.
+
+### P19-SEC-013 — PROVIDER_HARD ceiling raiseable via Admin limit ceremony
 
 - **title:** Hard/contract ceiling may be raised with source/reason ceremony
 - **category:** CATEGORY_5_PROVIDER_LIMITS
@@ -413,30 +426,35 @@ Non-hard scopes cannot exceed active hard ceiling (`wouldExceedProviderHardLimit
 
 ---
 
-## Dependency / static security (Step 2A)
+## Dependency / static security (Step 2B)
 
-### Audit snapshot (post Fastify 5.12.2)
+### Audit snapshot (post Next 16.3.6 / Nest platform-fastify 12.0.3 / grpc-js 1.14.5 / fast-uri patched)
 
 Command: `pnpm security:audit` / `pnpm audit --json`
 
-Metadata observed after Fastify pin/override to **5.12.2**:
+Record exact post-patch metadata in Step 2B RETURN (`DEPENDENCY_AUDIT_*`).
 
-- **19 vulnerabilities** aggregate (2 low | 6 moderate | 10 high | 1 critical)
-- Fastify `<5.12.2` advisories: **cleared** (P19-SEC-018 RESOLVED)
+Triaged production Critical/High clusters P19-SEC-019..022 are **RESOLVED** by version removal.
+Any remaining Critical/High must be classified production-reachable vs build/dev-only; none may remain untriaged.
 
-### Triage of Critical/High clusters
+Post-Step-2B audit remaining High (non-finding / not Mainnet-blocking under current evidence):
 
-| Cluster | Advisory | Reachability | Finding |
-| --- | --- | --- | --- |
-| next 16.3.4 | GHSA-vcvr-r3jv-pc5j Critical — RCE in next/og ImageResponse | Production: `apps/admin`, `apps/miniapp` | **P19-SEC-019** OPEN |
-| @nestjs/platform-fastify 12.0.1 | GHSA-9c5c-9qcx-q35q High — path-scoped middleware bypass | Production: `apps/api` | **P19-SEC-020** OPEN |
-| @grpc/grpc-js 1.14.4 | GHSA-m9gg-hp2v-232j High — getAuthContext unauthorized certs | Production: Temporal via api/worker | **P19-SEC-021** OPEN |
-| fast-uri 4.1.3 (via Fastify) | GHSA-qw65-cvwx-89v3 / GHSA-58mr-gqgx-xq4g High | Production: api/bot/signer/worker Fastify stack | **P19-SEC-022** OPEN |
-| fast-uri 3.1.6 (via webpack/Sentry) | same GHSAs | Build/dev (admin/miniapp webpack plugin) | build/dev only — no finding ID |
-| brace-expansion (eslint 5.x) | GHSA-qhr7-859c-m2p7 / GHSA-6j4f-fj2g-mc7p High | Build/dev/test only | build/dev only — no finding ID |
-| brace-expansion 2.x (otel rimraf/glob) | same | Production dep; nested-brace DoS path not used by LOOTRA request surfaces | production dependency; affected path not used — no finding ID |
+| Package | Advisories | Classification |
+| --- | --- | --- |
+| brace-expansion 5.x (eslint) | GHSA-qhr7-859c-m2p7, GHSA-6j4f-fj2g-mc7p | **build/dev/test only** |
+| brace-expansion 2.x (otel rimraf/glob) | same | production dependency; nested-brace DoS path **not used** by LOOTRA request surfaces |
 
-Do not invent advisory IDs beyond audit output. No broad auto-upgrade performed beyond Fastify 5.12.2.
+### Reachability accuracy (pre-patch, Step 2B)
+
+| Finding | Dependency presence | Exact exploit precondition in source |
+| --- | --- | --- |
+| P19-SEC-019 | next 16.3.4 Admin/Mini App | ImageResponse / next/og **NOT OBSERVED** |
+| P19-SEC-020 | @nestjs/platform-fastify 12.0.1 | MiddlewareConsumer/forRoutes/exclude **NOT OBSERVED** |
+| P19-SEC-021 | @grpc/grpc-js 1.14.4 via Temporal | getAuthContext / TLS auth-context **NOT OBSERVED** (address-only Temporal) |
+| P19-SEC-022 | fast-uri 4.1.3 via Fastify | direct fast-uri object-form calls **NOT OBSERVED** |
+
+Patched regardless; RESOLVED by removal of vulnerable versions.
+
 
 ### P19-SEC-018 — Fastify 5.12.1 security release gap
 
@@ -452,74 +470,82 @@ Do not invent advisory IDs beyond audit output. No broad auto-upgrade performed 
 
 - **title:** Next.js Critical RCE in `next/og` ImageResponse
 - **category:** DEPENDENCY_SUPPLY_CHAIN
-- **affected:** `apps/admin`, `apps/miniapp` (next 16.3.4; patched `>=16.3.6`)
+- **affected:** `apps/admin`, `apps/miniapp` (was next 16.3.4; patched `>=16.3.6`)
 - **preconditions:** Vulnerable Next.js runtime serving ImageResponse / OG path
-- **attacker capability:** Remote code execution per advisory
-- **security impact:** Critical supply-chain / runtime RCE
+- **reachability (Step 2B):** Affected dependency present; repo-wide source scan shows **no** `next/og` / `ImageResponse` usage — exact RCE precondition **NOT OBSERVED**. Still patched because Admin/Mini App are production Next runtimes.
+- **attacker capability:** Remote code execution per advisory (if ImageResponse used)
+- **security impact:** Critical supply-chain / runtime RCE when precondition present
 - **financial impact:** Indirect (full host compromise)
 - **privacy impact:** High if exploited
-- **reproduction:** `pnpm audit` Critical advisory GHSA-vcvr-r3jv-pc5j
+- **reproduction:** prior `pnpm audit` Critical advisory GHSA-vcvr-r3jv-pc5j
 - **severity:** CRITICAL
 - **confidence:** HIGH
-- **remediation:** Upgrade Next.js to patched `>=16.3.6` in a focused follow-up (not auto-bundled with Fastify-only Step 2A pin)
-- **Mainnet blocker:** YES
+- **remediation:** Upgrade Next.js to patched `>=16.3.6`
+- **Mainnet blocker:** YES (was)
 - **Owner acceptance permitted:** OWNER_POLICY_REQUIRED
-- **status:** OPEN
+- **status:** RESOLVED
+- **resolution (Step 2B):** Direct pins `apps/admin` + `apps/miniapp` → **16.3.6**; lockfile updated; audit no longer reports GHSA-vcvr-r3jv-pc5j.
 
 ### P19-SEC-020 — NestJS platform-fastify middleware path bypass (GHSA-9c5c-9qcx-q35q)
 
 - **title:** `@nestjs/platform-fastify` path-scoped middleware bypass via absolute-form request targets
 - **category:** DEPENDENCY_SUPPLY_CHAIN
-- **affected:** `apps/api` (`@nestjs/platform-fastify` 12.0.1; patched `>=12.0.2`)
-- **preconditions:** Path-scoped Nest middleware on Fastify adapter
-- **attacker capability:** Bypass path-scoped middleware (auth/CSRF depending on placement)
-- **security impact:** High — potential guard/middleware skip
-- **financial impact:** Indirect if Admin/session middleware scoped by path is bypassed
+- **affected:** `apps/api` (was `@nestjs/platform-fastify` 12.0.1; patched `>=12.0.2`, applied **12.0.3**)
+- **preconditions:** Path-scoped Nest `MiddlewareConsumer` / `.forRoutes` / `.exclude`
+- **reachability (Step 2B):** Affected dependency present; source review found **no** `MiddlewareConsumer` / `.forRoutes` / `.exclude`. Auth uses guards/decorators — **not** the advisory's path-scoped middleware primitive. Exact bypass precondition **NOT OBSERVED**. Still patched.
+- **attacker capability:** Bypass path-scoped middleware (when used)
+- **security impact:** High when path-scoped middleware authorizes
+- **financial impact:** Indirect
 - **privacy impact:** Medium
-- **reproduction:** audit GHSA-9c5c-9qcx-q35q
+- **reproduction:** prior audit GHSA-9c5c-9qcx-q35q
 - **severity:** HIGH
 - **confidence:** HIGH
-- **remediation:** Upgrade `@nestjs/platform-fastify` to `>=12.0.2` in focused follow-up; verify middleware binding
-- **Mainnet blocker:** YES
+- **remediation:** Upgrade `@nestjs/platform-fastify` to patched 12.x
+- **Mainnet blocker:** YES (was)
 - **Owner acceptance permitted:** OWNER_POLICY_REQUIRED
-- **status:** OPEN
+- **status:** RESOLVED
+- **resolution (Step 2B):** Pin **12.0.3**; route guards remain authoritative; no middleware-based auth model introduced.
 
 ### P19-SEC-021 — @grpc/grpc-js unauthorized certificate context (GHSA-m9gg-hp2v-232j)
 
 - **title:** `@grpc/grpc-js` getAuthContext can treat unauthorized certificates as authorized
 - **category:** DEPENDENCY_SUPPLY_CHAIN
-- **affected:** Temporal client/worker paths (`apps/api`, `apps/worker`; version 1.14.4; patched `>=1.14.5`)
+- **affected:** Temporal client/worker paths (was 1.14.4; patched `>=1.14.5`)
 - **preconditions:** gRPC TLS configurations using auth context certificate authorization
-- **attacker capability:** Mis-authorization of peer certificates in affected configs
-- **security impact:** High on Temporal control plane trust
-- **financial impact:** Indirect (worker/workflow integrity)
+- **reachability (Step 2B):** Dependency present via Temporal. Current source connects with **address-only** (`Connection.connect({ address })`); **no** direct `getAuthContext` usage; **no** Temporal TLS/`ChannelCredentials` configuration observed. Certificate-auth exploitability **not claimed**. Still patched transitive version.
+- **attacker capability:** Mis-authorization of peer certificates in affected TLS configs
+- **security impact:** High on Temporal control plane trust when TLS auth-context used
+- **financial impact:** Indirect
 - **privacy impact:** Medium
-- **reproduction:** audit GHSA-m9gg-hp2v-232j
+- **reproduction:** prior audit GHSA-m9gg-hp2v-232j
 - **severity:** HIGH
-- **confidence:** MEDIUM (config-dependent exploitability)
-- **remediation:** Upgrade `@grpc/grpc-js` via Temporal/dependency resolution to `>=1.14.5`; confirm TLS auth context usage
-- **Mainnet blocker:** YES
+- **confidence:** MEDIUM (config-dependent)
+- **remediation:** Override `@grpc/grpc-js` to `>=1.14.5`
+- **Mainnet blocker:** YES (was)
 - **Owner acceptance permitted:** OWNER_POLICY_REQUIRED
-- **status:** OPEN
+- **status:** RESOLVED
+- **resolution (Step 2B):** Workspace override `@grpc/grpc-js: 1.14.5`; no 1.14.4 runtime resolution remains; audit advisory cleared.
 
 ### P19-SEC-022 — fast-uri authority injection / host confusion (Fastify runtime)
 
 - **title:** `fast-uri` High advisories on Fastify JSON schema/URI serialize path
 - **category:** DEPENDENCY_SUPPLY_CHAIN
-- **affected:** Fastify stack in api/bot/signer/worker (`fast-uri` 4.1.3)
+- **affected:** Fastify stack in api/bot/signer/worker (was `fast-uri` 4.1.3)
 - **advisories:** GHSA-qw65-cvwx-89v3, GHSA-58mr-gqgx-xq4g
-- **preconditions:** Code paths serializing untrusted URI authority via fast-uri
+- **preconditions:** Code paths serializing untrusted URI authority via fast-uri object-form APIs
+- **reachability (Step 2B):** Dependency present through Fastify serializer/schema stack. Repo has **no** direct `fast-uri` object-form serialize/normalize/equal calls. Dependency presence ≠ demonstrated exploit path. Still patched.
 - **attacker capability:** Authority injection / host confusion per advisory
-- **security impact:** High on URI serialization trust
+- **security impact:** High on URI serialization trust when exploitable path exercised
 - **financial impact:** Indirect
 - **privacy impact:** Low–Medium
-- **reproduction:** audit; transitive via `@fastify/ajv-compiler` / `fast-json-stringify`
+- **reproduction:** prior audit; transitive via `@fastify/ajv-compiler` / `fast-json-stringify`
 - **severity:** HIGH
 - **confidence:** MEDIUM
-- **remediation:** Override/upgrade `fast-uri` to patched `>=4.1.4` (and clear 4.1.3-only host confusion) in focused follow-up
-- **Mainnet blocker:** YES
+- **remediation:** Override `fast-uri@^4` → 4.1.4 and `fast-uri@^3` → 3.1.7
+- **Mainnet blocker:** YES (was)
 - **Owner acceptance permitted:** OWNER_POLICY_REQUIRED
-- **status:** OPEN
+- **status:** RESOLVED
+- **resolution (Step 2B):** Runtime resolves `fast-uri@4.1.4`; build/dev paths resolve `fast-uri@3.1.7`. Vulnerable production 4.1.3 / 3.1.6 cleared from audit Critical/High for this cluster.
 
 ---
 
