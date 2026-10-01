@@ -145,6 +145,9 @@ export interface RestoreDrillReport {
     readonly unexpectedOutgoingCount: number | null;
     readonly ambiguousAttemptCount: number | null;
     readonly providerReportDigest: string | null;
+    readonly payoutInvariantFailCount: number | null;
+    readonly payoutInvariantFindingCodes: readonly string[];
+    readonly mismatchReferences: readonly string[];
   };
   readonly representativeCounts: {
     readonly status: DrillSectionStatus;

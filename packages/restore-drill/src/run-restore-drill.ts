@@ -354,6 +354,9 @@ export async function runRestoreDrill(
         unexpectedOutgoingCount: chain.unexpectedOutgoingCount,
         ambiguousAttemptCount: chain.ambiguousAttemptCount,
         providerReportDigest: chain.providerReportDigest,
+        payoutInvariantFailCount: chain.payoutInvariantFailCount,
+        payoutInvariantFindingCodes: chain.payoutInvariantFindingCodes,
+        mismatchReferences: chain.mismatchReferences,
       };
     } else {
       chainSection = {
@@ -374,6 +377,9 @@ export async function runRestoreDrill(
         unexpectedOutgoingCount: null,
         ambiguousAttemptCount: null,
         providerReportDigest: null,
+        payoutInvariantFailCount: null,
+        payoutInvariantFindingCodes: [],
+        mismatchReferences: [],
       };
     }
 

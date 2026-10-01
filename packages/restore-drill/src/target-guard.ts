@@ -53,7 +53,8 @@ export type TargetGuardFailure =
   | 'VERIFY_USERS_AMBIGUOUS'
   | 'SOURCE_COUNT_CAPTURE_MISSING'
   | 'TEMPORAL_CONFIG_MISSING'
-  | 'VERIFY_ALL_USERS_MODE_INVALID';
+  | 'VERIFY_ALL_USERS_MODE_INVALID'
+  | 'INVALID_DRILL_MODE';
 
 export class RestoreTargetGuardError extends Error {
   readonly code: TargetGuardFailure;
@@ -83,9 +84,20 @@ export function parseRestoreDrillEnv(
   const sourceCountCapturePath = nonempty(env.PHASE18_SOURCE_COUNT_CAPTURE_PATH);
   const temporalAddress = nonempty(env.PHASE18_TEMPORAL_ADDRESS);
   const temporalNamespace = nonempty(env.PHASE18_TEMPORAL_NAMESPACE);
-  const modeRaw = (env.PHASE18_RESTORE_DRILL_MODE ?? 'DB_ONLY_STEP2A').trim();
-  const drillMode =
-    modeRaw === 'FULL_STEP2B' ? ('FULL_STEP2B' as const) : ('DB_ONLY_STEP2A' as const);
+  let drillMode: 'DB_ONLY_STEP2A' | 'FULL_STEP2B';
+  if (env.PHASE18_RESTORE_DRILL_MODE === undefined) {
+    drillMode = 'DB_ONLY_STEP2A';
+  } else {
+    const modeRaw = env.PHASE18_RESTORE_DRILL_MODE.trim();
+    if (modeRaw === 'DB_ONLY_STEP2A' || modeRaw === 'FULL_STEP2B') {
+      drillMode = modeRaw;
+    } else {
+      throw new RestoreTargetGuardError(
+        'INVALID_DRILL_MODE',
+        'PHASE18_RESTORE_DRILL_MODE must be exactly DB_ONLY_STEP2A or FULL_STEP2B',
+      );
+    }
+  }
 
   return {
     enabled,

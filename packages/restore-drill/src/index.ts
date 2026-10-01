@@ -55,11 +55,17 @@ export {
   type TemporalReconciliationResult,
 } from './temporal-reconciliation.js';
 export {
+  RESTORE_DRILL_READONLY_VALIDATE_FLAGS,
+  assertStrictTestnetNetworkEnv,
   captureChainScope,
+  captureExpectedConfirmedPayouts,
+  captureUnresolvedAmbiguityCounts,
   isChainScopeEmpty,
+  matchConfirmedPayoutsToAgreedTransfers,
   reconcileChainReadOnly,
   type ChainReconciliationResult,
   type ChainScopeCounts,
+  type ExpectedConfirmedPayout,
 } from './chain-reconciliation.js';
 export {
   RESTORE_DRILL_APPLICATION_NAME,

@@ -7,6 +7,8 @@ export const RESTORE_DRILL_ALLOWED_LEDGER_IMPORTS = ['checkLedgerInvariants'] as
 export const RESTORE_DRILL_ALLOWED_WITHDRAWALS_IMPORTS = [
   'runPhase10RestoreReconcileScan',
   'runPhase10ChainHistoryReadonlyValidate',
+  'checkPhase10PayoutInvariants',
+  'assertPhase10ReadonlyValidationReportIntegrity',
 ] as const;
 export const RESTORE_DRILL_ALLOWED_DB_IMPORTS = ['listMigrationFiles'] as const;
 

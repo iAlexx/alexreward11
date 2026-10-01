@@ -685,6 +685,16 @@ describe('restore-drill architecture boundary', () => {
     ).toHaveLength(0);
     expect(
       findRestoreDrillFinancialImportViolations(
+        `import { checkPhase10PayoutInvariants } from '@alex-rewards/withdrawals';`,
+      ),
+    ).toHaveLength(0);
+    expect(
+      findRestoreDrillFinancialImportViolations(
+        `import { assertPhase10ReadonlyValidationReportIntegrity } from '@alex-rewards/withdrawals';`,
+      ),
+    ).toHaveLength(0);
+    expect(
+      findRestoreDrillFinancialImportViolations(
         `import { listMigrationFiles } from '@alex-rewards/db';`,
       ),
     ).toHaveLength(0);

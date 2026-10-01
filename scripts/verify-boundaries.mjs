@@ -455,6 +455,8 @@ for (const key of forbiddenPlaintextEnvKeys) {
       allowed: new Set([
         'runPhase10RestoreReconcileScan',
         'runPhase10ChainHistoryReadonlyValidate',
+        'checkPhase10PayoutInvariants',
+        'assertPhase10ReadonlyValidationReportIntegrity',
       ]),
     },
     {

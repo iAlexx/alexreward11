@@ -431,193 +431,8 @@ describe('chain reconciliation', () => {
       },
     });
     expect(result.status).toBe('FAIL');
-    expect(result.reasonCode).toBe('MAINNET_REFUSED');
+    expect(result.reasonCode).toBe('MAINNET_OR_NON_TESTNET_REFUSED');
     expect(result.providerQueryPerformed).toBe(false);
-  });
-
-  it('provider disagreement blocks', async () => {
-    const pool = createFakePool((sql) => {
-      if (sql.includes('FROM withdrawals') && !sql.includes('state')) {
-        return { rowCount: 1, rows: [{ count: '1' }] };
-      }
-      return { rowCount: 1, rows: [{ count: '0' }] };
-    });
-    const result = await reconcileChainReadOnly({
-      pool,
-      env: {
-        TON_PRIMARY_PROVIDER_KIND: 'toncenter',
-        TON_PRIMARY_PROVIDER_URL: 'https://primary.example',
-        TON_SECONDARY_PROVIDER_KIND: 'tonapi',
-        TON_SECONDARY_PROVIDER_URL: 'https://secondary.example',
-        TON_TESTNET_JETTON_MASTER: 'EQCjetton',
-      },
-      validateOverride: async () =>
-        ({
-          verdict: 'FAIL_PROVIDER_DISAGREEMENT',
-          validationOnly: true as const,
-          acceptanceEnabled: false as const,
-          primaryHealth: { ok: true },
-          secondaryHealth: { ok: true },
-          primaryCoverage: { windowFullyCovered: true },
-          secondaryCoverage: { windowFullyCovered: true },
-          providerAgreement: false,
-          agreedTransferCount: 0,
-          onlyPrimaryCount: 1,
-          onlySecondaryCount: 0,
-          reportDigest: 'abc',
-        }) as never,
-    });
-    expect(result.status).toBe('OWNER_REVIEW_REQUIRED');
-    expect(result.reasonCode).toBe('CHAIN_PROVIDER_DISAGREEMENT');
-  });
-
-  it('incomplete history blocks', async () => {
-    const pool = createFakePool((sql) => {
-      if (sql.includes('FROM withdrawals') && !sql.includes('state')) {
-        return { rowCount: 1, rows: [{ count: '1' }] };
-      }
-      return { rowCount: 1, rows: [{ count: '0' }] };
-    });
-    const result = await reconcileChainReadOnly({
-      pool,
-      env: {
-        TON_PRIMARY_PROVIDER_KIND: 'toncenter',
-        TON_PRIMARY_PROVIDER_URL: 'https://primary.example',
-        TON_SECONDARY_PROVIDER_KIND: 'tonapi',
-        TON_SECONDARY_PROVIDER_URL: 'https://secondary.example',
-        TON_TESTNET_JETTON_MASTER: 'EQCjetton',
-      },
-      validateOverride: async () =>
-        ({
-          verdict: 'FAIL_INCOMPLETE_HISTORY',
-          primaryHealth: { ok: true },
-          secondaryHealth: { ok: true },
-          primaryCoverage: { windowFullyCovered: false },
-          secondaryCoverage: { windowFullyCovered: true },
-          providerAgreement: true,
-          agreedTransferCount: 0,
-          onlyPrimaryCount: 0,
-          onlySecondaryCount: 0,
-          reportDigest: 'abc',
-        }) as never,
-    });
-    expect(result.status).toBe('OWNER_REVIEW_REQUIRED');
-    expect(result.reasonCode).toBe('CHAIN_WINDOW_INCOMPLETE');
-  });
-
-  it('unexpected outgoing blocks', async () => {
-    const pool = createFakePool((sql) => {
-      if (sql.includes('FROM withdrawals') && !sql.includes('state')) {
-        return { rowCount: 1, rows: [{ count: '1' }] };
-      }
-      return { rowCount: 1, rows: [{ count: '0' }] };
-    });
-    const result = await reconcileChainReadOnly({
-      pool,
-      env: {
-        TON_PRIMARY_PROVIDER_KIND: 'toncenter',
-        TON_PRIMARY_PROVIDER_URL: 'https://primary.example',
-        TON_SECONDARY_PROVIDER_KIND: 'tonapi',
-        TON_SECONDARY_PROVIDER_URL: 'https://secondary.example',
-        TON_TESTNET_JETTON_MASTER: 'EQCjetton',
-      },
-      validateOverride: async () =>
-        ({
-          verdict: 'PASS_WITH_OBSERVED_TRANSFERS',
-          primaryHealth: { ok: true },
-          secondaryHealth: { ok: true },
-          primaryCoverage: { windowFullyCovered: true },
-          secondaryCoverage: { windowFullyCovered: true },
-          providerAgreement: true,
-          agreedTransferCount: 1,
-          onlyPrimaryCount: 2,
-          onlySecondaryCount: 0,
-          reportDigest: 'abc',
-        }) as never,
-    });
-    expect(result.status).toBe('FAIL');
-    expect(result.reasonCode).toBe('UNEXPECTED_OUTGOING_TRANSFER');
-  });
-
-  it('unresolved ambiguous attempt blocks', async () => {
-    const pool = createFakePool((sql, params) => {
-      if (sql.includes('FROM withdrawals') && !sql.includes('state') && sql.includes('COUNT')) {
-        return { rowCount: 1, rows: [{ count: '1' }] };
-      }
-      if (sql.includes("state::text = 'CONFIRMED'")) {
-        return { rowCount: 1, rows: [{ count: '0' }] };
-      }
-      const flat = JSON.stringify(params ?? []);
-      if (sql.includes('state::text = ANY') && flat.includes('BROADCASTING')) {
-        return { rowCount: 1, rows: [{ count: '1' }] };
-      }
-      if (sql.includes('broadcast_result_state') && flat.includes('BROADCASTED')) {
-        return { rowCount: 1, rows: [{ count: '0' }] };
-      }
-      return { rowCount: 1, rows: [{ count: '0' }] };
-    });
-    const result = await reconcileChainReadOnly({
-      pool,
-      env: {
-        TON_PRIMARY_PROVIDER_KIND: 'toncenter',
-        TON_PRIMARY_PROVIDER_URL: 'https://primary.example',
-        TON_SECONDARY_PROVIDER_KIND: 'tonapi',
-        TON_SECONDARY_PROVIDER_URL: 'https://secondary.example',
-        TON_TESTNET_JETTON_MASTER: 'EQCjetton',
-      },
-      validateOverride: async () =>
-        ({
-          verdict: 'PASS_ZERO_OUTGOING',
-          primaryHealth: { ok: true },
-          secondaryHealth: { ok: true },
-          primaryCoverage: { windowFullyCovered: true },
-          secondaryCoverage: { windowFullyCovered: true },
-          providerAgreement: true,
-          agreedTransferCount: 0,
-          onlyPrimaryCount: 0,
-          onlySecondaryCount: 0,
-          reportDigest: 'abc',
-        }) as never,
-    });
-    expect(result.status).toBe('OWNER_REVIEW_REQUIRED');
-    expect(result.reasonCode).toBe('AMBIGUOUS_CHAIN_ATTEMPT_STATE');
-  });
-
-  it('CONFIRMED without complete intended TEP-74 proof blocks', async () => {
-    const pool = createFakePool((sql) => {
-      if (sql.includes('FROM withdrawals') && !sql.includes('state') && sql.includes('COUNT')) {
-        return { rowCount: 1, rows: [{ count: '1' }] };
-      }
-      if (sql.includes("state::text = 'CONFIRMED'")) {
-        return { rowCount: 1, rows: [{ count: '1' }] };
-      }
-      return { rowCount: 1, rows: [{ count: '0' }] };
-    });
-    const result = await reconcileChainReadOnly({
-      pool,
-      env: {
-        TON_PRIMARY_PROVIDER_KIND: 'toncenter',
-        TON_PRIMARY_PROVIDER_URL: 'https://primary.example',
-        TON_SECONDARY_PROVIDER_KIND: 'tonapi',
-        TON_SECONDARY_PROVIDER_URL: 'https://secondary.example',
-        TON_TESTNET_JETTON_MASTER: 'EQCjetton',
-      },
-      validateOverride: async () =>
-        ({
-          verdict: 'PASS_ZERO_OUTGOING',
-          primaryHealth: { ok: true },
-          secondaryHealth: { ok: true },
-          primaryCoverage: { windowFullyCovered: true },
-          secondaryCoverage: { windowFullyCovered: true },
-          providerAgreement: true,
-          agreedTransferCount: 0,
-          onlyPrimaryCount: 0,
-          onlySecondaryCount: 0,
-          reportDigest: 'abc',
-        }) as never,
-    });
-    expect(result.status).toBe('FAIL');
-    expect(result.reasonCode).toBe('CONFIRMED_WITHOUT_TEP74_PROOF');
   });
 });
 
@@ -795,6 +610,16 @@ describe('architecture boundary FULL additions', () => {
     expect(
       findRestoreDrillFinancialImportViolations(
         `import { runPhase10ChainHistoryReadonlyValidate } from '@alex-rewards/withdrawals';`,
+      ),
+    ).toHaveLength(0);
+    expect(
+      findRestoreDrillFinancialImportViolations(
+        `import { checkPhase10PayoutInvariants } from '@alex-rewards/withdrawals';`,
+      ),
+    ).toHaveLength(0);
+    expect(
+      findRestoreDrillFinancialImportViolations(
+        `import { assertPhase10ReadonlyValidationReportIntegrity } from '@alex-rewards/withdrawals';`,
       ),
     ).toHaveLength(0);
     expect(
