@@ -53,7 +53,8 @@
     "dev:stack:down": "docker compose -f infra/docker/compose.yaml --env-file .env --profile apps down",
     "smoke": "node scripts/phase1-smoke.mjs",
     "archive:phase": "node scripts/create-phase-archive.mjs",
-    "test:archive": "node --test scripts/create-phase-archive.test.mjs"
+    "test:archive": "node --test scripts/create-phase-archive.test.mjs",
+    "test:phase19-security": "node scripts/phase19-security-review.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

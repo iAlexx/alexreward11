@@ -111,3 +111,24 @@ See `docs/ADS_SPEC.md` and `docs/ADSGRAM_CLARIFICATION_REGISTER.md`.
   `PAYOUT_DISPATCH_PAUSE` is not silently flipped.
 
 See `docs/OWNER_ADMIN_AUTH.md`, `docs/ADMIN_POLICY_CENTER.md`, ADR-023.
+
+## Phase 19 — Pre-Mainnet security review
+
+Phase 19 is **IN_PROGRESS** (Step 1 discovery). `PHASE19_GATE=HOLD`.
+
+Authoritative review artifacts:
+
+- `docs/PHASE_19_SECURITY_REVIEW_PLAN.md`
+- `docs/PHASE_19_SECURITY_FINDINGS.md`
+- `docs/PHASE_19_ATTACK_SURFACE.md`
+
+Verified-from-code statements for Phase 19 Step 1 (not aspirational):
+
+- Founder claim **consume** stores hash only, is single-use under row lock, uses session `userId` authority, and issues zero ledger money.
+- Admin Founder **grant** requires CSRF + recent reauth + consumed confirmation with target binding; reassignment is unavailable.
+- Admin claim-code **issue** currently uses CSRF + recent reauth (`gateHighImpactMutation`) but does **not** consume a second confirmation (`P19-SEC-001` OPEN).
+- AdsGram production monetary remains **BLOCKED**; client completion and AdsGram webhook do not issue money.
+- Policy Center refuses arbitrary code and returns `applied=false` for REWARD_RULES / PROVIDER_LIMITS; FEATURE_FLAGS via Policy Center is **not** equivalent to dedicated Feature Flags security (`P19-SEC-009` OPEN).
+- Review Queue is not financial source of truth; Admin `RESOLVE_AFTER_DOMAIN` currently hardcodes `domainSucceeded: true` without server domain evidence (`P19-SEC-017` OPEN).
+
+Mainnet / production monetary / AdsGram monetary / payout resume remain unauthorized by Phase 19 Step 1.
