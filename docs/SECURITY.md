@@ -153,13 +153,15 @@ Verified-from-code statements for Phase 19 (not aspirational):
 
 ## Phase 20 — Closed Beta / Minimal Funds
 
-Phase 20 is **IN_PROGRESS** (Step 2 source/config readiness). `PHASE20_GATE=HOLD`.
+Phase 20 is **IN_PROGRESS** (Step 3 provider/no-fill observation). `PHASE20_GATE=HOLD`.
 Branch: `phase20-closed-beta`. Starting HEAD:
 `240d22a6c877f2d678668ba596238f6c8b234f71`.
 
 Authority freeze unchanged: Mainnet OFF; production monetary OFF; AdsGram production
 monetary BLOCKED; payout resume unauthorized; `PHASE20_REAL_MONEY_EXECUTION_AUTHORIZED=false`.
 Phase 20 archive **not** created. Phase 21 **not** started.
+
+Owner NOTIFICATIONS_SCOPE=DRAFT_ONLY_NO_SEND (P20-GAP-007 DEFERRED). AdsGram monetary remains BLOCKED after Step 3 observation.
 
 Step 2 HOLD: disposable draft-only notification proofs; fraud/eligibility fail-closed + TEST
 fixture proofs (REFERENCE ONLY — NOT APPROVED FOR STAGING); empty mission list honesty;
@@ -173,6 +175,7 @@ Authoritative artifacts:
 - `docs/PHASE_20_GAP_REGISTER.md`
 - `docs/PHASE_20_FRAUD_ELIGIBILITY_POLICY_PROPOSAL.md`
 - `docs/PHASE_20_CONTROLLED_CONTENT_PROPOSAL.md`
+- `docs/PHASE_20_STEP3_PROVIDER_NO_FILL_EVIDENCE.md`
 
 Phase 19 residual OPEN findings (004–008, 010–012) are carried into the Phase 20 gap register
 and must not be silently discarded. P19-SEC-010/011/012 must be reconsidered before any

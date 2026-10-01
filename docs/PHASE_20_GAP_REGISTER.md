@@ -15,9 +15,9 @@ Canonical IDs: `P20-GAP-001` .. contiguous.
 | Metric                                                   | Count |
 | -------------------------------------------------------- | ----- |
 | Total gaps                                               | 18    |
-| Blocks Closed Beta (observation / non-money)             | 3     |
+| Blocks Closed Beta (observation / non-money)             | 2     |
 | Blocks real-money beta                                   | 8     |
-| Blocks Phase 20 archive (until resolved or Owner-scoped) | 3     |
+| Blocks Phase 20 archive (until resolved or Owner-scoped) | 2 |
 | Carried Phase 19 residuals mapped                        | 8     |
 
 ---
@@ -110,18 +110,20 @@ Canonical IDs: `P20-GAP-001` .. contiguous.
 
 ### P20-GAP-007 — Notifications engine stub / draft-only / Mini App unavailable
 
-- **title:** Notification behavior not implementable as real send in Phase 20 without new work
+- **title:** Notification delivery not implemented; Phase 20 accepts draft/no-send scope
 - **category:** NOTIFICATIONS
 - **affected component:** `packages/notifications`; Admin notifications; Mini App notifications page
-- **evidence:** package "intentionally not implemented"; Admin "draft metadata only"; UnavailableShell
-- **impact:** Cannot validate real delivery/privacy targeting end-to-end
-- **prerequisite:** Owner scope decision: implement MVP vs accept draft-only honesty for Phase 20
-- **proposed remediation/test:** Step 2 added draft/no-send automated proofs; Owner must choose draft-only scope vs delivery MVP (see plan § notifications scope decision)
-- **blocks Closed Beta?** YES — until Owner explicitly scopes draft-only/no-send behavior as sufficient Phase 20 evidence
+- **evidence:** Step 2 draft/no-send proofs; Owner Step 3 decision `NOTIFICATIONS_SCOPE=DRAFT_ONLY_NO_SEND`
+- **impact:** Real send/dispatch remains unimplemented (intentional for Phase 20)
+- **prerequisite:** None for Phase 20 Closed Beta exit under Owner draft-only scope
+- **proposed remediation/test:** Retain draft/no-send proofs; future phases may implement delivery MVP
+- **blocks Closed Beta?** NO — Owner scoped Phase 20 to draft/no-send validation
 - **blocks real-money beta?** NO
-- **blocks Phase 20 archive?** YES — until Owner scopes acceptance criteria
-- **status:** OPEN / READY_FOR_OWNER_SCOPE_DECISION
-- **step2 note:** Draft-only / no-send unit+DB proofs exist; Owner must still accept draft-only scope for Phase 20 (no send engine).
+- **blocks Phase 20 archive?** NO — Master Spec notification-behavior for Phase 20 satisfied by scoped draft/no-send evidence
+- **status:** DEFERRED
+- **note:** OWNER_SCOPED_FOR_PHASE20 — DRAFT_ONLY_NO_SEND
+- **step2 note:** Draft-only / no-send unit+DB proofs exist.
+- **step3 note:** Owner accepted draft/no-send for Phase 20. Delivery is NOT implemented and NOT production-ready.
 
 ### P20-GAP-008 — Activity surface PLACEHOLDER
 
@@ -281,23 +283,29 @@ Canonical IDs: `P20-GAP-001` .. contiguous.
 
 ---
 
-## Notifications scope decision (Owner — not chosen in Step 2)
+## Notifications scope decision (Owner — Step 3)
 
-P20-GAP-007 remains OPEN until Owner selects one:
+**Owner decision recorded:** `NOTIFICATIONS_SCOPE = DRAFT_ONLY_NO_SEND`
 
-1. **Phase 20 validates notification draft/no-send privacy behavior only** (automated proofs exist; no delivery MVP).
-2. **Build a real notification delivery MVP before Phase 20 archive** (new implementation work; out of Step 2).
+For Phase 20 Closed Beta:
+- Admin may create notification campaign draft metadata
+- no send / dispatch / Telegram / push / external provider delivery
+- no ledger or reward effect
+- SECURITY category remains refused
+- Admin authorization/privacy boundaries remain mandatory
 
-Cursor must not choose for the Owner.
+This is Phase 20 scope acceptance only. Delivery is **not** implemented, **not** production-ready, and **not** permanently out of scope for future phases.
 
-## Blocking tallies (Step 1 interpretation)
+`P20-GAP-007` status: **DEFERRED** (`OWNER_SCOPED_FOR_PHASE20 — DRAFT_ONLY_NO_SEND`).
+Blockers: Closed Beta **NO**, real-money **NO**, archive **NO**.
+
+## Blocking tallies (derived)
 
 Counts below MUST match mechanical derivation from each gap section (`YES` / `NO` first token).
 Do not add inferred items that lack a canonical `P20-GAP-xxx` entry.
 
-**P20_BLOCKING_CLOSED_BETA_GAPS** (count = 3):
+**P20_BLOCKING_CLOSED_BETA_GAPS** (count = 2):
 
-- P20-GAP-007
 - P20-GAP-009
 - P20-GAP-017
 
@@ -312,15 +320,14 @@ Do not add inferred items that lack a canonical `P20-GAP-xxx` entry.
 - P20-GAP-009
 - P20-GAP-011
 
-**P20_BLOCKING_ARCHIVE_GAPS** (count = 3):
+**P20_BLOCKING_ARCHIVE_GAPS** (count = 2):
 
-- P20-GAP-007
 - P20-GAP-009
 - P20-GAP-017
 
 ---
 
-## Non-goals for Step 1–2 remediations
+## Non-goals for Step 1–3 remediations
 
-Do not implement broad product features or activate staging policies/content in Step 2. Draft-only / disposable proofs + Owner proposals only.
+Do not implement notification delivery, activate staging policies/content, or enable AdsGram monetary in Steps 1–3.
 Integrity check: `pnpm phase20:gap-register:check`.

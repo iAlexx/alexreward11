@@ -220,3 +220,13 @@ API ceremony exists (`providers-admin` / `admin-limits`). Admin UI for limit cer
 `PHASE 20 STEP 2 = SOURCE/CONFIG PROOFS + OWNER PROPOSALS / HOLD (NO STAGING ACTIVATION)`
 
 No Phase 20 archive. No Phase 21. No real-money execution authorized.
+
+---
+
+## Step 3 notes
+
+**Owner notification scope:** `NOTIFICATIONS_SCOPE=DRAFT_ONLY_NO_SEND` -> P20-GAP-007 DEFERRED.
+
+Provider/no-fill/Earn observation validated with AdsGram monetary **BLOCKED**. Real-money gaps unchanged.
+Harness: `pnpm phase20:step3` with `PHASE20_STEP3_REQUIRE_DB_GATES=1` + `PHASE20_DATABASE_URL`.
+Evidence: `docs/PHASE_20_STEP3_PROVIDER_NO_FILL_EVIDENCE.md`.

@@ -56,7 +56,8 @@
     "test:archive": "node --test scripts/create-phase-archive.test.mjs",
     "test:phase19-security": "node scripts/phase19-security-review.mjs",
     "phase20:gap-register:check": "node scripts/phase20-gap-register-check.mjs",
-    "test:phase20-step2": "node scripts/phase20-step2-readiness.mjs"
+    "test:phase20-step2": "node scripts/phase20-step2-readiness.mjs",
+    "phase20:step3": "node scripts/phase20-step3-provider-no-fill.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
