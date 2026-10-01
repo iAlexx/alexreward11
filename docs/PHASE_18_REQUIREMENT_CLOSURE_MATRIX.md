@@ -1,9 +1,9 @@
 # Phase 18 Requirement Closure Matrix
 
 Companion to `docs/PHASE_18_OBSERVABILITY_DR_PLAN.md`.
-Statuses allowed: `COMPLETE` | `OWNER_POLICY_REQUIRED` | `EXTERNAL_INTEGRATION_OPTIONAL` | `ARCHIVE_PENDING`.
+Statuses allowed: `COMPLETE` | `OWNER_POLICY_REQUIRED` | `EXTERNAL_INTEGRATION_OPTIONAL` | `ACCEPTED_PACKAGING_IN_PROGRESS` | `ARCHIVE_PASS`.
 
-Semantic markers: PHASE18_CLOSURE_MATRIX, ARCHIVE_PENDING, COMPLETE.
+Semantic markers: PHASE18_CLOSURE_MATRIX, ACCEPTED_PACKAGING_IN_PROGRESS, COMPLETE.
 
 | # | Requirement | Implementation / evidence | Operational authority | Closure status | Owner policy dependency | Missing threshold fails closed |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -19,7 +19,7 @@ Semantic markers: PHASE18_CLOSURE_MATRIX, ARCHIVE_PENDING, COMPLETE.
 | 10 | Reward/budget exposure alerts | ops-health `REWARD_BUDGET_EXPOSURE` | Read-only | COMPLETE | Near-exhaustion OWNER_POLICY_REQUIRED | YES |
 | 11 | Founder bonus budget alerts | ops-health `FOUNDER_BONUS_BUDGET_EXPOSURE` | Read-only | COMPLETE | Near-exhaustion OWNER_POLICY_REQUIRED | YES |
 | 12 | Review Queue backlog alerts | ops-health `REVIEW_QUEUE_BACKLOG` | Read-only; no auto-resolve | COMPLETE | Count/age threshold OWNER_POLICY_REQUIRED | YES |
-| 13 | Archive / restore documentation | `docs/PHASE_ARCHIVE.md`, `docs/DISASTER_RECOVERY.md` slug `PHASE_18_OBSERVABILITY_DR` | Owner acceptance | ARCHIVE_PENDING | Archive pack after independent review | N/A |
+| 13 | Archive / restore documentation | `docs/PHASE_ARCHIVE.md`, `docs/DISASTER_RECOVERY.md` slug `PHASE_18_OBSERVABILITY_DR` | Owner acceptance | ACCEPTED / PACKAGING IN PROGRESS | Canonical source `654a709`; Phase 19 NOT STARTED | N/A |
 
 ## Step 2B verified technical gate (no secrets)
 
