@@ -6,6 +6,7 @@
 
 import type { Pool } from 'pg';
 
+import { parseStrictRfc3339 } from './strict-rfc3339.js';
 import type { RestoreTargetFingerprint } from './types.js';
 
 /** Template / system catalogs only — NOT application DB names. */
@@ -90,14 +91,14 @@ export function parseRestoreDrillEnv(
   const restoreTargetAtRaw = nonempty(env.PHASE18_RESTORE_TARGET_AT);
   let restoreTargetAt: string | null = null;
   if (restoreTargetAtRaw !== null) {
-    const ms = Date.parse(restoreTargetAtRaw);
-    if (!Number.isFinite(ms)) {
+    try {
+      restoreTargetAt = parseStrictRfc3339(restoreTargetAtRaw);
+    } catch {
       throw new RestoreTargetGuardError(
         'RESTORE_TARGET_AT_INVALID',
         'PHASE18_RESTORE_TARGET_AT must be a valid RFC3339 timestamp',
       );
     }
-    restoreTargetAt = new Date(ms).toISOString();
   }
   let drillMode: 'DB_ONLY_STEP2A' | 'FULL_STEP2B';
   if (env.PHASE18_RESTORE_DRILL_MODE === undefined) {

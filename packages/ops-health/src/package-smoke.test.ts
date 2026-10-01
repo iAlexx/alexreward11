@@ -58,9 +58,36 @@ describe('ops-health pure contracts', () => {
   });
 
   it('exposes required system components and alert classes', () => {
-    expect(SYSTEM_COMPONENTS).toContain('OUTBOX_LAG');
-    expect(SYSTEM_COMPONENTS).toContain('SIGNER');
-    expect(ALERT_CLASSES).toContain('REVIEW_QUEUE_BACKLOG');
-    expect(ALERT_CLASSES).toContain('PAYOUT_DISPATCH_PAUSE');
+    expect(SYSTEM_COMPONENTS).toHaveLength(12);
+    expect([...SYSTEM_COMPONENTS]).toEqual([
+      'API',
+      'POSTGRES',
+      'REDIS',
+      'TEMPORAL',
+      'TELEGRAM_BOT',
+      'ADS_PROVIDER',
+      'TON_RPC_PRIMARY',
+      'TON_RPC_SECONDARY',
+      'SIGNER',
+      'HOT_WALLET_CHAIN_SYNC',
+      'OUTBOX_LAG',
+      'RECONCILIATION',
+    ]);
+    expect(ALERT_CLASSES).toHaveLength(11);
+    for (const alertClass of [
+      'OUTBOX_LAG',
+      'RECONCILIATION_MISMATCH',
+      'PROVIDER_HEALTH',
+      'PROVIDER_LIMIT',
+      'PROVIDER_SETTLEMENT',
+      'REWARD_BUDGET_EXPOSURE',
+      'FOUNDER_BONUS_BUDGET_EXPOSURE',
+      'REVIEW_QUEUE_BACKLOG',
+      'HOT_WALLET_COVERAGE',
+      'SIGNER_NOT_READY',
+      'PAYOUT_DISPATCH_PAUSE',
+    ] as const) {
+      expect(ALERT_CLASSES).toContain(alertClass);
+    }
   });
 });

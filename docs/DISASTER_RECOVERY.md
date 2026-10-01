@@ -1,23 +1,35 @@
 # Disaster recovery
 
-Phase 1 local data is disposable development data. Production backup, restore, dispatch-pause,
-and mandatory reconciliation procedures remain governed by the Master Spec and must be
-implemented and drilled before production/mainnet. No Phase 1 mechanism may be presented as
-production recovery.
+Semantic markers: PITR_ENABLED, ISOLATED_RESTORE_DRILL_PASS, FULL_TECHNICAL_RESTORE_GATE_PASS, PAYOUT_RESUME_OWNER_GATED, NO_AUTO_UNPAUSE, SIBLING_RETAINED.
 
-## Current verified Railway PostgreSQL state (Phase 18 Step 2A)
+Phase 1 local data remains disposable development data. Production recovery is governed by the Master Spec and the Phase 18 verified drill below.
 
-Read-only Railway inspection (staging Postgres service) established:
+## Current verified Railway PostgreSQL state (Phase 18 Step 2B CLOSED / PASS)
 
-- PostgreSQL volume exists; operational Postgres is healthy/online.
-- **PITR is NOT currently enabled.**
-- No isolated restore service/environment currently exists.
-- No restore drill has yet been executed against a restored target.
+- Railway-managed PostgreSQL PITR is **ENABLED** (managed PITR / pgBackRest; do not DIY WAL).
+- Backup became trusted through a successful **isolated sibling** restore drill.
+- Restore target timestamp: `2026-10-01T03:48:46.745Z`.
+- Source host and restored sibling host were distinct (isolation PASS).
+- Validator enforced read-only DB (`default_transaction_read_only`).
+- Representative source/restored counts: EXACT_MATCH.
+- Selected user-history verification: 4/4 PASS (privacy-safe SHA-256 userReference only).
+- Temporal reconciliation: PASS.
+- Chain reconciliation: PASS via legitimate empty-chain scope (`NO_CHAIN_BOUND_PAYOUT_STATE_TO_RECONCILE`).
+- Payout remained paused (`PAYOUT_DISPATCH_PAUSE=true`); validator did not unpause.
+- Source and sibling remained unmodified by the validator.
+- No application DB cutover occurred (apps remain bound to source Postgres).
+- `fullRestoreGatePass=true` with `PAYOUT_RESUME_ALLOWED=false`, `AUTO_UNPAUSE=false`, `AUTO_RESEND=false`.
+
+Step 2B runtime evidence recorded under untracked `phase18-runtime-evidence/` (e.g. `source-capture-20261001-034845.json` and restore-drill JSON/Markdown). Do not commit credentials or that evidence tree.
+
+### Retained sibling lifecycle
+
+The restore sibling is temporary DR evidence infrastructure. Do **not** delete it in Step 3.
+Cleanup requires a separate reviewed Owner-approved action after evidence/archive requirements no longer need it.
 
 ### Railway-supported PITR direction (do not DIY WAL)
 
-Railway provides **managed PostgreSQL PITR** using its supported Postgres PITR workflow /
-pgBackRest integration.
+Railway provides **managed PostgreSQL PITR** using its supported Postgres PITR workflow / pgBackRest integration.
 
 **Do NOT** manually edit:
 
@@ -29,120 +41,40 @@ pgBackRest integration.
 
 ### Isolation model (host/service based)
 
-A Railway managed PITR restore creates a **separate sibling PostgreSQL service** while
-restoring the source database cluster contents. A legitimate isolated restore may therefore
-preserve the **same database name** as source (for example `alex_rewards` or `railway`).
+A Railway managed PITR restore creates a **separate sibling PostgreSQL service** while restoring the source database cluster contents. A legitimate isolated restore may therefore preserve the **same database name** as source.
 
-Isolation evidence is therefore:
+Isolation evidence:
 
 - explicit target host binding (`PHASE18_RESTORE_EXPECTED_HOST`)
-- optional/required source host identity (`PHASE18_SOURCE_DATABASE_HOST`)
+- source host identity (`PHASE18_SOURCE_DATABASE_HOST`)
 - target host **must differ** from source host
 - target endpoint identity must differ from operational `DATABASE_URL` endpoint
-  (normalized host/port/database — credentials ignored)
 - exact `current_database()` binding to `PHASE18_RESTORE_EXPECTED_DATABASE_NAME`
+- FULL_STEP2B: `PHASE18_RESTORE_TARGET_AT` strict RFC3339 must equal source-capture timestamp
 
-Database name alone is **not** proof that the target is operational. Template/system names
-(`postgres`, `template0`, `template1`) remain forbidden.
+Template/system names (`postgres`, `template0`, `template1`) remain forbidden.
 
-Step 2A ships **code + DR tooling + runbook only**. Step 2B (Owner-approved) enables
-Railway-managed PITR, creates an isolated restore target, and runs the drill.
-
-## Phase 18 isolated restore-drill tooling (Step 2A)
+## Phase 18 restore-drill tooling
 
 Package: `@alex-rewards/restore-drill`
-
-CLI (after build):
 
 ```text
 pnpm phase18:restore-drill
 ```
 
-Required env (fail-closed; **never** falls back to `DATABASE_URL`):
+Modes: `DB_ONLY_STEP2A` (default) or `FULL_STEP2B`.
+Never falls back to `DATABASE_URL`. Never auto-unpause / auto-resend.
+Strict RFC3339 required for `PHASE18_RESTORE_TARGET_AT` and source-capture timestamps.
 
-| Variable | Requirement |
-| --- | --- |
-| `PHASE18_RESTORE_DRILL_ENABLED` | Must be `true` (default `false`) |
-| `PHASE18_RESTORE_DATABASE_URL` | Explicit restore-only connection string |
-| `PHASE18_RESTORE_EXPECTED_DATABASE_NAME` | Exact `current_database()` match |
-| `PHASE18_RESTORE_EXPECTED_HOST` | Exact hostname match against restore URL host |
-| `PHASE18_RESTORE_FEATURE_FLAG_ENVIRONMENT` | Environment for `PAYOUT_DISPATCH_PAUSE` read |
-| `PHASE18_SOURCE_DATABASE_HOST` | Optional in Step 2A; **required** for FULL_STEP2B; must differ from target host |
-| `PHASE18_RESTORE_VERIFY_USER_IDS` | Optional UUID allowlist (omit → `NOT_EXECUTED`) |
+See `docs/OPERATIONS_RUNBOOK.md` Phase 18 Owner Operations Procedures (restore backup) and `docs/PHASE_18_OBSERVABILITY_DR_PLAN.md`.
 
-Production pool path enforces PostgreSQL `default_transaction_read_only=on` with
-application_name `alex-rewards-restore-drill` and verifies read-only mode on connect.
+## Hot Wallet / signer recovery (summary)
 
-The CLI is **read-only**: schema check, ledger invariants (`checkLedgerInvariants`), Phase 10
-restore reconcile (`runPhase10RestoreReconcileScan` with `autoResend: false` /
-`autoUnpause: false`), outbox observation (FAILED/DEAD_LETTER and `withdrawal.approved`
-PENDING require Owner review), representative counts (fail-closed; source comparison
-`NOT_EXECUTED` in Step 2A), optional user-history aggregates (existence-verified), RTO/RPO
-**observations** (targets remain `OWNER_POLICY_REQUIRED`).
+Pause payouts first. Follow `docs/TON_SIGNER.md` rotation / compromise response.
+Dual encrypted offline backups; verify fingerprint/address; audited Hot Wallet identity transition; reconcile old/new wallet state; retire old signing capability; never store plaintext key/passphrase in repo/env; Owner approval before resume.
 
-Step 2A / DB-only mode always reports:
+## Resume rule
 
-- Temporal workflow live reconciliation = `NOT_OBSERVED`
-- Live chain reconciliation = `NOT_OBSERVED`
-- Count comparison = `NOT_EXECUTED`
-- `fullRestoreGatePass = false`
-- `PAYOUT_RESUME_ALLOWED = false`
-
-`restoreValidationPass` means DB-side evidence checks passed — it is **not** the Phase 18
-full restore gate.
-
-Evidence artifacts (gitignored): `phase18-restore-drill-<UTC>.json` / `.md`
-
-### Planned Step 2B sequence (NOT executed in Step 2A)
-
-1. Verify payout dispatch pause on source staging
-2. Enable/configure Railway-managed PITR
-3. Establish backup recovery point
-4. Create isolated restore target (sibling service — distinct host)
-5. Restore to isolated target
-6. Record restore start/availability timestamps
-7. Bind restore validator **ONLY** to isolated DB (`PHASE18_RESTORE_*` + expected host)
-8. Verify schema (no auto-migrate)
-9. Verify `PAYOUT_DISPATCH_PAUSE = true` (validator does not set it)
-10. Run ledger invariants
-11. Run withdrawal/attempt/outbox DB reconciliation
-12. Compare representative source/restored counts
-13. Verify selected test-user histories if Owner provides IDs
-14. Perform read-only Temporal workflow reconciliation
-15. Perform required read-only Testnet chain reconciliation
-16. Record observed RTO/RPO
-17. Prove financial ambiguity ⇒ payout resume blocked
-18. No resume until Owner review
-
-A backup is **not trusted** until successfully restored. No automatic payout resume.
-
-## Hot Wallet / signer custody (v1.3)
-
-Production signing uses **self-hosted encrypted Ed25519 (`FALLBACK_ENCRYPTED`)** under
-`apps/signer`. AWS KMS compatibility is historical evidence only; AWS is **not** the production
-custody backend. **No signer-custody migration required.**
-
-### Encrypted bundle recovery
-
-1. Keep **two offline encrypted backups** of the Hot Wallet key bundle (ciphertext only).
-2. After host loss: restore bundle to a clean signer host, set `SIGNER_KEY_BUNDLE_PATH`, unlock
-   via loopback with Owner-held passphrase, verify fingerprint/address, then resume only after
-   reconciliation gates pass.
-3. Passphrase is never stored in process environment; plaintext seeds are never archived.
-
-### Hot Wallet compromise
-
-1. Pause payout dispatch; hold ambiguous withdrawals.
-2. Disable signer unlock / revoke encrypted-bundle access on compromised hosts (and revoke any
-   residual historical KMS permission if somehow still present — not part of the production path).
-3. Rotate: new Hot Wallet identity + new encrypted bundle + dual offline backups.
-4. Update audited Hot Wallet configuration; reconcile ledger vs chain vs funding.
-5. Resume dispatch only after Owner approval and mandatory post-restore reconciliation
-   (dispatch starts PAUSED after database restore).
-
-### Future providers
-
-HSM or Vault-backed adapters may implement the same `SignPort` / `LockableSignPort` boundary later.
-They must not return signing permission to general workers.
-
-See `docs/TON_SIGNER.md` and `docs/OPERATIONS_RUNBOOK.md`.
+Technical restore gate PASS does **not** authorize payout resume.
+Resume requires Owner approval, zero unresolved financial ambiguity, and the Admin Feature Flags high-impact ceremony.
+`PAYOUT_RESUME_OWNER_GATED`. `NO_AUTO_UNPAUSE`.

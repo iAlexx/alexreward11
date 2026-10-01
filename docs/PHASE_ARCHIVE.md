@@ -48,3 +48,18 @@ would be historically false.
 
 After packaging passes: present the final review-package path and `PACKAGE_SHA256.txt` to the
 Owner, then wait for explicit approval before starting the next phase.
+
+## Phase 18 archive slug (ARCHIVE_PENDING)
+
+When Phase 18 is accepted after independent review of Step 3, archive with:
+
+- phase: `18`
+- slug: `PHASE_18_OBSERVABILITY_DR` (helper argument typically `OBSERVABILITY_DR`)
+
+Example (do **not** run during Step 3):
+
+```powershell
+pnpm archive:phase -- --phase 18 --slug OBSERVABILITY_DR --commit <accepted-sha> --report docs/PHASE_18_ACCEPTANCE_REPORT.md
+```
+
+Phase 18 Step 3 status: **ARCHIVE_PENDING** — do not create the final Phase 18 archive pack in Step 3.

@@ -593,3 +593,55 @@ describe('ops-health architecture boundary', () => {
     expect(assertBoundedMetricLabels({ component: 'ADS_PROVIDER', state: 'OK' }).ok).toBe(true);
   });
 });
+
+describe('required System Health component set', () => {
+  it('emits all 12 components and never converts missing signals to OK', async () => {
+    const { SYSTEM_COMPONENTS } = await import('../src/types.js');
+    const pool = createFakePool((sql) => {
+      // Force query failures / empty for optional signals so probes stay UNKNOWN where expected.
+      if (sql.includes('feature_flags')) return { rowCount: 0, rows: [] };
+      if (sql.includes('outbox_events')) {
+        throw new Error('outbox unavailable');
+      }
+      if (sql.includes('reconciliation_issues')) {
+        throw new Error('recon unavailable');
+      }
+      return { rowCount: 0, rows: [] };
+    });
+    const snapshot = await evaluateOpsHealth({ pool, environment: 'LOCAL' });
+    expect(snapshot.components).toHaveLength(SYSTEM_COMPONENTS.length);
+    for (const id of SYSTEM_COMPONENTS) {
+      const row = snapshot.components.find((c) => c.component === id);
+      expect(row, id).toBeDefined();
+      if (
+        id === 'TELEGRAM_BOT' ||
+        id === 'TON_RPC_PRIMARY' ||
+        id === 'TON_RPC_SECONDARY' ||
+        id === 'SIGNER' ||
+        id === 'HOT_WALLET_CHAIN_SYNC' ||
+        id === 'ADS_PROVIDER'
+      ) {
+        expect(row?.state).toBe('UNKNOWN');
+        expect(row?.reasonCode).toMatch(
+          /SIGNAL_NOT_CONFIGURED|NO_PROVIDER|NO_RELEVANT_PROVIDERS|UNKNOWN|NOT_CONFIGURED/,
+        );
+        expect(row?.state).not.toBe('OK');
+      }
+    }
+    for (const alertClass of [
+      'PROVIDER_HEALTH',
+      'PROVIDER_LIMIT',
+      'PROVIDER_SETTLEMENT',
+      'REWARD_BUDGET_EXPOSURE',
+      'FOUNDER_BONUS_BUDGET_EXPOSURE',
+      'REVIEW_QUEUE_BACKLOG',
+      'HOT_WALLET_COVERAGE',
+      'SIGNER_NOT_READY',
+      'PAYOUT_DISPATCH_PAUSE',
+      'OUTBOX_LAG',
+      'RECONCILIATION_MISMATCH',
+    ]) {
+      expect(snapshot.alerts.some((a) => a.alertClass === alertClass)).toBe(true);
+    }
+  });
+});

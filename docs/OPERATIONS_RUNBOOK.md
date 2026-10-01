@@ -138,14 +138,14 @@ After any database restore:
 3. **Never auto-resend.** **Never unpause** from this scanner.
 4. Resume only after Owner review of findings + mandatory reconciliation.
 
-### Phase 18 isolated restore drill (Step 2A tooling)
+### Phase 18 isolated restore drill
 
-Current Railway staging observation: **PITR disabled**; no isolated restore target yet.
+Railway-managed PITR is **ENABLED**. Step 2B isolated sibling restore drill is **PASS**
+(restore target `2026-10-01T03:48:46.745Z`). See `docs/DISASTER_RECOVERY.md` and
+`docs/PHASE_18_OBSERVABILITY_DR_PLAN.md`.
+
 Use Railway **managed** PITR / pgBackRest only — do not hand-edit Postgres WAL archive config.
-
-Isolation is **host/service based**. Managed PITR restore may keep the same database name as
-source; prove isolation via distinct restore host (`PHASE18_RESTORE_EXPECTED_HOST`) vs source
-host (`PHASE18_SOURCE_DATABASE_HOST`), not by requiring a different DB name.
+Isolation is **host/service based** (`PHASE18_RESTORE_EXPECTED_HOST` ≠ `PHASE18_SOURCE_DATABASE_HOST`).
 
 Fail-closed CLI (binds only to `PHASE18_RESTORE_DATABASE_URL`; never `DATABASE_URL`):
 
@@ -153,25 +153,10 @@ Fail-closed CLI (binds only to `PHASE18_RESTORE_DATABASE_URL`; never `DATABASE_U
 pnpm phase18:restore-drill
 ```
 
-Required: `PHASE18_RESTORE_DRILL_ENABLED=true`, `PHASE18_RESTORE_DATABASE_URL`,
-`PHASE18_RESTORE_EXPECTED_DATABASE_NAME`, `PHASE18_RESTORE_EXPECTED_HOST`,
-`PHASE18_RESTORE_FEATURE_FLAG_ENVIRONMENT`.
-Optional: `PHASE18_SOURCE_DATABASE_HOST` (required for FULL_STEP2B),
-`PHASE18_RESTORE_VERIFY_USER_IDS` (comma-separated internal UUIDs; never commit real IDs).
-
-Behavior:
-
-- Production pool forces PostgreSQL `default_transaction_read_only=on`
-- Read-only schema / ledger / Phase 10 restore-reconcile / outbox / counts
-- Verifies pause flag; does **not** create or flip it
-- `autoUnpause: false`, `autoResend: false`
-- Step 2A DB-only: Temporal + live chain = `NOT_OBSERVED`; count comparison = `NOT_EXECUTED`
-- `fullRestoreGatePass=false`, `PAYOUT_RESUME_ALLOWED=false`
-- Writes gitignored `phase18-restore-drill-<UTC>.{json,md}`
-
-Step 2B (Owner-approved later) enables PITR, creates isolated restore DB (sibling host), runs
-full Temporal + chain reconciliation. See `docs/DISASTER_RECOVERY.md` and
-`docs/PHASE_18_OBSERVABILITY_DR_PLAN.md`.
+FULL_STEP2B additionally requires source-count capture path, Temporal address/namespace,
+`PHASE18_RESTORE_TARGET_AT` (strict RFC3339), and `PHASE18_RESTORE_VERIFY_ALL_USERS` or verify user ids.
+Validator is read-only: `autoUnpause: false`, `autoResend: false`, `PAYOUT_RESUME_ALLOWED=false`.
+STAGING `PAYOUT_DISPATCH_PAUSE` must remain **true** during Phase 18 closure.
 
 ### Campaign dry-run
 
@@ -179,3 +164,130 @@ full Temporal + chain reconciliation. See `docs/DISASTER_RECOVERY.md` and
 `PHASE10_FAILURE_SCENARIO_CATALOGUE` (`LOCAL_DETERMINISTIC` vs `REQUIRES_REAL_TESTNET`).
 It creates **no** withdrawals and does not flip env. Real mode is refused unless every
 gate in the explicit gates object is `true`.
+
+
+## Phase 18 Owner Operations Procedures
+
+Semantic markers: PHASE18_OWNER_OPERATIONS_PROCEDURES, AUTO_UNPAUSE_FALSE, AUTO_RESEND_FALSE, PAYOUT_PAUSE_PROCEDURE.
+
+Current STAGING state during Phase 18 closure: `PAYOUT_DISPATCH_PAUSE=true`. Do not change it in Step 3.
+`AUTO_UNPAUSE=false`. `AUTO_RESEND=false`. Resume is never automatic.
+
+### 1. Fund Hot Wallet
+
+- Preconditions: payouts paused if Hot Wallet identity is changing; Testnet/Mainnet policy already Owner-set.
+- Authoritative system: MANUAL OWNER PROCEDURE — external chain transfer into Hot Wallet; verification via `pnpm --filter @alex-rewards/withdrawals run phase10:hot-wallet-monitor` and Admin Hot Wallet public views.
+- Safe sequence: transfer on-chain → wait confirmations → run hot-wallet-monitor → record coverage evidence.
+- Verification: monitor PASS / coverage observed; never edit a DB balance field as funding.
+- Rollback/containment: pause payouts if unexpected outgoing detected.
+- Forbidden: mutating ledger/Hot Wallet rows to invent coverage; storing keys in repo/env.
+- Audit: transfer tx evidence + monitor report digests (no plaintext keys).
+
+### 2. Verify coverage
+
+- Preconditions: Hot Wallet identity known; RPC providers configured for the intended network.
+- Authoritative system: `phase10:hot-wallet-monitor`; Admin System Health `HOT_WALLET_CHAIN_SYNC` / `HOT_WALLET_COVERAGE` (UNKNOWN if signal absent).
+- Safe sequence: run monitor read-only → interpret coverage vs pending payout exposure.
+- Verification: monitor exit + Admin alert/component states.
+- Forbidden: inventing OK when signal is UNKNOWN.
+- Audit: monitor output filenames / digests.
+
+### 3. Approve withdrawal
+
+- Preconditions: Owner Admin authenticated; payout pause policy understood; withdrawal in approvable state.
+- Authoritative system: Admin Withdrawals page + high-impact Admin API ceremony (`apps/admin` Withdrawals / reauth).
+- Safe sequence: review fraud/review-queue signals → reauth ceremony → approve action → confirm workflow/outbox created.
+- Verification: withdrawal state transition visible in Admin; no blind CLI approve for production.
+- Forbidden: direct SQL status edits; approving while financial ambiguity open without Owner note.
+- Audit: Admin action audit trail.
+
+### 4. Hold suspicious withdrawal
+
+- Preconditions: suspicion signal (fraud, reconcile danger, unexpected chain).
+- Authoritative system: Admin Withdrawals / Review Queue; pause payouts if systemic.
+- Safe sequence: hold/quarantine via Admin controls where present → pause dispatch if blast radius unclear → open Review Queue case.
+- Verification: withdrawal cannot dispatch; pause flag true if freeze required.
+- Forbidden: deleting withdrawal rows; blind resend after hold.
+- Audit: hold reason + case id digests.
+
+### 5. Review fraud flag
+
+- Preconditions: Owner/authorized Admin; user id available internally only.
+- Authoritative system: Admin Fraud page (`FraudPage`) + Review Queue ensure-open ceremony.
+- Safe sequence: load fraud evidence → open/reuse FRAUD_REVIEW case → do not safe-clear without Owner policy.
+- Verification: case visible; no fraud package import from Admin UI.
+- Forbidden: clearing fraud as payout unlock shortcut.
+- Audit: fraud.ensure_review action records.
+
+### 6. Pause / resume payouts
+
+- Preconditions: Owner Admin; high-impact reauth available.
+- Authoritative system: Admin Feature Flags page (`FeatureFlagsPage`) mutating `PAYOUT_DISPATCH_PAUSE` via ceremony — never direct `UPDATE feature_flags`.
+- Pause sequence: open Feature Flags → select PAYOUT_DISPATCH_PAUSE → complete high-impact ceremony → set enabled=true → confirm Admin overview warning.
+- Resume sequence MUST require: successful restore/reconciliation gate where relevant; zero unresolved financial ambiguity; Owner review; authoritative high-impact flag change to enabled=false; post-change health confirmation on Admin System + withdrawals readiness.
+- Verification: ops-health `PAYOUT_DISPATCH_PAUSE` observation; worker respects pause.
+- Forbidden: auto-unpause; SQL flag flips; resume while FULL restore gate failed.
+- Audit: feature_flags.mutate ceremony records. Markers: PAYOUT_PAUSE_PROCEDURE, NO_AUTO_UNPAUSE.
+
+### 7. Change reward rule
+
+- Preconditions: Owner Admin; Policy Center access.
+- Authoritative system: Admin Policy Center (`PolicyCenterPage` / policy-center Admin API) — typed versioned rules only.
+- Safe sequence: create new rule version via structured forms → bind entitlements through existing rewards/control-center paths → verify no historical ledger rewrite.
+- Verification: new version visible; issuance uses new version only going forward.
+- Forbidden: editing historical reward ledger entries; free-form SQL policy edits.
+- Audit: policy version ids.
+
+### 8. Respond to AdsGram outage
+
+- Preconditions: provider health degraded/unavailable.
+- Authoritative system: Admin System Health `ADS_PROVIDER` / `PROVIDER_HEALTH`; AdsGram console (MANUAL OWNER PROCEDURE for vendor console).
+- Safe sequence: confirm alert → disable monetary campaigns if active → pause payouts if reward/payout ambiguity → wait vendor recovery → settlement review.
+- Verification: provider health recovers; settlement alert not DISPUTED.
+- Forbidden: overriding provider hard limits; enabling AdsGram monetary as workaround during Phase 18 freeze.
+- Audit: health snapshots + Owner decision note.
+
+### 9. Restore backup
+
+- Preconditions: Owner approval; payouts paused; Railway-managed PITR enabled.
+- Authoritative system: Railway managed PITR restore to **isolated sibling** first; validate with `pnpm phase18:restore-drill` FULL_STEP2B.
+- Safe sequence: capture source counts → restore sibling → bind validator to sibling host → require `PHASE18_RESTORE_TARGET_AT` match → Temporal + chain scope reconcile → keep apps on source → Owner review before any cutover (cutover is separate Owner decision; not Step 3).
+- Verification: `fullRestoreGatePass=true` still leaves `PAYOUT_RESUME_ALLOWED=false` until Owner resume ceremony.
+- Forbidden: DIY WAL; restoring over source; unpause from validator; deleting sibling during Step 3.
+- Audit: evidence filenames under untracked `phase18-runtime-evidence/`.
+
+### 10. Rotate Bot token
+
+- Preconditions: Owner; bot service access.
+- Authoritative system: MANUAL OWNER PROCEDURE — Telegram BotFather + Railway bot service secret update (no secret values in git).
+- Safe sequence: pause user-critical flows if needed → issue new token → update Railway secret → restart bot → revoke old token → verify bot health.
+- Verification: Admin `TELEGRAM_BOT` / bot health endpoint.
+- Forbidden: committing token to repo; pasting token into docs.
+- Audit: rotation timestamp + operator identity only.
+
+### 11. Rotate signer
+
+- Preconditions: `PAYOUT_DISPATCH_PAUSE=true`; controlled host available.
+- Authoritative system: `docs/TON_SIGNER.md` + signer local unlock APIs; `apps/signer` only.
+- Safe sequence: pause payouts → generate new seed/bundle on controlled host → dual encrypted offline backups → verify fingerprint/address → audited Hot Wallet identity transition → deploy bundle → unlock briefly → relock → retire old unlock capability.
+- Verification: signer readiness + Hot Wallet reference match; reconcile old/new wallet state.
+- Forbidden: plaintext key/passphrase in repo/env; API/worker importing KMS/signing clients.
+- Audit: fingerprint + ceremony notes. Live rotation is Owner-scheduled (docs only in Step 3).
+
+### 12. Retire Hot Wallet
+
+- Preconditions: payouts paused; replacement wallet ready or payouts remaining stopped.
+- Authoritative system: audited Hot Wallet config transition + chain observation (`phase10:hot-wallet-monitor`).
+- Safe sequence: pause → move identity to new wallet under rotation procedure → reconcile residual balances/outgoing → revoke old signing capability → confirm no unexpected old-wallet outgoing.
+- Verification: monitor shows expected wallet only; reconcile PASS.
+- Forbidden: leaving old signer unlockable; inventing DB balances.
+- Audit: old/new identity digests.
+
+### 13. Handle reconciliation issue
+
+- Preconditions: reconcile danger/warn; pause recommended.
+- Authoritative system: `phase10:restore-reconcile`, Phase 18 restore-drill sections, Admin System Health reconciliation alerts.
+- Safe sequence: pause payouts → run read-only reconcile → classify categories → preserve evidence → Owner decides remediation (never auto-resend).
+- Verification: dangerousCount=0 or Owner-accepted residual with freeze retained.
+- Forbidden: blind resend; ledger history edits; auto-unpause.
+- Audit: reconcile report digests. Marker: NO_BLIND_RESEND.

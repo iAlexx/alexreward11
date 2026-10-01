@@ -5,6 +5,7 @@
 import { readFileSync } from 'node:fs';
 
 import { REPRESENTATIVE_COUNT_TABLES } from './counts.js';
+import { parseStrictRfc3339 } from './strict-rfc3339.js';
 import type { CountCapture, DrillSectionStatus } from './types.js';
 
 export class SourceCountArtifactError extends Error {
@@ -48,11 +49,11 @@ function parseRfc3339(value: unknown, field: string): string {
   if (typeof value !== 'string' || value.trim() === '') {
     throw new SourceCountArtifactError('CAPTURED_AT_MISSING', `${field} must be a non-empty RFC3339 string`);
   }
-  const ms = Date.parse(value);
-  if (!Number.isFinite(ms)) {
+  try {
+    return parseStrictRfc3339(value);
+  } catch {
     throw new SourceCountArtifactError('CAPTURED_AT_INVALID', `${field} is not valid RFC3339`);
   }
-  return new Date(ms).toISOString();
 }
 
 function parseNonNegativeInt(value: unknown, table: string): number {

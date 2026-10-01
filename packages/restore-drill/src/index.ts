@@ -41,6 +41,7 @@ export {
   hashOpaqueReference,
   hashSelectedUserReference,
 } from './user-reference.js';
+export { parseStrictRfc3339, tryParseStrictRfc3339 } from './strict-rfc3339.js';
 export {
   compareSourceRestoredCounts,
   loadSourceCountCaptureFromPath,
