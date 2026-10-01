@@ -1,6 +1,6 @@
 /**
  * Restore-drill-owned PostgreSQL pool with session default_transaction_read_only=on.
- * Never uses @alex-rewards/db createDatabasePool (writable application pool).
+ * Never uses the writable @alex-rewards/db application pool factory.
  */
 
 import { Pool } from 'pg';
@@ -25,7 +25,7 @@ function settingIsOn(value: string | undefined | null): boolean {
   return (value ?? '').trim().toLowerCase() === 'on';
 }
 
-/** Verify the connected session is read-only. Fail-closed for production path. */
+/** Require BOTH default_transaction_read_only and transaction_read_only = on. */
 export async function assertSessionReadOnlyEnforced(pool: Pool): Promise<true> {
   try {
     const result = await pool.query<{ default_ro: string; tx_ro: string }>(
@@ -34,10 +34,10 @@ export async function assertSessionReadOnlyEnforced(pool: Pool): Promise<true> {
          current_setting('transaction_read_only') AS tx_ro`,
     );
     const row = result.rows[0];
-    if (!settingIsOn(row?.default_ro) && !settingIsOn(row?.tx_ro)) {
+    if (!settingIsOn(row?.default_ro) || !settingIsOn(row?.tx_ro)) {
       throw new RestoreTargetGuardError(
         'READ_ONLY_NOT_ENFORCED',
-        'restore-drill pool is not in PostgreSQL read-only mode',
+        'restore-drill pool requires default_transaction_read_only=on AND transaction_read_only=on',
       );
     }
     return true;

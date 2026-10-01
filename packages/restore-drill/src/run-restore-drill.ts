@@ -266,6 +266,7 @@ export async function runRestoreDrill(
         reasonCode: userHistory.reasonCode,
         userCountConfigured: userHistory.userCountConfigured,
         usersVerified: userHistory.usersVerified,
+        users: userHistory.users,
       },
       withdrawalRecords: {
         status: withdrawalRecords.status,

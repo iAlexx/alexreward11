@@ -12,17 +12,30 @@ import {
   RESTORE_DRILL_DATABASE_URL_FALLBACK_ALLOWED,
   RestoreTargetGuardError,
   assertRestoreTargetEnv,
+  assertSessionReadOnlyEnforced,
   computeObservedRpoSeconds,
+  findRestoreDrillFinancialImportViolations,
   parseEndpointIdentity,
   parseRestoreDrillEnv,
   redactDatabaseUrl,
   runRestoreDrill,
+  validateRestoredSchema,
   verifySelectedUserHistory,
   captureRepresentativeCounts,
   reconcileOutboxReadOnly,
 } from '../src/index.js';
 import { RESTORE_DRILL_FORBIDDEN_CAPABILITIES, RESTORE_DRILL_FORBIDDEN_IMPORTS } from '../src/safety.js';
 import { verifyPayoutDispatchPaused } from '../src/payout-pause.js';
+
+vi.mock('@alex-rewards/db', async () => {
+  const actual = await vi.importActual<typeof import('@alex-rewards/db')>('@alex-rewards/db');
+  return {
+    ...actual,
+    listMigrationFiles: vi.fn(async () => [
+      { version: '0001', fileName: '0001.sql', path: '0001.sql' },
+    ]),
+  };
+});
 
 type QueryResult = { rowCount: number; rows: unknown[] };
 
@@ -327,10 +340,83 @@ describe('selected user history', () => {
     ]);
     expect(result.status).toBe('PASS');
     expect(result.usersVerified).toBe(1);
-    expect(result.aggregates[0]?.userIdPresent).toBe(true);
-    expect(result.aggregates[0]?.ledgerAccountCount).toBe(3);
-    expect(result.aggregates[0]?.ledgerProjectionRowCount).toBe(3);
-    expect(result.aggregates[0]?.withdrawalsByState.COMPLETED).toBe(2);
+    expect(result.users[0]?.userReference).toBe('11111111-1111-4111-8111-111111111111');
+    expect(result.users[0]?.userIdPresent).toBe(true);
+    expect(result.users[0]?.ledgerAccountCount).toBe(3);
+    expect(result.users[0]?.ledgerProjectionRowCount).toBe(3);
+    expect(result.users[0]?.withdrawalsByState.COMPLETED).toBe(2);
+  });
+
+  it('final runRestoreDrill report preserves selected-user aggregates', async () => {
+    const userId = '22222222-2222-4222-8222-222222222222';
+    const report = await runRestoreDrill({
+      env: {
+        ...baseEnv,
+        PHASE18_RESTORE_VERIFY_USER_IDS: userId,
+      },
+      pool: createFakePool((sql) => {
+        if (sql.includes('default_transaction_read_only')) {
+          return { rowCount: 1, rows: [{ default_ro: 'on', tx_ro: 'on' }] };
+        }
+        if (sql.includes('current_database')) {
+          return { rowCount: 1, rows: [{ current_database: 'alex_rewards' }] };
+        }
+        if (sql.includes('version()')) return { rowCount: 1, rows: [{ version: 'PostgreSQL 16' }] };
+        if (sql.includes("to_regclass('public.schema_migrations')")) {
+          return { rowCount: 1, rows: [{ present: false }] };
+        }
+        if (sql.includes('feature_flags')) return { rowCount: 1, rows: [{ enabled: true }] };
+        if (sql.includes('EXISTS')) return { rowCount: 1, rows: [{ present: true }] };
+        if (sql.includes('GROUP BY state')) {
+          return { rowCount: 1, rows: [{ state: 'APPROVED', count: '1' }] };
+        }
+        if (sql.includes('FROM outbox_events') && sql.includes('dedupe_key')) {
+          return { rowCount: 1, rows: [{ count: '0' }] };
+        }
+        if (sql.includes('FROM outbox_events')) {
+          return {
+            rowCount: 1,
+            rows: [
+              {
+                pending: '0',
+                dispatched: '0',
+                failed: '0',
+                dead_letter: '0',
+                oldest_pending_age_seconds: null,
+                withdrawal_approved_pending: '0',
+              },
+            ],
+          };
+        }
+        if (sql.includes('COUNT(*)')) return { rowCount: 1, rows: [{ count: '4' }] };
+        return { rowCount: 0, rows: [] };
+      }),
+      mode: 'DB_ONLY_STEP2A',
+      checkLedger: async () => ({ ok: true, findings: [] }),
+      restoreReconcile: async () => ({
+        dangerousCount: 0,
+        warnCount: 0,
+        byCategory: {},
+        autoResend: false as const,
+        autoUnpause: false as const,
+      }),
+    });
+    expect(report.selectedUserHistory.status).toBe('PASS');
+    expect(report.selectedUserHistory.users).toHaveLength(1);
+    expect(report.selectedUserHistory.users[0]).toMatchObject({
+      userReference: userId,
+      userIdPresent: true,
+      ledgerAccountCount: 4,
+      ledgerProjectionRowCount: 4,
+      rewardEventCount: 4,
+      withdrawalCount: 4,
+      withdrawalsByState: { APPROVED: 1 },
+    });
+    const json = JSON.stringify(report);
+    expect(json).toContain(userId);
+    expect(json).toContain('ledgerProjectionRowCount');
+    expect(json).not.toMatch(/telegram/i);
+    expect(json).not.toMatch(/wallet/i);
   });
 });
 
@@ -526,5 +612,211 @@ describe('restore-drill architecture boundary', () => {
     expect(RESTORE_DRILL_FORBIDDEN_CAPABILITIES.tonBroadcast).toBe(false);
     expect(RESTORE_DRILL_FORBIDDEN_CAPABILITIES.autoUnpause).toBe(false);
     expect(RESTORE_DRILL_FORBIDDEN_CAPABILITIES.autoResend).toBe(false);
+  });
+
+  it('rejects subpath/namespace/default/require/dynamic/reexport financial import bypasses', () => {
+    const cases: Array<{ source: string; reason: string }> = [
+      {
+        source: `import { x } from '@alex-rewards/ledger/invariants.js';`,
+        reason: 'SUBPATH_IMPORT',
+      },
+      {
+        source: `import * as ledger from '@alex-rewards/ledger';`,
+        reason: 'NAMESPACE_IMPORT',
+      },
+      {
+        source: `import ledger from '@alex-rewards/ledger';`,
+        reason: 'DEFAULT_IMPORT',
+      },
+      {
+        source: `const x = require('@alex-rewards/withdrawals');`,
+        reason: 'REQUIRE',
+      },
+      {
+        source: `const x = await import('@alex-rewards/db');`,
+        reason: 'DYNAMIC_IMPORT',
+      },
+      {
+        source: `export * from '@alex-rewards/ledger';`,
+        reason: 'REEXPORT_STAR',
+      },
+      {
+        source: `export { checkLedgerInvariants } from '@alex-rewards/ledger';`,
+        reason: 'REEXPORT_NAMED',
+      },
+      {
+        source: `import { postLedger } from '@alex-rewards/ledger';`,
+        reason: 'DISALLOWED_NAMED_IMPORT',
+      },
+    ];
+    for (const { source, reason } of cases) {
+      const violations = findRestoreDrillFinancialImportViolations(source);
+      expect(violations.some((v) => v.reason === reason)).toBe(true);
+    }
+    expect(
+      findRestoreDrillFinancialImportViolations(
+        `import { checkLedgerInvariants } from '@alex-rewards/ledger';`,
+      ),
+    ).toHaveLength(0);
+    expect(
+      findRestoreDrillFinancialImportViolations(
+        `import { runPhase10RestoreReconcileScan } from '@alex-rewards/withdrawals';`,
+      ),
+    ).toHaveLength(0);
+    expect(
+      findRestoreDrillFinancialImportViolations(
+        `import { listMigrationFiles } from '@alex-rewards/db';`,
+      ),
+    ).toHaveLength(0);
+  });
+});
+
+describe('read-only session enforcement', () => {
+  it('default=off, transaction=off => FAIL', async () => {
+    const pool = createFakePool(() => ({
+      rowCount: 1,
+      rows: [{ default_ro: 'off', tx_ro: 'off' }],
+    }));
+    await expect(assertSessionReadOnlyEnforced(pool)).rejects.toMatchObject({
+      code: 'READ_ONLY_NOT_ENFORCED',
+    });
+  });
+
+  it('default=off, transaction=on => FAIL', async () => {
+    const pool = createFakePool(() => ({
+      rowCount: 1,
+      rows: [{ default_ro: 'off', tx_ro: 'on' }],
+    }));
+    await expect(assertSessionReadOnlyEnforced(pool)).rejects.toMatchObject({
+      code: 'READ_ONLY_NOT_ENFORCED',
+    });
+  });
+
+  it('default=on, transaction=off => FAIL', async () => {
+    const pool = createFakePool(() => ({
+      rowCount: 1,
+      rows: [{ default_ro: 'on', tx_ro: 'off' }],
+    }));
+    await expect(assertSessionReadOnlyEnforced(pool)).rejects.toMatchObject({
+      code: 'READ_ONLY_NOT_ENFORCED',
+    });
+  });
+
+  it('default=on, transaction=on => PASS', async () => {
+    const pool = createFakePool(() => ({
+      rowCount: 1,
+      rows: [{ default_ro: 'on', tx_ro: 'on' }],
+    }));
+    await expect(assertSessionReadOnlyEnforced(pool)).resolves.toBe(true);
+  });
+});
+
+describe('critical schema shape', () => {
+  const allColumns: Record<string, string[]> = {
+    ledger_entries: [
+      'ledger_transaction_id',
+      'ledger_account_id',
+      'direction',
+      'amount_atomic',
+    ],
+    ledger_account_balances: [
+      'ledger_account_id',
+      'balance_atomic',
+      'version',
+      'last_ledger_transaction_id',
+    ],
+    withdrawals: [
+      'state',
+      'workflow_id',
+      'reservation_ledger_tx_id',
+      'settlement_ledger_tx_id',
+      'release_ledger_tx_id',
+    ],
+    withdrawal_attempts: [
+      'withdrawal_id',
+      'broadcast_result_state',
+      'broadcast_submitted_at',
+      'broadcast_ambiguity_class',
+    ],
+    outbox_events: ['event_type', 'dedupe_key', 'aggregate_id', 'payload', 'status'],
+    feature_flags: ['flag_key', 'environment', 'enabled'],
+    reconciliation_issues: ['severity', 'status'],
+  };
+
+  const allEnums: Record<string, string[]> = {
+    outbox_event_status: ['PENDING', 'DISPATCHED', 'FAILED', 'DEAD_LETTER'],
+    reconciliation_issue_severity: ['INFO', 'WARNING', 'CRITICAL'],
+    reconciliation_issue_status: ['OPEN', 'INVESTIGATING', 'RESOLVED', 'DISMISSED'],
+  };
+
+  function schemaShapePool(options?: {
+    omitColumn?: string;
+    omitEnum?: string;
+  }) {
+    return createFakePool((sql, params) => {
+      if (sql.includes("to_regclass('public.schema_migrations')")) {
+        return { rowCount: 1, rows: [{ present: true }] };
+      }
+      if (sql.includes('FROM schema_migrations') && !sql.includes('information_schema')) {
+        return { rowCount: 1, rows: [{ version: '0001' }] };
+      }
+      if (sql.includes('to_regclass($1)')) {
+        return { rowCount: 1, rows: [{ present: true }] };
+      }
+      if (sql.includes('information_schema.columns')) {
+        const table = String(params?.[0] ?? '');
+        const cols = [...(allColumns[table] ?? [])];
+        if (options?.omitColumn?.startsWith(`${table}.`)) {
+          const col = options.omitColumn.slice(table.length + 1);
+          return {
+            rowCount: cols.length - 1,
+            rows: cols.filter((c) => c !== col).map((column_name) => ({ column_name })),
+          };
+        }
+        return {
+          rowCount: cols.length,
+          rows: cols.map((column_name) => ({ column_name })),
+        };
+      }
+      if (sql.includes('pg_enum')) {
+        const enumName = String(params?.[0] ?? '');
+        const labels = [...(allEnums[enumName] ?? [])];
+        if (options?.omitEnum?.startsWith(`${enumName}.`)) {
+          const label = options.omitEnum.slice(enumName.length + 1);
+          return {
+            rowCount: labels.length - 1,
+            rows: labels.filter((l) => l !== label).map((enumlabel) => ({ enumlabel })),
+          };
+        }
+        return {
+          rowCount: labels.length,
+          rows: labels.map((enumlabel) => ({ enumlabel })),
+        };
+      }
+      return { rowCount: 0, rows: [] };
+    });
+  }
+
+  it('migration markers present but critical column missing => FAIL', async () => {
+    const result = await validateRestoredSchema(
+      schemaShapePool({ omitColumn: 'withdrawals.workflow_id' }),
+    );
+    expect(result.status).toBe('FAIL');
+    expect(result.criticalColumnsMissing).toContain('withdrawals.workflow_id');
+  });
+
+  it('required enum label missing => FAIL', async () => {
+    const result = await validateRestoredSchema(
+      schemaShapePool({ omitEnum: 'outbox_event_status.DEAD_LETTER' }),
+    );
+    expect(result.status).toBe('FAIL');
+    expect(result.criticalEnumValuesMissing).toContain('outbox_event_status.DEAD_LETTER');
+  });
+
+  it('required shape complete => PASS', async () => {
+    const result = await validateRestoredSchema(schemaShapePool());
+    expect(result.status).toBe('PASS');
+    expect(result.criticalColumnsMissing).toEqual([]);
+    expect(result.criticalEnumValuesMissing).toEqual([]);
   });
 });

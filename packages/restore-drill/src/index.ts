@@ -3,6 +3,7 @@ export type {
   DrillSectionStatus,
   RestoreDrillReport,
   RestoreTargetFingerprint,
+  SelectedUserHistoryEvidence,
   TimingEvidence,
 } from './types.js';
 export {
@@ -37,4 +38,14 @@ export {
   assertSessionReadOnlyEnforced,
   createRestoreDrillReadOnlyPool,
 } from './pool-ro.js';
-export { RESTORE_DRILL_FORBIDDEN_CAPABILITIES, RESTORE_DRILL_FORBIDDEN_IMPORTS } from './safety.js';
+export {
+  RESTORE_DRILL_ALLOWED_DB_IMPORTS,
+  RESTORE_DRILL_ALLOWED_LEDGER_IMPORTS,
+  RESTORE_DRILL_ALLOWED_WITHDRAWALS_IMPORTS,
+  RESTORE_DRILL_FORBIDDEN_CAPABILITIES,
+  RESTORE_DRILL_FORBIDDEN_IMPORTS,
+} from './safety.js';
+export {
+  findRestoreDrillFinancialImportViolations,
+  type RestoreDrillImportViolation,
+} from './import-boundary.js';

@@ -32,7 +32,7 @@ export function renderRestoreDrillMarkdown(report: RestoreDrillReport): string {
     `- counts restored=${report.representativeCounts.restoredCaptureStatus} comparison=${report.representativeCounts.comparisonStatus}`,
     `- workflow: ${report.workflowReconciliation.status} (${report.workflowReconciliation.reasonCode})`,
     `- blockchain: ${report.blockchainReconciliation.status} (${report.blockchainReconciliation.reasonCode})`,
-    `- selectedUserHistory: ${report.selectedUserHistory.status}`,
+    `- selectedUserHistory: ${report.selectedUserHistory.status} verified=${report.selectedUserHistory.usersVerified}/${report.selectedUserHistory.userCountConfigured}`,
     ``,
     `## Timing (observations only; targets OWNER_POLICY_REQUIRED)`,
     `- observedValidationSeconds: ${String(report.timing.observedValidationSeconds)}`,

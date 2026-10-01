@@ -445,9 +445,20 @@ for (const key of forbiddenPlaintextEnvKeys) {
     '@alex-rewards/fraud',
     '@alex-rewards/wallets',
   ];
-  const allowedLedger = new Set(['checkLedgerInvariants']);
-  const allowedWithdrawals = new Set(['runPhase10RestoreReconcileScan']);
-  const allowedDb = new Set(['listMigrationFiles']);
+  const financialAllowlists = [
+    {
+      pkg: '@alex-rewards/ledger',
+      allowed: new Set(['checkLedgerInvariants']),
+    },
+    {
+      pkg: '@alex-rewards/withdrawals',
+      allowed: new Set(['runPhase10RestoreReconcileScan']),
+    },
+    {
+      pkg: '@alex-rewards/db',
+      allowed: new Set(['listMigrationFiles']),
+    },
+  ];
   const forbiddenNamedSurfaces = [
     'createDatabasePool',
     'migrateDatabase',
@@ -461,31 +472,71 @@ for (const key of forbiddenPlaintextEnvKeys) {
     'workflow.start',
   ];
 
-  function namedImportsFrom(source, pkg) {
-    const escaped = pkg.replace('/', '\\/');
-    const re = new RegExp(
-      `import\\s+(?:type\\s+)?\\{([^}]+)\\}\\s+from\\s+['"]${escaped}['"]`,
-      'g',
-    );
-    const names = [];
-    let match;
-    while ((match = re.exec(source)) !== null) {
-      for (const part of match[1].split(',')) {
-        const cleaned = part
+  function stripComments(source) {
+    return source
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+  }
+
+  function collectNamedBindings(clause) {
+    return clause
+      .split(',')
+      .map((part) =>
+        part
           .replace(/\btype\b/g, '')
           .replace(/\bas\s+\w+/g, '')
-          .trim();
-        if (cleaned) names.push(cleaned);
+          .trim(),
+      )
+      .filter((name) => name !== '');
+  }
+
+  function financialImportViolations(source) {
+    const code = stripComments(source);
+    const violations = [];
+    for (const { pkg, allowed } of financialAllowlists) {
+      const escaped = pkg.replace('/', '\\/');
+      if (new RegExp(`(?:from|import|require\\()\\s*['"]${escaped}\\/[^'"]+['"]`).test(code)) {
+        violations.push(`${pkg}: SUBPATH_IMPORT`);
+      }
+      if (new RegExp(`import\\s+\\*\\s+as\\s+\\w+\\s+from\\s+['"]${escaped}['"]`).test(code)) {
+        violations.push(`${pkg}: NAMESPACE_IMPORT`);
+      }
+      if (new RegExp(`import\\s+[A-Za-z_$][\\w$]*\\s+from\\s+['"]${escaped}['"]`).test(code)) {
+        violations.push(`${pkg}: DEFAULT_IMPORT`);
+      }
+      if (new RegExp(`require\\(\\s*['"]${escaped}(?:\\/[^'"]*)?['"]\\s*\\)`).test(code)) {
+        violations.push(`${pkg}: REQUIRE`);
+      }
+      if (new RegExp(`import\\(\\s*['"]${escaped}(?:\\/[^'"]*)?['"]\\s*\\)`).test(code)) {
+        violations.push(`${pkg}: DYNAMIC_IMPORT`);
+      }
+      if (new RegExp(`export\\s+\\*\\s+from\\s+['"]${escaped}(?:\\/[^'"]*)?['"]`).test(code)) {
+        violations.push(`${pkg}: REEXPORT_STAR`);
+      }
+      const exportNamed = new RegExp(
+        `export\\s+(?:type\\s+)?\\{([^}]+)\\}\\s+from\\s+['"]${escaped}['"]`,
+        'g',
+      );
+      let exportMatch;
+      while ((exportMatch = exportNamed.exec(code)) !== null) {
+        violations.push(`${pkg}: REEXPORT_NAMED (${exportMatch[1].trim()})`);
+      }
+      const namedImport = new RegExp(
+        `import\\s+(?:type\\s+)?\\{([^}]+)\\}\\s+from\\s+['"]${escaped}['"]`,
+        'g',
+      );
+      let namedMatch;
+      while ((namedMatch = namedImport.exec(code)) !== null) {
+        for (const name of collectNamedBindings(namedMatch[1])) {
+          if (!allowed.has(name)) {
+            violations.push(
+              `${pkg}: DISALLOWED_NAMED_IMPORT ${name} (allowed: ${[...allowed].join(', ')})`,
+            );
+          }
+        }
       }
     }
-    // Reject namespace / default imports from these packages.
-    if (
-      new RegExp(`import\\s+\\*\\s+as\\s+\\w+\\s+from\\s+['"]${escaped}['"]`).test(source) ||
-      new RegExp(`import\\s+\\w+\\s+from\\s+['"]${escaped}['"]`).test(source)
-    ) {
-      names.push('*');
-    }
-    return names;
+    return violations;
   }
 
   const restoreDrillSrc = (await walk('packages/restore-drill/src/')).filter((path) =>
@@ -507,32 +558,11 @@ for (const key of forbiddenPlaintextEnvKeys) {
       }
     }
 
-    for (const name of namedImportsFrom(source, '@alex-rewards/ledger')) {
-      if (name === '*' || !allowedLedger.has(name)) {
-        failures.push(
-          `${path}: restore-drill may only import { ${[...allowedLedger].join(', ')} } from @alex-rewards/ledger (found ${name})`,
-        );
-      }
-    }
-    for (const name of namedImportsFrom(source, '@alex-rewards/withdrawals')) {
-      if (name === '*' || !allowedWithdrawals.has(name)) {
-        failures.push(
-          `${path}: restore-drill may only import { ${[...allowedWithdrawals].join(', ')} } from @alex-rewards/withdrawals (found ${name})`,
-        );
-      }
-    }
-    for (const name of namedImportsFrom(source, '@alex-rewards/db')) {
-      if (name === '*' || !allowedDb.has(name)) {
-        failures.push(
-          `${path}: restore-drill may only import { ${[...allowedDb].join(', ')} } from @alex-rewards/db (found ${name})`,
-        );
-      }
+    for (const violation of financialImportViolations(source)) {
+      failures.push(`${path}: restore-drill financial import boundary: ${violation}`);
     }
 
-    const withoutBlock = source.replace(/\/\*[\s\S]*?\*\//g, ' ');
-    const withoutLine = withoutBlock
-      .replace(/(^|[^:])\/\/[^\n]*/g, '$1')
-      .replace(/(^|[\s;(])--[^\n]*/g, '$1');
+    const withoutLine = stripComments(source);
     if (
       /\bINSERT\s+INTO\b/i.test(withoutLine) ||
       /\bUPDATE\s+[A-Za-z_][\w.]*/i.test(withoutLine) ||

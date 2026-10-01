@@ -29,6 +29,8 @@ export const RESTORE_DRILL_FORBIDDEN_IMPORTS = [
 ] as const;
 
 /** Exact allowed named runtime imports from financial packages. */
-export const RESTORE_DRILL_ALLOWED_LEDGER_IMPORTS = ['checkLedgerInvariants'] as const;
-export const RESTORE_DRILL_ALLOWED_WITHDRAWALS_IMPORTS = ['runPhase10RestoreReconcileScan'] as const;
-export const RESTORE_DRILL_ALLOWED_DB_IMPORTS = ['listMigrationFiles'] as const;
+export {
+  RESTORE_DRILL_ALLOWED_DB_IMPORTS,
+  RESTORE_DRILL_ALLOWED_LEDGER_IMPORTS,
+  RESTORE_DRILL_ALLOWED_WITHDRAWALS_IMPORTS,
+} from './import-boundary.js';

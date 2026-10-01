@@ -50,6 +50,17 @@ export interface CountCapture {
   readonly tables: Readonly<Record<string, number>>;
 }
 
+/** Safe per-selected-user evidence. userReference is the internal UUID. */
+export interface SelectedUserHistoryEvidence {
+  readonly userReference: string;
+  readonly userIdPresent: boolean;
+  readonly ledgerAccountCount: number;
+  readonly ledgerProjectionRowCount: number;
+  readonly rewardEventCount: number;
+  readonly withdrawalCount: number;
+  readonly withdrawalsByState: Readonly<Record<string, number>>;
+}
+
 export interface RestoreDrillReport {
   readonly contractVersion: 'phase18-restore-drill-v1';
   readonly mode: 'DB_ONLY_STEP2A' | 'FULL_STEP2B';
@@ -63,6 +74,8 @@ export interface RestoreDrillReport {
     readonly appliedMigrationCount: number;
     readonly missingVersions: readonly string[];
     readonly criticalTablesMissing: readonly string[];
+    readonly criticalColumnsMissing: readonly string[];
+    readonly criticalEnumValuesMissing: readonly string[];
   };
   readonly payoutDispatchPause: {
     readonly status: DrillSectionStatus;
@@ -128,6 +141,7 @@ export interface RestoreDrillReport {
     readonly reasonCode: string;
     readonly userCountConfigured: number;
     readonly usersVerified: number;
+    readonly users: readonly SelectedUserHistoryEvidence[];
   };
   readonly withdrawalRecords: {
     readonly status: DrillSectionStatus;

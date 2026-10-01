@@ -1,20 +1,13 @@
 import type { Pool } from 'pg';
 
-import type { DrillSectionStatus } from './types.js';
+import type { DrillSectionStatus, SelectedUserHistoryEvidence } from './types.js';
 
 export interface SelectedUserHistoryResult {
   readonly status: DrillSectionStatus;
   readonly reasonCode: string;
   readonly userCountConfigured: number;
   readonly usersVerified: number;
-  readonly aggregates: readonly {
-    readonly userIdPresent: boolean;
-    readonly ledgerAccountCount: number;
-    readonly ledgerProjectionRowCount: number;
-    readonly rewardEventCount: number;
-    readonly withdrawalCount: number;
-    readonly withdrawalsByState: Readonly<Record<string, number>>;
-  }[];
+  readonly users: readonly SelectedUserHistoryEvidence[];
 }
 
 const UUID_RE =
@@ -23,6 +16,7 @@ const UUID_RE =
 /**
  * Optional Owner allowlist verification. No IDs => NOT_EXECUTED (not PASS).
  * Never exposes Telegram identity, wallet addresses, or tokens.
+ * userReference is the internal UUID (Owner-supplied allowlist value).
  */
 export async function verifySelectedUserHistory(
   pool: Pool,
@@ -34,7 +28,7 @@ export async function verifySelectedUserHistory(
       reasonCode: 'NO_USER_ALLOWLIST',
       userCountConfigured: 0,
       usersVerified: 0,
-      aggregates: [],
+      users: [],
     };
   }
 
@@ -45,12 +39,12 @@ export async function verifySelectedUserHistory(
         reasonCode: 'INVALID_USER_ID',
         userCountConfigured: userIds.length,
         usersVerified: 0,
-        aggregates: [],
+        users: [],
       };
     }
   }
 
-  const aggregates: SelectedUserHistoryResult['aggregates'][number][] = [];
+  const users: SelectedUserHistoryEvidence[] = [];
   for (const userId of userIds) {
     const exists = await pool.query<{ present: boolean }>(
       `SELECT EXISTS(SELECT 1 FROM users WHERE id = $1::uuid) AS present`,
@@ -61,8 +55,8 @@ export async function verifySelectedUserHistory(
         status: 'FAIL',
         reasonCode: 'SELECTED_USER_MISSING',
         userCountConfigured: userIds.length,
-        usersVerified: aggregates.length,
-        aggregates,
+        usersVerified: users.length,
+        users,
       };
     }
 
@@ -99,7 +93,8 @@ export async function verifySelectedUserHistory(
       withdrawalsByState[row.state] = Number(row.count);
     }
 
-    aggregates.push({
+    users.push({
+      userReference: userId.toLowerCase(),
       userIdPresent: true,
       ledgerAccountCount: Number(accounts.rows[0]?.count ?? 0),
       ledgerProjectionRowCount: Number(projections.rows[0]?.count ?? 0),
@@ -113,7 +108,7 @@ export async function verifySelectedUserHistory(
     status: 'PASS',
     reasonCode: 'USER_HISTORY_AGGREGATES_CAPTURED',
     userCountConfigured: userIds.length,
-    usersVerified: aggregates.length,
-    aggregates,
+    usersVerified: users.length,
+    users,
   };
 }
