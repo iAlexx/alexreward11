@@ -1,12 +1,15 @@
 # Phase 18 — Observability / DR / Business Health Plan
 
-Status: Step 3 operational closure in progress. Step 2B CLOSED / PASS.
+Status: Phase 18 CLOSED / PASS / ARCHIVED. Step 2B CLOSED / PASS.
+`PHASE18_GATE=PASS`. `PHASE18_ARCHIVE=PASS`. `PHASE18_STATUS=CLOSED / PASS`. Phase 19 NOT STARTED.
 Archive slug: `PHASE_18_OBSERVABILITY_DR` — status **CLOSED / PASS** (`PHASE18_ARCHIVE=PASS`; Phase 19 NOT STARTED).
 Gate: isolated restore drill PASSED with payout dispatch paused; **no automatic resume**.
 
-Semantic markers: STEP2B_COMPLETED, FULL_TECHNICAL_RESTORE_GATE_PASS, PAYOUT_RESUME_OWNER_GATED, PHASE18_ARCHIVE_PASS, AUTO_UNPAUSE_FALSE, AUTO_RESEND_FALSE.\n\nHistorical Step 3 marker ARCHIVE_PENDING is superseded by Owner acceptance and sealed archive (`PHASE18_ARCHIVE_PASS`). Archive acceptance does not authorize payout resume.
+Semantic markers: STEP2B_COMPLETED, FULL_TECHNICAL_RESTORE_GATE_PASS, PAYOUT_RESUME_OWNER_GATED, PHASE18_ARCHIVE_PASS, AUTO_UNPAUSE_FALSE, AUTO_RESEND_FALSE.
 
-Classification key (Step 3):
+Historical Step 3 marker ARCHIVE_PENDING is superseded by Owner acceptance and sealed archive (`PHASE18_ARCHIVE_PASS`). Archive acceptance does not authorize payout resume.
+
+Classification key:
 - `COMPLETE` — software/ops contract satisfied for Phase 18 source closure
 - `OWNER_POLICY_REQUIRED` — Owner numeric/policy decision still required
 - `EXTERNAL_INTEGRATION_OPTIONAL` — optional hosted vendor / pager delivery not selected
@@ -93,19 +96,33 @@ Restore-drill DB-only tooling, host isolation, read-only pool, schema/pause/ledg
 ### Step 2B (completed)
 Railway-managed PITR enablement, isolated sibling restore, FULL_STEP2B gate including source-count artifact binding, Temporal visibility reconciliation, chain empty-scope reconciliation, privacy-safe all-user verification.
 
-### Step 3 (this step)
-Strict RFC3339 restore timestamp hardening; documentation truth; incident playbooks; Owner operations procedures; Owner policy register; closure matrix; documentation truth tests. **No archive. No pause change. No Railway mutation.**
+### Step 3 (completed)
+Strict RFC3339 restore timestamp hardening; documentation truth; incident playbooks; Owner operations procedures; Owner policy register; closure matrix; documentation truth tests. Pause unchanged. No Railway mutation during Step 3. Archive packaging followed Owner acceptance after Step 3.
 
 ---
 
-## Explicit non-goals (Step 3)
+## Current post-archive invariants
 
-- No Phase 18 archive ZIP / acceptance pack creation
-- No marking Phase 18 CLOSED
-- No change to `PAYOUT_DISPATCH_PAUSE` (must remain true on STAGING)
+- `PHASE18_GATE=PASS`
+- `PHASE18_ARCHIVE=PASS`
+- `PHASE18_STATUS=CLOSED / PASS`
+- Phase 19 NOT STARTED
+- Canonical accepted source remains `654a7097456d7d18ad6e6a7072793ee6d353ca33`
+- Sealed archive stamp `20261001-175223` (do not rebuild/mutate)
+- `PAYOUT_DISPATCH_PAUSE` remains true on STAGING (archive does not authorize resume)
 - No auto-unpause / auto-resend
-- No ledger / withdrawal / Outbox mutation
-- No sibling delete / new PITR restore / PITR disable
-- No deploy / Mainnet / production monetary / AdsGram monetary enablement
-- No Phase 19 start
-- No invented numeric thresholds or hosted monitoring vendors
+- No Mainnet / production monetary / AdsGram monetary enablement
+
+## Historical Step 3 constraints (superseded after Owner acceptance + archive seal)
+
+These constraints applied **during** Step 3 execution only and are retained for history:
+
+- No Phase 18 archive ZIP / acceptance pack creation (superseded: archive sealed)
+- No marking Phase 18 CLOSED (superseded: `PHASE18_STATUS=CLOSED / PASS`)
+- No change to `PAYOUT_DISPATCH_PAUSE` (must remain true on STAGING) — still in force
+- No auto-unpause / auto-resend — still in force
+- No ledger / withdrawal / Outbox mutation — still in force
+- No sibling delete / new PITR restore / PITR disable — still Owner-gated
+- No deploy / Mainnet / production monetary / AdsGram monetary enablement — still in force
+- No Phase 19 start — still in force
+- No invented numeric thresholds or hosted monitoring vendors — still in force
