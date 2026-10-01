@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 
 import type { DrillSectionStatus, SelectedUserHistoryEvidence } from './types.js';
+import { hashSelectedUserReference } from './user-reference.js';
 
 export interface SelectedUserHistoryResult {
   readonly status: DrillSectionStatus;
@@ -13,10 +14,18 @@ export interface SelectedUserHistoryResult {
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+/** Enumerate restored user IDs internally — never print/log raw IDs. */
+export async function enumerateRestoredUserIds(pool: Pool): Promise<readonly string[]> {
+  const result = await pool.query<{ id: string }>(
+    `SELECT id::text AS id FROM users ORDER BY id`,
+  );
+  return result.rows.map((r) => r.id);
+}
+
 /**
- * Optional Owner allowlist verification. No IDs => NOT_EXECUTED (not PASS).
+ * Optional Owner allowlist / ALL-USERS verification. No IDs => NOT_EXECUTED (not PASS).
  * Never exposes Telegram identity, wallet addresses, or tokens.
- * userReference is the internal UUID (Owner-supplied allowlist value).
+ * userReference is a deterministic SHA-256 domain-separated digest — never the raw UUID.
  */
 export async function verifySelectedUserHistory(
   pool: Pool,
@@ -94,7 +103,7 @@ export async function verifySelectedUserHistory(
     }
 
     users.push({
-      userReference: userId.toLowerCase(),
+      userReference: hashSelectedUserReference(userId),
       userIdPresent: true,
       ledgerAccountCount: Number(accounts.rows[0]?.count ?? 0),
       ledgerProjectionRowCount: Number(projections.rows[0]?.count ?? 0),

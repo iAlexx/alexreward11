@@ -1,12 +1,15 @@
 /**
- * Phase 18 Step 2A — read-only restore drill orchestrator.
- * NEVER mutates DB, NEVER resumes payout, NEVER calls signer/TON/Temporal replay.
+ * Phase 18 restore-drill orchestrator.
+ * DB_ONLY_STEP2A: DB read-only evidence; fullRestoreGatePass always false.
+ * FULL_STEP2B: fail-closed Temporal + chain + source-count gate (still no resume).
+ * NEVER mutates DB, NEVER resumes payout, NEVER calls signer / ton broadcast / Temporal mutation.
  */
 
 import { checkLedgerInvariants } from '@alex-rewards/ledger';
 import { runPhase10RestoreReconcileScan } from '@alex-rewards/withdrawals';
 import type { Pool } from 'pg';
 
+import { reconcileChainReadOnly } from './chain-reconciliation.js';
 import { captureRepresentativeCounts, diffCountCaptures } from './counts.js';
 import { reconcileOutboxReadOnly } from './outbox.js';
 import { verifyPayoutDispatchPaused } from './payout-pause.js';
@@ -16,14 +19,30 @@ import {
 } from './pool-ro.js';
 import { validateRestoredSchema } from './schema.js';
 import {
+  compareSourceRestoredCounts,
+  loadSourceCountCaptureFromPath,
+  parseSourceCountCapture,
+  SourceCountArtifactError,
+} from './source-count-artifact.js';
+import {
   assertConnectedRestoreTarget,
   assertRestoreTargetEnv,
   parseRestoreDrillEnv,
   RESTORE_DRILL_DATABASE_URL_FALLBACK_ALLOWED,
   type RestoreDrillEnvConfig,
 } from './target-guard.js';
-import type { RestoreDrillReport, TimingEvidence, DrillSectionStatus } from './types.js';
-import { verifySelectedUserHistory } from './user-history.js';
+import {
+  createTemporalListPort,
+  reconcileTemporalWorkflows,
+  type TemporalListPort,
+} from './temporal-reconciliation.js';
+import type {
+  CountCapture,
+  DrillSectionStatus,
+  RestoreDrillReport,
+  TimingEvidence,
+} from './types.js';
+import { enumerateRestoredUserIds, verifySelectedUserHistory } from './user-history.js';
 import { summarizeWithdrawalRecords } from './withdrawal-records.js';
 
 export interface RunRestoreDrillOptions {
@@ -50,6 +69,14 @@ export interface RunRestoreDrillOptions {
     readonly autoResend: false;
     readonly autoUnpause: false;
   }>;
+  /** Test injection — Temporal visibility list port (FULL_STEP2B). */
+  readonly temporalListPort?: TemporalListPort | null;
+  /** Test injection — skip filesystem read; supply parsed source capture. */
+  readonly sourceCountCapture?: CountCapture | unknown;
+  /** Test injection — chain validate override forwarded to reconcileChainReadOnly. */
+  readonly chainValidateOverride?: Parameters<
+    typeof reconcileChainReadOnly
+  >[0]['validateOverride'];
 }
 
 /** RPO = how far restored authoritative data lags behind source evidence (seconds). */
@@ -74,20 +101,63 @@ function secondsBetween(start: string | null, end: string | null): number | null
   return Math.max(0, Math.round((b - a) / 1000));
 }
 
+function isBlockingStatus(status: DrillSectionStatus): boolean {
+  return (
+    status === 'FAIL' ||
+    status === 'OWNER_REVIEW_REQUIRED' ||
+    status === 'NOT_OBSERVED' ||
+    status === 'NOT_EXECUTED'
+  );
+}
+
+export function computeFullRestoreGatePass(sections: {
+  readonly targetIsolationPass: boolean;
+  readonly databaseReadOnlyEnforced: boolean;
+  readonly schema: DrillSectionStatus;
+  readonly pause: DrillSectionStatus;
+  readonly pauseEnabled: boolean | null;
+  readonly ledger: DrillSectionStatus;
+  readonly withdrawalRestore: DrillSectionStatus;
+  readonly outbox: DrillSectionStatus;
+  readonly countComparison: DrillSectionStatus;
+  readonly selectedUser: DrillSectionStatus;
+  readonly workflow: DrillSectionStatus;
+  readonly blockchain: DrillSectionStatus;
+  readonly withdrawalRecords: DrillSectionStatus;
+}): boolean {
+  if (!sections.targetIsolationPass) return false;
+  if (!sections.databaseReadOnlyEnforced) return false;
+  if (sections.pauseEnabled !== true) return false;
+  const mandatory: DrillSectionStatus[] = [
+    sections.schema,
+    sections.pause,
+    sections.ledger,
+    sections.withdrawalRestore,
+    sections.outbox,
+    sections.countComparison,
+    sections.selectedUser,
+    sections.workflow,
+    sections.blockchain,
+    sections.withdrawalRecords,
+  ];
+  return mandatory.every((s) => s === 'PASS');
+}
+
 export async function runRestoreDrill(
   options: RunRestoreDrillOptions = {},
 ): Promise<RestoreDrillReport> {
   const env = options.env ?? process.env;
   const config = parseRestoreDrillEnv(env);
-  const mode = options.mode ?? 'DB_ONLY_STEP2A';
+  const mode = options.mode ?? config.drillMode;
   const bound = assertRestoreTargetEnv(config, { mode });
   const validationStartedAt = (options.now ?? new Date()).toISOString();
 
   const ownsPool = options.pool === undefined;
   const pool = options.pool ?? createRestoreDrillReadOnlyPool(bound.restoreDatabaseUrl);
 
+  let temporalCloseable: { close: () => Promise<void> } | null = null;
+
   try {
-    // Production-owned pool must prove PostgreSQL read-only. Injected test pools also verify.
     await assertSessionReadOnlyEnforced(pool);
 
     const target = await assertConnectedRestoreTarget(pool, bound, {
@@ -149,10 +219,163 @@ export async function runRestoreDrill(
 
     const outbox = await reconcileOutboxReadOnly(pool);
     const counts = await captureRepresentativeCounts(pool);
-    const userHistory = await verifySelectedUserHistory(pool, config.verifyUserIds);
+
+    let verifyUserIds = config.verifyUserIds;
+    if (mode === 'FULL_STEP2B' && config.verifyAllUsers) {
+      verifyUserIds = [...(await enumerateRestoredUserIds(pool))];
+    }
+    const userHistory = await verifySelectedUserHistory(pool, verifyUserIds);
     const withdrawalRecords = await summarizeWithdrawalRecords(pool);
 
-    const dbExpectedWorkflowIdentityCount = await countDbExpectedWorkflowIdentities(pool);
+    // --- Count comparison (FULL only) ---
+    let sourceCapture: CountCapture | null = null;
+    let countComparisonStatus: DrillSectionStatus = 'NOT_EXECUTED';
+    let countStatus: DrillSectionStatus = counts.status;
+    let countDiff: Readonly<Record<string, number>> | null = diffCountCaptures(
+      null,
+      counts.restoredCapture,
+    );
+    let countFailedTables: readonly string[] = counts.failedTables;
+    let countReasonExtra: string | null = null;
+
+    if (mode === 'FULL_STEP2B') {
+      try {
+        if (options.sourceCountCapture !== undefined) {
+          sourceCapture =
+            options.sourceCountCapture !== null &&
+            typeof options.sourceCountCapture === 'object' &&
+            'tables' in (options.sourceCountCapture as object) &&
+            'capturedAt' in (options.sourceCountCapture as object) &&
+            typeof (options.sourceCountCapture as CountCapture).capturedAt === 'string' &&
+            typeof (options.sourceCountCapture as CountCapture).tables === 'object'
+              ? (options.sourceCountCapture as CountCapture)
+              : parseSourceCountCapture(options.sourceCountCapture);
+        } else if (config.sourceCountCapturePath !== null) {
+          sourceCapture = loadSourceCountCaptureFromPath(config.sourceCountCapturePath);
+        } else {
+          throw new SourceCountArtifactError(
+            'SOURCE_COUNT_CAPTURE_MISSING',
+            'PHASE18_SOURCE_COUNT_CAPTURE_PATH is required for FULL_STEP2B',
+          );
+        }
+
+        if (counts.restoredCapture === null || counts.restoredCaptureStatus === 'FAIL') {
+          countStatus = 'FAIL';
+          countComparisonStatus = 'FAIL';
+          countReasonExtra = 'RESTORED_COUNT_CAPTURE_FAILED';
+        } else {
+          const compared = compareSourceRestoredCounts(sourceCapture, counts.restoredCapture);
+          countDiff = compared.diff;
+          countFailedTables = compared.failedTables;
+          countComparisonStatus = compared.status;
+          countStatus = compared.status === 'PASS' ? counts.status : compared.status;
+          countReasonExtra = compared.reasonCode;
+        }
+      } catch (error: unknown) {
+        countStatus = 'FAIL';
+        countComparisonStatus = 'FAIL';
+        countReasonExtra =
+          error instanceof SourceCountArtifactError
+            ? error.code
+            : 'SOURCE_COUNT_ARTIFACT_FAILED';
+        sourceCapture = null;
+        countDiff = null;
+      }
+    }
+
+    // --- Temporal (FULL only) ---
+    let workflowSection: RestoreDrillReport['workflowReconciliation'];
+    if (mode === 'FULL_STEP2B') {
+      let temporalPort: TemporalListPort | null = null;
+      if (options.temporalListPort !== undefined) {
+        temporalPort = options.temporalListPort;
+      } else if (config.temporalAddress !== null && config.temporalNamespace !== null) {
+        const created = await createTemporalListPort({
+          address: config.temporalAddress,
+          namespace: config.temporalNamespace,
+        });
+        temporalCloseable = created;
+        temporalPort = created;
+      }
+      const workflow = await reconcileTemporalWorkflows({ pool, temporal: temporalPort });
+      workflowSection = {
+        status: workflow.status,
+        reasonCode: workflow.reasonCode,
+        dbExpectedWorkflowIdentityCount: workflow.dbExpectedWorkflowIdentityCount,
+        temporalObservedWorkflowCount: workflow.temporalObservedWorkflowCount,
+        matchedCount: workflow.matchedCount,
+        missingInTemporalCount: workflow.missingInTemporalCount,
+        unexpectedInTemporalCount: workflow.unexpectedInTemporalCount,
+        statusCounts: workflow.statusCounts,
+        mismatchReferences: workflow.mismatchReferences,
+        temporalQueried: workflow.temporalQueried,
+      };
+    } else {
+      workflowSection = {
+        status: 'NOT_OBSERVED',
+        reasonCode: 'TEMPORAL_NOT_QUERIED_STEP2A',
+        dbExpectedWorkflowIdentityCount: 0,
+        temporalObservedWorkflowCount: 0,
+        matchedCount: 0,
+        missingInTemporalCount: 0,
+        unexpectedInTemporalCount: 0,
+        statusCounts: {},
+        mismatchReferences: [],
+        temporalQueried: false,
+      };
+    }
+
+    // --- Chain (FULL only) ---
+    let chainSection: RestoreDrillReport['blockchainReconciliation'];
+    if (mode === 'FULL_STEP2B') {
+      const chain = await reconcileChainReadOnly({
+        pool,
+        env,
+        ...(options.now !== undefined ? { now: options.now } : {}),
+        ...(options.chainValidateOverride !== undefined
+          ? { validateOverride: options.chainValidateOverride }
+          : {}),
+      });
+      chainSection = {
+        status: chain.status,
+        reasonCode: chain.reasonCode,
+        liveChainReconciliation: chain.liveChainReconciliation,
+        withdrawalsRequiringLiveChainCount: chain.withdrawalsRequiringLiveChainCount,
+        liveProviderQueryPerformed: chain.liveProviderQueryPerformed,
+        chainScopeEmpty: chain.chainScopeEmpty,
+        providerQueryPerformed: chain.providerQueryPerformed,
+        primaryHealthy: chain.primaryHealthy,
+        secondaryHealthy: chain.secondaryHealthy,
+        providerAgreement: chain.providerAgreement,
+        windowFullyCovered: chain.windowFullyCovered,
+        agreedTransferCount: chain.agreedTransferCount,
+        knownExpectedTransferCount: chain.knownExpectedTransferCount,
+        confirmedMatchedCount: chain.confirmedMatchedCount,
+        unexpectedOutgoingCount: chain.unexpectedOutgoingCount,
+        ambiguousAttemptCount: chain.ambiguousAttemptCount,
+        providerReportDigest: chain.providerReportDigest,
+      };
+    } else {
+      chainSection = {
+        status: 'NOT_OBSERVED',
+        reasonCode: 'LIVE_CHAIN_NOT_QUERIED_STEP2A',
+        liveChainReconciliation: 'NOT_OBSERVED',
+        withdrawalsRequiringLiveChainCount: withdrawalRecords.requiringLiveChainCount,
+        liveProviderQueryPerformed: false,
+        chainScopeEmpty: false,
+        providerQueryPerformed: false,
+        primaryHealthy: null,
+        secondaryHealthy: null,
+        providerAgreement: null,
+        windowFullyCovered: null,
+        agreedTransferCount: null,
+        knownExpectedTransferCount: null,
+        confirmedMatchedCount: null,
+        unexpectedOutgoingCount: null,
+        ambiguousAttemptCount: null,
+        providerReportDigest: null,
+      };
+    }
 
     const validationCompletedAt = new Date().toISOString();
     const timing: TimingEvidence = {
@@ -170,21 +393,21 @@ export async function runRestoreDrill(
         options.timingOverrides?.restoreStartedAt ?? null,
         validationCompletedAt,
       ),
-      sourceEvidenceCapturedAt: options.timingOverrides?.sourceEvidenceCapturedAt ?? null,
+      sourceEvidenceCapturedAt:
+        options.timingOverrides?.sourceEvidenceCapturedAt ??
+        sourceCapture?.capturedAt ??
+        null,
       restoredLatestAuthoritativeTimestamp:
         options.timingOverrides?.restoredLatestAuthoritativeTimestamp ?? null,
       observedRpoSeconds: computeObservedRpoSeconds(
-        options.timingOverrides?.sourceEvidenceCapturedAt ?? null,
+        options.timingOverrides?.sourceEvidenceCapturedAt ??
+          sourceCapture?.capturedAt ??
+          null,
         options.timingOverrides?.restoredLatestAuthoritativeTimestamp ?? null,
       ),
       rtoTargetSeconds: 'OWNER_POLICY_REQUIRED',
       rpoTargetSeconds: 'OWNER_POLICY_REQUIRED',
     };
-
-    const workflowStatus: DrillSectionStatus = 'NOT_OBSERVED';
-    const chainStatus: DrillSectionStatus = 'NOT_OBSERVED';
-    const liveChainReconciliation = 'NOT_OBSERVED' as const;
-    const temporalObserved = 'NOT_OBSERVED' as const;
 
     const hardFails = [
       schema.status === 'FAIL',
@@ -192,15 +415,61 @@ export async function runRestoreDrill(
       ledgerStatus === 'FAIL',
       withdrawStatus === 'FAIL' || withdrawStatus === 'OWNER_REVIEW_REQUIRED',
       outbox.status === 'FAIL' || outbox.status === 'OWNER_REVIEW_REQUIRED',
-      counts.status === 'FAIL',
+      countStatus === 'FAIL',
       userHistory.status === 'FAIL',
       withdrawalRecords.status === 'FAIL',
     ];
     const restoreValidationPass = !hardFails.some(Boolean);
 
-    // Step 2A: Temporal / live chain / source-restored comparison incomplete ⇒ full gate false.
-    const fullRestoreGatePass = false;
-    const payoutResumeAllowedFinal = false;
+    const fullRestoreGatePass =
+      mode === 'FULL_STEP2B'
+        ? computeFullRestoreGatePass({
+            targetIsolationPass:
+              target.targetDatabaseNameMatchesExpected &&
+              (target.targetDistinctFromSource === true ||
+                target.targetDistinctFromSource === null),
+            databaseReadOnlyEnforced: target.databaseReadOnlyEnforced,
+            schema: schema.status,
+            pause: pause.status,
+            pauseEnabled: pause.payoutDispatchPausedAtValidation,
+            ledger: ledgerStatus,
+            withdrawalRestore: withdrawStatus,
+            outbox: outbox.status,
+            countComparison: countComparisonStatus,
+            selectedUser: userHistory.status,
+            workflow: workflowSection.status,
+            blockchain: chainSection.status,
+            withdrawalRecords: withdrawalRecords.status,
+          })
+        : false;
+
+    const notes: string[] = [
+      'DATABASE_URL_FALLBACK_ALLOWED=' + String(RESTORE_DRILL_DATABASE_URL_FALLBACK_ALLOWED),
+      'Isolation is host/service based; DB name may match source after managed PITR restore.',
+      'payoutResumeAllowed=false; resumeDecision=OWNER_APPROVAL_REQUIRED (Owner ceremony required).',
+      'autoUnpause=false; autoResend=false; restore-drill never UPDATEs feature_flags.',
+    ];
+    if (mode === 'DB_ONLY_STEP2A') {
+      notes.push(
+        'Mode DB_ONLY_STEP2A: Temporal/chain/source-count comparison NOT executed; fullRestoreGatePass=false.',
+      );
+    } else {
+      notes.push(
+        'Mode FULL_STEP2B: Temporal visibility, chain scope, and source-count artifact comparison executed read-only.',
+      );
+      if (chainSection.chainScopeEmpty && !chainSection.providerQueryPerformed) {
+        notes.push(
+          'Chain zero-scope path: no live provider query performed (NO_CHAIN_BOUND_PAYOUT_STATE_TO_RECONCILE).',
+        );
+      }
+      if (countReasonExtra !== null) {
+        notes.push(`Source/restored count comparison reason: ${countReasonExtra}`);
+      }
+    }
+    notes.push('Do not enable Railway PITR or create restore resources from this CLI.');
+
+    // Silence unused helper reference under DB_ONLY (still useful for FULL gate callers/tests).
+    void isBlockingStatus;
 
     return {
       contractVersion: 'phase18-restore-drill-v1',
@@ -240,26 +509,16 @@ export async function runRestoreDrill(
         duplicateDedupeKeyAnomalies: outbox.duplicateDedupeKeyAnomalies,
         lagThreshold: 'THRESHOLD_NOT_CONFIGURED',
       },
-      workflowReconciliation: {
-        status: workflowStatus,
-        reasonCode: 'TEMPORAL_NOT_QUERIED_STEP2A',
-        dbExpectedWorkflowIdentityCount,
-        temporalObserved,
-      },
-      blockchainReconciliation: {
-        status: chainStatus,
-        reasonCode: 'LIVE_CHAIN_NOT_QUERIED_STEP2A',
-        liveChainReconciliation,
-        withdrawalsRequiringLiveChainCount: withdrawalRecords.requiringLiveChainCount,
-      },
+      workflowReconciliation: workflowSection,
+      blockchainReconciliation: chainSection,
       representativeCounts: {
-        status: counts.status,
+        status: countStatus,
         restoredCaptureStatus: counts.restoredCaptureStatus,
-        comparisonStatus: counts.comparisonStatus,
-        failedTables: counts.failedTables,
-        sourceCapture: null,
+        comparisonStatus: countComparisonStatus,
+        failedTables: countFailedTables,
+        sourceCapture,
         restoredCapture: counts.restoredCapture,
-        diff: diffCountCaptures(null, counts.restoredCapture),
+        diff: countDiff,
       },
       selectedUserHistory: {
         status: userHistory.status,
@@ -276,35 +535,24 @@ export async function runRestoreDrill(
       },
       restoreValidationPass,
       fullRestoreGatePass,
-      payoutResumeAllowed: payoutResumeAllowedFinal,
+      payoutResumeAllowed: false,
+      resumeDecision: 'OWNER_APPROVAL_REQUIRED',
       autoUnpause: false,
       autoResend: false,
       financialAuthority: false,
-      notes: [
-        'DATABASE_URL_FALLBACK_ALLOWED=' + String(RESTORE_DRILL_DATABASE_URL_FALLBACK_ALLOWED),
-        'Isolation is host/service based; DB name may match source after managed PITR restore.',
-        'Step 2A is DB-only preparation; fullRestoreGatePass=false (Temporal/chain/count comparison NOT complete).',
-        'PAYOUT_RESUME_ALLOWED is false until Step 2B completes all required evidence.',
-        'Do not enable Railway PITR or create restore resources from this CLI.',
-      ],
+      notes,
     };
   } finally {
+    if (temporalCloseable !== null) {
+      try {
+        await temporalCloseable.close();
+      } catch {
+        // ignore close errors
+      }
+    }
     if (ownsPool) {
       await pool.end();
     }
-  }
-}
-
-async function countDbExpectedWorkflowIdentities(pool: Pool): Promise<number> {
-  try {
-    const result = await pool.query<{ count: string }>(
-      `SELECT COUNT(*)::text AS count
-         FROM withdrawals
-        WHERE workflow_id IS NOT NULL`,
-    );
-    return Number(result.rows[0]?.count ?? 0);
-  } catch {
-    return 0;
   }
 }
 

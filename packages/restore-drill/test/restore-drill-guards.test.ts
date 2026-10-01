@@ -23,6 +23,7 @@ import {
   verifySelectedUserHistory,
   captureRepresentativeCounts,
   reconcileOutboxReadOnly,
+  hashSelectedUserReference,
 } from '../src/index.js';
 import { RESTORE_DRILL_FORBIDDEN_CAPABILITIES, RESTORE_DRILL_FORBIDDEN_IMPORTS } from '../src/safety.js';
 import { verifyPayoutDispatchPaused } from '../src/payout-pause.js';
@@ -340,7 +341,9 @@ describe('selected user history', () => {
     ]);
     expect(result.status).toBe('PASS');
     expect(result.usersVerified).toBe(1);
-    expect(result.users[0]?.userReference).toBe('11111111-1111-4111-8111-111111111111');
+    expect(result.users[0]?.userReference).toBe(hashSelectedUserReference('11111111-1111-4111-8111-111111111111'));
+    expect(result.users[0]?.userReference).toMatch(/^[0-9a-f]{64}$/);
+    expect(JSON.stringify(result)).not.toContain('11111111-1111-4111-8111-111111111111');
     expect(result.users[0]?.userIdPresent).toBe(true);
     expect(result.users[0]?.ledgerAccountCount).toBe(3);
     expect(result.users[0]?.ledgerProjectionRowCount).toBe(3);
@@ -403,8 +406,9 @@ describe('selected user history', () => {
     });
     expect(report.selectedUserHistory.status).toBe('PASS');
     expect(report.selectedUserHistory.users).toHaveLength(1);
+    const expectedRef = hashSelectedUserReference(userId);
     expect(report.selectedUserHistory.users[0]).toMatchObject({
-      userReference: userId,
+      userReference: expectedRef,
       userIdPresent: true,
       ledgerAccountCount: 4,
       ledgerProjectionRowCount: 4,
@@ -413,10 +417,14 @@ describe('selected user history', () => {
       withdrawalsByState: { APPROVED: 1 },
     });
     const json = JSON.stringify(report);
-    expect(json).toContain(userId);
+    expect(json).not.toContain(userId);
+    expect(json).toContain(expectedRef);
+    expect(expectedRef).toMatch(/^[0-9a-f]{64}$/);
     expect(json).toContain('ledgerProjectionRowCount');
     expect(json).not.toMatch(/telegram/i);
-    expect(json).not.toMatch(/wallet/i);
+    expect(json).not.toMatch(/walletAddress/i);
+    expect(json).not.toMatch(/sessionToken/i);
+    expect(json).not.toMatch(/authToken/i);
   });
 });
 
@@ -606,7 +614,14 @@ describe('restore-drill architecture boundary', () => {
       expect(stripped).not.toMatch(/\bsendBoc\b/);
       expect(stripped).not.toMatch(/\bpostLedger\b/);
       expect(stripped).not.toMatch(/setFeatureFlagEnabled/);
-      expect(stripped).not.toMatch(/local-unlock|signerSign|workflow\.start/i);
+      expect(stripped).not.toMatch(/local-unlock|signerSign/i);
+      expect(stripped).not.toMatch(/\bworkflow\.start\b/);
+      expect(stripped).not.toMatch(/\bworkflow\.execute\b/);
+      expect(stripped).not.toMatch(/\bworkflow\.signal\b/);
+      expect(stripped).not.toMatch(/\bworkflow\.signalWithStart\b/);
+      expect(stripped).not.toMatch(/\bworkflow\.update\b/);
+      expect(stripped).not.toMatch(/\bworkflow\.cancel\b/);
+      expect(stripped).not.toMatch(/\bworkflow\.terminate\b/);
     }
     expect(RESTORE_DRILL_FORBIDDEN_CAPABILITIES.sqlMutation).toBe(false);
     expect(RESTORE_DRILL_FORBIDDEN_CAPABILITIES.tonBroadcast).toBe(false);
@@ -661,6 +676,11 @@ describe('restore-drill architecture boundary', () => {
     expect(
       findRestoreDrillFinancialImportViolations(
         `import { runPhase10RestoreReconcileScan } from '@alex-rewards/withdrawals';`,
+      ),
+    ).toHaveLength(0);
+    expect(
+      findRestoreDrillFinancialImportViolations(
+        `import { runPhase10ChainHistoryReadonlyValidate } from '@alex-rewards/withdrawals';`,
       ),
     ).toHaveLength(0);
     expect(

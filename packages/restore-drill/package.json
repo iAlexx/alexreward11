@@ -20,6 +20,7 @@
     "@alex-rewards/db": "workspace:*",
     "@alex-rewards/ledger": "workspace:*",
     "@alex-rewards/withdrawals": "workspace:*",
+    "@temporalio/client": "1.23.0",
     "pg": "8.23.0"
   },
   "devDependencies": {

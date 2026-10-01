@@ -434,7 +434,7 @@ for (const key of forbiddenPlaintextEnvKeys) {
   }
 }
 
-// Phase 18 Step 2A: restore-drill may only import exact read-only financial symbols.
+// Phase 18 Step 2B: restore-drill may only import exact read-only financial symbols.
 {
   const forbiddenRestoreDrillImports = [
     '@alex-rewards/signing',
@@ -452,7 +452,10 @@ for (const key of forbiddenPlaintextEnvKeys) {
     },
     {
       pkg: '@alex-rewards/withdrawals',
-      allowed: new Set(['runPhase10RestoreReconcileScan']),
+      allowed: new Set([
+        'runPhase10RestoreReconcileScan',
+        'runPhase10ChainHistoryReadonlyValidate',
+      ]),
     },
     {
       pkg: '@alex-rewards/db',
@@ -470,6 +473,12 @@ for (const key of forbiddenPlaintextEnvKeys) {
     'replayOutbox',
     'sendBoc',
     'workflow.start',
+    'workflow.execute',
+    'workflow.signal',
+    'workflow.signalWithStart',
+    'workflow.update',
+    'workflow.cancel',
+    'workflow.terminate',
   ];
 
   function stripComments(source) {

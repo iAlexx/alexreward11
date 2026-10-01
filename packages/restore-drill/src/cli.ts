@@ -9,9 +9,15 @@
  *   PHASE18_RESTORE_EXPECTED_HOST=...
  *   PHASE18_RESTORE_FEATURE_FLAG_ENVIRONMENT=STAGING|LOCAL|...
  *
- * Optional:
- *   PHASE18_SOURCE_DATABASE_HOST=... (required for FULL_STEP2B)
- *   PHASE18_RESTORE_VERIFY_USER_IDS=uuid,uuid
+ * Mode:
+ *   PHASE18_RESTORE_DRILL_MODE=DB_ONLY_STEP2A|FULL_STEP2B (default DB_ONLY_STEP2A)
+ *
+ * FULL_STEP2B additional:
+ *   PHASE18_SOURCE_DATABASE_HOST=...
+ *   PHASE18_SOURCE_COUNT_CAPTURE_PATH=...
+ *   PHASE18_TEMPORAL_ADDRESS=...
+ *   PHASE18_TEMPORAL_NAMESPACE=...
+ *   PHASE18_RESTORE_VERIFY_ALL_USERS=true  OR  PHASE18_RESTORE_VERIFY_USER_IDS=...
  *
  * Never uses DATABASE_URL as fallback. Isolation is host/service based.
  */
@@ -19,12 +25,15 @@
 import { writeFile } from 'node:fs/promises';
 
 import { RestoreTargetGuardError } from './target-guard.js';
+import { parseRestoreDrillEnv } from './target-guard.js';
 import { renderRestoreDrillMarkdown, serializeRestoreDrillReport } from './report.js';
 import { runRestoreDrill } from './run-restore-drill.js';
 
 async function main(): Promise<void> {
   try {
-    const report = await runRestoreDrill({ mode: 'DB_ONLY_STEP2A' });
+    const config = parseRestoreDrillEnv(process.env);
+    const mode = config.drillMode;
+    const report = await runRestoreDrill({ mode });
     const stamp = report.observedAt.replace(/[:.]/g, '-');
     const jsonPath = `phase18-restore-drill-${stamp}.json`;
     const mdPath = `phase18-restore-drill-${stamp}.md`;
@@ -36,7 +45,8 @@ async function main(): Promise<void> {
       // Step 2A never allows resume; exit 0 only when DB-side validation itself passed.
       process.exitCode = report.restoreValidationPass ? 0 : 2;
     } else {
-      process.exitCode = report.fullRestoreGatePass && report.payoutResumeAllowed ? 0 : 2;
+      // FULL gate may pass technically; resume remains Owner-gated (never auto-true here).
+      process.exitCode = report.fullRestoreGatePass ? 0 : 2;
     }
   } catch (error: unknown) {
     if (error instanceof RestoreTargetGuardError) {

@@ -23,6 +23,7 @@ export {
   type TargetGuardFailure,
 } from './target-guard.js';
 export {
+  computeFullRestoreGatePass,
   computeObservedRpoSeconds,
   runRestoreDrill,
   type RunRestoreDrillOptions,
@@ -31,8 +32,35 @@ export { renderRestoreDrillMarkdown, serializeRestoreDrillReport } from './repor
 export { verifyPayoutDispatchPaused } from './payout-pause.js';
 export { validateRestoredSchema } from './schema.js';
 export { reconcileOutboxReadOnly } from './outbox.js';
-export { captureRepresentativeCounts } from './counts.js';
-export { verifySelectedUserHistory } from './user-history.js';
+export { captureRepresentativeCounts, REPRESENTATIVE_COUNT_TABLES } from './counts.js';
+export {
+  enumerateRestoredUserIds,
+  verifySelectedUserHistory,
+} from './user-history.js';
+export {
+  hashOpaqueReference,
+  hashSelectedUserReference,
+} from './user-reference.js';
+export {
+  compareSourceRestoredCounts,
+  loadSourceCountCaptureFromPath,
+  parseSourceCountCapture,
+  SourceCountArtifactError,
+} from './source-count-artifact.js';
+export {
+  captureDbExpectedWorkflowIdentities,
+  createTemporalListPort,
+  reconcileTemporalWorkflows,
+  type TemporalListPort,
+  type TemporalReconciliationResult,
+} from './temporal-reconciliation.js';
+export {
+  captureChainScope,
+  isChainScopeEmpty,
+  reconcileChainReadOnly,
+  type ChainReconciliationResult,
+  type ChainScopeCounts,
+} from './chain-reconciliation.js';
 export {
   RESTORE_DRILL_APPLICATION_NAME,
   assertSessionReadOnlyEnforced,

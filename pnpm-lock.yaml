@@ -649,6 +649,9 @@ importers:
       '@alex-rewards/withdrawals':
         specifier: workspace:*
         version: link:../withdrawals
+      '@temporalio/client':
+        specifier: 1.23.0
+        version: 1.23.0
       pg:
         specifier: 8.23.0
         version: 8.23.0

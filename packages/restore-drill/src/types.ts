@@ -50,7 +50,7 @@ export interface CountCapture {
   readonly tables: Readonly<Record<string, number>>;
 }
 
-/** Safe per-selected-user evidence. userReference is the internal UUID. */
+/** Safe per-selected-user evidence. userReference is SHA-256 hex — never a raw UUID. */
 export interface SelectedUserHistoryEvidence {
   readonly userReference: string;
   readonly userIdPresent: boolean;
@@ -119,13 +119,32 @@ export interface RestoreDrillReport {
     readonly status: DrillSectionStatus;
     readonly reasonCode: string;
     readonly dbExpectedWorkflowIdentityCount: number;
-    readonly temporalObserved: 'NOT_OBSERVED';
+    readonly temporalObservedWorkflowCount: number;
+    readonly matchedCount: number;
+    readonly missingInTemporalCount: number;
+    readonly unexpectedInTemporalCount: number;
+    readonly statusCounts: Readonly<Record<string, number>>;
+    readonly mismatchReferences: readonly string[];
+    readonly temporalQueried: boolean;
   };
   readonly blockchainReconciliation: {
     readonly status: DrillSectionStatus;
     readonly reasonCode: string;
-    readonly liveChainReconciliation: 'NOT_OBSERVED';
+    readonly liveChainReconciliation: 'OBSERVED' | 'NOT_REQUIRED_EMPTY_SCOPE' | 'NOT_OBSERVED';
     readonly withdrawalsRequiringLiveChainCount: number;
+    readonly liveProviderQueryPerformed: boolean;
+    readonly chainScopeEmpty: boolean;
+    readonly providerQueryPerformed: boolean;
+    readonly primaryHealthy: boolean | null;
+    readonly secondaryHealthy: boolean | null;
+    readonly providerAgreement: boolean | null;
+    readonly windowFullyCovered: boolean | null;
+    readonly agreedTransferCount: number | null;
+    readonly knownExpectedTransferCount: number | null;
+    readonly confirmedMatchedCount: number | null;
+    readonly unexpectedOutgoingCount: number | null;
+    readonly ambiguousAttemptCount: number | null;
+    readonly providerReportDigest: string | null;
   };
   readonly representativeCounts: {
     readonly status: DrillSectionStatus;
@@ -151,9 +170,11 @@ export interface RestoreDrillReport {
   };
   /** DB-side validation evidence only — not the Phase 18 full restore gate. */
   readonly restoreValidationPass: boolean;
-  /** Always false in Step 2A (Temporal/chain/count-comparison incomplete). */
+  /** FULL_STEP2B may be true only when every mandatory section PASSes. */
   readonly fullRestoreGatePass: boolean;
+  /** Always false in restore-drill — Owner ceremony required to resume. */
   readonly payoutResumeAllowed: boolean;
+  readonly resumeDecision: 'OWNER_APPROVAL_REQUIRED';
   readonly autoUnpause: false;
   readonly autoResend: false;
   readonly financialAuthority: false;

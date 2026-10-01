@@ -25,6 +25,11 @@ export interface RestoreDrillEnvConfig {
   readonly sourceDatabaseHost: string | null;
   readonly featureFlagEnvironment: string | null;
   readonly verifyUserIds: readonly string[];
+  readonly verifyAllUsers: boolean;
+  readonly sourceCountCapturePath: string | null;
+  readonly temporalAddress: string | null;
+  readonly temporalNamespace: string | null;
+  readonly drillMode: 'DB_ONLY_STEP2A' | 'FULL_STEP2B';
   readonly databaseUrlPresent: boolean;
   readonly databaseUrl: string | null;
 }
@@ -44,7 +49,11 @@ export type TargetGuardFailure =
   | 'CURRENT_DATABASE_MISMATCH'
   | 'UNPARSEABLE_RESTORE_URL'
   | 'READ_ONLY_NOT_ENFORCED'
-  | 'CONNECT_FAILED';
+  | 'CONNECT_FAILED'
+  | 'VERIFY_USERS_AMBIGUOUS'
+  | 'SOURCE_COUNT_CAPTURE_MISSING'
+  | 'TEMPORAL_CONFIG_MISSING'
+  | 'VERIFY_ALL_USERS_MODE_INVALID';
 
 export class RestoreTargetGuardError extends Error {
   readonly code: TargetGuardFailure;
@@ -69,6 +78,14 @@ export function parseRestoreDrillEnv(
     .split(',')
     .map((s) => s.trim())
     .filter((s) => s !== '');
+  const verifyAllUsers =
+    (env.PHASE18_RESTORE_VERIFY_ALL_USERS ?? 'false').trim().toLowerCase() === 'true';
+  const sourceCountCapturePath = nonempty(env.PHASE18_SOURCE_COUNT_CAPTURE_PATH);
+  const temporalAddress = nonempty(env.PHASE18_TEMPORAL_ADDRESS);
+  const temporalNamespace = nonempty(env.PHASE18_TEMPORAL_NAMESPACE);
+  const modeRaw = (env.PHASE18_RESTORE_DRILL_MODE ?? 'DB_ONLY_STEP2A').trim();
+  const drillMode =
+    modeRaw === 'FULL_STEP2B' ? ('FULL_STEP2B' as const) : ('DB_ONLY_STEP2A' as const);
 
   return {
     enabled,
@@ -78,6 +95,11 @@ export function parseRestoreDrillEnv(
     sourceDatabaseHost,
     featureFlagEnvironment,
     verifyUserIds,
+    verifyAllUsers,
+    sourceCountCapturePath,
+    temporalAddress,
+    temporalNamespace,
+    drillMode,
     databaseUrlPresent: databaseUrl !== null,
     databaseUrl,
   };
@@ -201,6 +223,32 @@ export function assertRestoreTargetEnv(
     throw new RestoreTargetGuardError(
       'SOURCE_HOST_MISSING',
       'PHASE18_SOURCE_DATABASE_HOST is required for FULL_STEP2B',
+    );
+  }
+  if (mode === 'FULL_STEP2B') {
+    if (config.verifyAllUsers && config.verifyUserIds.length > 0) {
+      throw new RestoreTargetGuardError(
+        'VERIFY_USERS_AMBIGUOUS',
+        'PHASE18_RESTORE_VERIFY_ALL_USERS and PHASE18_RESTORE_VERIFY_USER_IDS are mutually exclusive',
+      );
+    }
+    if (config.sourceCountCapturePath === null) {
+      throw new RestoreTargetGuardError(
+        'SOURCE_COUNT_CAPTURE_MISSING',
+        'PHASE18_SOURCE_COUNT_CAPTURE_PATH is required for FULL_STEP2B',
+      );
+    }
+    if (config.temporalAddress === null || config.temporalNamespace === null) {
+      throw new RestoreTargetGuardError(
+        'TEMPORAL_CONFIG_MISSING',
+        'PHASE18_TEMPORAL_ADDRESS and PHASE18_TEMPORAL_NAMESPACE are required for FULL_STEP2B',
+      );
+    }
+  }
+  if (config.verifyAllUsers && mode !== 'FULL_STEP2B') {
+    throw new RestoreTargetGuardError(
+      'VERIFY_ALL_USERS_MODE_INVALID',
+      'PHASE18_RESTORE_VERIFY_ALL_USERS is only allowed with FULL_STEP2B',
     );
   }
   if (sourceHostRaw !== null) {
