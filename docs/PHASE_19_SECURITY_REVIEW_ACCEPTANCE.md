@@ -291,14 +291,14 @@ Exact accepted source commit: `b5110524f90f29dc2a9235aac91ee9de731a03c0`
 | -------- | ------ |
 | Canonical source ZIP | `ALEx_Rewards_PHASE_19_SECURITY_REVIEW_20261001-211438_b511052.zip` |
 | Canonical source ZIP path | `phase-archives/PHASE_19_SECURITY_REVIEW/ALEx_Rewards_PHASE_19_SECURITY_REVIEW_20261001-211438_b511052.zip` |
-| Canonical source ZIP SHA256 | *(filled after packaging)* |
+| Canonical source ZIP SHA256 | `1ef9374e88970a90e137f4d71cf250cd9137fe75627e13f9eda2517a77b4b4bc` |
 | Final review-package filename | `PHASE_19_SECURITY_REVIEW_PACKAGE_20261001-211438_b511052.zip` |
-| Source extraction | *(filled after packaging)* |
-| Outer package extraction | *(filled after packaging)* |
-| Prohibited-path scan (source + outer) | *(filled after packaging)* |
-| Nested source validation | *(filled after packaging)* |
-| Forward-slash ZIP entry names | *(filled after packaging)* |
-| SHA256SUMS verification | *(filled after packaging)* |
+| Source extraction | **PASS** |
+| Outer package extraction | **PASS** |
+| Prohibited-path scan (source + outer) | **PASS** |
+| Nested source validation | **PASS** |
+| Forward-slash ZIP entry names | **PASS** (4 entries under `PHASE_19_SECURITY_REVIEW/`) |
+| SHA256SUMS verification | **PASS** |
 
 Final review-package SHA256 is recorded externally in `PACKAGE_SHA256.txt` beside the package.
 Section M does **not** embed the outer package SHA256.
