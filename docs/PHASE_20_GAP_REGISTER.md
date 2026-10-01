@@ -1,7 +1,7 @@
 # Phase 20 — Gap Register (Step 1–3 / 4A decision pack)
 
 **PHASE20_GATE:** HOLD
-**Step:** 3 complete; Step 4A Owner policy decision pack prepared (no activation); HOLD for Owner policy/content decisions
+**Step:** 4B Owner-approved policy recorded (staging activation still pending); HOLD
 **Register scope:** Closed Beta readiness gaps + carried Phase 19 residuals
 **Rule:** Do not hide issues because they originated in an older phase.
 **Status values:** OPEN | DEFERRED | REMEDIATED | ACCEPTED_RESIDUAL (Owner only for Critical/High)
@@ -151,10 +151,11 @@ Canonical IDs: `P20-GAP-001` .. contiguous.
 - **blocks Closed Beta?** YES — blocks complete Phase 20 fraud/trust/eligibility validation until controlled ACTIVE policies exist
 - **blocks real-money beta?** YES — unsafe to pay without eligibility/fraud ACTIVE
 - **blocks Phase 20 archive?** YES — until fraud/eligibility category evidenced
-- **status:** OPEN / READY_FOR_OWNER_POLICY_APPROVAL
+- **status:** OPEN / OWNER_APPROVED / READY_FOR_STAGING_ACTIVATION
 - **step2 note:** Disposable fail-closed + ACTIVE fixture proofs exist; TEST fixture numbers are REFERENCE ONLY — NOT APPROVED FOR STAGING.
-- **step4a note:** Owner decision matrix + proposed Closed-Beta profiles published; **not activated**. See `docs/PHASE_20_STEP4_OWNER_POLICY_DECISION.md`.
-- **step4a.1 note:** Source ACCOUNT_STATE action-aware + FEATURE_FLAG binding corrections completed; proposed values still await Owner approval (not activated).
+- **step4a note:** Owner decision matrix published. See `docs/PHASE_20_STEP4_OWNER_POLICY_DECISION.md`.
+- **step4a.1/4a.2 note:** ACCOUNT_STATE + FEATURE_FLAG semantics corrected before approval.
+- **step4b note:** Owner approved exact Closed Beta Risk/Trust/Eligibility values; source artifact `packages/fraud/policy/phase20-closed-beta-owner-approved.json`; disposable validation only. Staging activation **not** performed. See `docs/PHASE_20_STEP4_OWNER_POLICY_APPROVAL.md`.
 
 ### P20-GAP-010 — Provider-limit Admin UI ceremony incomplete
 

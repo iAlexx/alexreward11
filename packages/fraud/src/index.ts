@@ -166,3 +166,5 @@ export {
   type AccountStateSnapshot,
   type EligibilityFeatureFlagBinding,
 } from './eligibility-gate-semantics.js';
+
+export { PHASE20_CLOSED_BETA_OWNER_APPROVED_POLICY } from './phase20-closed-beta-approved-policy.js';

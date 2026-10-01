@@ -874,3 +874,21 @@ been GRANTED and Mission money issued, Phase 16 does **not** automatically casca
 Mission reward. Production activation of monetary `VALID_AD_COUNT` missions remains blocked until
 the Owner approves a cascade / non-cascade policy. Non-AD monetary missions (e.g. DAILY_LOGIN)
 may still be issued in synthetic LOCAL/STAGING tests.
+
+## Clarification — Phase 20 Step 4B Owner-approved Closed Beta policy (2026-10-02)
+
+Owner approved the Closed Beta Risk / Trust / Eligibility profile recorded in
+`packages/fraud/policy/phase20-closed-beta-owner-approved.json` (`activationAuthorized=false`).
+
+Key approved values: Risk thresholds 20/50/75; weights OPEN_HIGH=55, OPEN_CRITICAL=80,
+CONFIRMED=60, SHARED_PAYOUT=35, SHARED_DEVICE=25, SHARED_NETWORK=20, COUNTRY_CHANGED=15;
+actions LOW/MEDIUM=MANUAL_REVIEW, HIGH=HELD, CRITICAL=WITHDRAWAL_BLOCKED; history signals
+omitted (`signal_params={}`). Trust equal weights 25/25/25/25 with minDays 1/1 and minCount 1/1;
+state thresholds 25/50/75. Eligibility: WITHDRAWAL=ACCOUNT_STATE+RISK+FEATURE_FLAG;
+AD=ACCOUNT_STATE+RISK; MISSION=ACCOUNT_STATE+FEATURE_FLAG; TASK=ACCOUNT_STATE;
+REFERRAL_ACTIVATION/MEMBERSHIP_CLAIM omitted.
+
+This clarification does **not** authorize staging/ops ACTIVE policy activation, Railway deploy,
+production monetary, AdsGram monetary, payout resume, TON broadcast, signer, or Mainnet.
+`P20-GAP-009` remains OPEN / OWNER_APPROVED / READY_FOR_STAGING_ACTIVATION and still blocks
+Closed Beta until a separate staging activation ceremony.

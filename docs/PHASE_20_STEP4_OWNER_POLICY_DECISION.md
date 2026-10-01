@@ -1,14 +1,16 @@
 # Phase 20 Step 4A — Owner Fraud / Trust / Eligibility Policy Decision Pack
 
 **PHASE20_GATE:** HOLD  
-**Step:** 4A / 4A.1 — OWNER DECISION PACK (source semantics corrected; no activation)  
+**Step:** 4A–4B — OWNER DECISION PACK + OWNER APPROVAL RECORDED (staging activation not authorized)  
 **Branch:** `phase20-closed-beta`  
-**Related gap:** `P20-GAP-009` status remains `OPEN / READY_FOR_OWNER_POLICY_APPROVAL`  
+**Related gap:** `P20-GAP-009` = `OPEN / OWNER_APPROVED / READY_FOR_STAGING_ACTIVATION` (still blocks Closed Beta until staging activation)  
+**Canonical approved artifact:** `packages/fraud/policy/phase20-closed-beta-owner-approved.json`  
+**Approval record:** `docs/PHASE_20_STEP4_OWNER_POLICY_APPROVAL.md`  
 **Companion (historical Step 2):** `docs/PHASE_20_FRAUD_ELIGIBILITY_POLICY_PROPOSAL.md`
 
 **Authority freeze (unchanged):** Mainnet OFF; production monetary OFF; AdsGram monetary BLOCKED; payout resume unauthorized; no Railway/ops DB mutation; no policy INSERT/UPDATE to ACTIVE staging rows in this step.
 
-This document does **not** activate policies. Values labeled **PROPOSED** require explicit Owner approval before any later activation step.
+This document does **not** activate policies on staging/ops. Sections marked **PROPOSED** are historical 4A candidates. **Canonical Closed-Beta values are OWNER-APPROVED** (see section 9 and the JSON artifact).
 
 ---
 
@@ -131,49 +133,50 @@ MISSION_CLAIM:
 
 ## 4. Owner decision matrix
 
-Legend: **TEST REFERENCE** = harness only. **PROPOSED** = Closed-Beta candidate requiring Owner approval. Financial impact assumes AdsGram remains BLOCKED and payouts remain paused.
+Legend: **TEST REFERENCE** = harness only. **APPROVED** = Owner-approved Closed-Beta canonical value (Step 4B). Historical 4A proposals that differed are noted in §5. Financial impact assumes AdsGram remains BLOCKED and payouts remain paused.
 
-| Domain      | Field                                        | Supported values / constraints | TEST REFERENCE                           | Proposed Closed-Beta value                                                                                                            | Effect                                  | Too permissive risk              | Too strict risk                                   | Financial impact            | Security impact             | Rollback          | Owner approval required |
+| Domain      | Field                                        | Supported values / constraints | TEST REFERENCE                           | Approved Closed-Beta value                                                                                                            | Effect                                  | Too permissive risk              | Too strict risk                                   | Financial impact            | Security impact             | Rollback          | Owner approval |
 | ----------- | -------------------------------------------- | ------------------------------ | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- | -------------------------------- | ------------------------------------------------- | --------------------------- | --------------------------- | ----------------- | ----------------------- |
-| Risk        | `thresholds.lowMax`                          | int 0–100; `< mediumMax`       | 20                                       | **PROPOSED 20**                                                                                                                       | score ≤20 → LOW                         | LOW band too wide → under-review | LOW too narrow → noise MANUAL_REVIEW              | Low while money BLOCKED     | Medium                      | SUPERSEDE rule    | YES                     |
-| Risk        | `thresholds.mediumMax`                       | int; `< highMax`               | 50                                       | **PROPOSED 50**                                                                                                                       | ≤50 → MEDIUM                            | same                             | same                                              | Low                         | Medium                      | SUPERSEDE         | YES                     |
-| Risk        | `thresholds.highMax`                         | int; `< 100 practical`         | 75                                       | **PROPOSED 75**                                                                                                                       | ≤75 → HIGH; else CRITICAL               | CRITICAL rare                    | CRITICAL frequent                                 | Low                         | High if CRITICAL mishandled | SUPERSEDE         | YES                     |
-| Risk        | weight `OPEN_HIGH_FRAUD_FLAG`                | 0–100; collector               | (not in default TEST weights)            | **PROPOSED 40**                                                                                                                       | OPEN HIGH flag contributes 40           | under-weights known fraud        | over-holds clean users                            | Low                         | High                        | SUPERSEDE         | YES                     |
-| Risk        | weight `OPEN_CRITICAL_FRAUD_FLAG`            | 0–100                          | n/a in default TEST                      | **PROPOSED 60**                                                                                                                       | OPEN CRITICAL contributes 60            | under-react                      | over-react                                        | Low                         | High                        | SUPERSEDE         | YES                     |
-| Risk        | weight `CONFIRMED_FRAUD_FLAG`                | 0–100                          | n/a                                      | **PROPOSED 50**                                                                                                                       | confirmed flag contributes 50           | under-react                      | sticky holds                                      | Low                         | High                        | SUPERSEDE         | YES                     |
-| Risk        | weight `SHARED_PAYOUT_WALLET`                | 0–100                          | n/a                                      | **PROPOSED 35**                                                                                                                       | shared verified primary wallet          | multi-account payout risk        | shared household false+                           | Medium if money on          | High                        | SUPERSEDE         | YES                     |
-| Risk        | weight `SHARED_NETWORK_SIGNAL`               | 0–100                          | n/a                                      | **PROPOSED 20**                                                                                                                       | shared live session ip_hash             | botnet under-detect              | café/VPN false+                                   | Low                         | Medium                      | SUPERSEDE         | YES                     |
-| Risk        | weight `SHARED_DEVICE_SIGNAL`                | 0–100                          | n/a                                      | **PROPOSED 25**                                                                                                                       | shared-device relationship rows         | under-detect                     | relationship noise                                | Low                         | Medium                      | SUPERSEDE         | YES                     |
-| Risk        | weight `NETWORK_COUNTRY_CHANGED`             | 0–100                          | n/a                                      | **PROPOSED 15**                                                                                                                       | last-2 country change                   | travel ignored                   | travelers held                                    | Low                         | Low–Med                     | SUPERSEDE         | YES                     |
-| Risk        | `AD_REVERSED_REWARD_HISTORY`                 | weight + params                | unset                                    | **PROPOSED omit for Step 4A**                                                                                                         | n/a until Owner wants history           | miss reverse abuse               | block after provider reverses                     | Low while BLOCKED           | Medium later                | add later version | YES to add              |
-| Risk        | `REFERRAL_REJECTED_EDGE_HISTORY`             | weight + params                | unset                                    | **PROPOSED omit for Step 4A**                                                                                                         | n/a                                     | miss referral abuse              | punish bad edges early                            | Low                         | Medium later                | add later         | YES to add              |
+| Risk        | `thresholds.lowMax`                          | int 0–100; `< mediumMax`       | 20                                       | **APPROVED 20**                                                                                                                       | score ≤20 → LOW                         | LOW band too wide → under-review | LOW too narrow → noise MANUAL_REVIEW              | Low while money BLOCKED     | Medium                      | SUPERSEDE rule    | DONE (4B)              |
+| Risk        | `thresholds.mediumMax`                       | int; `< highMax`               | 50                                       | **APPROVED 50**                                                                                                                       | ≤50 → MEDIUM                            | same                             | same                                              | Low                         | Medium                      | SUPERSEDE         | DONE (4B)              |
+| Risk        | `thresholds.highMax`                         | int; `< 100 practical`         | 75                                       | **APPROVED 75**                                                                                                                       | ≤75 → HIGH; else CRITICAL               | CRITICAL rare                    | CRITICAL frequent                                 | Low                         | High if CRITICAL mishandled | SUPERSEDE         | DONE (4B)              |
+| Risk        | weight `OPEN_HIGH_FRAUD_FLAG`                | 0–100; collector               | (not in default TEST weights)            | **APPROVED 55** (was proposed 40)                                                                                                     | OPEN HIGH flag contributes 55 → HIGH    | under-weights known fraud        | over-holds clean users                            | Low                         | High                        | SUPERSEDE         | DONE (4B)              |
+| Risk        | weight `OPEN_CRITICAL_FRAUD_FLAG`            | 0–100                          | n/a in default TEST                      | **APPROVED 80** (was proposed 60)                                                                                                     | OPEN CRITICAL contributes 80 → CRITICAL | under-react                      | over-react                                        | Low                         | High                        | SUPERSEDE         | DONE (4B)              |
+| Risk        | weight `CONFIRMED_FRAUD_FLAG`                | 0–100                          | n/a                                      | **APPROVED 60** (was proposed 50)                                                                                                     | confirmed flag contributes 60 → HIGH    | under-react                      | sticky holds                                      | Low                         | High                        | SUPERSEDE         | DONE (4B)              |
+| Risk        | weight `SHARED_PAYOUT_WALLET`                | 0–100                          | n/a                                      | **APPROVED 35**                                                                                                                       | shared verified primary wallet          | multi-account payout risk        | shared household false+                           | Medium if money on          | High                        | SUPERSEDE         | DONE (4B)              |
+| Risk        | weight `SHARED_NETWORK_SIGNAL`               | 0–100                          | n/a                                      | **APPROVED 20**                                                                                                                       | shared live session ip_hash             | botnet under-detect              | café/VPN false+                                   | Low                         | Medium                      | SUPERSEDE         | DONE (4B)              |
+| Risk        | weight `SHARED_DEVICE_SIGNAL`                | 0–100                          | n/a                                      | **APPROVED 25**                                                                                                                       | shared-device relationship rows         | under-detect                     | relationship noise                                | Low                         | Medium                      | SUPERSEDE         | DONE (4B)              |
+| Risk        | weight `NETWORK_COUNTRY_CHANGED`             | 0–100                          | n/a                                      | **APPROVED 15**                                                                                                                       | last-2 country change                   | travel ignored                   | travelers held                                    | Low                         | Low–Med                     | SUPERSEDE         | DONE (4B)              |
+| Risk        | `AD_REVERSED_REWARD_HISTORY`                 | weight + params                | unset                                    | **APPROVED omit**                                                                                                         | n/a until Owner wants history           | miss reverse abuse               | block after provider reverses                     | Low while BLOCKED           | Medium later                | add later version | DONE (4B)              |
+| Risk        | `REFERRAL_REJECTED_EDGE_HISTORY`             | weight + params                | unset                                    | **APPROVED omit**                                                                                                         | n/a                                     | miss referral abuse              | punish bad edges early                            | Low                         | Medium later                | add later         | DONE (4B)              |
 | Risk        | harness `ACCOUNT_AGE` / `WALLET_REUSE`       | **not collector-supported**    | 10 / 15                                  | **DO NOT ACTIVATE**                                                                                                                   | would fail collector                    | n/a                              | n/a                                               | n/a                         | n/a                         | n/a               | N/A (invalid live)      |
-| Risk        | `actions.LOW`                                | allowlisted action             | MANUAL_REVIEW                            | **PROPOSED MANUAL_REVIEW**                                                                                                            | low score → review label                | silent ALLOW                     | over-review                                       | None (no auto-pay)          | Low                         | SUPERSEDE         | YES                     |
-| Risk        | `actions.MEDIUM`                             | allowlisted                    | MANUAL_REVIEW                            | **PROPOSED MANUAL_REVIEW**                                                                                                            | medium → review                         | silent ALLOW                     | over-review                                       | None                        | Med                         | SUPERSEDE         | YES                     |
-| Risk        | `actions.HIGH`                               | allowlisted                    | HELD                                     | **PROPOSED HELD**                                                                                                                     | high → HELD label                       | under-hold                       | over-hold Earn/Withdraw via allowlist             | Low                         | High                        | SUPERSEDE         | YES                     |
-| Risk        | `actions.CRITICAL`                           | allowlisted                    | WITHDRAWAL_BLOCKED                       | **PROPOSED WITHDRAWAL_BLOCKED**                                                                                                       | critical → withdrawal-blocked label     | under-block                      | over-block                                        | Low (pause already on)      | High                        | SUPERSEDE         | YES                     |
-| Trust       | `ACCOUNT_AGE.minDays`                        | positive int                   | 7                                        | **PROPOSED 1**                                                                                                                        | age≥1 day satisfies                     | brand-new same-day miss          | 7d blocks new beta UX if later gated              | None today                  | Low                         | SUPERSEDE         | YES                     |
-| Trust       | `ACCOUNT_AGE.weight`                         | 0–100                          | 25                                       | **PROPOSED 40**                                                                                                                       | larger NEW→BASIC step for aged accounts | inflate trust                    | slow growth                                       | None                        | Low                         | SUPERSEDE         | YES                     |
-| Trust       | `VERIFIED_PRIMARY_WALLET_AGE.minDays`        | positive int                   | 3                                        | **PROPOSED 1**                                                                                                                        | wallet age≥1 day                        | same-day wallet                  | 3d harsh for testers                              | None                        | Low                         | SUPERSEDE         | YES                     |
-| Trust       | `VERIFIED_PRIMARY_WALLET_AGE.weight`         | 0–100                          | 25                                       | **PROPOSED 40**                                                                                                                       | wallet maturity weight                  | inflate                          | slow                                              | None                        | Low                         | SUPERSEDE         | YES                     |
-| Trust       | `REWARDED_AD_HISTORY`                        | weight/minCount                | 25 / 1                                   | **PROPOSED keep 25 / 1**                                                                                                              | needs ≥1 AVAILABLE AD reward            | easy inflate after first reward  | unreachable while AdsGram money BLOCKED (often 0) | None                        | Low                         | SUPERSEDE         | YES                     |
-| Trust       | `CONFIRMED_PAYOUT_HISTORY`                   | weight/minCount                | 25 / 1                                   | **PROPOSED keep 25 / 1**                                                                                                              | needs ≥1 CONFIRMED withdrawal           | inflate after payout             | unreachable while payouts frozen                  | None                        | Low                         | SUPERSEDE         | YES                     |
-| Trust       | `basicMin` / `establishedMin` / `trustedMin` | 0–100 ordered                  | 25 / 50 / 75                             | **PROPOSED 25 / 50 / 75**                                                                                                             | state bands                             | easy TRUSTED                     | stuck NEW/BASIC                                   | None (not eligibility gate) | Low                         | SUPERSEDE         | YES                     |
-| Eligibility | `WITHDRAWAL_REQUEST.requiredGates`           | gate allowlist                 | ACCOUNT_STATE, RISK_POLICY, FEATURE_FLAG | **PROPOSED same**                                                                                                                     | pause + risk + account must pass        | skip risk/pause                  | over-block (intended while frozen)                | High if later unpaused      | High                        | SUPERSEDE policy  | YES                     |
-| Eligibility | `WITHDRAWAL_REQUEST.precedence`              | permutation of required        | RISK, ACCOUNT, FLAG                      | **PROPOSED same**                                                                                                                     | primary blocked reason order            | wrong audit reason               | same                                              | Low                         | Med                         | SUPERSEDE         | YES                     |
-| Eligibility | `WITHDRAWAL_REQUEST.riskAllowedActions`      | subset of risk actions         | includes HELD                            | **PROPOSED ALLOW, EXTEND_PENDING, MANUAL_REVIEW** (exclude HELD)                                                                      | HELD cannot request withdraw            | HELD can withdraw (TEST)         | over-block withdraw                               | High if money on            | High                        | SUPERSEDE         | YES                     |
-| Eligibility | `AD_SESSION_START.requiredGates`             | gate allowlist                 | ACCOUNT_STATE (, FEATURE_FLAG invalid)   | **PROPOSED ACCOUNT_STATE, RISK_POLICY** (FEATURE_FLAG unsupported)                                                                    | Earn observation under risk             | no risk on ads                   | over-block ads                                    | Low while BLOCKED           | Med                         | SUPERSEDE         | YES                     |
-| Eligibility | `AD_SESSION_START.riskAllowedActions`        | required with RISK             | n/a in TEST                              | **PROPOSED ALLOW, EXTEND_PENDING, MANUAL_REVIEW**                                                                                     | HELD/CRITICAL labels block ad start     | HELD watches ads                 | false+ block Earn                                 | Low while BLOCKED           | Med                         | SUPERSEDE         | YES                     |
-| Eligibility | `MISSION_CLAIM` / `TASK_CLAIM`               | gates                          | historically FEATURE_FLAG on both        | **PROPOSED MISSION=ACCOUNT_STATE+FEATURE_FLAG; TASK=ACCOUNT_STATE**                                                                   | mission pause meaningful; task no flag  | skip account checks              | FEATURE_FLAG on TASK fails closed                 | Med when content live       | Med                         | SUPERSEDE         | YES                     |
-| Eligibility | `REFERRAL_ACTIVATION` / `MEMBERSHIP_CLAIM`   | optional actions               | unset                                    | **PROPOSED omit** (REFERRAL not in Step 4 policy; activation remains Phase 15 engine; `REFERRAL_REWARD_PAUSE` = reward issuance only) | fail-closed if FEATURE_FLAG required    | accidental open                  | intentional omit                                  | Low                         | Low                         | add later         | YES to add              |
+| Risk        | `actions.LOW`                                | allowlisted action             | MANUAL_REVIEW                            | **APPROVED MANUAL_REVIEW**                                                                                                            | low score → review label                | silent ALLOW                     | over-review                                       | None (no auto-pay)          | Low                         | SUPERSEDE         | DONE (4B)              |
+| Risk        | `actions.MEDIUM`                             | allowlisted                    | MANUAL_REVIEW                            | **APPROVED MANUAL_REVIEW**                                                                                                            | medium → review                         | silent ALLOW                     | over-review                                       | None                        | Med                         | SUPERSEDE         | DONE (4B)              |
+| Risk        | `actions.HIGH`                               | allowlisted                    | HELD                                     | **APPROVED HELD**                                                                                                                     | high → HELD label                       | under-hold                       | over-hold Earn/Withdraw via allowlist             | Low                         | High                        | SUPERSEDE         | DONE (4B)              |
+| Risk        | `actions.CRITICAL`                           | allowlisted                    | WITHDRAWAL_BLOCKED                       | **APPROVED WITHDRAWAL_BLOCKED**                                                                                                       | critical → withdrawal-blocked label     | under-block                      | over-block                                        | Low (pause already on)      | High                        | SUPERSEDE         | DONE (4B)              |
+| Trust       | `ACCOUNT_AGE.minDays`                        | positive int                   | 7                                        | **APPROVED 1**                                                                                                                        | age≥1 day satisfies                     | brand-new same-day miss          | 7d blocks new beta UX if later gated              | None today                  | Low                         | SUPERSEDE         | DONE (4B)              |
+| Trust       | `ACCOUNT_AGE.weight`                         | 0–100                          | 25                                       | **APPROVED 25** (was proposed 40)                                                                                                     | equal-weight trust ladder               | inflate trust                    | slow growth                                       | None                        | Low                         | SUPERSEDE         | DONE (4B)              |
+| Trust       | `VERIFIED_PRIMARY_WALLET_AGE.minDays`        | positive int                   | 3                                        | **APPROVED 1**                                                                                                                        | wallet age≥1 day                        | same-day wallet                  | 3d harsh for testers                              | None                        | Low                         | SUPERSEDE         | DONE (4B)              |
+| Trust       | `VERIFIED_PRIMARY_WALLET_AGE.weight`         | 0–100                          | 25                                       | **APPROVED 25** (was proposed 40)                                                                                                     | wallet maturity weight                  | inflate                          | slow                                              | None                        | Low                         | SUPERSEDE         | DONE (4B)              |
+| Trust       | `REWARDED_AD_HISTORY`                        | weight/minCount                | 25 / 1                                   | **APPROVED 25 / 1**                                                                                                              | needs ≥1 AVAILABLE AD reward            | easy inflate after first reward  | unreachable while AdsGram money BLOCKED (often 0) | None                        | Low                         | SUPERSEDE         | DONE (4B)              |
+| Trust       | `CONFIRMED_PAYOUT_HISTORY`                   | weight/minCount                | 25 / 1                                   | **APPROVED 25 / 1**                                                                                                              | needs ≥1 CONFIRMED withdrawal           | inflate after payout             | unreachable while payouts frozen                  | None                        | Low                         | SUPERSEDE         | DONE (4B)              |
+| Trust       | `basicMin` / `establishedMin` / `trustedMin` | 0–100 ordered                  | 25 / 50 / 75                             | **APPROVED 25 / 50 / 75**                                                                                                             | state bands                             | easy TRUSTED                     | stuck NEW/BASIC                                   | None (not eligibility gate) | Low                         | SUPERSEDE         | DONE (4B)              |
+| Eligibility | `WITHDRAWAL_REQUEST.requiredGates`           | gate allowlist                 | ACCOUNT_STATE, RISK_POLICY, FEATURE_FLAG | **APPROVED same**                                                                                                                     | pause + risk + account must pass        | skip risk/pause                  | over-block (intended while frozen)                | High if later unpaused      | High                        | SUPERSEDE policy  | DONE (4B)              |
+| Eligibility | `WITHDRAWAL_REQUEST.precedence`              | permutation of required        | RISK, ACCOUNT, FLAG                      | **APPROVED same**                                                                                                                     | primary blocked reason order            | wrong audit reason               | same                                              | Low                         | Med                         | SUPERSEDE         | DONE (4B)              |
+| Eligibility | `WITHDRAWAL_REQUEST.riskAllowedActions`      | subset of risk actions         | includes HELD                            | **APPROVED ALLOW, EXTEND_PENDING, MANUAL_REVIEW** (exclude HELD)                                                                      | HELD cannot request withdraw            | HELD can withdraw (TEST)         | over-block withdraw                               | High if money on            | High                        | SUPERSEDE         | DONE (4B)              |
+| Eligibility | `AD_SESSION_START.requiredGates`             | gate allowlist                 | ACCOUNT_STATE (, FEATURE_FLAG invalid)   | **APPROVED ACCOUNT_STATE, RISK_POLICY** (FEATURE_FLAG unsupported)                                                                    | Earn observation under risk             | no risk on ads                   | over-block ads                                    | Low while BLOCKED           | Med                         | SUPERSEDE         | DONE (4B)              |
+| Eligibility | `AD_SESSION_START.riskAllowedActions`        | required with RISK             | n/a in TEST                              | **APPROVED ALLOW, EXTEND_PENDING, MANUAL_REVIEW**                                                                                     | HELD/CRITICAL labels block ad start     | HELD watches ads                 | false+ block Earn                                 | Low while BLOCKED           | Med                         | SUPERSEDE         | DONE (4B)              |
+| Eligibility | `MISSION_CLAIM` / `TASK_CLAIM`               | gates                          | historically FEATURE_FLAG on both        | **APPROVED MISSION=ACCOUNT_STATE+FEATURE_FLAG; TASK=ACCOUNT_STATE**                                                                   | mission pause meaningful; task no flag  | skip account checks              | FEATURE_FLAG on TASK fails closed                 | Med when content live       | Med                         | SUPERSEDE         | DONE (4B)              |
+| Eligibility | `REFERRAL_ACTIVATION` / `MEMBERSHIP_CLAIM`   | optional actions               | unset                                    | **APPROVED omit** (REFERRAL not in Step 4 policy; activation remains Phase 15 engine; `REFERRAL_REWARD_PAUSE` = reward issuance only) | fail-closed if FEATURE_FLAG required    | accidental open                  | intentional omit                                  | Low                         | Low                         | add later         | DONE (4B)              |
 
 ---
 
-## 5. Proposed conservative Closed-Beta profiles
+## 5. Historical 4A proposed profiles (superseded by Owner approval)
 
-All values below are **PROPOSED — requires Owner approval**. Not approved. Not activated.
+The JSON blocks below are the **4A PROPOSED** candidates kept for audit.  
+**They are NOT the canonical Closed-Beta profile.** Owner-approved values differ (notably Risk weights and Trust signal weights). See §9.
 
-### 5.1 Risk — PROPOSED BETA PROFILE
+### 5.1 Risk — HISTORICAL 4A PROPOSED (superseded)
 
 ```json
 {
@@ -197,10 +200,10 @@ All values below are **PROPOSED — requires Owner approval**. Not approved. Not
 }
 ```
 
-**Effect:** Prefer hold/review labels over silent ALLOW. No auto-ban execution. Collector-compatible only.  
+**Superseded note:** Owner approved OPEN_HIGH=55, OPEN_CRITICAL=80, CONFIRMED=60 (same thresholds/actions/other weights).  
 **Money authority change:** NO.
 
-### 5.2 Trust — PROPOSED BETA PROFILE
+### 5.2 Trust — HISTORICAL 4A PROPOSED (superseded)
 
 ```json
 {
@@ -214,11 +217,10 @@ All values below are **PROPOSED — requires Owner approval**. Not approved. Not
 }
 ```
 
-**Why minDays=1 (not TEST 7/3):** Closed Beta testers are often brand-new; Trust is not an eligibility gate today, but Owner-readable states should still progress when a verified wallet appears. History signals remain hard while AdsGram money BLOCKED and payouts frozen — expected.
-
+**Superseded note:** Owner approved equal weights 25/25/25/25 (minDays 1/1, minCount 1/1; same state thresholds).  
 **Money authority change:** NO.
 
-### 5.3 Eligibility — PROPOSED BETA PROFILE (reassessed after 4A.1)
+### 5.3 Eligibility — APPROVED (unchanged from 4A proposal after 4A.1)
 
 ```json
 {
@@ -267,7 +269,7 @@ Omitting FEATURE_FLAG from AD_SESSION_START / TASK_CLAIM is **correct semantics*
 
 #### 5.3.3 Withdrawal safety
 
-Proposed withdrawal eligibility still requires FEATURE_FLAG (`WITHDRAWAL_REQUESTS_PAUSE`). With pause enabled, withdrawals stay ineligible. Proposal does **not**:
+Approved withdrawal eligibility still requires FEATURE_FLAG (`WITHDRAWAL_REQUESTS_PAUSE`). With pause enabled, withdrawals stay ineligible. Approved policy does **not**:
 
 - auto-approve withdrawals
 - bypass manual review / pause / wallet ownership / cooldown / ledger reservation / signer / reconciliation  
@@ -277,20 +279,21 @@ Proposed withdrawal eligibility still requires FEATURE_FLAG (`WITHDRAWAL_REQUEST
 
 ---
 
-## 6. New-user / scenario behavior (illustrative — no real users)
+## 6. New-user / scenario behavior (APPROVED profile — no real users)
 
-Assumes PROPOSED profiles; Trust not used as eligibility gate.
+Assumes **Owner-approved** profiles (§9); Trust not used as eligibility gate.
 
 | Scenario                                                    | Risk (typical)                                                | Trust state                                                                       | Eligibility AD_SESSION_START                                        | Eligibility WITHDRAWAL_REQUEST                        |
 | ----------------------------------------------------------- | ------------------------------------------------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------- | ----------------------------------------------------- |
-| Brand-new account + **first** verified wallet (no cooldown) | score 0 → LOW → MANUAL_REVIEW → allowed by riskAllowedActions | often NEW or BASIC/TRUSTED from age+wallet weights                                | AD_SESSION_START **ELIGIBLE** if ACTIVE + risk allowlisted          | INELIGIBLE if pause enabled (FEATURE_FLAG) — expected |
+| Brand-new account + **first** verified wallet (no cooldown) | score 0 → LOW → MANUAL_REVIEW → allowed by riskAllowedActions | often NEW; age+wallet alone → ESTABLISHED (50), not TRUSTED                       | AD_SESSION_START **ELIGIBLE** if ACTIVE + risk allowlisted          | INELIGIBLE if pause enabled (FEATURE_FLAG) — expected |
 | ACTIVE user after **primary wallet change** (24h cooldown)  | unchanged                                                     | unchanged                                                                         | AD ACCOUNT_STATE **OK**; session may proceed to risk                | INELIGIBLE_ACCOUNT_STATE (cooldown)                   |
-| Established account + verified primary wallet ≥1d, no fraud | LOW / MANUAL_REVIEW                                           | often BASIC or higher from age+wallet; ad/payout history still unmet while frozen | ELIGIBLE                                                            | blocked by pause / risk if elevated                   |
-| Shared payout wallet signal active (+35)                    | likely MEDIUM or HIGH depending on stack                      | unchanged by risk                                                                 | may become INELIGIBLE_RISK_POLICY if action HELD/WITHDRAWAL_BLOCKED | blocked                                               |
-| OPEN CRITICAL fraud flag alone (+60)                        | **HIGH / HELD** (not CRITICAL; see §12)                       | n/a                                                                               | **BLOCK** under proposed allowlist                                  | **BLOCK**                                             |
+| Established account + verified primary wallet ≥1d, no fraud | LOW / MANUAL_REVIEW                                           | ESTABLISHED from age+wallet; TRUSTED only with ad or payout history               | ELIGIBLE                                                            | blocked by pause / risk if elevated                   |
+| Shared payout wallet signal active (+35)                    | MEDIUM / MANUAL_REVIEW alone                                  | unchanged by risk                                                                 | ALLOW under risk allowlist                                          | ALLOW under risk; pause/engine still authoritative    |
+| OPEN CRITICAL fraud flag alone (+80)                        | **CRITICAL / WITHDRAWAL_BLOCKED**                             | n/a                                                                               | **BLOCK**                                                           | **BLOCK**                                             |
+| OPEN HIGH fraud flag alone (+55)                            | **HIGH / HELD**                                               | n/a                                                                               | **BLOCK**                                                           | **BLOCK**                                             |
 | Account withdrawal_status BLOCKED                           | n/a for risk                                                  | n/a                                                                               | AD ACCOUNT_STATE **OK** (withdrawal-scoped)                         | INELIGIBLE_ACCOUNT_STATE                              |
 
-**Brand-new tester usability:** Earn observation remains usable under PROPOSED AD_SESSION_START (ACCOUNT_STATE + RISK only; FEATURE_FLAG unsupported for ads). Primary **wallet change** starts a 24h **withdrawal** cooldown — that blocks WITHDRAWAL_REQUEST via ACCOUNT_STATE, **not** AD_SESSION_START. Trust NEW is **non-blocking**. Withdrawals remain frozen by pause + engine gates.
+**Brand-new tester usability:** Earn observation remains usable under approved AD_SESSION_START (ACCOUNT_STATE + RISK only; FEATURE_FLAG unsupported for ads). Primary **wallet change** starts a 24h **withdrawal** cooldown — that blocks WITHDRAWAL_REQUEST via ACCOUNT_STATE, **not** AD_SESSION_START. Trust NEW is **non-blocking**. Withdrawals remain frozen by pause + engine gates.
 
 ---
 
@@ -312,98 +315,71 @@ Assumes PROPOSED profiles; Trust not used as eligibility gate.
 
 ---
 
-## 9. OWNER DECISIONS REQUIRED
+## 9. OWNER DECISIONS — APPROVED (Step 4B)
 
-Fill each line with `APPROVE_AS_PROPOSED` | `APPROVE_WITH_EDITS:<note>` | `REJECT:<note>` | `DEFER`.
+Canonical approved values live in `packages/fraud/policy/phase20-closed-beta-owner-approved.json` and `docs/PHASE_20_STEP4_OWNER_POLICY_APPROVAL.md`.
 
 ```
-OWNER_DECISION_01_RISK_THRESHOLDS=
-  recommended: lowMax=20, mediumMax=50, highMax=75
-  effect: band risk scores into LOW/MEDIUM/HIGH/CRITICAL
-  risk: too-wide LOW under-reviews; too-narrow over-holds
-
-OWNER_DECISION_02_RISK_WEIGHTS=
-  recommended: collector set in §5.1 (omit ACCOUNT_AGE/WALLET_REUSE; omit history signals for 4A)
-  effect: score only from implemented fraud/reuse/network collectors
-  risk: omitting shared-wallet under-detects multi-account; heavy network weight false-positives NAT users
-
-OWNER_DECISION_03_RISK_ACTIONS=
-  recommended: LOW/MEDIUM=MANUAL_REVIEW; HIGH=HELD; CRITICAL=WITHDRAWAL_BLOCKED
-  effect: labels for eligibility allowlists; no auto-ban execution
-  risk: ALLOW on LOW would weaken review posture
-
-OWNER_DECISION_04_TRUST_SIGNALS=
-  recommended: §5.2 (minDays=1 for age/wallet; keep history minCount=1)
-  effect: observational trust progression for new testers without gating Earn
-  risk: TEST minDays=7/3 leaves almost all beta users NEW forever (harmless today; confusing ops)
-
-OWNER_DECISION_05_TRUST_THRESHOLDS=
-  recommended: basicMin=25, establishedMin=50, trustedMin=75
-  effect: map score → NEW/BASIC/ESTABLISHED/TRUSTED
-  risk: lowering trustedMin invents easy TRUSTED optics
-
-OWNER_DECISION_06_WITHDRAWAL_ELIGIBILITY=
-  recommended: ACCOUNT_STATE+RISK_POLICY+FEATURE_FLAG; riskAllowedActions without HELD
-  effect: withdrawals stay pause-gated; HELD cannot request withdraw
-  risk: including HELD (TEST) would allow held users to request withdraw when pause later lifts
-
-OWNER_DECISION_07_AD_SESSION_ELIGIBILITY=
-  recommended: ACCOUNT_STATE+RISK_POLICY; omit FEATURE_FLAG (unsupported binding — correct, not a workaround)
-  effect: allow controlled Earn observation while payouts paused; risk can still block
-  risk: inventing an ad pause flag without Owner/spec approval would expand kill-switch surface
-
-OWNER_DECISION_08_MISSION_TASK_ELIGIBILITY=
-  recommended: MISSION_CLAIM=ACCOUNT_STATE+FEATURE_FLAG; TASK_CLAIM=ACCOUNT_STATE only; do not activate content in 4A
-  effect: mission pause remains meaningful; task has no approved FEATURE_FLAG binding yet
-  risk: requiring FEATURE_FLAG on TASK_CLAIM fails closed; activating without content ceremony is unsafe
+OWNER_DECISION_01_RISK_THRESHOLDS=APPROVED lowMax=20, mediumMax=50, highMax=75
+OWNER_DECISION_02_RISK_WEIGHTS=APPROVED OPEN_HIGH=55, OPEN_CRITICAL=80, CONFIRMED=60, SHARED_PAYOUT=35, SHARED_DEVICE=25, SHARED_NETWORK=20, COUNTRY_CHANGED=15 (history signals omitted)
+OWNER_DECISION_03_RISK_ACTIONS=APPROVED LOW/MEDIUM=MANUAL_REVIEW; HIGH=HELD; CRITICAL=WITHDRAWAL_BLOCKED
+OWNER_DECISION_04_TRUST_SIGNALS=APPROVED weights 25/25/25/25; minDays 1/1; minCount 1/1
+OWNER_DECISION_05_TRUST_THRESHOLDS=APPROVED basicMin=25, establishedMin=50, trustedMin=75
+OWNER_DECISION_06_WITHDRAWAL_ELIGIBILITY=APPROVED ACCOUNT_STATE+RISK_POLICY+FEATURE_FLAG; riskAllowedActions ALLOW/EXTEND_PENDING/MANUAL_REVIEW
+OWNER_DECISION_07_AD_SESSION_ELIGIBILITY=APPROVED ACCOUNT_STATE+RISK_POLICY (no FEATURE_FLAG)
+OWNER_DECISION_08_MISSION_TASK_ELIGIBILITY=APPROVED MISSION=ACCOUNT_STATE+FEATURE_FLAG; TASK=ACCOUNT_STATE (content not activated)
 ```
+
+Historical 4A proposals remain above for audit; **canonical Closed-Beta profile is the Owner-approved artifact**, not earlier PROPOSED weights (e.g. OPEN_HIGH was proposed 40, approved 55).
 
 ---
 
 ## 10. Explicit non-claims
 
 - Notification delivery unchanged (`DRAFT_ONLY_NO_SEND`).
-- No LIVE_POLICY_CHANGED. No operational/staging ACTIVE seed in Step 4A.
+- No LIVE_POLICY_CHANGED. No operational/staging ACTIVE seed in Step 4B (disposable TEST DB only).
 - No Railway deploy. No Mainnet. No AdsGram monetary enablement. No payout resume.
-- Step 4 activation is **NOT STARTED**.
+- Staging activation ceremony is **NOT STARTED** (Owner-approved artifact only).
 
 ---
 
 ## 11. Evidence pointers
 
+- `packages/fraud/policy/phase20-closed-beta-owner-approved.json` (canonical approved)
+- `packages/fraud/src/phase20-closed-beta-approved-policy.ts`
 - `packages/fraud/src/risk-rule.ts`, `risk-evaluator.ts`, `risk-signal-collector.ts`, `evaluate-and-persist.ts`
 - `packages/fraud/src/trust-rule.ts`, `trust-evaluator.ts`, `trust-signal-collector.ts`
 - `packages/fraud/src/eligibility-policy.ts`, `eligibility-evaluator.ts`, `evaluate-and-persist-eligibility.ts`
 - `packages/fraud/test/harness.ts` (TEST REFERENCE only)
 - `docs/PHASE_20_GAP_REGISTER.md` → P20-GAP-009
+- `docs/PHASE_20_STEP4_OWNER_POLICY_APPROVAL.md`
 
 ---
 
-## 12. SINGLE-SIGNAL RISK OUTCOME MATRIX (proposed weights × thresholds 20/50/75)
+## 12. SINGLE-SIGNAL RISK OUTCOME MATRIX (APPROVED weights × thresholds 20/50/75)
 
 Assumptions: only the listed signal is active; other weights contribute 0.  
 `score = weight` (capped 100). Tier: ≤20 LOW; ≤50 MEDIUM; ≤75 HIGH; else CRITICAL.  
-Proposed actions: LOW/MEDIUM=`MANUAL_REVIEW`; HIGH=`HELD`; CRITICAL=`WITHDRAWAL_BLOCKED`.  
-Proposed eligibility `riskAllowedActions` for WITHDRAWAL_REQUEST and AD_SESSION_START:  
-`ALLOW`, `EXTEND_PENDING`, `MANUAL_REVIEW` (**HELD not allowed**).
+Approved actions: LOW/MEDIUM=`MANUAL_REVIEW`; HIGH=`HELD`; CRITICAL=`WITHDRAWAL_BLOCKED`.  
+Approved eligibility `riskAllowedActions` for WITHDRAWAL_REQUEST and AD_SESSION_START:  
+`ALLOW`, `EXTEND_PENDING`, `MANUAL_REVIEW` (**HELD / WITHDRAWAL_BLOCKED not allowed**).
 
-| Signal                   | Weight | Score | Tier     | Configured action | AD_SESSION_START (proposed) | WITHDRAWAL_REQUEST (proposed) | Surprise?                                                            |
-| ------------------------ | -----: | ----: | -------- | ----------------- | --------------------------- | ----------------------------- | -------------------------------------------------------------------- |
-| OPEN_HIGH_FRAUD_FLAG     |     40 |    40 | MEDIUM   | MANUAL_REVIEW     | ALLOW                       | ALLOW                         | No                                                                   |
-| OPEN_CRITICAL_FRAUD_FLAG |     60 |    60 | **HIGH** | **HELD**          | **BLOCK**                   | **BLOCK**                     | **Yes — weight 60 is HIGH, not CRITICAL (CRITICAL needs score >75)** |
-| CONFIRMED_FRAUD_FLAG     |     50 |    50 | MEDIUM   | MANUAL_REVIEW     | ALLOW                       | ALLOW                         | Borderline: exactly mediumMax stays MEDIUM                           |
-| SHARED_PAYOUT_WALLET     |     35 |    35 | MEDIUM   | MANUAL_REVIEW     | ALLOW                       | ALLOW                         | No                                                                   |
-| SHARED_DEVICE_SIGNAL     |     25 |    25 | MEDIUM   | MANUAL_REVIEW     | ALLOW                       | ALLOW                         | No                                                                   |
-| SHARED_NETWORK_SIGNAL    |     20 |    20 | LOW      | MANUAL_REVIEW     | ALLOW                       | ALLOW                         | No                                                                   |
-| NETWORK_COUNTRY_CHANGED  |     15 |    15 | LOW      | MANUAL_REVIEW     | ALLOW                       | ALLOW                         | No                                                                   |
-
-**Owner note:** A lone OPEN_CRITICAL flag (weight 60) yields **HELD**, which the proposed eligibility allowlist **blocks**. To reach CRITICAL/`WITHDRAWAL_BLOCKED` from a single signal, weight must be **≥76** under these thresholds — or combine signals / raise weight / change thresholds. Do not silently change proposed weights in this step.
+| Signal                   | Weight | Score | Tier         | Configured action     | AD_SESSION_START | WITHDRAWAL_REQUEST | Note                                      |
+| ------------------------ | -----: | ----: | ------------ | --------------------- | ---------------- | ------------------ | ----------------------------------------- |
+| (none)                   |      0 |     0 | LOW          | MANUAL_REVIEW         | ALLOW            | ALLOW              | Withdrawal still subject to pause/engine  |
+| OPEN_HIGH_FRAUD_FLAG     |     55 |    55 | **HIGH**     | **HELD**              | **BLOCK**        | **BLOCK**          | Owner raised from proposed 40             |
+| OPEN_CRITICAL_FRAUD_FLAG |     80 |    80 | **CRITICAL** | **WITHDRAWAL_BLOCKED** | **BLOCK**      | **BLOCK**          | Owner raised from proposed 60             |
+| CONFIRMED_FRAUD_FLAG     |     60 |    60 | **HIGH**     | **HELD**              | **BLOCK**        | **BLOCK**          | Owner raised from proposed 50             |
+| SHARED_PAYOUT_WALLET     |     35 |    35 | MEDIUM       | MANUAL_REVIEW         | ALLOW            | ALLOW              | No auto-block alone                       |
+| SHARED_DEVICE_SIGNAL     |     25 |    25 | MEDIUM       | MANUAL_REVIEW         | ALLOW            | ALLOW              | No auto-block alone                       |
+| SHARED_NETWORK_SIGNAL    |     20 |    20 | LOW          | MANUAL_REVIEW         | ALLOW            | ALLOW              | Must not auto-ban                         |
+| NETWORK_COUNTRY_CHANGED  |     15 |    15 | LOW          | MANUAL_REVIEW         | ALLOW            | ALLOW              | Must not auto-ban                         |
 
 ---
 
 ## 4A.2 Referral FEATURE_FLAG clarification
 
-`REFERRAL_ACTIVATION` is **not** configured in the proposed Step 4 Closed Beta eligibility policy.
+`REFERRAL_ACTIVATION` is **not** configured in the Owner-approved Step 4 Closed Beta eligibility policy.
 
 Referral edge activation (`PENDING -> ACTIVE | REJECTED`) remains governed by the existing Phase 15 referral-rule engine in `packages/referrals/src/activation.ts`, which **does not issue referral money**.
 

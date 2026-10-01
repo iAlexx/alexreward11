@@ -1,6 +1,6 @@
 # Phase 20 — Closed Beta / Minimal Funds Plan (Step 1–3)
 
-**PHASE20_STATUS:** `IN_PROGRESS` — Step 3 complete; Step 4A Owner fraud/trust/eligibility decision pack ready (no activation); HOLD for Owner policy/content decisions
+**PHASE20_STATUS:** `IN_PROGRESS` — Step 4B Owner policy approved in source (staging activation pending); HOLD
 **PHASE20_GATE:** `HOLD`
 **PHASE20_ARCHIVE:** `NOT CREATED`
 **Phase 21:** `NOT STARTED`
@@ -209,6 +209,7 @@ API ceremony exists (`providers-admin` / `admin-limits`). Admin UI for limit cer
 - `docs/PHASE_20_FRAUD_ELIGIBILITY_POLICY_PROPOSAL.md`
 - `docs/PHASE_20_CONTROLLED_CONTENT_PROPOSAL.md`
 - `docs/PHASE_20_STEP4_OWNER_POLICY_DECISION.md`
+- `docs/PHASE_20_STEP4_OWNER_POLICY_APPROVAL.md`
 - `docs/PHASE_19_SECURITY_FINDINGS.md` (residuals)
 - `docs/ADSGRAM_CLARIFICATION_REGISTER.md`
 - `docs/WITHDRAWALS.md` / `docs/OPERATIONS_RUNBOOK.md`
@@ -246,3 +247,8 @@ Evidence: `docs/PHASE_20_STEP3_PROVIDER_NO_FILL_EVIDENCE.md`.
 ## Step 4A / 4A.1 notes
 
 Owner decision pack for P20-GAP-009 published: `docs/PHASE_20_STEP4_OWNER_POLICY_DECISION.md`. Step 4A.1 corrected ACCOUNT_STATE (withdrawal-scoped) and FEATURE_FLAG bindings (no withdrawal-pause fallback). **No policy activation.** Owner has not approved values. Step 4 activation not started.
+
+
+## Step 4B notes
+
+Owner-approved Closed Beta Risk/Trust/Eligibility recorded in `packages/fraud/policy/phase20-closed-beta-owner-approved.json`. Disposable validation via `pnpm phase20:step4b:policy-check`. **No staging activation.**

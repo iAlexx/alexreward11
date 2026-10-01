@@ -1,0 +1,66 @@
+{
+  "artifactId": "PHASE20_CLOSED_BETA_OWNER_APPROVED_POLICY",
+  "phase": 20,
+  "status": "OWNER_APPROVED_STAGING_CANDIDATE",
+  "activationAuthorized": false,
+  "sourceCommitAtApproval": "3f4a849617a31cec1c35dad0d7be6410200c94f2",
+  "notes": [
+    "Owner-approved Closed Beta Risk/Trust/Eligibility candidate.",
+    "Importing or validating this artifact MUST NOT activate DB policies.",
+    "Staging activation requires a separate Owner-gated ceremony."
+  ],
+  "risk": {
+    "thresholds": { "lowMax": 20, "mediumMax": 50, "highMax": 75 },
+    "signalWeights": {
+      "OPEN_HIGH_FRAUD_FLAG": 55,
+      "OPEN_CRITICAL_FRAUD_FLAG": 80,
+      "CONFIRMED_FRAUD_FLAG": 60,
+      "SHARED_PAYOUT_WALLET": 35,
+      "SHARED_DEVICE_SIGNAL": 25,
+      "SHARED_NETWORK_SIGNAL": 20,
+      "NETWORK_COUNTRY_CHANGED": 15
+    },
+    "signalParams": {},
+    "actions": {
+      "LOW": "MANUAL_REVIEW",
+      "MEDIUM": "MANUAL_REVIEW",
+      "HIGH": "HELD",
+      "CRITICAL": "WITHDRAWAL_BLOCKED"
+    }
+  },
+  "trust": {
+    "signals": {
+      "ACCOUNT_AGE": { "weight": 25, "minDays": 1 },
+      "VERIFIED_PRIMARY_WALLET_AGE": { "weight": 25, "minDays": 1 },
+      "REWARDED_AD_HISTORY": { "weight": 25, "minCount": 1 },
+      "CONFIRMED_PAYOUT_HISTORY": { "weight": 25, "minCount": 1 }
+    },
+    "stateThresholds": {
+      "basicMin": 25,
+      "establishedMin": 50,
+      "trustedMin": 75
+    }
+  },
+  "eligibility": {
+    "actions": {
+      "WITHDRAWAL_REQUEST": {
+        "requiredGates": ["ACCOUNT_STATE", "RISK_POLICY", "FEATURE_FLAG"],
+        "precedence": ["RISK_POLICY", "ACCOUNT_STATE", "FEATURE_FLAG"],
+        "riskAllowedActions": ["ALLOW", "EXTEND_PENDING", "MANUAL_REVIEW"]
+      },
+      "AD_SESSION_START": {
+        "requiredGates": ["ACCOUNT_STATE", "RISK_POLICY"],
+        "precedence": ["RISK_POLICY", "ACCOUNT_STATE"],
+        "riskAllowedActions": ["ALLOW", "EXTEND_PENDING", "MANUAL_REVIEW"]
+      },
+      "MISSION_CLAIM": {
+        "requiredGates": ["ACCOUNT_STATE", "FEATURE_FLAG"],
+        "precedence": ["ACCOUNT_STATE", "FEATURE_FLAG"]
+      },
+      "TASK_CLAIM": {
+        "requiredGates": ["ACCOUNT_STATE"],
+        "precedence": ["ACCOUNT_STATE"]
+      }
+    }
+  }
+}
