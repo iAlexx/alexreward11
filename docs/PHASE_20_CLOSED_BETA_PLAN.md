@@ -1,6 +1,6 @@
 # Phase 20 — Closed Beta / Minimal Funds Plan (Step 1–3)
 
-**PHASE20_STATUS:** `IN_PROGRESS` — Step 3 provider/no-fill observation complete; HOLD for Step 4 Owner policy/content decisions
+**PHASE20_STATUS:** `IN_PROGRESS` — Step 3 complete; Step 4A Owner fraud/trust/eligibility decision pack ready (no activation); HOLD for Owner policy/content decisions
 **PHASE20_GATE:** `HOLD`
 **PHASE20_ARCHIVE:** `NOT CREATED`
 **Phase 21:** `NOT STARTED`
@@ -208,6 +208,7 @@ API ceremony exists (`providers-admin` / `admin-limits`). Admin UI for limit cer
 - `docs/PHASE_20_GAP_REGISTER.md`
 - `docs/PHASE_20_FRAUD_ELIGIBILITY_POLICY_PROPOSAL.md`
 - `docs/PHASE_20_CONTROLLED_CONTENT_PROPOSAL.md`
+- `docs/PHASE_20_STEP4_OWNER_POLICY_DECISION.md`
 - `docs/PHASE_19_SECURITY_FINDINGS.md` (residuals)
 - `docs/ADSGRAM_CLARIFICATION_REGISTER.md`
 - `docs/WITHDRAWALS.md` / `docs/OPERATIONS_RUNBOOK.md`
@@ -241,3 +242,7 @@ Overall Phase 20 remains `PHASE20_GATE=HOLD` (blockers P20-GAP-009, P20-GAP-017)
 Provider/no-fill/Earn observation validated with AdsGram monetary **BLOCKED**. Real-money gaps unchanged.
 Harness: `pnpm phase20:step3` with `PHASE20_STEP3_REQUIRE_DB_GATES=1` + `PHASE20_DATABASE_URL`.
 Evidence: `docs/PHASE_20_STEP3_PROVIDER_NO_FILL_EVIDENCE.md`.
+
+## Step 4A notes
+
+Owner decision pack for P20-GAP-009 published: `docs/PHASE_20_STEP4_OWNER_POLICY_DECISION.md`. **No policy activation.** Step 4 activation not started.

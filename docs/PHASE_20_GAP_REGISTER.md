@@ -1,7 +1,7 @@
-# Phase 20 — Gap Register (Step 1–3)
+# Phase 20 — Gap Register (Step 1–3 / 4A decision pack)
 
 **PHASE20_GATE:** HOLD
-**Step:** 3 complete (provider/no-fill observation validated); HOLD for Step 4 Owner policy/content decisions
+**Step:** 3 complete; Step 4A Owner policy decision pack prepared (no activation); HOLD for Owner policy/content decisions
 **Register scope:** Closed Beta readiness gaps + carried Phase 19 residuals
 **Rule:** Do not hide issues because they originated in an older phase.
 **Status values:** OPEN | DEFERRED | REMEDIATED | ACCEPTED_RESIDUAL (Owner only for Critical/High)
@@ -147,12 +147,13 @@ Canonical IDs: `P20-GAP-001` .. contiguous.
 - **evidence:** engines fail-closed without ACTIVE rules; Phase 14 noted seeds Owner-required
 - **impact:** Controlled beta may refuse actions until policies seeded
 - **prerequisite:** Owner-approved policy rows for staging beta
-- **proposed remediation/test:** Step 2 disposable fixtures + fail-closed proofs + `docs/PHASE_20_FRAUD_ELIGIBILITY_POLICY_PROPOSAL.md`; staging ACTIVE still Owner-gated
+- **proposed remediation/test:** Step 2 disposable fixtures + fail-closed proofs; Step 4A Owner decision pack `docs/PHASE_20_STEP4_OWNER_POLICY_DECISION.md`; staging ACTIVE still Owner-gated
 - **blocks Closed Beta?** YES — blocks complete Phase 20 fraud/trust/eligibility validation until controlled ACTIVE policies exist
 - **blocks real-money beta?** YES — unsafe to pay without eligibility/fraud ACTIVE
 - **blocks Phase 20 archive?** YES — until fraud/eligibility category evidenced
 - **status:** OPEN / READY_FOR_OWNER_POLICY_APPROVAL
-- **step2 note:** Disposable fail-closed + ACTIVE fixture proofs exist; TEST fixture numbers are REFERENCE ONLY — NOT APPROVED FOR STAGING. See `docs/PHASE_20_FRAUD_ELIGIBILITY_POLICY_PROPOSAL.md`.
+- **step2 note:** Disposable fail-closed + ACTIVE fixture proofs exist; TEST fixture numbers are REFERENCE ONLY — NOT APPROVED FOR STAGING.
+- **step4a note:** Owner decision matrix + proposed Closed-Beta profiles published; **not activated**. See `docs/PHASE_20_STEP4_OWNER_POLICY_DECISION.md`.
 
 ### P20-GAP-010 — Provider-limit Admin UI ceremony incomplete
 
