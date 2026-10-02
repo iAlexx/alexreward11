@@ -62,6 +62,12 @@ describe('phase21 readiness / preflight', () => {
       'WITHDRAWAL_REQUEST_PAUSE_FAIL_CLOSED',
       'PRODUCTION_FLAG_BASELINE_TOOL',
       'MAINNET_REGISTRY_BOOTSTRAP',
+      'FORCE_APPLY_REMOVED',
+      'PRODUCTION_FLAG_BASELINE_ATOMIC',
+      'MAINNET_REGISTRY_ONE_PASS_ATOMIC',
+      'CONCRETE_EXTERNAL_ADAPTERS',
+      'CONCRETE_FEE_ADAPTER',
+      'HOT_WALLET_REGISTRATION_TOOL',
     ]) {
       expect(byCode[required], required).toBeDefined();
     }

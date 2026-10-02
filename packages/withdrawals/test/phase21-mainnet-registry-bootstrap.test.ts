@@ -1,11 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
+  planPhase21MainnetRegistryBootstrap,
   runPhase21MainnetRegistryBootstrap,
   type Phase21MainnetRegistryBootstrapClient,
 } from '../src/phase21-mainnet-registry-bootstrap.js';
-
-type Row = Record<string, unknown>;
 
 function mockEmptyClient(): Phase21MainnetRegistryBootstrapClient {
   return {
@@ -47,46 +46,48 @@ describe('phase21 mainnet registry bootstrap', () => {
     else process.env.PHASE21_OPERATIONAL_CEREMONY_ENABLED = prevCeremony;
   });
 
-  it('defaults to DRY_RUN with CREATE plan when empty', async () => {
+  it('plans CREATE for network+assets+rules when empty (one-pass plan)', async () => {
     delete process.env.PHASE21_MAINNET_REGISTRY_BOOTSTRAP_APPLY;
     delete process.env.PHASE21_OPERATIONAL_CEREMONY_ENABLED;
-    const result = await runPhase21MainnetRegistryBootstrap(mockEmptyClient(), {
+    const items = await planPhase21MainnetRegistryBootstrap(mockEmptyClient(), {
       usdtJettonMaster: 'EQD0vdSA_NedR9uvbgN9EikRX-suesDxGeFg69XQMavfLqIw',
     });
-    expect(result.mode).toBe('DRY_RUN');
-    expect(result.applied).toBe(false);
-    expect(
-      result.items.some((i) => i.resource === 'networks:TON_MAINNET' && i.action === 'CREATE'),
-    ).toBe(true);
-    expect(result.items.some((i) => i.resource === 'hot_wallets:MAINNET_SLOT')).toBe(true);
-    expect(result.items.find((i) => i.resource === 'hot_wallets:MAINNET_SLOT')?.action).toBe(
+    const resources = items.map((i) => i.resource);
+    expect(resources).toContain('networks:TON_MAINNET');
+    expect(resources).toContain('assets:USDT');
+    expect(resources).toContain('assets:GRAM');
+    expect(resources).toContain('withdrawal_fee_rules:v1');
+    expect(resources).toContain('withdrawal_limit_rules:v1');
+    expect(resources).toContain('hot_wallets:MAINNET_SLOT');
+    expect(items.filter((i) => i.action === 'CREATE').length).toBeGreaterThanOrEqual(5);
+    expect(items.find((i) => i.resource === 'hot_wallets:MAINNET_SLOT')?.action).toBe(
       'DOCUMENTED_ONLY',
     );
   });
 
-  it('apply-off stays DRY_RUN even if apply env alone is set', async () => {
+  it('run stays PLAN without gates; no forceApply', async () => {
     process.env.PHASE21_MAINNET_REGISTRY_BOOTSTRAP_APPLY = '1';
     delete process.env.PHASE21_OPERATIONAL_CEREMONY_ENABLED;
     const result = await runPhase21MainnetRegistryBootstrap(mockEmptyClient(), {
       usdtJettonMaster: 'EQD0vdSA_NedR9uvbgN9EikRX-suesDxGeFg69XQMavfLqIw',
     });
-    expect(result.mode).toBe('DRY_RUN');
+    expect(result.mode).toBe('PLAN');
     expect(result.applied).toBe(false);
+    expect(result.notes.some((n) => n.includes('forceApply'))).toBe(true);
   });
 
-  it('conflict refuses apply', async () => {
-    const result = await runPhase21MainnetRegistryBootstrap(
-      mockConflictNetworkClient(),
-      { usdtJettonMaster: 'EQD0vdSA_NedR9uvbgN9EikRX-suesDxGeFg69XQMavfLqIw' },
-      { forceApply: true },
+  it('conflict refused in plan', async () => {
+    const items = await planPhase21MainnetRegistryBootstrap(mockConflictNetworkClient(), {
+      usdtJettonMaster: 'EQD0vdSA_NedR9uvbgN9EikRX-suesDxGeFg69XQMavfLqIw',
+    });
+    expect(items.some((c) => c.resource === 'networks:TON_MAINNET' && c.action === 'CONFLICT')).toBe(
+      true,
     );
-    expect(result.applied).toBe(false);
-    expect(result.conflicts.some((c) => c.resource === 'networks:TON_MAINNET')).toBe(true);
   });
 
   it('rejects placeholder jetton master', async () => {
     await expect(
-      runPhase21MainnetRegistryBootstrap(mockEmptyClient(), {
+      planPhase21MainnetRegistryBootstrap(mockEmptyClient(), {
         usdtJettonMaster: 'LOCAL-PLACEHOLDER-USDT',
       }),
     ).rejects.toThrow(/PLACEHOLDER|LOCAL/);

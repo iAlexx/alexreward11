@@ -74,3 +74,16 @@ CLI: `pnpm phase21:readiness` / `pnpm phase21:preflight` - overall readiness BLO
 | MAINNET_REGISTRY_BOOTSTRAP | DRY_RUN registry bootstrap present |
 
 READY_FOR_LIVE_PAYOUT remains always false.
+
+## Step 3B ceremony tooling hardening (source observations)
+
+| Code | Meaning |
+| --- | --- |
+| FORCE_APPLY_REMOVED | No forceApply bypass; env gates only |
+| PRODUCTION_FLAG_BASELINE_ATOMIC | Atomic flag baseline APPLY |
+| MAINNET_REGISTRY_ONE_PASS_ATOMIC | Zero→complete registry one txn |
+| CONCRETE_EXTERNAL_ADAPTERS | Toncenter/TonAPI Mainnet read-only adapters |
+| CONCRETE_FEE_ADAPTER | Toncenter Mainnet fee provider |
+| HOT_WALLET_REGISTRATION_TOOL | Gated hot wallet register tooling |
+
+READY_FOR_LIVE_PAYOUT remains false.

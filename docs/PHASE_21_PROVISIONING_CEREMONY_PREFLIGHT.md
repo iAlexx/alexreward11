@@ -51,3 +51,15 @@ READY_FOR_OWNER_PROVISIONING_CEREMONY additionally requires PASS on:
 - MAINNET_REGISTRY_BOOTSTRAP
 
 READY_FOR_LIVE_PAYOUT remains always false. See PHASE_21_STEP3A_INDEPENDENT_REVIEW_CORRECTIONS.md.
+
+## Step 3B tooling hardening (source)
+
+- [ ] forceApply removed from flag baseline + registry bootstrap
+- [ ] Atomic PRODUCTION flag baseline APPLY (versions + audit)
+- [ ] Atomic Mainnet registry one-pass APPLY
+- [ ] Concrete Mainnet external adapters + fee adapter
+- [ ] Hot Wallet registration tooling (Owner inputs required)
+- [ ] pnpm phase21:preflight may show READY_FOR_OWNER_PROVISIONING_CEREMONY when Step 3B observations PASS
+- [ ] readyForLivePayout remains false
+
+Canonical detail: PHASE_21_STEP3B_CEREMONY_TOOLING_HARDENING.md

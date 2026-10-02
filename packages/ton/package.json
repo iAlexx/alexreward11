@@ -13,7 +13,7 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src test",
-    "test": "vitest run test/ton-proof-crypto.test.ts",
+    "test": "vitest run test/ton-proof-crypto.test.ts test/toncenter-mainnet-fee-provider.test.ts",
     "test:phase10": "vitest run test/phase10-chain-provider.test.ts test/phase10-provider-adapters.test.ts test/phase10-enumerate-history.test.ts test/phase10-admit-wallet-seqno.test.ts"
   },
   "dependencies": {

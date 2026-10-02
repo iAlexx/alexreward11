@@ -25,3 +25,12 @@ HTTP reachability only when `PHASE21_EXTERNAL_PROBE_LIVE=1`. No `sendBoc`. Unit 
 - Probe provenance includes providerKind, providerHost, networkIdentity, observedAt, resource, verificationMethod, ok.
 - Bare HTTP 200 is never Mainnet identity; identity adapter or incomplete/unavailable.
 - erifyMainnetUsdtWithTwoProviders fail-closed orchestration is available for Owner ceremony use (offline unit-tested with mocks).
+
+## Step 3B concrete adapters
+
+- packages/ton/src/toncenter-mainnet-readonly.ts
+- packages/ton/src/tonapi-mainnet-readonly.ts
+- Factory: createPhase21MainnetExternalAdapters in withdrawals
+- CLI: pnpm phase21:verify-mainnet-external
+- Fee: ToncenterMainnetFeeProvider + pnpm phase21:estimate-mainnet-fee
+- Never broadcast / never sendBoc; API keys redacted to hostname in errors

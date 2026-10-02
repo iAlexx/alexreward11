@@ -62,9 +62,17 @@
     "phase20:step4c:preflight": "node scripts/phase20-step4c-staging-preflight.mjs",
     "phase21:readiness": "pnpm --filter @alex-rewards/withdrawals run phase21:readiness",
     "phase21:preflight": "pnpm --filter @alex-rewards/withdrawals run phase21:preflight",
-    "test:phase21": "pnpm --filter @alex-rewards/withdrawals run test:phase21 && pnpm --filter @alex-rewards/signing exec vitest run test/phase21-mainnet-policy.test.ts test/phase21-bundle-encrypt.test.ts test/phase21-mainnet-ceremony-cli.test.ts test/jetton-transfer-policy.test.ts test/gram-native-currency.test.ts test/mainnet-fee-estimation.test.ts && pnpm --filter @alex-rewards/wallets exec vitest run test/phase21-mainnet-wallet-guards.test.ts && pnpm --filter @alex-rewards/ledger run test:phase21-provision",
+    "test:phase21": "pnpm --filter @alex-rewards/withdrawals run test:phase21 && pnpm --filter @alex-rewards/signing exec vitest run test/phase21-mainnet-policy.test.ts test/phase21-bundle-encrypt.test.ts test/phase21-mainnet-ceremony-cli.test.ts test/jetton-transfer-policy.test.ts test/gram-native-currency.test.ts test/mainnet-fee-estimation.test.ts && pnpm --filter @alex-rewards/wallets exec vitest run test/phase21-mainnet-wallet-guards.test.ts && pnpm --filter @alex-rewards/ledger run test:phase21-provision && pnpm --filter @alex-rewards/ton exec vitest run test/toncenter-mainnet-fee-provider.test.ts",
     "phase21:provision-controlled-available": "pnpm --filter @alex-rewards/ledger run phase21:provision-controlled-available",
-    "phase21:reverse-controlled-available": "pnpm --filter @alex-rewards/ledger run phase21:reverse-controlled-available"
+    "phase21:reverse-controlled-available": "pnpm --filter @alex-rewards/ledger run phase21:reverse-controlled-available",
+    "phase21:production-flags:plan": "pnpm --filter @alex-rewards/withdrawals run phase21:production-flags:plan",
+    "phase21:production-flags:apply": "pnpm --filter @alex-rewards/withdrawals run phase21:production-flags:apply",
+    "phase21:mainnet-registry:plan": "pnpm --filter @alex-rewards/withdrawals run phase21:mainnet-registry:plan",
+    "phase21:mainnet-registry:apply": "pnpm --filter @alex-rewards/withdrawals run phase21:mainnet-registry:apply",
+    "phase21:verify-mainnet-external": "pnpm --filter @alex-rewards/withdrawals run phase21:verify-mainnet-external",
+    "phase21:estimate-mainnet-fee": "pnpm --filter @alex-rewards/withdrawals run phase21:estimate-mainnet-fee",
+    "phase21:hot-wallet:plan": "pnpm --filter @alex-rewards/withdrawals run phase21:hot-wallet:plan",
+    "phase21:hot-wallet:register": "pnpm --filter @alex-rewards/withdrawals run phase21:hot-wallet:register"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

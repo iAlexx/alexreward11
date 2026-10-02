@@ -45,6 +45,8 @@ export {
   type MainnetFeeEstimationResult,
   type MainnetFeeEstimator,
   type ReadOnlyMainnetFeeProvider,
+  ToncenterMainnetFeeProvider,
+  type ToncenterMainnetFeeProviderConfig,
 } from './mainnet-fee-estimation.js';
 export { localSigningFixtureConfig, type SignerRuntimeConfig } from './config.js';
 export { SignerError, type SignerErrorCode } from './errors.js';

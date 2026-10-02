@@ -132,3 +132,12 @@ Bootstrap tooling (DRY_RUN default): see `docs/PHASE_21_MAINNET_REGISTRY_BOOTSTR
 Native gas asset remains ledger-compatible with legacy identifiers (`HOT_WALLET_TON_ASSET`) while display/canonical native = Gram/GRAM.
 
 See `docs/PHASE_21_SIGNER_HOSTING_DECISION.md`, `docs/PHASE_21_PROVISIONING_CEREMONY_PREFLIGHT.md`, and `docs/PHASE_21_STEP3A_INDEPENDENT_REVIEW_CORRECTIONS.md`.
+
+## Step 3B registration tooling (not executed)
+
+- PLAN: pnpm phase21:hot-wallet:plan
+- REGISTER: pnpm phase21:hot-wallet:register -- --apply with env gates + Owner-supplied
+  PHASE21_HOT_WALLET_ADDRESS, PHASE21_HOT_WALLET_SIGNER_REFERENCE,
+  PHASE21_HOT_WALLET_PAYOUT_JETTON_WALLET
+- Inserts v5R1 + FALLBACK_ENCRYPTED + fingerprint + payout jetton wallet + audit
+- Refuses duplicate ACTIVE payout wallet; does not invent addresses

@@ -197,3 +197,8 @@ export class LiveOptionalMainnetFeeEstimator implements MainnetFeeEstimator {
     }
   }
 }
+
+export {
+  ToncenterMainnetFeeProvider,
+  type ToncenterMainnetFeeProviderConfig,
+} from '@alex-rewards/ton';

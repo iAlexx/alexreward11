@@ -96,3 +96,21 @@ export {
   type TonApiTestnetProviderConfig,
 } from './tonapi-testnet-provider.js';
 export { createTonChainProvider, type TonProviderKind } from './create-chain-provider.js';
+
+export {
+  assertMainnetProviderUrl,
+  normalizeMainnetProviderHost,
+  redactProviderErrorMessage,
+} from './mainnet-provider-http.js';
+export {
+  ToncenterMainnetReadonlyClient,
+  type ToncenterMainnetReadonlyConfig,
+} from './toncenter-mainnet-readonly.js';
+export {
+  TonapiMainnetReadonlyClient,
+  type TonapiMainnetReadonlyConfig,
+} from './tonapi-mainnet-readonly.js';
+export {
+  ToncenterMainnetFeeProvider,
+  type ToncenterMainnetFeeProviderConfig,
+} from './toncenter-mainnet-fee-provider.js';

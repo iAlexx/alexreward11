@@ -91,6 +91,13 @@ export interface Phase21ReadinessObservations {
   readonly withdrawalRequestPauseFailClosed?: boolean;
   readonly productionFlagBaselineToolReady?: boolean;
   readonly mainnetRegistryBootstrapReady?: boolean;
+  /** Step 3B ceremony tooling hardening observations. */
+  readonly forceApplyRemoved?: boolean;
+  readonly productionFlagBaselineAtomic?: boolean;
+  readonly mainnetRegistryOnePassAtomic?: boolean;
+  readonly concreteExternalAdaptersReady?: boolean;
+  readonly concreteFeeAdapterReady?: boolean;
+  readonly hotWalletRegistrationToolReady?: boolean;
 }
 
 export interface Phase21ReadinessReport {
@@ -346,6 +353,74 @@ export function buildPhase21ReadinessReport(
         : 'Mainnet registry bootstrap tooling present (DRY_RUN default; not executed)',
     details: {
       mainnetRegistryBootstrapReady: observations.mainnetRegistryBootstrapReady !== false,
+    },
+  });
+
+  items.push({
+    code: 'FORCE_APPLY_REMOVED',
+    status: observations.forceApplyRemoved === false ? 'BLOCKED' : 'PASS',
+    message:
+      observations.forceApplyRemoved === false
+        ? 'forceApply bypass still present in ceremony tooling'
+        : 'forceApply removed; APPLY only via production ceremony env gates',
+    details: { forceApplyRemoved: observations.forceApplyRemoved !== false },
+  });
+
+  items.push({
+    code: 'PRODUCTION_FLAG_BASELINE_ATOMIC',
+    status: observations.productionFlagBaselineAtomic === false ? 'BLOCKED' : 'PASS',
+    message:
+      observations.productionFlagBaselineAtomic === false
+        ? 'PRODUCTION flag baseline APPLY is not atomic'
+        : 'PRODUCTION flag baseline APPLY is atomic (txn + advisory lock + versions)',
+    details: {
+      productionFlagBaselineAtomic: observations.productionFlagBaselineAtomic !== false,
+    },
+  });
+
+  items.push({
+    code: 'MAINNET_REGISTRY_ONE_PASS_ATOMIC',
+    status: observations.mainnetRegistryOnePassAtomic === false ? 'BLOCKED' : 'PASS',
+    message:
+      observations.mainnetRegistryOnePassAtomic === false
+        ? 'Mainnet registry one-pass atomic APPLY incomplete'
+        : 'Mainnet registry zero-to-complete APPLY is one atomic transaction',
+    details: {
+      mainnetRegistryOnePassAtomic: observations.mainnetRegistryOnePassAtomic !== false,
+    },
+  });
+
+  items.push({
+    code: 'CONCRETE_EXTERNAL_ADAPTERS',
+    status: observations.concreteExternalAdaptersReady === false ? 'BLOCKED' : 'PASS',
+    message:
+      observations.concreteExternalAdaptersReady === false
+        ? 'Concrete Mainnet external adapters incomplete'
+        : 'Concrete Mainnet Toncenter/TonAPI read-only adapters ready (no broadcast)',
+    details: {
+      concreteExternalAdaptersReady: observations.concreteExternalAdaptersReady !== false,
+    },
+  });
+
+  items.push({
+    code: 'CONCRETE_FEE_ADAPTER',
+    status: observations.concreteFeeAdapterReady === false ? 'BLOCKED' : 'PASS',
+    message:
+      observations.concreteFeeAdapterReady === false
+        ? 'Concrete Mainnet fee adapter incomplete'
+        : 'Concrete Toncenter Mainnet fee adapter ready (UNAVAILABLE when untrustworthy)',
+    details: { concreteFeeAdapterReady: observations.concreteFeeAdapterReady !== false },
+  });
+
+  items.push({
+    code: 'HOT_WALLET_REGISTRATION_TOOL',
+    status: observations.hotWalletRegistrationToolReady === false ? 'BLOCKED' : 'PASS',
+    message:
+      observations.hotWalletRegistrationToolReady === false
+        ? 'Hot Wallet registration tooling incomplete'
+        : 'Hot Wallet registration tooling ready (Owner inputs required; gated APPLY)',
+    details: {
+      hotWalletRegistrationToolReady: observations.hotWalletRegistrationToolReady !== false,
     },
   });
 
@@ -847,5 +922,11 @@ export function defaultPhase21Step1Observations(): Phase21ReadinessObservations 
     withdrawalRequestPauseFailClosed: true,
     productionFlagBaselineToolReady: true,
     mainnetRegistryBootstrapReady: true,
+    forceApplyRemoved: true,
+    productionFlagBaselineAtomic: true,
+    mainnetRegistryOnePassAtomic: true,
+    concreteExternalAdaptersReady: true,
+    concreteFeeAdapterReady: true,
+    hotWalletRegistrationToolReady: true,
   };
 }

@@ -84,6 +84,12 @@ const FULL_SOURCE_FOUNDATION_CODES = new Set([
   'WITHDRAWAL_REQUEST_PAUSE_FAIL_CLOSED',
   'PRODUCTION_FLAG_BASELINE_TOOL',
   'MAINNET_REGISTRY_BOOTSTRAP',
+  'FORCE_APPLY_REMOVED',
+  'PRODUCTION_FLAG_BASELINE_ATOMIC',
+  'MAINNET_REGISTRY_ONE_PASS_ATOMIC',
+  'CONCRETE_EXTERNAL_ADAPTERS',
+  'CONCRETE_FEE_ADAPTER',
+  'HOT_WALLET_REGISTRATION_TOOL',
 ]);
 
 /** Step 3A independent-review source corrections (also in FULL_SOURCE_FOUNDATION_CODES). */
@@ -95,6 +101,16 @@ const SOURCE_CORRECTION_CODES = new Set([
   'WITHDRAWAL_REQUEST_PAUSE_FAIL_CLOSED',
   'PRODUCTION_FLAG_BASELINE_TOOL',
   'MAINNET_REGISTRY_BOOTSTRAP',
+]);
+
+/** Step 3B ceremony tooling hardening (also in FULL_SOURCE_FOUNDATION_CODES). */
+const STEP3B_HARDENING_CODES = new Set([
+  'FORCE_APPLY_REMOVED',
+  'PRODUCTION_FLAG_BASELINE_ATOMIC',
+  'MAINNET_REGISTRY_ONE_PASS_ATOMIC',
+  'CONCRETE_EXTERNAL_ADAPTERS',
+  'CONCRETE_FEE_ADAPTER',
+  'HOT_WALLET_REGISTRATION_TOOL',
 ]);
 
 /** Hard owner operational mistakes (e.g. unpaused without ceremony). */
@@ -134,6 +150,7 @@ export function runPhase21Preflight(
     blockedCodes.has(c),
   );
   const sourceCorrectionsBlocked = [...SOURCE_CORRECTION_CODES].some((c) => blockedCodes.has(c));
+  const step3bHardeningBlocked = [...STEP3B_HARDENING_CODES].some((c) => blockedCodes.has(c));
   const ownerHardBlocked = [...OWNER_HARD_BLOCK_CODES].some((c) => blockedCodes.has(c));
   const externalBlocked = [...EXTERNAL_CODES].some((c) => blockedCodes.has(c));
 
@@ -147,8 +164,8 @@ export function runPhase21Preflight(
   let verdict: Phase21PreflightVerdict;
   if (ownerHardBlocked || coreWiringBlocked) {
     verdict = 'BLOCKED_FOR_OWNER_DECISION';
-  } else if (!fullFoundationBlocked && !sourceCorrectionsBlocked) {
-    // Source foundations + Step 3A corrections complete; remaining blockers are external and/or live-only.
+  } else if (!fullFoundationBlocked && !sourceCorrectionsBlocked && !step3bHardeningBlocked) {
+    // Source foundations + Step 3A/3B hardening complete; remaining blockers are external and/or live-only.
     verdict = 'READY_FOR_OWNER_PROVISIONING_CEREMONY';
   } else if (ownerNonExternalBlocked.length > 0 && !externalBlocked) {
     verdict = 'BLOCKED_FOR_OWNER_DECISION';
@@ -168,9 +185,9 @@ export function runPhase21Preflight(
     warnings,
     readyForLivePayout: false,
     notes: [
-      'Step 3A preflight never emits READY_FOR_LIVE_PAYOUT',
-      'readyForLivePayout is always false in Step 3 / 3A',
-      'READY_FOR_OWNER_PROVISIONING_CEREMONY requires Step 3A source corrections PASS',
+      'Step 3B preflight never emits READY_FOR_LIVE_PAYOUT',
+      'readyForLivePayout is always false in Step 3 / 3A / 3B',
+      'READY_FOR_OWNER_PROVISIONING_CEREMONY requires Step 3A/3B ceremony tooling hardening PASS',
       'MAINNET_SOURCE_READY means source foundations are progressing; not live payout',
       'AdsGram monetary gaps remain OPEN; balance source may be SOURCE_IMPLEMENTED_OWNER_APPROVED_BUT_NOT_EXECUTED',
       'No operational mutation, deploy, funding, or real key generation is authorized by this report',

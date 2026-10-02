@@ -706,7 +706,9 @@ export type {
 
 export {
   PHASE21_PRODUCTION_FLAG_BASELINE,
+  PHASE21_PRODUCTION_FLAG_BASELINE_LOCK_KEY1,
   planPhase21ProductionFlagBaseline,
+  applyPhase21ProductionFlagBaseline,
   runPhase21ProductionFlagBaseline,
 } from './phase21-production-flag-baseline.js';
 export type {
@@ -714,10 +716,13 @@ export type {
   Phase21ProductionFlagBaselinePlanRow,
   Phase21ProductionFlagBaselineResult,
   Phase21ProductionBaselineFlagKey,
+  Phase21ProductionFlagBaselineApplyInput,
 } from './phase21-production-flag-baseline.js';
 
 export {
+  PHASE21_MAINNET_REGISTRY_BOOTSTRAP_LOCK_KEY1,
   planPhase21MainnetRegistryBootstrap,
+  applyPhase21MainnetRegistryBootstrap,
   runPhase21MainnetRegistryBootstrap,
 } from './phase21-mainnet-registry-bootstrap.js';
 export type {
@@ -726,6 +731,31 @@ export type {
   Phase21MainnetRegistryBootstrapResult,
   Phase21MainnetRegistryPlanItem,
 } from './phase21-mainnet-registry-bootstrap.js';
+
+export {
+  assertPhase21CeremonyApplyGates,
+  __phase21TestSetApplyEnv,
+  Phase21CeremonyApplyGateError,
+  PHASE21_CEREMONY_REQUIRED_DATABASE_NAME_ENV,
+} from './phase21-ceremony-apply-gates.js';
+
+export { createPhase21MainnetExternalAdapters } from './phase21-mainnet-adapters.js';
+export type {
+  Phase21MainnetExternalAdaptersConfig,
+  Phase21MainnetProviderEndpoint,
+  Phase21MainnetProviderKind,
+} from './phase21-mainnet-adapters.js';
+
+export {
+  PHASE21_HOT_WALLET_REGISTER_LOCK_KEY1,
+  planPhase21HotWalletRegistration,
+  applyPhase21HotWalletRegistration,
+} from './phase21-hot-wallet-registration.js';
+export type {
+  Phase21HotWalletRegistrationInput,
+  Phase21HotWalletRegistrationPlan,
+  Phase21HotWalletRegistrationResult,
+} from './phase21-hot-wallet-registration.js';
 
 export {
   realPayoutNetworkFromPhase10,

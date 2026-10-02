@@ -1,10 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   PHASE21_PRODUCTION_FLAG_BASELINE,
+  applyPhase21ProductionFlagBaseline,
+  planPhase21ProductionFlagBaseline,
   runPhase21ProductionFlagBaseline,
   type Phase21ProductionFlagBaselineClient,
 } from '../src/phase21-production-flag-baseline.js';
+import { __phase21TestSetApplyEnv } from '../src/phase21-ceremony-apply-gates.js';
 
 function mockClient(store: Map<string, boolean>): Phase21ProductionFlagBaselineClient {
   return {
@@ -17,76 +20,101 @@ function mockClient(store: Map<string, boolean>): Phase21ProductionFlagBaselineC
         if (!store.has(key)) return { rows: [] as unknown as T[] };
         return { rows: [{ enabled: store.get(key)! }] as unknown as T[] };
       }
-      if (text.includes('INSERT INTO feature_flags')) {
-        const key = String(params?.[0] ?? '');
-        const enabled = Boolean(params?.[1]);
-        store.set(key, enabled);
-        return { rows: [] as unknown as T[], rowCount: 1 };
-      }
       return { rows: [] as unknown as T[] };
     },
   };
 }
 
 describe('phase21 production flag baseline', () => {
-  const prevApply = process.env.PHASE21_PRODUCTION_FLAG_BASELINE_APPLY;
-  const prevCeremony = process.env.PHASE21_OPERATIONAL_CEREMONY_ENABLED;
+  const envKeys = [
+    'DEPLOYMENT_ENV',
+    'PHASE21_OPERATIONAL_CEREMONY_ENABLED',
+    'PHASE21_PRODUCTION_FLAG_BASELINE_APPLY',
+    'PHASE21_CEREMONY_REQUIRED_DATABASE_NAME',
+  ] as const;
+  const prev: Record<string, string | undefined> = {};
 
-  function restoreEnv(): void {
-    if (prevApply === undefined) delete process.env.PHASE21_PRODUCTION_FLAG_BASELINE_APPLY;
-    else process.env.PHASE21_PRODUCTION_FLAG_BASELINE_APPLY = prevApply;
-    if (prevCeremony === undefined) delete process.env.PHASE21_OPERATIONAL_CEREMONY_ENABLED;
-    else process.env.PHASE21_OPERATIONAL_CEREMONY_ENABLED = prevCeremony;
+  afterEach(() => {
+    for (const k of envKeys) {
+      if (prev[k] === undefined) delete process.env[k];
+      else process.env[k] = prev[k];
+    }
+  });
+
+  function snap(): void {
+    for (const k of envKeys) prev[k] = process.env[k];
   }
 
-  it('defaults to DRY_RUN and plans CREATE for missing rows', async () => {
+  it('run defaults to PLAN and has no forceApply option', async () => {
+    snap();
     delete process.env.PHASE21_PRODUCTION_FLAG_BASELINE_APPLY;
     delete process.env.PHASE21_OPERATIONAL_CEREMONY_ENABLED;
     const store = new Map<string, boolean>();
     const result = await runPhase21ProductionFlagBaseline(mockClient(store));
-    expect(result.mode).toBe('DRY_RUN');
+    expect(result.mode).toBe('PLAN');
     expect(result.applied).toBe(false);
+    expect(result.applyAuthorized).toBe(false);
     expect(result.rows.every((r) => r.action === 'CREATE')).toBe(true);
     expect(result.rows).toHaveLength(PHASE21_PRODUCTION_FLAG_BASELINE.length);
-    restoreEnv();
+    expect(result.notes.some((n) => n.includes('forceApply'))).toBe(true);
   });
 
-  it('refuses conflicts without overwrite', async () => {
+  it('plan reports conflicts without overwrite', async () => {
     const store = new Map<string, boolean>([['PAYOUT_DISPATCH_PAUSE', false]]);
-    const result = await runPhase21ProductionFlagBaseline(mockClient(store), {
-      forceApply: true,
-    });
-    expect(result.applied).toBe(false);
-    expect(result.conflicts.some((c) => c.flagKey === 'PAYOUT_DISPATCH_PAUSE')).toBe(true);
+    const rows = await planPhase21ProductionFlagBaseline(mockClient(store));
+    expect(rows.some((r) => r.flagKey === 'PAYOUT_DISPATCH_PAUSE' && r.action === 'CONFLICT')).toBe(
+      true,
+    );
     expect(store.get('PAYOUT_DISPATCH_PAUSE')).toBe(false);
   });
 
-  it('apply creates only missing rows when gated', async () => {
-    const store = new Map<string, boolean>([
-      ['WITHDRAWAL_REQUESTS_PAUSE', true],
-      ['PUBLIC_PAYOUT_LOGS_ENABLED', false],
-    ]);
-    const result = await runPhase21ProductionFlagBaseline(mockClient(store), {
-      forceApply: true,
+  it('apply refuses when env gates missing (no forceApply)', async () => {
+    snap();
+    delete process.env.DEPLOYMENT_ENV;
+    delete process.env.PHASE21_OPERATIONAL_CEREMONY_ENABLED;
+    delete process.env.PHASE21_PRODUCTION_FLAG_BASELINE_APPLY;
+    delete process.env.PHASE21_CEREMONY_REQUIRED_DATABASE_NAME;
+
+    const fakeClient = {
+      async query(text: string) {
+        if (text === 'BEGIN' || text === 'ROLLBACK' || text === 'COMMIT') return { rows: [] };
+        if (text.includes('current_database')) {
+          return { rows: [{ name: 'alex_rewards_phase20_test' }] };
+        }
+        return { rows: [] };
+      },
+    };
+
+    const result = await applyPhase21ProductionFlagBaseline(fakeClient as never, {
+      reason: 'test',
+      changedByAdminId: null,
     });
-    expect(result.mode).toBe('APPLY');
-    expect(result.applied).toBe(true);
-    expect(result.createdCount).toBe(PHASE21_PRODUCTION_FLAG_BASELINE.length - 2);
-    expect(store.get('PAYOUT_DISPATCH_PAUSE')).toBe(true);
-    expect(store.get('AUTO_PAYOUT_PAUSE')).toBe(true);
-    expect(store.get('PUBLIC_PAYOUT_LOGS_ENABLED')).toBe(false);
+    expect(result.applied).toBe(false);
+    expect(result.mode).toBe('REFUSED');
+    expect(result.refuseCode).toBeTruthy();
   });
 
-  it('idempotent exact retry creates zero rows', async () => {
-    const store = new Map<string, boolean>();
-    for (const flag of PHASE21_PRODUCTION_FLAG_BASELINE) {
-      store.set(flag.flagKey, flag.enabled);
-    }
-    const result = await runPhase21ProductionFlagBaseline(mockClient(store), {
-      forceApply: true,
+  it('apply refuses staging even with other gates', async () => {
+    snap();
+    __phase21TestSetApplyEnv({
+      DEPLOYMENT_ENV: 'staging',
+      PHASE21_OPERATIONAL_CEREMONY_ENABLED: 'true',
+      PHASE21_PRODUCTION_FLAG_BASELINE_APPLY: '1',
+      PHASE21_CEREMONY_REQUIRED_DATABASE_NAME: 'alex_rewards_phase20_test',
     });
-    expect(result.applied).toBe(true);
-    expect(result.createdCount).toBe(0);
-    expect(result.rows.every((r) => r.action === 'ALREADY_MATCHES')).toBe(true);
+    const fakeClient = {
+      async query(text: string) {
+        if (text.includes('current_database')) {
+          return { rows: [{ name: 'alex_rewards_phase20_test' }] };
+        }
+        return { rows: [] };
+      },
+    };
+    const result = await applyPhase21ProductionFlagBaseline(fakeClient as never, {
+      reason: 'test',
+      changedByAdminId: null,
+    });
+    expect(result.applied).toBe(false);
+    expect(result.refuseCode).toBe('STAGING_APPLY_FORBIDDEN');
   });
 });
