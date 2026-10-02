@@ -210,3 +210,7 @@ no-passphrase-in-env custody — see `docs/PHASE_21_SIGNER_HOT_WALLET_CEREMONY.m
 
 Phase 21 is **not** PASS and **not** archived.
 
+
+## Phase 21 Step 2
+
+Mainnet bundle encrypt requires explicit phase21MainnetEnabled. Mainnet jetton transfer gas requires Owner-approved policy; SPIKE constants are Testnet-only. Signer hosting: dedicated host recommended; Railway not approved without custody redesign.

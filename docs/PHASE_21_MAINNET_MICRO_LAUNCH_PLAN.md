@@ -85,3 +85,16 @@ Expected Step 1: readiness overall `BLOCKED`; preflight `BLOCKED_FOR_EXTERNAL_RE
 - `docs/PHASE_21_50_WITHDRAWAL_ACCEPTANCE_CAMPAIGN.md`
 
 Do not mark Phase 21 PASS. Do not create archive in Step 1.
+
+
+---
+
+## Step 2 (complete - source wiring)
+
+- Fixed P21-S2-001 bundle encrypt Mainnet flag propagation
+- Fixed P21-S2-002 typed jetton transfer policy (no Mainnet SPIKE default)
+- Worker Phase21 selection wiring (default OFF; Phase10 preserved)
+- External read-only probes + hosting decision doc
+- Readiness/preflight upgraded; still BLOCKED overall at defaults
+
+Operational posture unchanged: PHASE21_MAINNET_ENABLED=NO, REAL_CHAIN=NO, pauses ON.

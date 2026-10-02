@@ -327,3 +327,7 @@ Phase 21 adds an explicit Mainnet layer (`packages/withdrawals/src/phase21-*.ts`
 Worker schema still refuses MAINNET `WITHDRAWAL_NETWORK_CODE` until a later step wires
 live Phase 21 dispatch. No real Mainnet payout in Step 1.
 
+
+## Phase 21 Step 2
+
+Worker supports explicit PHASE21_MAINNET_ENABLED selection (default OFF). Real payout pipeline accepts Phase10 or Phase21 network binding. Mainnet transfer policy: BLOCKED_OWNER_DECISION_MAINNET_TRANSFER_GAS_POLICY until Owner approves.

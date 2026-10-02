@@ -14,6 +14,9 @@ import {
   processWithdrawalConfirmedPublicPayoutOutboxBatch,
   mapDeploymentEnvToFeatureEnvironment,
   buildPhase10PayoutConfig,
+  buildPhase21PayoutConfig,
+  selectWithdrawalPayoutAuthority,
+  type Phase21PayoutConfig,
   type PublicPayoutFeatureEnvironment,
 } from '@alex-rewards/withdrawals';
 
@@ -37,18 +40,44 @@ const MISSION_MAINTENANCE_INTERVAL_MS = 5_000;
 
 const config = loadWorkerConfig();
 const withdrawalConfig = withdrawalEngineConfigFromWorker(config);
-const phase10Config = buildPhase10PayoutConfig({
-  realChainEnabled: config.WITHDRAWAL_REAL_CHAIN_ENABLED,
-  signerBaseUrl: config.SIGNER_BASE_URL,
-  signerServiceToken: config.SIGNER_SERVICE_TOKEN ?? '',
-  jettonMasterIdentity: config.TON_TESTNET_JETTON_MASTER,
-  primaryProviderKind: config.TON_PRIMARY_PROVIDER_KIND,
-  primaryProviderUrl: config.TON_PRIMARY_PROVIDER_URL,
-  primaryProviderApiKey: config.TON_PRIMARY_PROVIDER_API_KEY,
-  secondaryProviderKind: config.TON_SECONDARY_PROVIDER_KIND,
-  secondaryProviderUrl: config.TON_SECONDARY_PROVIDER_URL,
-  secondaryProviderApiKey: config.TON_SECONDARY_PROVIDER_API_KEY,
+const payoutAuthority = selectWithdrawalPayoutAuthority({
+  phase21MainnetEnabled: config.PHASE21_MAINNET_ENABLED,
+  withdrawalNetworkCode: config.WITHDRAWAL_NETWORK_CODE,
 });
+const phase10Config =
+  payoutAuthority === 'PHASE10_TESTNET'
+    ? buildPhase10PayoutConfig({
+        realChainEnabled: config.WITHDRAWAL_REAL_CHAIN_ENABLED,
+        signerBaseUrl: config.SIGNER_BASE_URL,
+        signerServiceToken: config.SIGNER_SERVICE_TOKEN ?? '',
+        jettonMasterIdentity: config.TON_TESTNET_JETTON_MASTER,
+        primaryProviderKind: config.TON_PRIMARY_PROVIDER_KIND,
+        primaryProviderUrl: config.TON_PRIMARY_PROVIDER_URL,
+        primaryProviderApiKey: config.TON_PRIMARY_PROVIDER_API_KEY,
+        secondaryProviderKind: config.TON_SECONDARY_PROVIDER_KIND,
+        secondaryProviderUrl: config.TON_SECONDARY_PROVIDER_URL,
+        secondaryProviderApiKey: config.TON_SECONDARY_PROVIDER_API_KEY,
+      })
+    : undefined;
+const phase21Config: Phase21PayoutConfig | undefined =
+  payoutAuthority === 'PHASE21_MAINNET'
+    ? buildPhase21PayoutConfig({
+        phase21MainnetEnabled: true,
+        realChainEnabled: config.WITHDRAWAL_REAL_CHAIN_ENABLED,
+        fakeChainEnabled: config.WITHDRAWAL_FAKE_CHAIN_ENABLED,
+        signerBaseUrl: config.SIGNER_BASE_URL,
+        signerServiceToken: config.SIGNER_SERVICE_TOKEN ?? '',
+        jettonMasterIdentity: config.TON_MAINNET_USDT_JETTON_MASTER ?? null,
+        primaryProviderKind: config.TON_PRIMARY_PROVIDER_KIND,
+        primaryProviderUrl: config.TON_PRIMARY_PROVIDER_URL,
+        primaryProviderApiKey: config.TON_PRIMARY_PROVIDER_API_KEY,
+        secondaryProviderKind: config.TON_SECONDARY_PROVIDER_KIND,
+        secondaryProviderUrl: config.TON_SECONDARY_PROVIDER_URL,
+        secondaryProviderApiKey: config.TON_SECONDARY_PROVIDER_API_KEY,
+      })
+    : undefined;
+const realChainEnabled =
+  phase21Config?.realChainEnabled ?? phase10Config?.realChainEnabled ?? false;
 Runtime.install({ shutdownSignals: [] });
 const observability = await initializeObservability({
   serviceName: 'worker',
@@ -100,7 +129,9 @@ try {
   const activities = createWithdrawalActivities({
     pool: dbPool,
     config: withdrawalConfig,
-    phase10: phase10Config,
+    payoutAuthority,
+    ...(phase10Config !== undefined ? { phase10: phase10Config } : {}),
+    ...(phase21Config !== undefined ? { phase21: phase21Config } : {}),
   });
   worker = await Worker.create({
     connection: nativeConnection,
@@ -143,14 +174,14 @@ try {
             client,
             taskQueue: config.TEMPORAL_TASK_QUEUE,
             fakeChainEnabled: withdrawalConfig.fakeChainEnabled,
-            realChainEnabled: phase10Config.realChainEnabled,
+            realChainEnabled,
           }),
         processFailedPreRetry: () =>
           processWithdrawalFailedPreRetryOutboxBatch(pool, {
             client,
             taskQueue: config.TEMPORAL_TASK_QUEUE,
             fakeChainEnabled: withdrawalConfig.fakeChainEnabled,
-            realChainEnabled: phase10Config.realChainEnabled,
+            realChainEnabled,
           }),
         processConfirmedPublicPayout: async () => {
           if (publicPayoutEnvironment === undefined) return;
@@ -221,7 +252,8 @@ try {
       listenHost: config.WORKER_LISTEN_HOST,
       taskQueue: config.TEMPORAL_TASK_QUEUE,
       fakeChainEnabled: withdrawalConfig.fakeChainEnabled,
-      realChainEnabled: phase10Config.realChainEnabled,
+      realChainEnabled,
+      payoutAuthority,
       outboxRelayEnabled: config.WORKER_OUTBOX_RELAY_ENABLED,
       referralMaintenanceEnabled,
       missionMaintenanceEnabled,

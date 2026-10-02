@@ -728,8 +728,7 @@ describe('environment validation', () => {
     ).toThrow(/MAINNET/);
   });
 
-  it('worker rejects MAINNET withdrawal network code', () => {
-
+  it('worker rejects MAINNET withdrawal network code when Phase21 gate is off', () => {
     expect(() =>
       loadWorkerConfig({
         ...common,
@@ -739,8 +738,50 @@ describe('environment validation', () => {
         TEMPORAL_ADDRESS: 'localhost:7233',
         TEMPORAL_TASK_QUEUE: 'alex-rewards-foundation',
         WITHDRAWAL_NETWORK_CODE: 'TON_MAINNET',
+        PHASE21_MAINNET_ENABLED: 'false',
       }),
     ).toThrow(/MAINNET/);
+  });
+
+  it('worker accepts Phase21 Mainnet wiring only with explicit complete config', () => {
+    expect(() =>
+      loadWorkerConfig({
+        ...common,
+        DATABASE_URL:
+          'postgresql://alex_rewards:local-alex-rewards-only@localhost:5432/alex_rewards',
+        REDIS_URL: 'redis://localhost:6379/0',
+        TEMPORAL_ADDRESS: 'localhost:7233',
+        TEMPORAL_TASK_QUEUE: 'alex-rewards-foundation',
+        PHASE21_MAINNET_ENABLED: 'true',
+        WITHDRAWAL_NETWORK_CODE: 'TON_MAINNET',
+        WITHDRAWAL_FAKE_CHAIN_ENABLED: 'false',
+        WITHDRAWAL_REAL_CHAIN_ENABLED: 'false',
+      }),
+    ).toThrow(/WITHDRAWAL_REAL_CHAIN_ENABLED|TON_MAINNET_USDT_JETTON_MASTER/);
+
+    const enabled = loadWorkerConfig({
+      ...common,
+      DATABASE_URL:
+        'postgresql://alex_rewards:local-alex-rewards-only@localhost:5432/alex_rewards',
+      REDIS_URL: 'redis://localhost:6379/0',
+      TEMPORAL_ADDRESS: 'localhost:7233',
+      TEMPORAL_TASK_QUEUE: 'alex-rewards-foundation',
+      PHASE21_MAINNET_ENABLED: 'true',
+      WITHDRAWAL_NETWORK_CODE: 'TON_MAINNET',
+      WITHDRAWAL_FAKE_CHAIN_ENABLED: 'false',
+      WITHDRAWAL_REAL_CHAIN_ENABLED: 'true',
+      TON_MAINNET_USDT_JETTON_MASTER: 'EQD0vdSA_NedR9uvbgN9EikRX-suesDxGeFg69XQMavfLqIw',
+      TON_PRIMARY_PROVIDER_KIND: 'toncenter',
+      TON_PRIMARY_PROVIDER_URL: 'https://mainnet.example/primary',
+      TON_SECONDARY_PROVIDER_KIND: 'tonapi',
+      TON_SECONDARY_PROVIDER_URL: 'https://mainnet.example/secondary',
+      SIGNER_SERVICE_TOKEN: 'a-secure-local-token-that-is-long-enough',
+    });
+    expect(enabled.PHASE21_MAINNET_ENABLED).toBe(true);
+    expect(enabled.WITHDRAWAL_NETWORK_CODE).toBe('TON_MAINNET');
+    expect(enabled.TON_MAINNET_USDT_JETTON_MASTER).toBe(
+      'EQD0vdSA_NedR9uvbgN9EikRX-suesDxGeFg69XQMavfLqIw',
+    );
   });
 
   describe('WORKER_LISTEN_HOST', () => {

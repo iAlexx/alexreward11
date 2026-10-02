@@ -1,3 +1,5 @@
+import type { JettonTransferExecutionPolicy } from './jetton-transfer-policy.js';
+
 export interface SignerRuntimeConfig {
   readonly deploymentEnv: 'local' | 'test' | 'staging' | 'production';
   readonly spikeEnabled: boolean;
@@ -16,6 +18,8 @@ export interface SignerRuntimeConfig {
    * When true, require MAINNET / networkGlobalId -239. Never inferred from NODE_ENV.
    */
   readonly phase21MainnetEnabled: boolean;
+  /** Owner-approved Mainnet jetton transfer gas policy (required when phase21MainnetEnabled). */
+  readonly mainnetTransferPolicy?: JettonTransferExecutionPolicy | null;
 }
 
 export function localSigningFixtureConfig(
@@ -33,6 +37,7 @@ export function localSigningFixtureConfig(
     workchain: 0,
     expectedAssetSymbol: 'USDT',
     phase21MainnetEnabled: false,
+    mainnetTransferPolicy: null,
     ...overrides,
   };
 }

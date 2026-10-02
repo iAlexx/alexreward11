@@ -322,3 +322,7 @@ pnpm phase21:preflight
 Ceremony / hosting notes: `docs/PHASE_21_SIGNER_HOT_WALLET_CEREMONY.md`.
 Plan: `docs/PHASE_21_MAINNET_MICRO_LAUNCH_PLAN.md`.
 
+
+## Phase 21 Step 2
+
+No operational Mainnet changes. Verify: pnpm phase21:readiness, pnpm phase21:preflight. Optional live external probes: set PHASE21_EXTERNAL_PROBE_LIVE=1 only during Owner verification ceremony.

@@ -1003,3 +1003,19 @@ Owner authorized Phase 21 **engineering** start on branch `phase21-mainnet-micro
 
 See `docs/PHASE_21_MAINNET_MICRO_LAUNCH_PLAN.md`.
 
+
+
+## Clarification - Phase 21 Step 2 Mainnet source wiring (2026-10-02)
+
+Step 2 fixes source defects and adds worker/signing wiring. Operational Mainnet remains OFF.
+
+- P21-S2-001: encryptKeyBundle accepts phase21MainnetEnabled and passes to identityFromSeed
+- P21-S2-002: typed JettonTransferExecutionPolicy; Mainnet requires Owner-approved policy (no SPIKE default)
+- Worker schema: PHASE21_MAINNET_ENABLED (default false) + TON_MAINNET_USDT_JETTON_MASTER
+- selectWithdrawalPayoutAuthority + real payout network binding for Phase10/Phase21
+- Read-only external probes in phase21-external-probes.ts
+- PHASE21_SIGNER_HOSTING_DECISION=DEDICATED_HOST_RECOMMENDED
+- CONTROLLED_MAINNET_WITHDRAWABLE_BALANCE_SOURCE=BLOCKED_OWNER_DECISION preserved
+- BLOCKED_OWNER_DECISION_MAINNET_TRANSFER_GAS_POLICY until Owner approves Mainnet gas policy
+
+No Railway mutation, no production keys, no funding, no unpause, no live payout.

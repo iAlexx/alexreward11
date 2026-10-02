@@ -462,8 +462,10 @@ const LOCAL_WORKER_WITHDRAWAL_DEFAULTS = {
   WITHDRAWAL_ASSET_SYMBOL: 'USDT',
   WITHDRAWAL_FAKE_CHAIN_ENABLED: 'true',
   WITHDRAWAL_REAL_CHAIN_ENABLED: 'false',
+  PHASE21_MAINNET_ENABLED: 'false',
   SIGNER_BASE_URL: 'http://127.0.0.1:3005',
   TON_TESTNET_JETTON_MASTER: '',
+  TON_MAINNET_USDT_JETTON_MASTER: '',
   TON_PRIMARY_PROVIDER_KIND: '',
   TON_PRIMARY_PROVIDER_URL: '',
   TON_PRIMARY_PROVIDER_API_KEY: '',
@@ -506,8 +508,14 @@ const workerSchema = serviceSchema
     WITHDRAWAL_ASSET_SYMBOL: z.string().min(1).max(32),
     WITHDRAWAL_FAKE_CHAIN_ENABLED: booleanFromString,
     WITHDRAWAL_REAL_CHAIN_ENABLED: booleanFromString,
+    /**
+     * Explicit Phase 21 Mainnet worker wiring gate. Default false.
+     * Never inferred from NODE_ENV / Railway env name / branch name.
+     */
+    PHASE21_MAINNET_ENABLED: booleanFromString,
     SIGNER_BASE_URL: z.string().min(1).max(512),
     TON_TESTNET_JETTON_MASTER: optionalEmptyString,
+    TON_MAINNET_USDT_JETTON_MASTER: optionalEmptyString,
     TON_PRIMARY_PROVIDER_KIND: optionalEmptyString,
     TON_PRIMARY_PROVIDER_URL: optionalEmptyString,
     TON_PRIMARY_PROVIDER_API_KEY: optionalEmptyString,
@@ -521,20 +529,80 @@ const workerSchema = serviceSchema
   })
   .superRefine((value, context) => {
     refineWithdrawalNetworkForDeployment(value, context);
-    // Worker always refuses MAINNET codes (including under local/test).
-    // Phase 21 Step 1: live Mainnet payout dispatch is NOT wired through worker schema yet.
-    // Keep refusing WITHDRAWAL_NETWORK_CODE MAINNET here until a later Owner-authorized step
-    // explicitly enables Phase21 dispatch wiring (PHASE21_MAINNET_ENABLED alone is insufficient).
-    if (
-      !isStagingIntegrationMode(value) &&
-      value.WITHDRAWAL_NETWORK_CODE.toUpperCase().includes('MAINNET')
-    ) {
-      context.addIssue({
-        code: 'custom',
-        path: ['WITHDRAWAL_NETWORK_CODE'],
-        message: 'MAINNET network codes are forbidden',
-      });
+    const networkUpper = value.WITHDRAWAL_NETWORK_CODE.toUpperCase();
+    const phase21 = value.PHASE21_MAINNET_ENABLED === true;
+
+    if (!isStagingIntegrationMode(value)) {
+      if (!phase21 && networkUpper.includes('MAINNET')) {
+        context.addIssue({
+          code: 'custom',
+          path: ['WITHDRAWAL_NETWORK_CODE'],
+          message:
+            'MAINNET network codes are forbidden unless PHASE21_MAINNET_ENABLED=true (explicit Owner gate)',
+        });
+      }
     }
+
+    if (phase21) {
+      if (value.WITHDRAWAL_NETWORK_CODE !== 'TON_MAINNET') {
+        context.addIssue({
+          code: 'custom',
+          path: ['WITHDRAWAL_NETWORK_CODE'],
+          message: 'PHASE21_MAINNET_ENABLED requires WITHDRAWAL_NETWORK_CODE=TON_MAINNET',
+        });
+      }
+      if (!value.WITHDRAWAL_REAL_CHAIN_ENABLED) {
+        context.addIssue({
+          code: 'custom',
+          path: ['WITHDRAWAL_REAL_CHAIN_ENABLED'],
+          message: 'PHASE21_MAINNET_ENABLED requires WITHDRAWAL_REAL_CHAIN_ENABLED=true',
+        });
+      }
+      if (value.WITHDRAWAL_FAKE_CHAIN_ENABLED) {
+        context.addIssue({
+          code: 'custom',
+          path: ['WITHDRAWAL_FAKE_CHAIN_ENABLED'],
+          message: 'PHASE21_MAINNET_ENABLED requires WITHDRAWAL_FAKE_CHAIN_ENABLED=false',
+        });
+      }
+      if (value.TON_MAINNET_USDT_JETTON_MASTER.trim() === '') {
+        context.addIssue({
+          code: 'custom',
+          path: ['TON_MAINNET_USDT_JETTON_MASTER'],
+          message:
+            'TON_MAINNET_USDT_JETTON_MASTER is required when PHASE21_MAINNET_ENABLED=true (Owner-approved; fail closed)',
+        });
+      }
+      if (value.TON_PRIMARY_PROVIDER_KIND.trim() === '') {
+        context.addIssue({
+          code: 'custom',
+          path: ['TON_PRIMARY_PROVIDER_KIND'],
+          message: 'TON_PRIMARY_PROVIDER_KIND is required when PHASE21_MAINNET_ENABLED=true',
+        });
+      }
+      if (value.TON_PRIMARY_PROVIDER_URL.trim() === '') {
+        context.addIssue({
+          code: 'custom',
+          path: ['TON_PRIMARY_PROVIDER_URL'],
+          message: 'TON_PRIMARY_PROVIDER_URL is required when PHASE21_MAINNET_ENABLED=true',
+        });
+      }
+      if (value.TON_SECONDARY_PROVIDER_KIND.trim() === '') {
+        context.addIssue({
+          code: 'custom',
+          path: ['TON_SECONDARY_PROVIDER_KIND'],
+          message: 'TON_SECONDARY_PROVIDER_KIND is required when PHASE21_MAINNET_ENABLED=true',
+        });
+      }
+      if (value.TON_SECONDARY_PROVIDER_URL.trim() === '') {
+        context.addIssue({
+          code: 'custom',
+          path: ['TON_SECONDARY_PROVIDER_URL'],
+          message: 'TON_SECONDARY_PROVIDER_URL is required when PHASE21_MAINNET_ENABLED=true',
+        });
+      }
+    }
+
     if (value.WITHDRAWAL_REAL_CHAIN_ENABLED && value.WITHDRAWAL_FAKE_CHAIN_ENABLED) {
       context.addIssue({
         code: 'custom',
@@ -542,7 +610,11 @@ const workerSchema = serviceSchema
         message: 'real chain and fake chain cannot both be enabled',
       });
     }
-    if (value.WITHDRAWAL_REAL_CHAIN_ENABLED && value.TON_TESTNET_JETTON_MASTER.trim() === '') {
+    if (
+      !phase21 &&
+      value.WITHDRAWAL_REAL_CHAIN_ENABLED &&
+      value.TON_TESTNET_JETTON_MASTER.trim() === ''
+    ) {
       context.addIssue({
         code: 'custom',
         path: ['TON_TESTNET_JETTON_MASTER'],
@@ -567,6 +639,10 @@ const workerSchema = serviceSchema
   })
   .transform((value) => ({
     ...value,
+    TON_MAINNET_USDT_JETTON_MASTER:
+      value.TON_MAINNET_USDT_JETTON_MASTER.trim() === ''
+        ? undefined
+        : value.TON_MAINNET_USDT_JETTON_MASTER.trim(),
     WORKER_LISTEN_HOST:
       value.WORKER_LISTEN_HOST ??
       (isStagingIntegrationMode(value) ? ('::' as const) : ('0.0.0.0' as const)),

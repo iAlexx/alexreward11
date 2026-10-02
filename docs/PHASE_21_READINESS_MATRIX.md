@@ -1,4 +1,4 @@
-# Phase 21 — Readiness Matrix (Step 1)
+# Phase 21 — Readiness Matrix (Step 2)
 
 **PHASE21_GATE:** `BLOCKED_FOR_MAINNET_PROVISIONING`
 **PHASE21_MAINNET_ENABLED:** `NO`
@@ -27,4 +27,9 @@ Statuses: `READY` | `PARTIAL` | `BLOCKED` | `NOT_PROVISIONED` | `OWNER_DECISION_
 | M16 | Worker live Mainnet dispatch | Not wired (schema still refuses MAINNET) | `packages/config` workerSchema comment | BLOCKED |
 | M17 | Railway signer hosting suitability | Potential architectural blocker (loopback unlock / public exposure) | ceremony doc | OWNER_DECISION_REQUIRED |
 
-CLI: `pnpm phase21:readiness` / `pnpm phase21:preflight` — expect BLOCKED in Step 1.
+CLI: `pnpm phase21:readiness` / `pnpm phase21:preflight` — expect BLOCKED in Step 2.
+
+| M18 | Mainnet transfer gas policy | Owner decision required | jetton-transfer-policy.ts | OWNER_DECISION_REQUIRED |
+| M19 | Worker Mainnet wiring (source) | Implemented default OFF | phase21-runtime-selection.ts, worker schema | READY (source) |
+| M20 | Mainnet Jetton external verification | Not run | phase21-external-probes.ts | BLOCKED |
+| M21 | Signer hosting decision | Documented | docs/PHASE_21_SIGNER_HOSTING_DECISION.md | READY (decision doc) |

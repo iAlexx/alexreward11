@@ -44,9 +44,17 @@ describe('phase21 readiness / preflight', () => {
       'MANUAL_APPROVAL_ONLY',
       'REAL_MONEY_BLOCKER_MAPPING',
       'WITHDRAWABLE_BALANCE_SOURCE',
+      'WORKER_MAINNET_WIRING',
+      'MAINNET_TRANSFER_GAS_POLICY',
+      'MAINNET_JETTON_EXTERNAL_VERIFICATION',
+      'SIGNER_HOSTING_DECISION',
     ]) {
       expect(codes.has(required), required).toBe(true);
     }
+
+    expect(
+      report.items.find((i) => i.code === 'MAINNET_TRANSFER_GAS_POLICY')?.message,
+    ).toMatch(/BLOCKED_OWNER_DECISION_MAINNET_TRANSFER_GAS_POLICY/);
   });
 
   it('preflight never emits READY_FOR_LIVE_PAYOUT and is blocked in Step1', () => {

@@ -83,3 +83,40 @@ Observed application services (no signer):
 - Phase 18 retained restore sibling
 
 Step 1 does not create a Railway signer service.
+
+
+---
+
+## Future DB rows (docs only - no INSERT in Step 2)
+
+Owner ceremony will require aligned rows (IDs assigned at ceremony time; not invented here):
+
+### 
+etworks
+
+- code: TON_MAINNET
+- chain: TON
+- environment: MAINNET
+- global_chain_identifier: 	on:mainnet
+- status: ACTIVE
+
+### ssets
+
+- symbol: USDT
+- 
+etwork_id: (FK to TON_MAINNET network row)
+- contract_identity: Owner-approved Mainnet USDT Jetton master (TON_MAINNET_USDT_JETTON_MASTER)
+- decimals: 6
+- is_native: alse
+
+### hot_wallets
+
+- ddress / riendly_address: derived Wallet V5 R1 Mainnet (
+etworkGlobalId=-239)
+- ersion: 5R1
+- signer_type: FALLBACK_ENCRYPTED
+- signer_reference: SHA-256 public key fingerprint hex (matches encrypted bundle)
+- payout_jetton_wallet_address: Owner-verified Mainnet USDT jetton wallet for hot wallet
+- status: ACTIVE
+
+See docs/PHASE_21_SIGNER_HOSTING_DECISION.md for hosting choice.

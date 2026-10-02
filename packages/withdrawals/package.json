@@ -32,7 +32,7 @@
     "phase10:closure-evaluate": "node dist/cli/phase10-ops.js closure-evaluate",
     "phase21:readiness": "node dist/cli/phase21-ops.js readiness",
     "phase21:preflight": "node dist/cli/phase21-ops.js preflight",
-    "test:phase21": "vitest run test/phase21-config-gate.test.ts test/phase21-expansion-gate.test.ts test/phase21-readiness.test.ts"
+    "test:phase21": "vitest run test/phase21-config-gate.test.ts test/phase21-expansion-gate.test.ts test/phase21-readiness.test.ts test/phase21-runtime-selection.test.ts test/phase21-external-probes.test.ts"
   },
   "dependencies": {
     "@alex-rewards/auth": "workspace:*",

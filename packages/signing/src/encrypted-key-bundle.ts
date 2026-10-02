@@ -239,11 +239,17 @@ export function encryptKeyBundle(input: {
   readonly networkGlobalId?: number;
   readonly workchain?: number;
   readonly kdfParams?: KeyBundleKdfParams;
+  readonly phase21MainnetEnabled?: boolean;
 }): EncryptedKeyBundleV1 {
   assertPassphraseStrength(input.passphrase);
   const networkGlobalId = input.networkGlobalId ?? -3;
   const workchain = input.workchain ?? 0;
-  const identity = identityFromSeed(input.seed, { networkGlobalId, workchain });
+  const phase21 = input.phase21MainnetEnabled === true;
+  const identity = identityFromSeed(input.seed, {
+    networkGlobalId,
+    workchain,
+    phase21MainnetEnabled: phase21,
+  });
   const kdfParams = assertArgon2idParamsV1(input.kdfParams ?? { ...DEFAULT_ARGON2ID_PARAMS });
   const salt = randomBytes(16);
   const nonce = randomBytes(24);

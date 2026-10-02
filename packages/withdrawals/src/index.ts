@@ -679,6 +679,30 @@ export type {
   Phase21WithdrawableBalanceSourceStatus,
 } from './phase21-readiness.js';
 
+export {
+  selectWithdrawalPayoutAuthority,
+  assertWithdrawalAuthorityMatchesNetwork,
+} from './phase21-runtime-selection.js';
+export type { WithdrawalPayoutAuthority } from './phase21-runtime-selection.js';
+
+export {
+  validateMainnetJettonMasterAddress,
+  validateProviderIndependence,
+  runOptionalMainnetProviderReachabilityProbe,
+} from './phase21-external-probes.js';
+export type {
+  Phase21ExternalProbeResult,
+  Phase21JettonMasterValidation,
+  Phase21ProviderIndependenceValidation,
+} from './phase21-external-probes.js';
+
+export {
+  realPayoutNetworkFromPhase10,
+  realPayoutNetworkFromPhase21,
+  resolveRealPayoutNetworkBinding,
+} from './real-payout-network.js';
+export type { RealPayoutNetworkBinding } from './real-payout-network.js';
+
 export { runPhase21Preflight } from './phase21-preflight.js';
 export type {
   Phase21ForbiddenPreflightVerdict,

@@ -8,12 +8,18 @@ export {
   buildCanonicalSigningMessageAsync,
   buildJettonTransferBodyForIntent,
   JETTON_TRANSFER_OP,
-  SPIKE_JETTON_ATTACHED_TON,
-  SPIKE_JETTON_FORWARD_TON,
-  SPIKE_SEND_MODE,
   type CanonicalMessageBuild,
   type CanonicalPayoutIntent,
 } from './canonical-message.js';
+export {
+  PHASE10_TESTNET_SPIKE_TRANSFER_POLICY,
+  SPIKE_JETTON_ATTACHED_TON,
+  SPIKE_JETTON_FORWARD_TON,
+  SPIKE_SEND_MODE,
+  assertJettonTransferPolicyValid,
+  resolveJettonTransferPolicy,
+  type JettonTransferExecutionPolicy,
+} from './jetton-transfer-policy.js';
 export { localSigningFixtureConfig, type SignerRuntimeConfig } from './config.js';
 export { SignerError, type SignerErrorCode } from './errors.js';
 export {

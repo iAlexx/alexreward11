@@ -13,7 +13,8 @@ import {
 export type Phase21PreflightVerdict =
   | 'BLOCKED_FOR_EXTERNAL_RESOURCES'
   | 'BLOCKED_FOR_OWNER_DECISION'
-  | 'READY_FOR_OWNER_MAINNET_PROVISIONING';
+  | 'READY_FOR_OWNER_MAINNET_PROVISIONING'
+  | 'READY_FOR_OWNER_PROVISIONING_CEREMONY';
 
 /** Explicitly excluded from Step 1 / this aggregator. */
 export type Phase21ForbiddenPreflightVerdict = 'READY_FOR_LIVE_PAYOUT';
@@ -29,6 +30,7 @@ export interface Phase21PreflightReport {
 
 const EXTERNAL_CODES = new Set([
   'MAINNET_JETTON_MASTER',
+  'MAINNET_JETTON_EXTERNAL_VERIFICATION',
   'PRIMARY_PROVIDER',
   'SECONDARY_PROVIDER',
   'SIGNER_SERVICE',
@@ -41,6 +43,7 @@ const EXTERNAL_CODES = new Set([
 
 const OWNER_DECISION_CODES = new Set([
   'MAINNET_EXPLICIT_GATE',
+  'MAINNET_TRANSFER_GAS_POLICY',
   'REAL_CHAIN_GATE',
   'WITHDRAWABLE_BALANCE_SOURCE',
   'WITHDRAWAL_REQUEST_PAUSE',
@@ -49,6 +52,12 @@ const OWNER_DECISION_CODES = new Set([
   'TRUST_POLICY',
   'ELIGIBILITY_POLICY',
   'PHASE20_ARCHIVED',
+]);
+
+const SOURCE_WIRING_CODES = new Set([
+  'MAINNET_CODE_SUPPORT',
+  'WORKER_MAINNET_WIRING',
+  'SIGNER_HOSTING_DECISION',
 ]);
 
 /**
@@ -76,16 +85,22 @@ export function runPhase21Preflight(
   const ownerBlocked = readiness.items.some(
     (i) => i.status === 'BLOCKED' && OWNER_DECISION_CODES.has(i.code),
   );
+  const sourceWiringBlocked = readiness.items.some(
+    (i) => i.status === 'BLOCKED' && SOURCE_WIRING_CODES.has(i.code),
+  );
 
   let verdict: Phase21PreflightVerdict;
-  if (externalBlocked) {
+  if (sourceWiringBlocked) {
+    verdict = 'BLOCKED_FOR_OWNER_DECISION';
+  } else if (externalBlocked) {
     verdict = 'BLOCKED_FOR_EXTERNAL_RESOURCES';
-  } else if (ownerBlocked || readiness.overall === 'BLOCKED') {
+  } else if (ownerBlocked) {
+    verdict = 'BLOCKED_FOR_OWNER_DECISION';
+  } else if (readiness.overall === 'BLOCKED') {
     verdict = 'BLOCKED_FOR_OWNER_DECISION';
   } else {
-    // Source foundation present; Owner may begin Mainnet provisioning ceremony.
-    // Still not live-payout ready.
-    verdict = 'READY_FOR_OWNER_MAINNET_PROVISIONING';
+    // Source wiring + hosting decision complete; remaining blockers are external Owner resources.
+    verdict = 'READY_FOR_OWNER_PROVISIONING_CEREMONY';
   }
 
   return {
@@ -95,7 +110,7 @@ export function runPhase21Preflight(
     warnings,
     readyForLivePayout: false,
     notes: [
-      'Step 1 preflight never emits READY_FOR_LIVE_PAYOUT',
+      'Step 2 preflight never emits READY_FOR_LIVE_PAYOUT',
       'No operational mutation, deploy, funding, or real key generation is authorized by this report',
     ],
   };

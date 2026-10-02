@@ -63,6 +63,11 @@ export interface Phase21ReadinessObservations {
   readonly railwaySignerExists?: boolean;
   readonly realMoneyBlockerMappingPresent?: boolean;
   readonly requireUnlock?: boolean;
+  readonly workerMainnetWiringComplete?: boolean;
+  readonly mainnetTransferGasPolicyApproved?: boolean;
+  readonly mainnetJettonExternalVerified?: boolean | null;
+  readonly signerHostingDecisionDocumented?: boolean;
+  readonly signerHostingDecision?: string | null;
 }
 
 export interface Phase21ReadinessReport {
@@ -141,6 +146,63 @@ export function buildPhase21ReadinessReport(
       supportedNetworkGlobalId: PHASE21_NETWORK_GLOBAL_ID,
     },
   });
+
+  items.push({
+    code: 'WORKER_MAINNET_WIRING',
+    status: observations.workerMainnetWiringComplete === false ? 'BLOCKED' : 'PASS',
+    message:
+      observations.workerMainnetWiringComplete === false
+        ? 'Worker Phase 21 Mainnet wiring incomplete in source'
+        : 'Worker source supports explicit Phase 21 Mainnet selection (default OFF)',
+    details: { workerMainnetWiringComplete: observations.workerMainnetWiringComplete !== false },
+  });
+
+  items.push({
+    code: 'MAINNET_TRANSFER_GAS_POLICY',
+    status: observations.mainnetTransferGasPolicyApproved === true ? 'PASS' : 'BLOCKED',
+    message:
+      observations.mainnetTransferGasPolicyApproved === true
+        ? 'Owner-approved Mainnet jetton transfer gas policy configured'
+        : 'BLOCKED_OWNER_DECISION_MAINNET_TRANSFER_GAS_POLICY',
+    details: {
+      mainnetTransferGasPolicyApproved: observations.mainnetTransferGasPolicyApproved === true,
+    },
+  });
+
+  if (observations.mainnetJettonExternalVerified === true) {
+    items.push({
+      code: 'MAINNET_JETTON_EXTERNAL_VERIFICATION',
+      status: 'PASS',
+      message: 'Mainnet Jetton master external verification observed',
+    });
+  } else if (observations.mainnetJettonExternalVerified === false) {
+    items.push({
+      code: 'MAINNET_JETTON_EXTERNAL_VERIFICATION',
+      status: 'BLOCKED',
+      message: 'Mainnet Jetton master failed external verification',
+    });
+  } else {
+    items.push({
+      code: 'MAINNET_JETTON_EXTERNAL_VERIFICATION',
+      status: 'BLOCKED',
+      message: 'Mainnet Jetton master not externally verified (optional live probe not run)',
+    });
+  }
+
+  if (observations.signerHostingDecisionDocumented === true) {
+    items.push({
+      code: 'SIGNER_HOSTING_DECISION',
+      status: 'PASS',
+      message: `Signer hosting decision documented (${observations.signerHostingDecision ?? 'see docs/PHASE_21_SIGNER_HOSTING_DECISION.md'})`,
+      details: { signerHostingDecision: observations.signerHostingDecision ?? null },
+    });
+  } else {
+    items.push({
+      code: 'SIGNER_HOSTING_DECISION',
+      status: 'BLOCKED',
+      message: 'Signer hosting decision not documented',
+    });
+  }
 
   items.push({
     code: 'MAINNET_EXPLICIT_GATE',
@@ -583,5 +645,10 @@ export function defaultPhase21Step1Observations(): Phase21ReadinessObservations 
     railwaySignerExists: false,
     realMoneyBlockerMappingPresent: true,
     requireUnlock: true,
+    workerMainnetWiringComplete: true,
+    mainnetTransferGasPolicyApproved: false,
+    mainnetJettonExternalVerified: null,
+    signerHostingDecisionDocumented: true,
+    signerHostingDecision: 'DEDICATED_HOST_RECOMMENDED',
   };
 }

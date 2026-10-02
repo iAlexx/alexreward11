@@ -8,10 +8,9 @@ import type { Pool } from 'pg';
 import {
   buildCanonicalSigningMessageAsync,
   buildJettonTransferBodyForIntent,
-  SPIKE_JETTON_ATTACHED_TON,
-  SPIKE_SEND_MODE,
   type CanonicalPayoutIntent,
 } from './canonical-message.js';
+import { resolveJettonTransferPolicy } from './jetton-transfer-policy.js';
 import type { SignerRuntimeConfig } from './config.js';
 import { SignerError } from './errors.js';
 import {
@@ -121,8 +120,13 @@ export async function signWithdrawalAttempt(
   }
 
   const intent = intentFromRow(row, publicKey, input.config);
+  const transferPolicy = resolveJettonTransferPolicy({
+    phase21MainnetEnabled: input.config.phase21MainnetEnabled === true,
+    transferPolicy: input.config.mainnetTransferPolicy ?? null,
+  });
   const canonical = await buildCanonicalSigningMessageAsync(intent, {
     phase21MainnetEnabled: input.config.phase21MainnetEnabled === true,
+    transferPolicy,
   });
 
   if (row.canonical_message_hash !== canonical.canonicalMessageHashHex) {
@@ -149,13 +153,13 @@ export async function signWithdrawalAttempt(
   const signedWalletRequestBody: Cell = await wallet.createTransfer({
     seqno: intent.seqno,
     timeout: intent.validUntil,
-    sendMode: SPIKE_SEND_MODE,
+    sendMode: transferPolicy.sendMode,
     messages: [
       internal({
         to: Address.parse(intent.payoutJettonWalletAddress),
-        value: SPIKE_JETTON_ATTACHED_TON,
+        value: transferPolicy.attachedTonAtomic,
         bounce: true,
-        body: buildJettonTransferBodyForIntent(intent),
+        body: buildJettonTransferBodyForIntent(intent, transferPolicy),
       }),
     ],
     authType: 'external',
@@ -225,8 +229,13 @@ export async function reconstructCanonicalHash(
   const row = await loadSigningView(input.pool, input.withdrawalAttemptId);
   assertSigningPolicy(row, input.config);
   const intent = intentFromRow(row, input.publicKey, input.config);
+  const transferPolicy = resolveJettonTransferPolicy({
+    phase21MainnetEnabled: input.config.phase21MainnetEnabled === true,
+    transferPolicy: input.config.mainnetTransferPolicy ?? null,
+  });
   const canonical = await buildCanonicalSigningMessageAsync(intent, {
     phase21MainnetEnabled: input.config.phase21MainnetEnabled === true,
+    transferPolicy,
   });
   return canonical.canonicalMessageHashHex;
 }

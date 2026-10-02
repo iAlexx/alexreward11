@@ -36,6 +36,8 @@ import {
   listPhase10MissingResources,
   type Phase10PayoutConfig,
 } from './phase10-config.js';
+import { assertPhase21Ready, listPhase21MissingResources, type Phase21PayoutConfig } from './phase21-config.js';
+import { resolveRealPayoutNetworkBinding } from './real-payout-network.js';
 import { compactTep74EvidenceSummary, persistIntendedPayoutProvenEvidence } from './reconcile.js';
 import { settleWithdrawalReservation } from './settlement.js';
 import {
@@ -109,7 +111,10 @@ export interface RealPayoutSignerPort {
 
 export interface RunRealTestnetPayoutPipelineInput {
   readonly withdrawalId: string;
-  readonly phase10: Phase10PayoutConfig;
+  /** Phase 10 Testnet payout config (default path). */
+  readonly phase10?: Phase10PayoutConfig;
+  /** Phase 21 Mainnet payout config (when worker authority is PHASE21_MAINNET). */
+  readonly phase21?: Phase21PayoutConfig;
   readonly engine: WithdrawalEngineConfig;
   /**
    * Build immutable canonical message hash (hex). Wired from `@alex-rewards/signing`
@@ -344,6 +349,7 @@ async function confirmAndSettle(
   attempt: PersistedPipelineAttempt,
   stagesCompleted: string[],
 ): Promise<RealTestnetPayoutPipelineResult> {
+  const payout = resolveRealPayoutNetworkBinding(input);
   const normalizedExternalMessageHash = attempt.normalizedExternalMessageHash;
   if (normalizedExternalMessageHash === null || normalizedExternalMessageHash.trim() === '') {
     return {
@@ -361,7 +367,7 @@ async function confirmAndSettle(
     recipient: context.recipient,
     amountAtomic: context.netAmountAtomic,
     queryId: attempt.queryId,
-    networkGlobalId: input.phase10.networkGlobalId,
+    networkGlobalId: payout.networkGlobalId,
     senderJettonWallet: context.payoutJettonWallet,
   };
   const observeInput = {
@@ -460,9 +466,9 @@ async function confirmAndSettle(
     );
     const state = current.rows[0]?.state;
     const primaryKind =
-      primaryEvidenceBound.providerKind ?? input.phase10.primaryProvider.kind ?? undefined;
+      primaryEvidenceBound.providerKind ?? payout.primaryProvider.kind ?? undefined;
     const secondaryKind =
-      secondaryEvidenceBound.providerKind ?? input.phase10.secondaryProvider.kind ?? undefined;
+      secondaryEvidenceBound.providerKind ?? payout.secondaryProvider.kind ?? undefined;
     const evidenceSummary = {
       ...compactTep74EvidenceSummary({
         withdrawalId: context.withdrawalId,
@@ -476,7 +482,7 @@ async function confirmAndSettle(
           success: primaryEvidenceBound.success,
           bounced: primaryEvidenceBound.bounced,
           ...(primaryKind !== undefined ? { providerKind: primaryKind } : {}),
-          networkGlobalId: primaryEvidenceBound.networkGlobalId ?? input.phase10.networkGlobalId,
+          networkGlobalId: primaryEvidenceBound.networkGlobalId ?? payout.networkGlobalId,
           ...(primaryEvidenceBound.senderJettonWallet !== undefined
             ? { senderJettonWallet: primaryEvidenceBound.senderJettonWallet }
             : {}),
@@ -596,6 +602,7 @@ async function loadPersistedContext(
   db: Pool,
   input: RunRealTestnetPayoutPipelineInput,
 ): Promise<PersistedPipelineContext> {
+  const payout = resolveRealPayoutNetworkBinding(input);
   const result = await db.query<{
     id: string;
     state: WithdrawalState;
@@ -624,7 +631,7 @@ async function loadPersistedContext(
   if (row === undefined) {
     throw new WithdrawalDomainError('VALIDATION', 'Withdrawal not found');
   }
-  const jettonMaster = input.phase10.jettonMasterIdentity ?? row.contract_identity;
+  const jettonMaster = payout.jettonMasterIdentity ?? row.contract_identity;
   if (
     row.hot_wallet_id === null ||
     row.recipient === null ||
@@ -1047,6 +1054,7 @@ export async function runRealTestnetPayoutPipeline(
   db: Pool,
   input: RunRealTestnetPayoutPipelineInput,
 ): Promise<RealTestnetPayoutPipelineResult> {
+  const payout = resolveRealPayoutNetworkBinding(input);
   const stagesCompleted: string[] = [];
 
   const paused = await withWithdrawalTransaction(db, async (client) =>
@@ -1060,21 +1068,46 @@ export async function runRealTestnetPayoutPipeline(
   const testPath = input.allowTestExecutionPath === true || input.skipAssertReady === true;
 
   if (!input.skipAssertReady) {
-    if (input.phase10.realChainEnabled && input.phase10.jettonMasterIdentity === null) {
-      const missing = listPhase10MissingResources(input.phase10);
+    if (payout.realChainEnabled && payout.jettonMasterIdentity === null) {
+      const missing =
+        payout.authority === 'PHASE21_MAINNET' && input.phase21 !== undefined
+          ? listPhase21MissingResources(input.phase21)
+          : input.phase10 !== undefined
+            ? listPhase10MissingResources(input.phase10)
+            : ['phase10 or phase21 payout config required'];
+      const code =
+        payout.authority === 'PHASE21_MAINNET'
+          ? 'PHASE21_EXTERNAL_RESOURCE_REQUIRED'
+          : 'PHASE10_EXTERNAL_RESOURCE_REQUIRED';
       throw new WithdrawalDomainError(
         'EXTERNAL_RESOURCE_REQUIRED',
-        `PHASE10_EXTERNAL_RESOURCE_REQUIRED: ${missing.join(', ')}`,
+        `${code}: ${missing.join(', ')}`,
         {
           details: {
-            code: 'PHASE10_EXTERNAL_RESOURCE_REQUIRED',
+            code,
             missingResources: missing,
           },
         },
       );
     }
     try {
-      assertPhase10Ready(input.phase10);
+      if (payout.authority === 'PHASE21_MAINNET') {
+        if (input.phase21 === undefined) {
+          throw new WithdrawalDomainError(
+            'CONFIG',
+            'Phase 21 Mainnet pipeline requires phase21 payout config',
+          );
+        }
+        assertPhase21Ready(input.phase21);
+      } else {
+        if (input.phase10 === undefined) {
+          throw new WithdrawalDomainError(
+            'CONFIG',
+            'Phase 10 Testnet pipeline requires phase10 payout config',
+          );
+        }
+        assertPhase10Ready(input.phase10);
+      }
     } catch (error) {
       if (error instanceof WithdrawalDomainError && error.code === 'EXTERNAL_RESOURCE_REQUIRED') {
         const missing = (error.details?.missingResources as string[] | undefined) ?? [
@@ -1096,9 +1129,9 @@ export async function runRealTestnetPayoutPipeline(
   const primary =
     input.chainProvider ??
     createProviderFromConfig(
-      input.phase10.primaryProvider.kind,
-      input.phase10.primaryProvider.url,
-      input.phase10.primaryProvider.apiKey,
+      payout.primaryProvider.kind,
+      payout.primaryProvider.url,
+      payout.primaryProvider.apiKey,
     );
   if (primary === null) {
     return {
@@ -1114,12 +1147,12 @@ export async function runRealTestnetPayoutPipeline(
     input.secondaryChainProvider !== undefined
       ? input.secondaryChainProvider
       : createProviderFromConfig(
-          input.phase10.secondaryProvider.kind,
-          input.phase10.secondaryProvider.url,
-          input.phase10.secondaryProvider.apiKey,
+          payout.secondaryProvider.kind,
+          payout.secondaryProvider.url,
+          payout.secondaryProvider.apiKey,
         );
 
-  if (!(primary instanceof FakeTonChainProvider) && !testPath && !input.phase10.realChainEnabled) {
+  if (!(primary instanceof FakeTonChainProvider) && !testPath && !payout.realChainEnabled) {
     return {
       state: 'BLOCKED',
       attemptId: null,
@@ -1132,8 +1165,8 @@ export async function runRealTestnetPayoutPipeline(
   const signer: RealPayoutSignerPort =
     input.signer ??
     new SignerHttpClient({
-      baseUrl: input.phase10.signerBaseUrl,
-      serviceToken: input.phase10.signerServiceToken,
+      baseUrl: payout.signerBaseUrl,
+      serviceToken: payout.signerServiceToken,
     });
 
   const persistedState = await db.query<{ state: WithdrawalState }>(
@@ -1288,7 +1321,7 @@ export async function runRealTestnetPayoutPipeline(
     }
     const admission = await admitWalletSeqnoWithRateLimitRetry(
       {
-        networkGlobalId: input.phase10.networkGlobalId,
+        networkGlobalId: payout.networkGlobalId,
         hotWalletAddress: context.hotWalletAddress,
         publicKeyHex: identity.publicKeyHex,
         signerKeyReference: identity.publicKeyFingerprint,
@@ -1343,7 +1376,7 @@ export async function runRealTestnetPayoutPipeline(
     const validUntilUnix = Math.floor(validUntil.getTime() / 1000);
     const intent: RealPayoutCanonicalIntent = {
       publicKey,
-      networkGlobalId: input.phase10.networkGlobalId,
+      networkGlobalId: payout.networkGlobalId,
       workchain: 0,
       subwalletNumber: 0,
       seqno: admission.seqno,
@@ -1532,7 +1565,7 @@ export async function runRealTestnetPayoutPipeline(
     }
 
     const jettonMaster =
-      input.phase10.jettonMasterIdentity ??
+      payout.jettonMasterIdentity ??
       (
         await client.query<{ contract_identity: string | null }>(
           `SELECT contract_identity FROM assets WHERE id = $1::uuid`,
@@ -1583,7 +1616,7 @@ export async function runRealTestnetPayoutPipeline(
   // --- Account-state / seqno admission BEFORE SIGNING and lease ---
   const initialAdmission = await admitWalletSeqnoWithRateLimitRetry(
     {
-      networkGlobalId: input.phase10.networkGlobalId,
+      networkGlobalId: payout.networkGlobalId,
       hotWalletAddress: loaded.hotWalletAddress,
       publicKeyHex: identity.publicKeyHex,
       signerKeyReference: identity.publicKeyFingerprint,
@@ -1665,7 +1698,7 @@ export async function runRealTestnetPayoutPipeline(
   // remain mandatory on every attempt; lease fence is re-checked before each retry.
   const readmission = await admitWalletSeqnoWithRateLimitRetry(
     {
-      networkGlobalId: input.phase10.networkGlobalId,
+      networkGlobalId: payout.networkGlobalId,
       hotWalletAddress: context.hotWalletAddress,
       publicKeyHex: identity.publicKeyHex,
       signerKeyReference: identity.publicKeyFingerprint,
@@ -1723,7 +1756,7 @@ export async function runRealTestnetPayoutPipeline(
 
   const intent: RealPayoutCanonicalIntent = {
     publicKey,
-    networkGlobalId: input.phase10.networkGlobalId,
+    networkGlobalId: payout.networkGlobalId,
     workchain: 0,
     subwalletNumber: 0,
     seqno,

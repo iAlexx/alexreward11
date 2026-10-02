@@ -3,6 +3,7 @@ import { keyPairFromSeed } from '@ton/crypto';
 
 import {
   SignerError,
+  SPIKE_SEND_MODE,
   assertSigningPolicy,
   buildCanonicalSigningMessageAsync,
   deriveWalletV5R1,
@@ -109,6 +110,14 @@ describe('Phase 21 Mainnet signing policy allow-path', () => {
       ),
     ).not.toThrow();
 
+    const ownerApprovedPolicy = {
+      attachedTonAtomic: 60_000_000n,
+      forwardTonAtomic: 1n,
+      sendMode: SPIKE_SEND_MODE,
+      networkScope: 'MAINNET_OWNER_APPROVED' as const,
+      sourceReference: 'OWNER_APPROVED_FIXTURE_STEP2_TEST_ONLY',
+    };
+
     await expect(
       buildCanonicalSigningMessageAsync(
         {
@@ -123,11 +132,57 @@ describe('Phase 21 Mainnet signing policy allow-path', () => {
           recipientAddress: derived.addressRaw,
           hotWalletAddress: derived.addressRaw,
           payoutJettonWalletAddress: derived.addressRaw,
-          jettonMasterIdentity: 'EQ_owner_approved_mainnet_usdt_jetton_master',
+          jettonMasterIdentity: 'EQD0vdSA_NedR9uvbgN9EikRX-suesDxGeFg69XQMavfLqIw',
+        },
+        { phase21MainnetEnabled: true, transferPolicy: ownerApprovedPolicy },
+      ),
+    ).resolves.toBeTruthy();
+
+    await expect(
+      buildCanonicalSigningMessageAsync(
+        {
+          publicKey: Buffer.from(kp.publicKey),
+          networkGlobalId: -239,
+          workchain: 0,
+          subwalletNumber: 0,
+          seqno: 1,
+          validUntil: Math.floor(Date.now() / 1000) + 120,
+          queryId: 1n,
+          netAmountAtomic: 100n,
+          recipientAddress: derived.addressRaw,
+          hotWalletAddress: derived.addressRaw,
+          payoutJettonWalletAddress: derived.addressRaw,
+          jettonMasterIdentity: 'EQD0vdSA_NedR9uvbgN9EikRX-suesDxGeFg69XQMavfLqIw',
         },
         { phase21MainnetEnabled: true },
       ),
-    ).resolves.toBeTruthy();
+    ).rejects.toThrow(/BLOCKED_OWNER_DECISION_MAINNET_TRANSFER_GAS_POLICY|Owner-approved/);
+  });
+
+  it('Testnet attempt cannot Mainnet-sign (network global id mismatch)', async () => {
+    const config = localSigningFixtureConfig();
+    const kp = keyPairFromSeed(Buffer.alloc(32, 7));
+    const derived = deriveWalletV5R1({
+      publicKey: Buffer.from(kp.publicKey),
+      networkGlobalId: -3,
+    });
+    await expect(
+      buildCanonicalSigningMessageAsync({
+        publicKey: Buffer.from(kp.publicKey),
+        networkGlobalId: -239,
+        workchain: 0,
+        subwalletNumber: 0,
+        seqno: 1,
+        validUntil: Math.floor(Date.now() / 1000) + 120,
+        queryId: 1n,
+        netAmountAtomic: 100n,
+        recipientAddress: derived.addressRaw,
+        hotWalletAddress: derived.addressRaw,
+        payoutJettonWalletAddress: derived.addressRaw,
+        jettonMasterIdentity: 'MASTER',
+      }),
+    ).rejects.toThrow(/MAINNET/);
+    expect(config.networkGlobalId).toBe(-3);
   });
 
   it('missing phase21MainnetEnabled flag still rejects Mainnet canonical message', async () => {
