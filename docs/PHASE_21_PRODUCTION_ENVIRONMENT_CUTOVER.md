@@ -37,3 +37,8 @@ Tooling: phase21-production-flag-baseline (DRY_RUN default; apply gated).
 - No Railway deploy
 - No DEPLOYMENT_ENV flip in Step 3A
 - No production-runtime branch move
+
+## Step 3B tooling readiness
+
+Ceremony APPLY is atomic and forceApply-free. See docs/PHASE_21_STEP3B_CEREMONY_TOOLING_HARDENING.md.
+Do not execute APPLY against operational Postgres in Step 3B.

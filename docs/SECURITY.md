@@ -224,3 +224,11 @@ Docs + readiness/preflight only. Signer hosting locked to `DEDICATED_CONTROLLED_
 - WITHDRAWAL_REQUESTS_PAUSE missing row fails closed in STAGING/PRODUCTION (mirrors payout pause).
 - PRODUCTION safety flag baseline tooling exists (DRY_RUN default; apply ceremony-gated).
 - Controlled Available provision production path requires PHASE21_OPERATIONAL_CEREMONY_ENABLED.
+
+## Phase 21 Step 3B security notes
+
+- Ceremony mutation paths refuse orceApply arguments; tests use env gates only.
+- Missing STAGING/PRODUCTION WITHDRAWAL_REQUESTS_PAUSE remains fail-closed (Step 3A).
+- APPLY against staging is forbidden; fake local env against production DB is refused by DB identity gate.
+- External verification evidence redacts API keys (provider kind + hostname only).
+- Attached GRAM policy is not auto-promoted to OWNER_APPROVED by fee estimates.

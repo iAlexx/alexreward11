@@ -49,3 +49,8 @@ See `docs/PHASE_21_PRODUCTION_ENVIRONMENT_CUTOVER.md`. High-level order:
 - `docs/PHASE_21_SIGNER_HOSTING_DECISION.md` -> `DEDICATED_CONTROLLED_HOST`
 - `docs/PHASE_21_MAINNET_RUNTIME_WIRING.md`
 - `docs/PHASE_21_MAINNET_REGISTRY_BOOTSTRAP.md`
+
+## Step 3B tooling readiness
+
+Ceremony APPLY is atomic and forceApply-free. See docs/PHASE_21_STEP3B_CEREMONY_TOOLING_HARDENING.md.
+Do not execute APPLY against operational Postgres in Step 3B.

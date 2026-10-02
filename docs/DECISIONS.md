@@ -1048,3 +1048,12 @@ Accepted source corrections for controlled provision env modes, honest fee estim
 external verifier hardening, withdrawal-request pause fail-closed, PRODUCTION flag baseline
 tooling, and Mainnet registry bootstrap tooling. No operational ceremony executed.
 See docs/PHASE_21_STEP3A_INDEPENDENT_REVIEW_CORRECTIONS.md.
+
+## Phase 21 Step 3B (ceremony tooling hardening)
+
+- Removed programmatic orceApply from PRODUCTION flag baseline and Mainnet registry bootstrap.
+- APPLY requires DEPLOYMENT_ENV=production + PHASE21_OPERATIONAL_CEREMONY_ENABLED + tool APPLY=1 + PHASE21_CEREMONY_REQUIRED_DATABASE_NAME match + CLI --apply.
+- Flag baseline and registry APPLY are atomic (txn + advisory lock); registry zero-to-complete is one pass.
+- Concrete Toncenter/TonAPI Mainnet read-only adapters and Toncenter fee provider added (no sendBoc).
+- Attached GRAM remains ESTIMATED / not Owner-approved.
+- No operational ceremony execution; production-runtime unchanged.

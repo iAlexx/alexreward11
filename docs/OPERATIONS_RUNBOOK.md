@@ -345,3 +345,11 @@ pnpm phase21:preflight
 
 Do not run operational ceremony, PRODUCTION flag baseline apply, or Mainnet registry apply from Step 3A engineering.
 Preflight READY_FOR_OWNER_PROVISIONING_CEREMONY requires Step 3A source corrections PASS; live payout remains blocked.
+
+## Phase 21 Step 3B operator ceremony commands (source-ready; do not execute yet)
+
+Read-only: pnpm phase21:readiness, pnpm phase21:preflight, pnpm phase21:production-flags:plan, pnpm phase21:mainnet-registry:plan, pnpm phase21:verify-mainnet-external, pnpm phase21:estimate-mainnet-fee, pnpm phase21:hot-wallet:plan.
+
+Mutation (later Owner ceremony only; gated): pnpm phase21:production-flags:apply -- --apply, pnpm phase21:mainnet-registry:apply -- --apply, pnpm phase21:hot-wallet:register -- --apply.
+
+Order: flag baseline -> verify flags -> registry bootstrap -> verify registry -> offline key -> signer host LOCKED -> external verify -> hot wallet register -> STOP (no funding/cutover/enable).
