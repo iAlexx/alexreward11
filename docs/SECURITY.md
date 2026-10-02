@@ -153,7 +153,7 @@ Verified-from-code statements for Phase 19 (not aspirational):
 
 ## Phase 20 — Closed Beta / Minimal Funds
 
-Phase 20 is **IN_PROGRESS**. Step 4C.2 sealed reproducible preflight evidence recorded (**staging activation / flag seed not performed**). Overall `PHASE20_GATE=HOLD`. Phase 20 is **not** PASS and **not** archived.
+Phase 20 is **IN_PROGRESS**. Canonical Railway runtime cutover to `production-runtime` @ `b9dd700…` completed; Owner-authorized staging Risk/Trust/Eligibility v1 + `WITHDRAWAL_REQUESTS_PAUSE/STAGING=true` activated with controlled validation. Production money remains OFF (AdsGram BLOCKED; payout pause true). Overall `PHASE20_GATE=HOLD`. Phase 20 is **not** PASS and **not** archived.
 Branch: `phase20-closed-beta`. Starting HEAD:
 `240d22a6c877f2d678668ba596238f6c8b234f71`.
 

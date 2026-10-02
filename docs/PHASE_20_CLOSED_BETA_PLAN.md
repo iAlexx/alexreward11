@@ -1,6 +1,6 @@
 # Phase 20 — Closed Beta / Minimal Funds Plan (Step 1–3)
 
-**PHASE20_STATUS:** `IN_PROGRESS` — Step 4C.2 sealed preflight evidence (activation/seed pending); HOLD
+**PHASE20_STATUS:** `IN_PROGRESS` — Canonical LOOTRA runtime cutover + Step 4C staging policies ACTIVE; HOLD (P20-GAP-017 remains)
 **PHASE20_GATE:** `HOLD`
 **PHASE20_ARCHIVE:** `NOT CREATED`
 **Phase 21:** `NOT STARTED`

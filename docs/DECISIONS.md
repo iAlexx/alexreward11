@@ -930,3 +930,22 @@ Preflight evidence uses a two-commit ceremony:
 
 The snapshot `sourceCommit` equals TOOLING_HEAD only (never self-referential EVIDENCE_HEAD).
 Absolute personal filesystem paths and credentials must not appear in committed snapshots.
+
+## Clarification — Phase 20 canonical runtime cutover + Step 4C activation (2026-10-02)
+
+Owner authorized promoting LOOTRA to the canonical Railway application runtime via stable
+branch `production-runtime` at RUNTIME_HEAD `b9dd700de428498493fb6e497ec16901684532c0`,
+while keeping application `DEPLOYMENT_ENV=staging` and all monetary safety gates closed.
+
+After runtime deploy proof and fresh empty-table preconditions, Owner-authorized staging DB
+ceremony COMMITTED:
+
+- `WITHDRAWAL_REQUESTS_PAUSE/STAGING=true` + `feature_flag_versions` v1 (admin/audit NULL bootstrap)
+- ACTIVE Risk/Trust/Eligibility v1 from `packages/fraud/policy/phase20-closed-beta-owner-approved.json`
+
+Controlled post-validation passed. `P20-GAP-009` closed as REMEDIATED /
+OWNER_APPROVED / STAGING_ACTIVE / CONTROLLED_VALIDATION_PASS.
+`P20-GAP-017` remains OPEN. Production money, payout resume, signer, TON, Mainnet, and
+AdsGram monetary enablement remain unauthorized.
+
+See `docs/PHASE_20_CANONICAL_RUNTIME_CUTOVER_AND_STEP4C_ACTIVATION.md`.

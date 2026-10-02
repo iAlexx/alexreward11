@@ -1,7 +1,7 @@
 # Phase 20 — Gap Register (Step 1–3 / 4A decision pack)
 
 **PHASE20_GATE:** HOLD
-**Step:** 4C.2 reproducible preflight evidence seal (activation/seed not executed); HOLD
+**Step:** Canonical runtime cutover + Step 4C staging policy activation complete; HOLD (P20-GAP-017 remains)
 **Register scope:** Closed Beta readiness gaps + carried Phase 19 residuals
 **Rule:** Do not hide issues because they originated in an older phase.
 **Status values:** OPEN | DEFERRED | REMEDIATED | ACCEPTED_RESIDUAL (Owner only for Critical/High)
@@ -15,9 +15,9 @@ Canonical IDs: `P20-GAP-001` .. contiguous.
 | Metric                                                   | Count |
 | -------------------------------------------------------- | ----- |
 | Total gaps                                               | 18    |
-| Blocks Closed Beta (observation / non-money)             | 2     |
-| Blocks real-money beta                                   | 8     |
-| Blocks Phase 20 archive (until resolved or Owner-scoped) | 2     |
+| Blocks Closed Beta (observation / non-money)             | 1     |
+| Blocks real-money beta                                   | 7     |
+| Blocks Phase 20 archive (until resolved or Owner-scoped) | 1     |
 | Carried Phase 19 residuals mapped                        | 8     |
 
 ---
@@ -148,10 +148,10 @@ Canonical IDs: `P20-GAP-001` .. contiguous.
 - **impact:** Controlled beta may refuse actions until policies seeded
 - **prerequisite:** Owner-approved policy rows for staging beta
 - **proposed remediation/test:** Step 2 disposable fixtures + fail-closed proofs; Step 4A Owner decision pack `docs/PHASE_20_STEP4_OWNER_POLICY_DECISION.md`; staging ACTIVE still Owner-gated
-- **blocks Closed Beta?** YES — blocks complete Phase 20 fraud/trust/eligibility validation until controlled ACTIVE policies exist
-- **blocks real-money beta?** YES — unsafe to pay without eligibility/fraud ACTIVE
-- **blocks Phase 20 archive?** YES — until fraud/eligibility category evidenced
-- **status:** OPEN / OWNER_APPROVED / READY_FOR_STAGING_ACTIVATION
+- **blocks Closed Beta?** NO — Owner-authorized staging ACTIVE Risk/Trust/Eligibility v1 + withdrawal pause seeded and validation passed
+- **blocks real-money beta?** NO — staging policies ACTIVE; real-money remains blocked by other money/provider/payout gaps
+- **blocks Phase 20 archive?** NO — fraud/eligibility category evidenced for Closed Beta staging
+- **status:** REMEDIATED / OWNER_APPROVED / STAGING_ACTIVE / CONTROLLED_VALIDATION_PASS
 - **step2 note:** Disposable fail-closed + ACTIVE fixture proofs exist; TEST fixture numbers are REFERENCE ONLY — NOT APPROVED FOR STAGING.
 - **step4a note:** Owner decision matrix published. See `docs/PHASE_20_STEP4_OWNER_POLICY_DECISION.md`.
 - **step4a.1/4a.2 note:** ACCOUNT_STATE + FEATURE_FLAG semantics corrected before approval.
@@ -159,6 +159,7 @@ Canonical IDs: `P20-GAP-001` .. contiguous.
 - **step4b.1 note:** Runtime export graph decoupled — approved JSON is test/tool-only (not loaded by `@alex-rewards/fraud` import). Status unchanged.
 - **step4c note:** Staging activation preflight completed read-only. Tables empty; proposed versions 1/1/1. Activation **not** executed. See `docs/PHASE_20_STEP4C_STAGING_POLICY_ACTIVATION_PREFLIGHT.md`.
 - **step4c.1 note:** Preflight path bug fixed; fresh RO re-run confirms empty tables. Explicit `WITHDRAWAL_REQUESTS_PAUSE/STAGING enabled=true` seed planned (not executed).
+- **cutover/activation note:** Canonical `production-runtime` @ `b9dd700…` deployed; Owner ceremony activated STAGING policies + WRP pause. See `docs/PHASE_20_CANONICAL_RUNTIME_CUTOVER_AND_STEP4C_ACTIVATION.md`.
 - **step4c.2 note:** Two-commit evidence seal — TOOLING_HEAD then EVIDENCE_HEAD; snapshot `sourceCommit` = tooling only; repo-relative paths only.
 
 ### P20-GAP-010 — Provider-limit Admin UI ceremony incomplete
@@ -312,12 +313,11 @@ Blockers: Closed Beta **NO**, real-money **NO**, archive **NO**.
 Counts below MUST match mechanical derivation from each gap section (`YES` / `NO` first token).
 Do not add inferred items that lack a canonical `P20-GAP-xxx` entry.
 
-**P20_BLOCKING_CLOSED_BETA_GAPS** (count = 2):
+**P20_BLOCKING_CLOSED_BETA_GAPS** (count = 1):
 
-- P20-GAP-009
 - P20-GAP-017
 
-**P20_BLOCKING_REAL_MONEY_GAPS** (count = 8):
+**P20_BLOCKING_REAL_MONEY_GAPS** (count = 7):
 
 - P20-GAP-001
 - P20-GAP-002
@@ -325,12 +325,10 @@ Do not add inferred items that lack a canonical `P20-GAP-xxx` entry.
 - P20-GAP-004
 - P20-GAP-005
 - P20-GAP-006
-- P20-GAP-009
 - P20-GAP-011
 
-**P20_BLOCKING_ARCHIVE_GAPS** (count = 2):
+**P20_BLOCKING_ARCHIVE_GAPS** (count = 1):
 
-- P20-GAP-009
 - P20-GAP-017
 
 ---
