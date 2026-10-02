@@ -82,7 +82,8 @@ function observationsFromEnv(): Phase21ReadinessObservations {
     withdrawalRequestsPaused: boolFromEnv('WITHDRAWAL_REQUESTS_PAUSED_OBSERVED', true),
     payoutDispatchPaused: boolFromEnv('PAYOUT_DISPATCH_PAUSED_OBSERVED', true),
     railwaySignerExists: envFlagTrue('PHASE21_RAILWAY_SIGNER_EXISTS'),
-    balanceSource: 'BLOCKED_OWNER_DECISION',
+    balanceSource:
+      defaults.balanceSource ?? 'SOURCE_IMPLEMENTED_OWNER_APPROVED_BUT_NOT_EXECUTED',
   };
 }
 

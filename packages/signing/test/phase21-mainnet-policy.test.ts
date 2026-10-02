@@ -115,7 +115,8 @@ describe('Phase 21 Mainnet signing policy allow-path', () => {
       forwardTonAtomic: 1n,
       sendMode: SPIKE_SEND_MODE,
       networkScope: 'MAINNET_OWNER_APPROVED' as const,
-      sourceReference: 'OWNER_APPROVED_FIXTURE_STEP2_TEST_ONLY',
+      sourceReference: 'OWNER_APPROVED_FIXTURE_STEP3_TEST_ONLY',
+      attachedGramLifecycle: 'OWNER_APPROVED' as const,
     };
 
     await expect(
@@ -137,6 +138,32 @@ describe('Phase 21 Mainnet signing policy allow-path', () => {
         { phase21MainnetEnabled: true, transferPolicy: ownerApprovedPolicy },
       ),
     ).resolves.toBeTruthy();
+
+    await expect(
+      buildCanonicalSigningMessageAsync(
+        {
+          publicKey: Buffer.from(kp.publicKey),
+          networkGlobalId: -239,
+          workchain: 0,
+          subwalletNumber: 0,
+          seqno: 1,
+          validUntil: Math.floor(Date.now() / 1000) + 120,
+          queryId: 1n,
+          netAmountAtomic: 100n,
+          recipientAddress: derived.addressRaw,
+          hotWalletAddress: derived.addressRaw,
+          payoutJettonWalletAddress: derived.addressRaw,
+          jettonMasterIdentity: 'EQD0vdSA_NedR9uvbgN9EikRX-suesDxGeFg69XQMavfLqIw',
+        },
+        {
+          phase21MainnetEnabled: true,
+          transferPolicy: {
+            ...ownerApprovedPolicy,
+            attachedGramLifecycle: 'ESTIMATED',
+          },
+        },
+      ),
+    ).rejects.toThrow(/BLOCKED_OWNER_DECISION_MAINNET_ATTACHED_GRAM|not Owner-approved/);
 
     await expect(
       buildCanonicalSigningMessageAsync(

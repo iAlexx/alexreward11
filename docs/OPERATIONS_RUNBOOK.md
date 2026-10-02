@@ -326,3 +326,17 @@ Plan: `docs/PHASE_21_MAINNET_MICRO_LAUNCH_PLAN.md`.
 ## Phase 21 Step 2
 
 No operational Mainnet changes. Verify: pnpm phase21:readiness, pnpm phase21:preflight. Optional live external probes: set PHASE21_EXTERNAL_PROBE_LIVE=1 only during Owner verification ceremony.
+
+## Phase 21 Step 3
+
+```bash
+pnpm phase21:readiness
+pnpm phase21:preflight
+```
+
+- Expect overall readiness BLOCKED; preflight may be `READY_FOR_OWNER_PROVISIONING_CEREMONY` or `MAINNET_SOURCE_READY`
+- Never treat output as live-payout authorization (`readyForLivePayout=false`)
+- Signer host decision: `DEDICATED_CONTROLLED_HOST` (not provisioned)
+- Controlled Available provision CLI must remain disabled; do not mutate operational DB
+- Canonical runtime remains `b9dd700`; Phase21 not deployed
+- Ceremony / GRAM naming / provisioning docs under `docs/PHASE_21_*`

@@ -34,3 +34,15 @@ export {
 } from './primary-change.js';
 export { requireAuthenticatedUserId } from './session.js';
 export { insertSecurityAuditLog, insertWalletOutboxEvent } from './audit.js';
+
+export {
+  PRIMARY_CHANGE_REQUIRES_FRESH_PROOF,
+  PRIMARY_CHANGE_WITHDRAWAL_COOLDOWN_HOURS,
+  TON_MAINNET_CONNECT_NETWORK_ID,
+  TON_TESTNET_CONNECT_NETWORK_ID,
+  assertAcceptedMainnetNetworkMapping,
+  assertTonPayoutAddressShape,
+  assertWalletAppNameNotAuthority,
+  primaryChangePolicyNotes,
+} from './phase21-mainnet-wallet-guards.js';
+export type { MainnetNetworkMappingInput } from './phase21-mainnet-wallet-guards.js';

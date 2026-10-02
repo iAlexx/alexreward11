@@ -81,6 +81,39 @@ export {
 export type { Phase10TestnetProvisionAssetSymbol } from './phase10-testnet-provision-assets.js';
 
 export {
+  PHASE21_CAMPAIGN_CEILING_LOCK_KEY1,
+  PHASE21_PROVISION_AUDIT_ACTION,
+  PHASE21_PROVISION_BUSINESS_REF_TYPE,
+  PHASE21_PROVISION_IDEMPOTENCY_SCOPE,
+  PHASE21_PROVISION_TOOL_VERSION,
+  PHASE21_REVERSE_AUDIT_ACTION,
+  PHASE21_REVERSE_BUSINESS_REF_TYPE,
+  PHASE21_REVERSE_IDEMPOTENCY_SCOPE,
+  provisionPhase21ControlledAvailable,
+  reversePhase21ControlledAvailableProvision,
+} from './phase21-mainnet-controlled-available.js';
+export type {
+  Phase21ControlledAvailableProvisionRuntimeConfig,
+  Phase21ProvisionIntent,
+  Phase21ProvisionResult,
+  Phase21ProvisionReverseResult,
+} from './phase21-mainnet-controlled-available.js';
+export {
+  PHASE21_CONTROLLED_AVAILABLE_CAMPAIGN_CEILING_ATOMIC,
+  PHASE21_CONTROLLED_PROVISION_ASSET_SYMBOL,
+  PHASE21_CONTROLLED_PROVISION_CHAIN,
+  PHASE21_CONTROLLED_PROVISION_ENVIRONMENT,
+  PHASE21_CONTROLLED_PROVISION_GLOBAL_CHAIN_ID,
+  PHASE21_CONTROLLED_PROVISION_NETWORK_CODE,
+  PHASE21_MICRO_LAUNCH_FEE_USDT,
+  PHASE21_MICRO_LAUNCH_GROSS_PER_WITHDRAWAL_USDT,
+  PHASE21_MICRO_LAUNCH_GROSS_USDT,
+  PHASE21_MICRO_LAUNCH_NET_USDT,
+  PHASE21_MICRO_LAUNCH_WITHDRAWAL_COUNT,
+  PHASE21_OPERATIONAL_DATABASE_NAME,
+} from './phase21-mainnet-controlled-available-assets.js';
+
+export {
   rebuildAccountProjections,
   loadStoredProjections,
   compareProjectionsToStored,

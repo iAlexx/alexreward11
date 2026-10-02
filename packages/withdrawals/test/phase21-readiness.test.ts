@@ -7,14 +7,16 @@ import {
 } from '../src/phase21-readiness.js';
 
 describe('phase21 readiness / preflight', () => {
-  it('default Step1 observations remain overall BLOCKED', () => {
+  it('default Step3 observations remain overall BLOCKED but source-ready foundations PASS', () => {
     const report = buildPhase21ReadinessReport(defaultPhase21Step1Observations());
     expect(report.overall).toBe('BLOCKED');
     expect(report.summary.blockedCount).toBeGreaterThan(0);
     expect(report.summary.productionSignerService).toBe('NOT_PROVISIONED');
-    expect(report.summary.balanceSource).toBe('BLOCKED_OWNER_DECISION');
+    expect(report.summary.balanceSource).toBe(
+      'SOURCE_IMPLEMENTED_OWNER_APPROVED_BUT_NOT_EXECUTED',
+    );
 
-    const codes = new Set(report.items.map((i) => i.code));
+    const byCode = Object.fromEntries(report.items.map((i) => [i.code, i]));
     for (const required of [
       'PHASE20_ARCHIVED',
       'MAINNET_CODE_SUPPORT',
@@ -46,24 +48,38 @@ describe('phase21 readiness / preflight', () => {
       'WITHDRAWABLE_BALANCE_SOURCE',
       'WORKER_MAINNET_WIRING',
       'MAINNET_TRANSFER_GAS_POLICY',
+      'MAINNET_ATTACHED_GRAM_POLICY',
       'MAINNET_JETTON_EXTERNAL_VERIFICATION',
       'SIGNER_HOSTING_DECISION',
+      'GRAM_NAMING_COMPATIBILITY',
+      'MULTICHAIN_WALLET_HARDENING',
+      'CONTROLLED_PROVISION_TOOLING',
+      'OFFLINE_MAINNET_CEREMONY_TOOLING',
     ]) {
-      expect(codes.has(required), required).toBe(true);
+      expect(byCode[required], required).toBeDefined();
     }
 
-    expect(
-      report.items.find((i) => i.code === 'MAINNET_TRANSFER_GAS_POLICY')?.message,
-    ).toMatch(/BLOCKED_OWNER_DECISION_MAINNET_TRANSFER_GAS_POLICY/);
+    expect(byCode['MAINNET_EXPLICIT_GATE']?.status).toBe('PASS');
+    expect(byCode['REAL_CHAIN_GATE']?.status).toBe('PASS');
+    expect(byCode['MAINNET_TRANSFER_GAS_POLICY']?.status).toBe('PASS');
+    expect(byCode['WITHDRAWABLE_BALANCE_SOURCE']?.status).toBe('PASS');
+    expect(byCode['MAINNET_ATTACHED_GRAM_POLICY']?.status).toBe('BLOCKED');
+    expect(byCode['SIGNER_HOSTING_DECISION']?.message).toMatch(/DEDICATED_CONTROLLED_HOST/);
+    expect(byCode['TON_GAS']?.message).toMatch(/GRAM gas/);
   });
 
-  it('preflight never emits READY_FOR_LIVE_PAYOUT and is blocked in Step1', () => {
+  it('preflight never emits READY_FOR_LIVE_PAYOUT; Step3 defaults approach ceremony readiness', () => {
     const preflight = runPhase21Preflight(defaultPhase21Step1Observations());
     expect(preflight.readyForLivePayout).toBe(false);
-    expect(preflight.verdict).toBe('BLOCKED_FOR_EXTERNAL_RESOURCES');
-    expect(['BLOCKED_FOR_EXTERNAL_RESOURCES', 'BLOCKED_FOR_OWNER_DECISION']).toContain(
-      preflight.verdict,
-    );
+    expect(preflight.verdict).not.toBe('READY_FOR_LIVE_PAYOUT' as never);
+    expect([
+      'READY_FOR_OWNER_PROVISIONING_CEREMONY',
+      'MAINNET_SOURCE_READY',
+      'BLOCKED_FOR_EXTERNAL_RESOURCES',
+      'BLOCKED_FOR_OWNER_DECISION',
+    ]).toContain(preflight.verdict);
+    // Source foundations complete with external still blocked ? ceremony verdict.
+    expect(preflight.verdict).toBe('READY_FOR_OWNER_PROVISIONING_CEREMONY');
   });
 
   it('unpaused dispatch without ceremony is not treated ready', () => {
@@ -77,5 +93,12 @@ describe('phase21 readiness / preflight', () => {
       'BLOCKED',
     );
     expect(report.overall).toBe('BLOCKED');
+    const preflight = runPhase21Preflight({
+      ...defaultPhase21Step1Observations(),
+      payoutDispatchPaused: false,
+      withdrawalRequestsPaused: false,
+    });
+    expect(preflight.readyForLivePayout).toBe(false);
+    expect(preflight.verdict).toBe('BLOCKED_FOR_OWNER_DECISION');
   });
 });

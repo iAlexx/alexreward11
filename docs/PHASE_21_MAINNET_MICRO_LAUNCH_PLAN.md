@@ -98,3 +98,27 @@ Do not mark Phase 21 PASS. Do not create archive in Step 1.
 - Readiness/preflight upgraded; still BLOCKED overall at defaults
 
 Operational posture unchanged: PHASE21_MAINNET_ENABLED=NO, REAL_CHAIN=NO, pauses ON.
+
+
+---
+
+## Step 3 (docs + readiness / preflight - SOURCE ONLY)
+
+Owner-approved design facts documented (no live payout):
+
+1. Chain=TON, network=`TON_MAINNET`, globalId=`-239`, TON Connect only
+2. Native display/canonical = Gram/GRAM, 9 decimals, nanogram; do **not** rename `TON_MAINNET` -> `GRAM_MAINNET`
+3. USDT Jetton on TON Mainnet is the payout asset
+4. `forwardTonAtomic=1` nanogram Owner-approved
+5. `attachedTonAtomic` NOT approved; lifecycle `UNVERIFIED|ESTIMATED|OWNER_APPROVED` - leave **ESTIMATED**
+6. SPIKE policy must **not** be used by Phase21
+7. Signer hosting = `DEDICATED_CONTROLLED_HOST`; `self_hosted_encrypted`; LOCKED boot; passphrase not in env
+8. Controlled Mainnet Available via `SUPPORT_ADJUSTMENT`; ceiling `10_000_000` atomic USDT; disabled by default; status `SOURCE_IMPLEMENTED_OWNER_APPROVED_BUT_NOT_EXECUTED`
+9. AdsGram gaps **not** closed
+10. Micro-launch band: 50 x 0.20 gross=10.00 USDT / net 9.50 with 0.01 fee
+11. Canonical runtime still `b9dd700`; Phase21 not deployed
+12. **NO LIVE PAYOUT** from Step 3
+
+New docs: GRAM naming, multichain wallet, controlled balance provisioning, production runtime deployment manifest, provisioning ceremony preflight.
+
+Readiness/preflight: may reach `READY_FOR_OWNER_PROVISIONING_CEREMONY` / `MAINNET_SOURCE_READY`; never `READY_FOR_LIVE_PAYOUT`.

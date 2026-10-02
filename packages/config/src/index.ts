@@ -1086,3 +1086,135 @@ export const loadPhase10TestnetProvisionConfig = (
       : environment;
   return parseEnvironment(phase10TestnetProvisionSchema, merged);
 };
+
+/**
+ * Phase 21 controlled Mainnet Available provisioning CLI config.
+ * Disabled by default. Forever separate from Phase 10 Testnet provision.
+ * Do NOT enable against operational Postgres from Step 3 engineering.
+ */
+const LOCAL_PHASE21_CONTROLLED_AVAILABLE_PROVISION_DEFAULTS = {
+  PHASE21_CONTROLLED_AVAILABLE_PROVISION_ENABLED: 'false',
+  PHASE21_CONTROLLED_AVAILABLE_PROVISION_ALLOWED_USER_ID: '',
+  PHASE21_CONTROLLED_AVAILABLE_PROVISION_MAX_ATOMIC: '1000000',
+  PHASE21_CONTROLLED_AVAILABLE_PROVISION_OWNER_ADMIN_USER_ID: '',
+  PHASE21_CONTROLLED_AVAILABLE_PROVISION_CAMPAIGN_ID: '',
+  PHASE21_CONTROLLED_AVAILABLE_PROVISION_REQUIRED_USDT_JETTON_MASTER: '',
+  PHASE21_CONTROLLED_AVAILABLE_PROVISION_REQUIRED_DATABASE_NAME: '',
+  WITHDRAWAL_NETWORK_CODE: 'TON_MAINNET',
+  WITHDRAWAL_ASSET_SYMBOL: 'USDT',
+} as const;
+
+const phase21ControlledAvailableProvisionSchema = commonSchema
+  .extend({
+    DATABASE_URL: postgresUrl,
+    PHASE21_CONTROLLED_AVAILABLE_PROVISION_ENABLED: booleanFromString,
+    PHASE21_CONTROLLED_AVAILABLE_PROVISION_ALLOWED_USER_ID: optionalUuidOrEmpty,
+    PHASE21_CONTROLLED_AVAILABLE_PROVISION_MAX_ATOMIC: optionalPositiveAtomicOrEmpty,
+    PHASE21_CONTROLLED_AVAILABLE_PROVISION_OWNER_ADMIN_USER_ID: optionalUuidOrEmpty,
+    PHASE21_CONTROLLED_AVAILABLE_PROVISION_CAMPAIGN_ID: optionalUuidOrEmpty,
+    PHASE21_CONTROLLED_AVAILABLE_PROVISION_REQUIRED_USDT_JETTON_MASTER: z.preprocess(
+      (value) => (value === undefined || value === null ? '' : value),
+      z.string().max(256),
+    ),
+    PHASE21_CONTROLLED_AVAILABLE_PROVISION_REQUIRED_DATABASE_NAME: z.preprocess(
+      (value) => (value === undefined || value === null ? '' : value),
+      z.string().max(128),
+    ),
+    WITHDRAWAL_NETWORK_CODE: z.string().min(1).max(64),
+    WITHDRAWAL_ASSET_SYMBOL: z.string().min(1).max(32),
+  })
+  .superRefine((value, context) => {
+    if (value.PHASE21_CONTROLLED_AVAILABLE_PROVISION_ENABLED) {
+      if (value.DEPLOYMENT_ENV !== 'local' && value.DEPLOYMENT_ENV !== 'test') {
+        context.addIssue({
+          code: 'custom',
+          path: ['PHASE21_CONTROLLED_AVAILABLE_PROVISION_ENABLED'],
+          message: 'Phase 21 controlled provision cannot be enabled outside local/test',
+        });
+      }
+      if (value.WITHDRAWAL_NETWORK_CODE !== 'TON_MAINNET') {
+        context.addIssue({
+          code: 'custom',
+          path: ['WITHDRAWAL_NETWORK_CODE'],
+          message: 'must be exactly TON_MAINNET when Phase 21 provision is enabled',
+        });
+      }
+      if (value.WITHDRAWAL_ASSET_SYMBOL !== 'USDT') {
+        context.addIssue({
+          code: 'custom',
+          path: ['WITHDRAWAL_ASSET_SYMBOL'],
+          message: 'must be exactly USDT when Phase 21 provision is enabled',
+        });
+      }
+      if (value.PHASE21_CONTROLLED_AVAILABLE_PROVISION_ALLOWED_USER_ID === '') {
+        context.addIssue({
+          code: 'custom',
+          path: ['PHASE21_CONTROLLED_AVAILABLE_PROVISION_ALLOWED_USER_ID'],
+          message: 'required UUID when Phase 21 controlled provision is enabled',
+        });
+      }
+      if (value.PHASE21_CONTROLLED_AVAILABLE_PROVISION_OWNER_ADMIN_USER_ID === '') {
+        context.addIssue({
+          code: 'custom',
+          path: ['PHASE21_CONTROLLED_AVAILABLE_PROVISION_OWNER_ADMIN_USER_ID'],
+          message: 'required UUID when Phase 21 controlled provision is enabled',
+        });
+      }
+      if (value.PHASE21_CONTROLLED_AVAILABLE_PROVISION_CAMPAIGN_ID === '') {
+        context.addIssue({
+          code: 'custom',
+          path: ['PHASE21_CONTROLLED_AVAILABLE_PROVISION_CAMPAIGN_ID'],
+          message: 'required campaign UUID when Phase 21 controlled provision is enabled',
+        });
+      }
+      if (value.PHASE21_CONTROLLED_AVAILABLE_PROVISION_MAX_ATOMIC === '') {
+        context.addIssue({
+          code: 'custom',
+          path: ['PHASE21_CONTROLLED_AVAILABLE_PROVISION_MAX_ATOMIC'],
+          message: 'required positive atomic amount when Phase 21 controlled provision is enabled',
+        });
+      }
+      const master =
+        value.PHASE21_CONTROLLED_AVAILABLE_PROVISION_REQUIRED_USDT_JETTON_MASTER.trim();
+      if (master === '') {
+        context.addIssue({
+          code: 'custom',
+          path: ['PHASE21_CONTROLLED_AVAILABLE_PROVISION_REQUIRED_USDT_JETTON_MASTER'],
+          message:
+            'required Mainnet USDT Jetton master when Phase 21 controlled provision is enabled',
+        });
+      }
+      const upper = master.toUpperCase();
+      if (upper.includes('TESTNET') || upper.includes('LOCAL') || upper.includes('PLACEHOLDER')) {
+        context.addIssue({
+          code: 'custom',
+          path: ['PHASE21_CONTROLLED_AVAILABLE_PROVISION_REQUIRED_USDT_JETTON_MASTER'],
+          message: 'Testnet/local/PLACEHOLDER Jetton masters forbidden for Phase 21 provision',
+        });
+      }
+      const requiredDb =
+        value.PHASE21_CONTROLLED_AVAILABLE_PROVISION_REQUIRED_DATABASE_NAME.trim();
+      if (requiredDb === 'alex_rewards') {
+        context.addIssue({
+          code: 'custom',
+          path: ['PHASE21_CONTROLLED_AVAILABLE_PROVISION_REQUIRED_DATABASE_NAME'],
+          message: 'operational database name alex_rewards is forbidden',
+        });
+      }
+    }
+  });
+
+export type Phase21ControlledAvailableProvisionConfig = z.infer<
+  typeof phase21ControlledAvailableProvisionSchema
+>;
+
+export const loadPhase21ControlledAvailableProvisionConfig = (
+  environment: NodeJS.ProcessEnv = process.env,
+): Phase21ControlledAvailableProvisionConfig => {
+  const deployment = environment.DEPLOYMENT_ENV ?? 'local';
+  const merged =
+    deployment === 'local' || deployment === 'test'
+      ? { ...LOCAL_PHASE21_CONTROLLED_AVAILABLE_PROVISION_DEFAULTS, ...environment }
+      : environment;
+  return parseEnvironment(phase21ControlledAvailableProvisionSchema, merged);
+};

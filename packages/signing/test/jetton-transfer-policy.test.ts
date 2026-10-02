@@ -2,11 +2,15 @@ import { describe, expect, it } from 'vitest';
 
 import {
   PHASE10_TESTNET_SPIKE_TRANSFER_POLICY,
+  PHASE21_ATTACHED_GRAM_POLICY_STATUS,
+  PHASE21_OWNER_APPROVED_FORWARD_GRAM_ATOMIC,
   SPIKE_JETTON_ATTACHED_TON,
   SPIKE_JETTON_FORWARD_TON,
   SPIKE_SEND_MODE,
   SignerError,
   assertJettonTransferPolicyValid,
+  assertPhase21MainnetTransferPolicy,
+  isPhase21ForwardGramPolicySourceReady,
   resolveJettonTransferPolicy,
 } from '../src/index.js';
 
@@ -35,19 +39,64 @@ describe('jetton transfer execution policy', () => {
     ).toThrow(/cannot use Testnet SPIKE/);
   });
 
-  it('network mismatch fails for non MAINNET_OWNER_APPROVED scope', () => {
+  it('rejects SPIKE attached amount even with MAINNET scope', () => {
+    expect(() =>
+      assertPhase21MainnetTransferPolicy({
+        attachedTonAtomic: SPIKE_JETTON_ATTACHED_TON,
+        forwardTonAtomic: PHASE21_OWNER_APPROVED_FORWARD_GRAM_ATOMIC,
+        sendMode: SPIKE_SEND_MODE,
+        networkScope: 'MAINNET_OWNER_APPROVED',
+        sourceReference: 'bad-spike',
+        attachedGramLifecycle: 'OWNER_APPROVED',
+      }),
+    ).toThrow(/SPIKE attached/);
+  });
+
+  it('requires Owner-approved forward = 1 nanogram', () => {
+    expect(() =>
+      assertPhase21MainnetTransferPolicy({
+        attachedTonAtomic: 60_000_000n,
+        forwardTonAtomic: 2n,
+        sendMode: SPIKE_SEND_MODE,
+        networkScope: 'MAINNET_OWNER_APPROVED',
+        sourceReference: 'bad-forward',
+        attachedGramLifecycle: 'OWNER_APPROVED',
+      }),
+    ).toThrow(/1 nanogram/);
+  });
+
+  it('ESTIMATED attached blocks live resolve (OWNER_DECISION_REQUIRED)', () => {
+    expect(PHASE21_ATTACHED_GRAM_POLICY_STATUS).toBe('ESTIMATED');
     expect(() =>
       resolveJettonTransferPolicy({
         phase21MainnetEnabled: true,
         transferPolicy: {
-          attachedTonAtomic: 1n,
-          forwardTonAtomic: 1n,
-          sendMode: 1,
-          networkScope: 'TESTNET_SPIKE',
-          sourceReference: 'forged',
+          attachedTonAtomic: 60_000_000n,
+          forwardTonAtomic: PHASE21_OWNER_APPROVED_FORWARD_GRAM_ATOMIC,
+          sendMode: SPIKE_SEND_MODE,
+          networkScope: 'MAINNET_OWNER_APPROVED',
+          sourceReference: 'estimated-attached',
+          attachedGramLifecycle: 'ESTIMATED',
         },
       }),
-    ).toThrow(SignerError);
+    ).toThrow(/BLOCKED_OWNER_DECISION_MAINNET_ATTACHED_GRAM|not Owner-approved/);
+  });
+
+  it('accepts future Owner-approved Mainnet policy with forward=1n and non-SPIKE attached', () => {
+    const approved = {
+      attachedTonAtomic: 60_000_000n,
+      forwardTonAtomic: PHASE21_OWNER_APPROVED_FORWARD_GRAM_ATOMIC,
+      sendMode: SPIKE_SEND_MODE,
+      networkScope: 'MAINNET_OWNER_APPROVED' as const,
+      sourceReference: 'OWNER_APPROVED_FIXTURE_STEP3_TEST_ONLY',
+      attachedGramLifecycle: 'OWNER_APPROVED' as const,
+    };
+    const policy = resolveJettonTransferPolicy({
+      phase21MainnetEnabled: true,
+      transferPolicy: approved,
+    });
+    expect(policy).toEqual(approved);
+    expect(policy.forwardTonAtomic).toBe(1n);
   });
 
   it('invalid negative values fail', () => {
@@ -62,18 +111,7 @@ describe('jetton transfer execution policy', () => {
     ).toThrow(/non-negative/);
   });
 
-  it('accepts Owner-approved Mainnet policy when explicitly supplied', () => {
-    const approved = {
-      attachedTonAtomic: 60_000_000n,
-      forwardTonAtomic: 1n,
-      sendMode: SPIKE_SEND_MODE,
-      networkScope: 'MAINNET_OWNER_APPROVED' as const,
-      sourceReference: 'OWNER_APPROVED_FIXTURE_STEP2_TEST_ONLY',
-    };
-    const policy = resolveJettonTransferPolicy({
-      phase21MainnetEnabled: true,
-      transferPolicy: approved,
-    });
-    expect(policy).toEqual(approved);
+  it('source forward policy ready while attached remains ESTIMATED', () => {
+    expect(isPhase21ForwardGramPolicySourceReady()).toBe(true);
   });
 });

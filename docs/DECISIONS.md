@@ -1019,3 +1019,25 @@ Step 2 fixes source defects and adds worker/signing wiring. Operational Mainnet 
 - BLOCKED_OWNER_DECISION_MAINNET_TRANSFER_GAS_POLICY until Owner approves Mainnet gas policy
 
 No Railway mutation, no production keys, no funding, no unpause, no live payout.
+
+
+## Clarification - Phase 21 Step 3 docs + readiness/preflight (2026-10-02)
+
+Step 3 documents Owner-approved Mainnet micro-launch design facts and upgrades readiness/preflight.
+Operational Mainnet remains OFF. **No live payout.**
+
+- Chain=TON / `TON_MAINNET` / `-239` / TON Connect only
+- Native display/canonical = Gram/GRAM (9 decimals, nanogram); do not rename `TON_MAINNET` -> `GRAM_MAINNET`
+- Legacy ledger codes `HOT_WALLET_TON_ASSET` + `TON_NETWORK_FEE_EXPENSE` = LEGACY_INTERNAL_IDENTIFIER
+- USDT Jetton on TON Mainnet payout asset
+- `forwardTonAtomic=1` nanogram Owner-approved; attached GRAM lifecycle remains **ESTIMATED**
+- SPIKE jetton transfer policy forbidden for Phase21
+- `PHASE21_SIGNER_HOSTING_DECISION=DEDICATED_CONTROLLED_HOST` (LOCKED; supersedes DEDICATED_HOST_RECOMMENDED)
+- Controlled Mainnet Available via `SUPPORT_ADJUSTMENT`; ceiling 10_000_000 atomic USDT; disabled; `SOURCE_IMPLEMENTED_OWNER_APPROVED_BUT_NOT_EXECUTED`
+- AdsGram monetary gaps remain OPEN
+- Micro-launch band documented: 50 x 0.20 gross=10.00 / net 9.50 @ 0.01 fee
+- Canonical runtime `production-runtime @ b9dd700` unchanged; Phase21 not deployed
+- Preflight verdicts: `BLOCKED_FOR_OWNER_DECISION` | `BLOCKED_FOR_EXTERNAL_RESOURCES` | `MAINNET_SOURCE_READY` | `READY_FOR_OWNER_PROVISIONING_CEREMONY`
+- `readyForLivePayout` always false; never emit `READY_FOR_LIVE_PAYOUT`
+
+See `docs/PHASE_21_READINESS_MATRIX.md` and Step 3 docs listed in the micro-launch plan.

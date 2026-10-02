@@ -331,3 +331,7 @@ live Phase 21 dispatch. No real Mainnet payout in Step 1.
 ## Phase 21 Step 2
 
 Worker supports explicit PHASE21_MAINNET_ENABLED selection (default OFF). Real payout pipeline accepts Phase10 or Phase21 network binding. Mainnet transfer policy: BLOCKED_OWNER_DECISION_MAINNET_TRANSFER_GAS_POLICY until Owner approves.
+
+## Phase 21 Step 3
+
+Forward GRAM gas policy Owner-approved at 1 nanogram; attached GRAM lifecycle remains ESTIMATED (not activated). Controlled Mainnet Available provision tooling status: `SOURCE_IMPLEMENTED_OWNER_APPROVED_BUT_NOT_EXECUTED` (SUPPORT_ADJUSTMENT; ceiling 10_000_000 atomic USDT; disabled). Readiness may reach `READY_FOR_OWNER_PROVISIONING_CEREMONY`; `READY_FOR_LIVE_PAYOUT=NO`. No live Mainnet payout in Step 3.

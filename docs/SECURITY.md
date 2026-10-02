@@ -214,3 +214,7 @@ Phase 21 is **not** PASS and **not** archived.
 ## Phase 21 Step 2
 
 Mainnet bundle encrypt requires explicit phase21MainnetEnabled. Mainnet jetton transfer gas requires Owner-approved policy; SPIKE constants are Testnet-only. Signer hosting: dedicated host recommended; Railway not approved without custody redesign.
+
+## Phase 21 Step 3
+
+Docs + readiness/preflight only. Signer hosting locked to `DEDICATED_CONTROLLED_HOST` (`self_hosted_encrypted`, LOCKED boot, passphrase not in env). Attached Mainnet GRAM remains ESTIMATED; SPIKE policy forbidden for Phase21. Canonical runtime still `b9dd700`; Phase21 not deployed. No live payout.

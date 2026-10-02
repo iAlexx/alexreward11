@@ -1,10 +1,12 @@
-# Phase 21 — Signer / Hot Wallet Ceremony (later Owner steps)
+# Phase 21 - Signer / Hot Wallet Ceremony (later Owner steps)
 
 **PRODUCTION_SIGNER_SERVICE:** `NOT_PROVISIONED`
 **PRODUCTION_HOT_WALLET_STATUS:** `NOT_CREATED`
-**REAL_PRODUCTION_KEY_GENERATED:** `NO` (Step 1 forbids generation)
+**REAL_PRODUCTION_KEY_GENERATED:** `NO` (Step 3 forbids generation/execution)
+**SIGNER_HOSTING:** `DEDICATED_CONTROLLED_HOST`
+**CEREMONY_EXECUTED:** `NO`
 
-This document prepares the later Owner ceremony. It does **not** authorize execution in Step 1.
+This document prepares the later Owner ceremony. It does **not** authorize execution in Step 3.
 
 ---
 
@@ -16,6 +18,7 @@ This document prepares the later Owner ceremony. It does **not** authorize execu
 - Signer signs only; never broadcasts
 - Restart returns LOCKED
 - API / Bot / Admin / Worker must not receive decrypted signing material
+- Hosting: **DEDICATED_CONTROLLED_HOST** (locked decision)
 
 Phase 21 Mainnet config (when explicitly enabled later):
 
@@ -29,6 +32,26 @@ SIGNER_WALLET_VERSION=v5R1
 
 ---
 
+## Offline Mainnet CLI reference (NOT EXECUTED in Step 3)
+
+Owner ceremony will use offline / controlled-host CLI paths (exact flags may evolve; values below are reference only):
+
+```text
+# Offline on controlled host - DO NOT RUN in Step 3
+# 1) Generate Wallet V5 R1 seed offline
+# 2) Derive Mainnet identity with Phase21 allow-path:
+#      networkCode=TON_MAINNET  networkGlobalId=-239  phase21MainnetEnabled=true
+# 3) Encrypt authenticated key bundle (self_hosted_encrypted)
+# 4) Dual offline encrypted backups; destroy plaintext
+# 5) Install ciphertext on DEDICATED_CONTROLLED_HOST
+# 6) Boot signer LOCKED; verify fingerprint/address
+# 7) Unlock briefly only for authorized sign window; relock
+```
+
+Step 3 documents this reference only. **No key generation, encrypt, deploy, unlock, or funding is performed.**
+
+---
+
 ## Later Owner ceremony sequence (not executed now)
 
 1. Generate fresh Wallet V5 R1 seed **offline**
@@ -37,7 +60,7 @@ SIGNER_WALLET_VERSION=v5R1
 4. Make **two** offline encrypted backups
 5. Record only public fingerprint + address (no secrets in Git)
 6. Destroy plaintext seed
-7. Install ciphertext on signer host
+7. Install ciphertext on dedicated controlled signer host
 8. Boot signer **LOCKED**
 9. Verify expected fingerprint / address against Hot Wallet registration
 10. Unlock briefly only for an authorized sign window
@@ -45,31 +68,10 @@ SIGNER_WALLET_VERSION=v5R1
 
 ---
 
-## Railway suitability note (honest architectural limitation)
+## Railway suitability note
 
-Current production custody assumes:
-
-- Encrypted bundle on a controlled host filesystem
-- Loopback-oriented unlock / least public exposure (`SIGNER_LISTEN_HOST` defaults to `127.0.0.1` for self_hosted_encrypted bare-metal safety)
-- Operator-present passphrase unlock (not stored in env)
-
-Railway-hosted signer creates real tension with that model:
-
-| Concern | Why it matters |
-| --- | --- |
-| Public / shared ingress | Signer HTTP must not be unnecessarily internet-exposed |
-| Loopback unlock | Container platforms often cannot use operator loopback unlock the same way as bare metal |
-| Bundle persistence | Encrypted bundle needs durable, access-controlled volume; ephemeral disks risk loss or mis-mount |
-| Passphrase delivery | Injecting unlock passphrase via platform secrets reintroduces plaintext-secret risk the model forbids in env |
-| Co-tenancy / blast radius | Shared PaaS increases exposure vs dedicated signing host |
-
-**Conclusion for Step 1:** Railway may be a **potential blocker** for hosting the production encrypted signer under the current loopback-unlock / no-passphrase-in-env model. Owner must decide later among:
-
-1. Dedicated controlled host / VM for signer (preferred fit to current model)
-2. Explicit architecture change (Owner-approved) before Railway signer hosting
-3. Defer production signer until hosting model is decided
-
-Do **not** fake Railway compatibility in Step 1.
+Railway cannot satisfy loopback unlock / no-passphrase-in-env custody without redesign.
+Owner decision is locked: **DEDICATED_CONTROLLED_HOST**. Do not fake Railway compatibility.
 
 ---
 
@@ -82,41 +84,39 @@ Observed application services (no signer):
 - temporal-staging, worker-staging, bot-staging
 - Phase 18 retained restore sibling
 
-Step 1 does not create a Railway signer service.
-
+Step 3 does not create a Railway signer service.
 
 ---
 
-## Future DB rows (docs only - no INSERT in Step 2)
+## Future DB rows (docs only - no INSERT in Step 3)
 
 Owner ceremony will require aligned rows (IDs assigned at ceremony time; not invented here):
 
-### 
-etworks
+### networks
 
 - code: TON_MAINNET
 - chain: TON
 - environment: MAINNET
-- global_chain_identifier: 	on:mainnet
+- global_chain_identifier: ton:mainnet
 - status: ACTIVE
 
-### ssets
+### assets
 
 - symbol: USDT
-- 
-etwork_id: (FK to TON_MAINNET network row)
-- contract_identity: Owner-approved Mainnet USDT Jetton master (TON_MAINNET_USDT_JETTON_MASTER)
+- network_id: (FK to TON_MAINNET network row)
+- contract_identity: Owner-approved Mainnet USDT Jetton master (`TON_MAINNET_USDT_JETTON_MASTER`)
 - decimals: 6
-- is_native: alse
+- is_native: false
 
 ### hot_wallets
 
-- ddress / riendly_address: derived Wallet V5 R1 Mainnet (
-etworkGlobalId=-239)
-- ersion: 5R1
+- address / friendly_address: derived Wallet V5 R1 Mainnet (`networkGlobalId=-239`)
+- version: v5R1
 - signer_type: FALLBACK_ENCRYPTED
 - signer_reference: SHA-256 public key fingerprint hex (matches encrypted bundle)
 - payout_jetton_wallet_address: Owner-verified Mainnet USDT jetton wallet for hot wallet
 - status: ACTIVE
 
-See docs/PHASE_21_SIGNER_HOSTING_DECISION.md for hosting choice.
+Native gas asset remains ledger-compatible with legacy identifiers (`HOT_WALLET_TON_ASSET`) while display/canonical native = Gram/GRAM.
+
+See `docs/PHASE_21_SIGNER_HOSTING_DECISION.md` and `docs/PHASE_21_PROVISIONING_CEREMONY_PREFLIGHT.md`.

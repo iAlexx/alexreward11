@@ -1,7 +1,8 @@
 /**
  * Phase 21 — pure/source Mainnet micro-launch readiness report.
  *
- * Observation-driven. Does NOT force PASS. Typical Step 1 inputs remain BLOCKED.
+ * Observation-driven. Does NOT force PASS. Step 3 defaults are source-ready
+ * for foundations but still fail-closed for live payout.
  * No operational mutation, no Mainnet RPC, no secret disclosure.
  */
 import {
@@ -24,7 +25,13 @@ export interface Phase21ReadinessItem {
 export type Phase21WithdrawableBalanceSourceStatus =
   | 'BLOCKED_OWNER_DECISION'
   | 'OWNER_APPROVED_SOURCE'
+  | 'SOURCE_IMPLEMENTED_OWNER_APPROVED_BUT_NOT_EXECUTED'
   | 'UNKNOWN';
+
+export type Phase21AttachedGramLifecycleObservation =
+  | 'UNVERIFIED'
+  | 'ESTIMATED'
+  | 'OWNER_APPROVED';
 
 export interface Phase21ReadinessObservations {
   readonly phase21MainnetEnabled?: boolean;
@@ -64,10 +71,18 @@ export interface Phase21ReadinessObservations {
   readonly realMoneyBlockerMappingPresent?: boolean;
   readonly requireUnlock?: boolean;
   readonly workerMainnetWiringComplete?: boolean;
+  /** @deprecated Prefer mainnetForwardGramPolicyApproved (forward=1 nanogram). */
   readonly mainnetTransferGasPolicyApproved?: boolean;
+  /** Owner-approved forwardTonAtomic=1 nanogram (Phase21). */
+  readonly mainnetForwardGramPolicyApproved?: boolean;
+  readonly mainnetAttachedGramLifecycle?: Phase21AttachedGramLifecycleObservation;
   readonly mainnetJettonExternalVerified?: boolean | null;
   readonly signerHostingDecisionDocumented?: boolean;
   readonly signerHostingDecision?: string | null;
+  readonly gramNamingCompatibilityDocumented?: boolean;
+  readonly multichainWalletHardeningReady?: boolean;
+  readonly controlledProvisionToolingReady?: boolean;
+  readonly offlineMainnetCeremonyToolingReady?: boolean;
 }
 
 export interface Phase21ReadinessReport {
@@ -107,9 +122,16 @@ function isForbiddenJetton(identity: string): boolean {
   );
 }
 
+function balanceSourcePasses(balanceSource: Phase21WithdrawableBalanceSourceStatus): boolean {
+  return (
+    balanceSource === 'OWNER_APPROVED_SOURCE' ||
+    balanceSource === 'SOURCE_IMPLEMENTED_OWNER_APPROVED_BUT_NOT_EXECUTED'
+  );
+}
+
 /**
  * Build a deterministic Phase 21 readiness report from observations.
- * Defaults assume Step 1 safe-off posture (Mainnet disabled, signer absent).
+ * Defaults assume Step 3 source-ready posture (Mainnet still disabled operationally).
  */
 export function buildPhase21ReadinessReport(
   observations: Phase21ReadinessObservations = {},
@@ -125,6 +147,11 @@ export function buildPhase21ReadinessReport(
     observations.balanceSource ?? 'BLOCKED_OWNER_DECISION';
   const railwaySignerExists = observations.railwaySignerExists === true;
   const confirmedWithdrawalCount = Math.max(0, Math.trunc(observations.confirmedWithdrawalCount ?? 0));
+  const forwardApproved =
+    observations.mainnetForwardGramPolicyApproved === true ||
+    observations.mainnetTransferGasPolicyApproved === true;
+  const attachedLifecycle: Phase21AttachedGramLifecycleObservation =
+    observations.mainnetAttachedGramLifecycle ?? 'ESTIMATED';
   const items: Phase21ReadinessItem[] = [];
 
   items.push({
@@ -159,13 +186,77 @@ export function buildPhase21ReadinessReport(
 
   items.push({
     code: 'MAINNET_TRANSFER_GAS_POLICY',
-    status: observations.mainnetTransferGasPolicyApproved === true ? 'PASS' : 'BLOCKED',
-    message:
-      observations.mainnetTransferGasPolicyApproved === true
-        ? 'Owner-approved Mainnet jetton transfer gas policy configured'
-        : 'BLOCKED_OWNER_DECISION_MAINNET_TRANSFER_GAS_POLICY',
+    status: forwardApproved ? 'PASS' : 'BLOCKED',
+    message: forwardApproved
+      ? 'Owner-approved Mainnet forward GRAM policy (1 nanogram); attached remains ESTIMATED'
+      : 'BLOCKED_OWNER_DECISION_MAINNET_TRANSFER_GAS_POLICY',
     details: {
+      mainnetForwardGramPolicyApproved: forwardApproved,
       mainnetTransferGasPolicyApproved: observations.mainnetTransferGasPolicyApproved === true,
+      attachedGramLifecycle: attachedLifecycle,
+      note: 'attachedTonAtomic NOT Owner-approved; SPIKE policy must not be used by Phase21',
+    },
+  });
+
+  items.push({
+    code: 'MAINNET_ATTACHED_GRAM_POLICY',
+    status: attachedLifecycle === 'OWNER_APPROVED' ? 'PASS' : 'BLOCKED',
+    message:
+      attachedLifecycle === 'OWNER_APPROVED'
+        ? 'Mainnet attached GRAM Owner-approved'
+        : 'OWNER_DECISION_REQUIRED: Mainnet attached GRAM lifecycle is ESTIMATED (not activated)',
+    details: {
+      mainnetAttachedGramLifecycle: attachedLifecycle,
+      livePayoutOnly: true,
+    },
+  });
+
+  items.push({
+    code: 'GRAM_NAMING_COMPATIBILITY',
+    status: observations.gramNamingCompatibilityDocumented === false ? 'BLOCKED' : 'PASS',
+    message:
+      observations.gramNamingCompatibilityDocumented === false
+        ? 'GRAM naming compatibility not documented'
+        : 'GRAM native display/canonical documented; chain remains TON_MAINNET (not renamed)',
+    details: {
+      gramNamingCompatibilityDocumented: observations.gramNamingCompatibilityDocumented !== false,
+    },
+  });
+
+  items.push({
+    code: 'MULTICHAIN_WALLET_HARDENING',
+    status: observations.multichainWalletHardeningReady === false ? 'BLOCKED' : 'PASS',
+    message:
+      observations.multichainWalletHardeningReady === false
+        ? 'Multichain wallet hardening incomplete (TON Connect Mainnet-only expected)'
+        : 'TON Connect Mainnet-only payout wallet hardening documented/source-ready',
+    details: {
+      multichainWalletHardeningReady: observations.multichainWalletHardeningReady !== false,
+    },
+  });
+
+  items.push({
+    code: 'CONTROLLED_PROVISION_TOOLING',
+    status: observations.controlledProvisionToolingReady === false ? 'BLOCKED' : 'PASS',
+    message:
+      observations.controlledProvisionToolingReady === false
+        ? 'Controlled Mainnet Available provision tooling not ready'
+        : 'Controlled Mainnet Available provision tooling present (disabled by default; not executed)',
+    details: {
+      controlledProvisionToolingReady: observations.controlledProvisionToolingReady !== false,
+    },
+  });
+
+  items.push({
+    code: 'OFFLINE_MAINNET_CEREMONY_TOOLING',
+    status: observations.offlineMainnetCeremonyToolingReady === false ? 'BLOCKED' : 'PASS',
+    message:
+      observations.offlineMainnetCeremonyToolingReady === false
+        ? 'Offline Mainnet signer/Hot Wallet ceremony tooling incomplete'
+        : 'Offline Mainnet ceremony CLI/reference present (not executed in Step 3)',
+    details: {
+      offlineMainnetCeremonyToolingReady:
+        observations.offlineMainnetCeremonyToolingReady !== false,
     },
   });
 
@@ -193,7 +284,7 @@ export function buildPhase21ReadinessReport(
     items.push({
       code: 'SIGNER_HOSTING_DECISION',
       status: 'PASS',
-      message: `Signer hosting decision documented (${observations.signerHostingDecision ?? 'see docs/PHASE_21_SIGNER_HOSTING_DECISION.md'})`,
+      message: `Signer hosting decision documented (${observations.signerHostingDecision ?? 'DEDICATED_CONTROLLED_HOST'})`,
       details: { signerHostingDecision: observations.signerHostingDecision ?? null },
     });
   } else {
@@ -204,12 +295,13 @@ export function buildPhase21ReadinessReport(
     });
   }
 
+  // Safe-off expected for Step 3: false → PASS; true → WARN (gate open, still not live-ready alone).
   items.push({
     code: 'MAINNET_EXPLICIT_GATE',
-    status: phase21MainnetEnabled ? 'WARN' : 'BLOCKED',
+    status: phase21MainnetEnabled ? 'WARN' : 'PASS',
     message: phase21MainnetEnabled
       ? 'PHASE21_MAINNET_ENABLED=true (Owner gate open; other blockers may remain)'
-      : 'PHASE21_MAINNET_ENABLED is false/unset (default safe-off)',
+      : 'PHASE21_MAINNET_ENABLED is false/unset (safe-off expected)',
     details: { phase21MainnetEnabled },
   });
 
@@ -310,7 +402,7 @@ export function buildPhase21ReadinessReport(
     items.push({
       code: 'SIGNER_LOCKED',
       status: 'WARN',
-      message: 'Signer observed unlocked; Step 1 expects LOCKED until Owner ceremony',
+      message: 'Signer observed unlocked; Phase21 expects LOCKED until Owner ceremony',
     });
   } else {
     items.push({
@@ -368,22 +460,23 @@ export function buildPhase21ReadinessReport(
     items.push({
       code: 'TON_GAS',
       status: 'PASS',
-      message: 'TON gas observed for Hot Wallet',
+      message: 'GRAM gas observed for Hot Wallet (native display GRAM; chain remains TON)',
     });
   } else {
     items.push({
       code: 'TON_GAS',
       status: 'BLOCKED',
-      message: 'TON gas funding not observed / not authorized in Step 1',
+      message: 'GRAM gas funding not observed / not authorized in Step 3',
     });
   }
 
+  // Safe-off expected: false → PASS; true → WARN.
   items.push({
     code: 'REAL_CHAIN_GATE',
-    status: realChainEnabled ? 'WARN' : 'BLOCKED',
+    status: realChainEnabled ? 'WARN' : 'PASS',
     message: realChainEnabled
       ? 'Real chain enabled (still fail-closed on other gates)'
-      : 'WITHDRAWAL_REAL_CHAIN_ENABLED is false (default)',
+      : 'WITHDRAWAL_REAL_CHAIN_ENABLED is false (safe-off expected)',
     details: { realChainEnabled },
   });
 
@@ -480,7 +573,7 @@ export function buildPhase21ReadinessReport(
       items.push({
         code,
         status: 'WARN',
-        message: `${label} policy state not observed in Step 1 source readiness`,
+        message: `${label} policy state not observed in Step 3 source readiness`,
       });
     }
   }
@@ -540,16 +633,18 @@ export function buildPhase21ReadinessReport(
     message:
       observations.realMoneyBlockerMappingPresent === false
         ? 'docs/PHASE_21_REAL_MONEY_BLOCKER_MAPPING.md missing'
-        : 'Phase20 real-money blocker mapping documented (gaps remain OPEN)',
+        : 'Phase20 real-money blocker mapping documented (AdsGram gaps remain OPEN)',
   });
 
   items.push({
     code: 'WITHDRAWABLE_BALANCE_SOURCE',
-    status: balanceSource === 'OWNER_APPROVED_SOURCE' ? 'PASS' : 'BLOCKED',
+    status: balanceSourcePasses(balanceSource) ? 'PASS' : 'BLOCKED',
     message:
-      balanceSource === 'OWNER_APPROVED_SOURCE'
-        ? 'Controlled Mainnet withdrawable balance source Owner-approved'
-        : 'CONTROLLED_MAINNET_WITHDRAWABLE_BALANCE_SOURCE=BLOCKED_OWNER_DECISION',
+      balanceSource === 'SOURCE_IMPLEMENTED_OWNER_APPROVED_BUT_NOT_EXECUTED'
+        ? 'CONTROLLED_MAINNET_WITHDRAWABLE_BALANCE_SOURCE=SOURCE_IMPLEMENTED_OWNER_APPROVED_BUT_NOT_EXECUTED'
+        : balanceSource === 'OWNER_APPROVED_SOURCE'
+          ? 'Controlled Mainnet withdrawable balance source Owner-approved'
+          : 'CONTROLLED_MAINNET_WITHDRAWABLE_BALANCE_SOURCE=BLOCKED_OWNER_DECISION',
     details: { balanceSource },
   });
 
@@ -608,7 +703,7 @@ export function buildPhase21ReadinessReport(
   };
 }
 
-/** Step 1 default observations: safe-off / not provisioned → overall BLOCKED. */
+/** Step 3 default observations: source-ready foundations; external/ops still blocked; no live payout. */
 export function defaultPhase21Step1Observations(): Phase21ReadinessObservations {
   return {
     phase21MainnetEnabled: false,
@@ -641,14 +736,20 @@ export function defaultPhase21Step1Observations(): Phase21ReadinessObservations 
     reconciliationHealthy: null,
     ledgerInvariantsHealthy: null,
     confirmedWithdrawalCount: 0,
-    balanceSource: 'BLOCKED_OWNER_DECISION',
+    balanceSource: 'SOURCE_IMPLEMENTED_OWNER_APPROVED_BUT_NOT_EXECUTED',
     railwaySignerExists: false,
     realMoneyBlockerMappingPresent: true,
     requireUnlock: true,
     workerMainnetWiringComplete: true,
-    mainnetTransferGasPolicyApproved: false,
+    mainnetTransferGasPolicyApproved: true,
+    mainnetForwardGramPolicyApproved: true,
+    mainnetAttachedGramLifecycle: 'ESTIMATED',
     mainnetJettonExternalVerified: null,
     signerHostingDecisionDocumented: true,
-    signerHostingDecision: 'DEDICATED_HOST_RECOMMENDED',
+    signerHostingDecision: 'DEDICATED_CONTROLLED_HOST',
+    gramNamingCompatibilityDocumented: true,
+    multichainWalletHardeningReady: true,
+    controlledProvisionToolingReady: true,
+    offlineMainnetCeremonyToolingReady: true,
   };
 }

@@ -677,6 +677,7 @@ export type {
   Phase21ReadinessReport,
   Phase21ReadinessStatus,
   Phase21WithdrawableBalanceSourceStatus,
+  Phase21AttachedGramLifecycleObservation,
 } from './phase21-readiness.js';
 
 export {
