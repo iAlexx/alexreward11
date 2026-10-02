@@ -2,6 +2,7 @@
  * Read-only TonAPI Mainnet client for Phase 21 ceremony probes.
  * Never exposes sendBoc / broadcast.
  */
+import { toCanonicalFriendlyAddress } from './address.js';
 import { TON_MAINNET_NETWORK_GLOBAL_ID } from './chain-provider.js';
 import {
   asRecord,
@@ -10,6 +11,7 @@ import {
   normalizeMainnetProviderHost,
   redactProviderErrorMessage,
   resolveExpectedMainnetGlobalId,
+  type MainnetProviderVerificationClass,
 } from './mainnet-provider-http.js';
 
 export interface TonapiMainnetReadonlyConfig {
@@ -17,6 +19,16 @@ export interface TonapiMainnetReadonlyConfig {
   readonly apiKey?: string | null;
   readonly fetchImpl?: typeof fetch;
   readonly expectedNetworkGlobalId?: number | null;
+}
+
+export interface TonapiJettonMetadataResult {
+  readonly ok: boolean;
+  readonly symbol: string | null;
+  readonly decimals: number | null;
+  readonly observedJettonMaster: string | null;
+  readonly metadataSource: string | null;
+  readonly message: string;
+  readonly providerHost: string;
 }
 
 export class TonapiMainnetReadonlyClient {
@@ -57,7 +69,8 @@ export class TonapiMainnetReadonlyClient {
 
   /**
    * Probe Mainnet identity via /v2/status and optional /v2/blockchain/config.
-   * If body cannot prove -239, require expectedNetworkGlobalId=-239 + mainnet host + healthy status.
+   * PROVEN_FROM_CHAIN_RESPONSE when body proves -239; otherwise
+   * VERIFIED_PROVIDER_MAINNET_ENDPOINT when allowlisted URL + status + expected=-239.
    */
   async probeNetworkIdentity(): Promise<{
     ok: boolean;
@@ -65,6 +78,7 @@ export class TonapiMainnetReadonlyClient {
     message: string;
     providerHost: string;
     verificationMethod: string;
+    verificationClass: MainnetProviderVerificationClass;
   }> {
     try {
       const statusBody = await this.get('/v2/status', 'TonapiMainnet status');
@@ -76,6 +90,7 @@ export class TonapiMainnetReadonlyClient {
           message: 'TonAPI REST API is offline',
           providerHost: this.providerHost,
           verificationMethod: 'tonapi_status_offline',
+          verificationClass: 'INCOMPLETE',
         };
       }
 
@@ -101,6 +116,7 @@ export class TonapiMainnetReadonlyClient {
               message: 'TonAPI blockchain config indicates Testnet (-3)',
               providerHost: this.providerHost,
               verificationMethod: 'tonapi_blockchain_config',
+              verificationClass: 'INCOMPLETE',
             };
           }
         }
@@ -115,6 +131,7 @@ export class TonapiMainnetReadonlyClient {
           message: 'TonAPI Mainnet identity proven from blockchain config (-239)',
           providerHost: this.providerHost,
           verificationMethod: 'tonapi_blockchain_config',
+          verificationClass: 'PROVEN_FROM_CHAIN_RESPONSE',
         };
       }
 
@@ -126,6 +143,7 @@ export class TonapiMainnetReadonlyClient {
             'TonAPI status healthy but -239 not proven from body and expectedNetworkGlobalId=-239 not configured',
           providerHost: this.providerHost,
           verificationMethod: 'tonapi_status_incomplete',
+          verificationClass: 'INCOMPLETE',
         };
       }
 
@@ -133,9 +151,10 @@ export class TonapiMainnetReadonlyClient {
         ok: true,
         networkGlobalId: TON_MAINNET_NETWORK_GLOBAL_ID,
         message:
-          'TonAPI Mainnet identity accepted via mainnet URL assert + /v2/status health + expectedNetworkGlobalId=-239',
+          'TonAPI Mainnet identity accepted via allowlisted URL + /v2/status health + expectedNetworkGlobalId=-239',
         providerHost: this.providerHost,
         verificationMethod: 'tonapi_url+status+expectedNetworkGlobalId',
+        verificationClass: 'VERIFIED_PROVIDER_MAINNET_ENDPOINT',
       };
     } catch (error: unknown) {
       return {
@@ -147,17 +166,13 @@ export class TonapiMainnetReadonlyClient {
         ),
         providerHost: this.providerHost,
         verificationMethod: 'tonapi_status_failed',
+        verificationClass: 'INCOMPLETE',
       };
     }
   }
 
-  async getJettonMetadata(jettonMaster: string): Promise<{
-    ok: boolean;
-    symbol: string | null;
-    decimals: number | null;
-    message: string;
-    providerHost: string;
-  }> {
+  async getJettonMetadata(jettonMaster: string): Promise<TonapiJettonMetadataResult> {
+    const requestedCanonical = toCanonicalFriendlyAddress(jettonMaster);
     try {
       const body = await this.get(
         `/v2/jettons/${encodeURIComponent(jettonMaster)}`,
@@ -175,11 +190,25 @@ export class TonapiMainnetReadonlyClient {
       } else if (typeof meta.decimals === 'string' && /^\d+$/.test(meta.decimals)) {
         decimals = Number(meta.decimals);
       }
+
+      const responseAddress =
+        typeof record.address === 'string'
+          ? record.address
+          : typeof meta.address === 'string'
+            ? meta.address
+            : null;
+      const observedJettonMaster =
+        (responseAddress !== null
+          ? toCanonicalFriendlyAddress(responseAddress)
+          : null) ?? requestedCanonical;
+
       if (symbol === null || decimals === null) {
         return {
           ok: false,
           symbol,
           decimals,
+          observedJettonMaster,
+          metadataSource: null,
           message: 'TonAPI jetton metadata missing symbol/decimals',
           providerHost: this.providerHost,
         };
@@ -188,6 +217,8 @@ export class TonapiMainnetReadonlyClient {
         ok: true,
         symbol,
         decimals,
+        observedJettonMaster,
+        metadataSource: 'tonapi_v2_jettons.metadata',
         message: 'TonAPI jetton metadata ok',
         providerHost: this.providerHost,
       };
@@ -196,6 +227,8 @@ export class TonapiMainnetReadonlyClient {
         ok: false,
         symbol: null,
         decimals: null,
+        observedJettonMaster: requestedCanonical,
+        metadataSource: null,
         message: redactProviderErrorMessage(
           error instanceof Error ? error.message : String(error),
           this.baseUrl,

@@ -134,6 +134,8 @@ describe('phase21 external probes (read-only)', () => {
           ok: true,
           symbol: 'USDT',
           decimals: 6,
+          observedJettonMaster: VALID_MASTER,
+          metadataSource: 'fixture',
           message: 'ok',
           providerHost: normalizeProviderHost(input.providerUrl),
         };
@@ -167,6 +169,8 @@ describe('phase21 external probes (read-only)', () => {
           ok: true,
           symbol: 'USDT',
           decimals: 6,
+          observedJettonMaster: VALID_MASTER,
+          metadataSource: 'fixture',
           message: 'ok',
           providerHost: normalizeProviderHost(input.providerUrl),
         };
@@ -215,6 +219,8 @@ describe('phase21 external probes (read-only)', () => {
             ok: true,
             symbol: 'USDT',
             decimals: 9,
+            observedJettonMaster: VALID_MASTER,
+            metadataSource: 'fixture',
             message: 'wrong decimals',
             providerHost: normalizeProviderHost(input.providerUrl),
           };
@@ -223,6 +229,8 @@ describe('phase21 external probes (read-only)', () => {
           ok: true,
           symbol: 'USDT',
           decimals: 6,
+          observedJettonMaster: VALID_MASTER,
+          metadataSource: 'fixture',
           message: 'ok',
           providerHost: normalizeProviderHost(input.providerUrl),
         };
@@ -236,6 +244,90 @@ describe('phase21 external probes (read-only)', () => {
       metadataAdapter,
     });
     expect(result.ok).toBe(false);
-    expect(result.code).toBe('USDT_METADATA_MISMATCH');
+    expect(result.incomplete).toBe(true);
+    expect(result.code).toBe('USDT_METADATA_INCOMPLETE');
   });
+
+  it('verifyMainnetUsdtWithTwoProviders incomplete when only one metadata trustworthy', async () => {
+    const identityAdapter: MainnetIdentityProbeAdapter = {
+      async probe(input) {
+        return {
+          ok: true,
+          networkGlobalId: -239,
+          message: 'mainnet',
+          providerHost: normalizeProviderHost(input.providerUrl),
+        };
+      },
+    };
+    const metadataAdapter: UsdtJettonMetadataProbeAdapter = {
+      async probe(input) {
+        if (input.providerKind === 'tonapi') {
+          return {
+            ok: false,
+            symbol: null,
+            decimals: null,
+            observedJettonMaster: null,
+            message: 'down',
+            providerHost: normalizeProviderHost(input.providerUrl),
+          };
+        }
+        return {
+          ok: true,
+          symbol: 'USDT',
+          decimals: 6,
+          observedJettonMaster: VALID_MASTER,
+          metadataSource: 'fixture',
+          message: 'ok',
+          providerHost: normalizeProviderHost(input.providerUrl),
+        };
+      },
+    };
+    const result = await verifyMainnetUsdtWithTwoProviders({
+      primary: { kind: 'toncenter', url: 'https://toncenter.example' },
+      secondary: { kind: 'tonapi', url: 'https://tonapi.example' },
+      jettonMaster: VALID_MASTER,
+      identityAdapter,
+      metadataAdapter,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.incomplete).toBe(true);
+    expect(result.code).toBe('USDT_METADATA_INCOMPLETE');
+  });
+
+  it('verifyMainnetUsdtWithTwoProviders fails on observed master mismatch', async () => {
+    const identityAdapter: MainnetIdentityProbeAdapter = {
+      async probe(input) {
+        return {
+          ok: true,
+          networkGlobalId: -239,
+          message: 'mainnet',
+          providerHost: normalizeProviderHost(input.providerUrl),
+        };
+      },
+    };
+    const other = 'EQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAM9c';
+    const metadataAdapter: UsdtJettonMetadataProbeAdapter = {
+      async probe(input) {
+        return {
+          ok: true,
+          symbol: 'USDT',
+          decimals: 6,
+          observedJettonMaster: input.providerKind === 'tonapi' ? other : VALID_MASTER,
+          metadataSource: 'fixture',
+          message: 'ok',
+          providerHost: normalizeProviderHost(input.providerUrl),
+        };
+      },
+    };
+    const result = await verifyMainnetUsdtWithTwoProviders({
+      primary: { kind: 'toncenter', url: 'https://toncenter.example' },
+      secondary: { kind: 'tonapi', url: 'https://tonapi.example' },
+      jettonMaster: VALID_MASTER,
+      identityAdapter,
+      metadataAdapter,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe('OBSERVED_JETTON_MASTER_MISMATCH');
+  });
+
 });

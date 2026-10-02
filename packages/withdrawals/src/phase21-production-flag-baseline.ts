@@ -12,6 +12,10 @@ import {
   Phase21CeremonyApplyGateError,
   type Phase21CeremonyApplyGateClient,
 } from './phase21-ceremony-apply-gates.js';
+import {
+  Phase21CeremonyOwnerAdminError,
+  resolvePhase21CeremonyOwnerAdmin,
+} from './phase21-ceremony-owner-admin.js';
 
 export type Phase21ProductionFlagBaselineMode = 'PLAN' | 'APPLY' | 'REFUSED';
 
@@ -59,8 +63,8 @@ export interface Phase21ProductionFlagBaselineClient {
 
 export interface Phase21ProductionFlagBaselineApplyInput {
   readonly reason: string;
-  /** Explicit; null allowed (SYSTEM actor / NULL changed_by_admin_id). */
-  readonly changedByAdminId: string | null;
+  /** Required ACTIVE OWNER admin — SYSTEM/null forbidden for production ceremony. */
+  readonly changedByAdminId: string;
 }
 
 /** Advisory lock class for production flag baseline APPLY serialization. */
@@ -121,7 +125,7 @@ async function insertFlagWithHistory(
     readonly flagKey: string;
     readonly desiredEnabled: boolean;
     readonly reason: string;
-    readonly changedByAdminId: string | null;
+    readonly changedByAdminId: string;
   },
 ): Promise<string> {
   const inserted = await client.query<{ id: string }>(
@@ -142,7 +146,7 @@ async function insertFlagWithHistory(
     [flagId, input.desiredEnabled, input.reason, input.changedByAdminId],
   );
 
-  const actorType = input.changedByAdminId === null ? 'SYSTEM' : 'ADMIN';
+  const actorType = 'ADMIN';
   await client.query(
     `INSERT INTO audit_logs (
        admin_user_id, actor_type, action_type, resource_type, resource_id,
@@ -211,6 +215,26 @@ export async function applyPhase21ProductionFlagBaseline(
     };
   }
 
+  let ownerAdminUserId: string;
+  try {
+    const owner = await resolvePhase21CeremonyOwnerAdmin(client, input.changedByAdminId);
+    ownerAdminUserId = owner.adminUserId;
+  } catch (error: unknown) {
+    const code =
+      error instanceof Phase21CeremonyOwnerAdminError ? error.code : 'OWNER_ADMIN_REQUIRED';
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      mode: 'REFUSED',
+      applyAuthorized: false,
+      applied: false,
+      rows: [],
+      conflicts: [],
+      createdCount: 0,
+      notes: [`APPLY refused: ${message}`],
+      refuseCode: code,
+    };
+  }
+
   await client.query('BEGIN');
   try {
     await client.query(
@@ -244,7 +268,7 @@ export async function applyPhase21ProductionFlagBaseline(
         flagKey: row.flagKey,
         desiredEnabled: row.desiredEnabled,
         reason,
-        changedByAdminId: input.changedByAdminId,
+        changedByAdminId: ownerAdminUserId,
       });
       createdCount += 1;
     }

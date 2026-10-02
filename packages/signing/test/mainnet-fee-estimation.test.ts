@@ -26,11 +26,16 @@ describe('mainnet fee estimation', () => {
     });
     expect(result.broadcast).toBe(false);
     expect(result.mode).toBe('MOCK');
-    expect(result.forwardTonAtomic).toBe(PHASE21_OWNER_APPROVED_FORWARD_GRAM_ATOMIC);
-    expect(result.attachedTonAtomicEstimated).toBe(60_000_000n);
+    expect(result.forwardGramAtomic).toBe(PHASE21_OWNER_APPROVED_FORWARD_GRAM_ATOMIC);
+    expect(result.candidateAttachedGramAtomic).toBe(60_000_000n);
+    expect(result.estimatedNetworkFeeAtomic).toBeNull();
     expect(result.attachedGramLifecycle).toBe(PHASE21_ATTACHED_GRAM_POLICY_STATUS);
     expect(result.attachedGramLifecycle).toBe('ESTIMATED');
-    expect(result.estimatedTotalNativeAtomic).toBe(60_000_001n);
+    expect(result.estimatedTotalNativeExposureAtomic).toBe(60_000_001n);
+    // fee not double-counted into exposure
+    expect(result.estimatedTotalNativeExposureAtomic).toBe(
+      (result.candidateAttachedGramAtomic ?? 0n) + result.forwardGramAtomic,
+    );
   });
 
   it('rejects non-Mainnet input', async () => {
@@ -71,7 +76,7 @@ describe('mainnet fee estimation', () => {
     expect(result.mode).toBe('UNAVAILABLE');
     expect(result.broadcast).toBe(false);
     expect(result.attachedGramLifecycle).toBe('ESTIMATED');
-    expect(result.attachedTonAtomicEstimated).toBeNull();
+    expect(result.candidateAttachedGramAtomic).toBeNull();
   });
 
   it('LIVE=1 with failing provider returns UNAVAILABLE', async () => {
@@ -92,11 +97,16 @@ describe('mainnet fee estimation', () => {
     expect(result.broadcast).toBe(false);
   });
 
-  it('LIVE=1 with injected Mainnet provider returns LIVE_READ_ONLY provenance', async () => {
+  it('LIVE=1 with injected Mainnet provider returns LIVE_READ_ONLY without double-counting fee', async () => {
     process.env.PHASE21_FEE_ESTIMATION_LIVE = '1';
     const provider: ReadOnlyMainnetFeeProvider = {
       async estimate() {
         return {
+          estimatedNetworkFeeAtomic: 1_000n,
+          candidateAttachedGramAtomic: 50_000_000n,
+          forwardGramAtomic: 1n,
+          estimatedTotalNativeExposureAtomic: 50_000_001n,
+          emulationMethod: 'toncenter_estimateFee_unsigned_jetton_body',
           attachedTonAtomicEstimated: 50_000_000n,
           estimatedFeeNativeAtomic: 1_000n,
           providerKind: 'toncenter',
@@ -122,6 +132,9 @@ describe('mainnet fee estimation', () => {
     expect(result.estimateMethod).toBe('estimateFee');
     expect(result.walletVersion).toBe('v5R1');
     expect(result.observedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
-    expect(result.attachedTonAtomicEstimated).toBe(50_000_000n);
+    expect(result.candidateAttachedGramAtomic).toBe(50_000_000n);
+    expect(result.estimatedNetworkFeeAtomic).toBe(1_000n);
+    expect(result.estimatedTotalNativeExposureAtomic).toBe(50_000_001n);
+    expect(result.estimatedTotalNativeExposureAtomic).not.toBe(50_001_001n);
   });
 });

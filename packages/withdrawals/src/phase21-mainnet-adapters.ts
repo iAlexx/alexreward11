@@ -105,6 +105,7 @@ export function createPhase21MainnetExternalAdapters(config: Phase21MainnetExter
         networkGlobalId: result.networkGlobalId,
         message: result.message,
         providerHost: result.providerHost,
+        verificationClass: result.verificationClass,
       };
     },
   };
@@ -112,7 +113,16 @@ export function createPhase21MainnetExternalAdapters(config: Phase21MainnetExter
   const metadata: UsdtJettonMetadataProbeAdapter = {
     async probe(input) {
       const client = clientForKind(byKind, input.providerKind);
-      return client.getJettonMetadata(input.jettonMaster);
+      const result = await client.getJettonMetadata(input.jettonMaster);
+      return {
+        ok: result.ok,
+        symbol: result.symbol,
+        decimals: result.decimals,
+        observedJettonMaster: result.observedJettonMaster,
+        metadataSource: result.metadataSource,
+        message: result.message,
+        providerHost: result.providerHost,
+      };
     },
   };
 

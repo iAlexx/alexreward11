@@ -1,20 +1,23 @@
 /**
  * Read-only Toncenter Mainnet client for Phase 21 ceremony probes.
  * Never exposes sendBoc / broadcast.
+ * USDT metadata: indexed v3 jetton/masters (symbol+decimals) + get_jetton_data reachability.
  */
 import { Address, beginCell, Cell } from '@ton/core';
 
+import { toCanonicalFriendlyAddress, tonAddressesEqual } from './address.js';
 import { TON_MAINNET_NETWORK_GLOBAL_ID } from './chain-provider.js';
 import {
   asRecord,
   assertMainnetProviderUrl,
-  appendApiKey,
   mainnetFetchJson,
   normalizeMainnetProviderHost,
   redactProviderErrorMessage,
   resolveExpectedMainnetGlobalId,
+  type MainnetProviderVerificationClass,
 } from './mainnet-provider-http.js';
 import { parseStackNumber } from './provider-http.js';
+import { deriveTonCenterV3BaseUrl } from './toncenter-testnet-provider.js';
 
 export interface ToncenterMainnetReadonlyConfig {
   readonly baseUrl: string;
@@ -22,6 +25,16 @@ export interface ToncenterMainnetReadonlyConfig {
   readonly fetchImpl?: typeof fetch;
   /** Required to claim -239 when response body cannot prove it. */
   readonly expectedNetworkGlobalId?: number | null;
+}
+
+export interface ToncenterJettonMetadataResult {
+  readonly ok: boolean;
+  readonly symbol: string | null;
+  readonly decimals: number | null;
+  readonly observedJettonMaster: string | null;
+  readonly metadataSource: string | null;
+  readonly message: string;
+  readonly providerHost: string;
 }
 
 type StackEntry = readonly [unknown, unknown];
@@ -75,8 +88,140 @@ function assertOkTonCenterMainnetBody(
   }
 }
 
+function readStringField(record: Record<string, unknown>, key: string): string | null {
+  const value = record[key];
+  if (typeof value === 'string' && value.trim() !== '') return value.trim();
+  return null;
+}
+
+function readDecimals(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value)) {
+    return value;
+  }
+  if (typeof value === 'string' && /^\d+$/.test(value.trim())) {
+    return Number(value.trim());
+  }
+  return null;
+}
+
+/**
+ * Parse symbol + decimals from Toncenter v3 indexed jetton/masters payload.
+ * Sources (first wins, no invention): token_info[], jetton_content, extra.
+ */
+export function parseToncenterV3JettonIndexedMetadata(body: unknown): {
+  symbol: string | null;
+  decimals: number | null;
+  observedAddress: string | null;
+  metadataSource: string | null;
+} {
+  if (body === null || typeof body !== 'object') {
+    return { symbol: null, decimals: null, observedAddress: null, metadataSource: null };
+  }
+  const root = body as Record<string, unknown>;
+  const masters = Array.isArray(root.jetton_masters) ? root.jetton_masters : [];
+  const firstMaster =
+    masters.length > 0 && masters[0] !== null && typeof masters[0] === 'object'
+      ? (masters[0] as Record<string, unknown>)
+      : null;
+  const observedAddress =
+    firstMaster !== null ? readStringField(firstMaster, 'address') : null;
+
+  let symbol: string | null = null;
+  let decimals: number | null = null;
+  let metadataSource: string | null = null;
+
+  const metadataRoot =
+    root.metadata !== null && typeof root.metadata === 'object' && !Array.isArray(root.metadata)
+      ? (root.metadata as Record<string, unknown>)
+      : null;
+
+  const metaKeys: string[] = [];
+  if (observedAddress !== null) metaKeys.push(observedAddress);
+  if (metadataRoot !== null) {
+    for (const key of Object.keys(metadataRoot)) {
+      if (!metaKeys.includes(key)) metaKeys.push(key);
+    }
+  }
+
+  for (const key of metaKeys) {
+    if (metadataRoot === null) break;
+    const entry = metadataRoot[key];
+    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    const entryRec = entry as Record<string, unknown>;
+    const tokenInfo = Array.isArray(entryRec.token_info) ? entryRec.token_info : [];
+    for (const info of tokenInfo) {
+      if (info === null || typeof info !== 'object' || Array.isArray(info)) continue;
+      const infoRec = info as Record<string, unknown>;
+      if (infoRec.valid === false) continue;
+      const sym = readStringField(infoRec, 'symbol');
+      const extra =
+        infoRec.extra !== null && typeof infoRec.extra === 'object' && !Array.isArray(infoRec.extra)
+          ? (infoRec.extra as Record<string, unknown>)
+          : null;
+      const dec =
+        readDecimals(infoRec.decimals) ??
+        (extra !== null ? readDecimals(extra.decimals) : null);
+      if (sym !== null && dec !== null) {
+        return {
+          symbol: sym,
+          decimals: dec,
+          observedAddress,
+          metadataSource: 'toncenter_v3_metadata.token_info',
+        };
+      }
+      if (symbol === null && sym !== null) {
+        symbol = sym;
+        metadataSource = 'toncenter_v3_metadata.token_info.partial';
+      }
+      if (decimals === null && dec !== null) {
+        decimals = dec;
+        metadataSource = metadataSource ?? 'toncenter_v3_metadata.token_info.partial';
+      }
+    }
+  }
+
+  if (firstMaster !== null) {
+    const content = firstMaster.jetton_content;
+    if (content !== null && typeof content === 'object' && !Array.isArray(content)) {
+      const contentRec = content as Record<string, unknown>;
+      const sym = readStringField(contentRec, 'symbol');
+      const dec = readDecimals(contentRec.decimals);
+      if (symbol === null && sym !== null) {
+        symbol = sym;
+        metadataSource = 'toncenter_v3_jetton_content';
+      }
+      if (decimals === null && dec !== null) {
+        decimals = dec;
+        metadataSource = metadataSource ?? 'toncenter_v3_jetton_content';
+      }
+      const extra =
+        contentRec.extra !== null &&
+        typeof contentRec.extra === 'object' &&
+        !Array.isArray(contentRec.extra)
+          ? (contentRec.extra as Record<string, unknown>)
+          : null;
+      if (decimals === null && extra !== null) {
+        const extraDec = readDecimals(extra.decimals);
+        if (extraDec !== null) {
+          decimals = extraDec;
+          metadataSource = metadataSource ?? 'toncenter_v3_jetton_content.extra';
+        }
+      }
+    }
+  }
+
+  if (symbol !== null && decimals !== null && metadataSource === null) {
+    metadataSource = 'toncenter_v3_indexed';
+  }
+  if (symbol === null || decimals === null) {
+    return { symbol, decimals, observedAddress, metadataSource: null };
+  }
+  return { symbol, decimals, observedAddress, metadataSource };
+}
+
 export class ToncenterMainnetReadonlyClient {
   readonly baseUrl: string;
+  readonly v3BaseUrl: string;
   readonly providerHost: string;
   private readonly apiKey: string | null;
   private readonly fetchImpl: typeof fetch;
@@ -84,6 +229,7 @@ export class ToncenterMainnetReadonlyClient {
 
   constructor(config: ToncenterMainnetReadonlyConfig) {
     this.baseUrl = assertMainnetProviderUrl(config.baseUrl, 'ToncenterMainnet');
+    this.v3BaseUrl = deriveTonCenterV3BaseUrl(this.baseUrl);
     this.providerHost = normalizeMainnetProviderHost(this.baseUrl);
     this.apiKey = config.apiKey?.trim() || null;
     this.fetchImpl = config.fetchImpl ?? fetch;
@@ -92,12 +238,19 @@ export class ToncenterMainnetReadonlyClient {
     );
   }
 
+  private headers(json = false): Record<string, string> {
+    const headers: Record<string, string> = { accept: 'application/json' };
+    if (json) headers['content-type'] = 'application/json';
+    if (this.apiKey !== null) headers['X-API-Key'] = this.apiKey;
+    return headers;
+  }
+
   private async get(method: string, context: string): Promise<unknown> {
-    const url = appendApiKey(`${this.baseUrl}/${method}`, this.apiKey);
+    const url = `${this.baseUrl}/${method}`;
     const body = await mainnetFetchJson(
       this.fetchImpl,
       url,
-      { method: 'GET' },
+      { method: 'GET', headers: this.headers() },
       context,
       this.baseUrl,
     );
@@ -105,18 +258,29 @@ export class ToncenterMainnetReadonlyClient {
     return body.result;
   }
 
+  private async getV3(pathWithQuery: string, context: string): Promise<unknown> {
+    const url = `${this.v3BaseUrl}${pathWithQuery.startsWith('/') ? pathWithQuery : `/${pathWithQuery}`}`;
+    return mainnetFetchJson(
+      this.fetchImpl,
+      url,
+      { method: 'GET', headers: this.headers() },
+      context,
+      this.baseUrl,
+    );
+  }
+
   private async post(
     method: string,
     payload: Record<string, unknown>,
     context: string,
   ): Promise<unknown> {
-    const url = appendApiKey(`${this.baseUrl}/${method}`, this.apiKey);
+    const url = `${this.baseUrl}/${method}`;
     const body = await mainnetFetchJson(
       this.fetchImpl,
       url,
       {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: this.headers(true),
         body: JSON.stringify(payload),
       },
       context,
@@ -140,8 +304,10 @@ export class ToncenterMainnetReadonlyClient {
   }
 
   /**
-   * Probe Mainnet identity. getMasterchainInfo does not return -239 in body;
-   * PASS requires healthy response + mainnet URL assert + expectedNetworkGlobalId=-239.
+   * Probe Mainnet identity.
+   * Verification class: VERIFIED_PROVIDER_MAINNET_ENDPOINT =
+   *   url allowlist + getMasterchainInfo health + expectedNetworkGlobalId=-239
+   * (getMasterchainInfo does not return -239 in body).
    */
   async probeNetworkIdentity(): Promise<{
     ok: boolean;
@@ -149,6 +315,7 @@ export class ToncenterMainnetReadonlyClient {
     message: string;
     providerHost: string;
     verificationMethod: string;
+    verificationClass: MainnetProviderVerificationClass;
   }> {
     try {
       const result = await this.get('getMasterchainInfo', 'ToncenterMainnet getMasterchainInfo');
@@ -161,15 +328,17 @@ export class ToncenterMainnetReadonlyClient {
             'Toncenter getMasterchainInfo healthy but expectedNetworkGlobalId=-239 not configured; refusing hostname-only PASS',
           providerHost: this.providerHost,
           verificationMethod: 'toncenter_getMasterchainInfo_incomplete',
+          verificationClass: 'INCOMPLETE',
         };
       }
       return {
         ok: true,
         networkGlobalId: TON_MAINNET_NETWORK_GLOBAL_ID,
         message:
-          'Toncenter Mainnet identity accepted via mainnet URL assert + getMasterchainInfo health + expectedNetworkGlobalId=-239',
+          'Toncenter Mainnet identity accepted via allowlisted URL + getMasterchainInfo health + expectedNetworkGlobalId=-239',
         providerHost: this.providerHost,
         verificationMethod: 'toncenter_url+getMasterchainInfo+expectedNetworkGlobalId',
+        verificationClass: 'VERIFIED_PROVIDER_MAINNET_ENDPOINT',
       };
     } catch (error: unknown) {
       return {
@@ -181,36 +350,95 @@ export class ToncenterMainnetReadonlyClient {
         ),
         providerHost: this.providerHost,
         verificationMethod: 'toncenter_getMasterchainInfo_failed',
+        verificationClass: 'INCOMPLETE',
       };
     }
   }
 
-  async getJettonMetadata(jettonMaster: string): Promise<{
-    ok: boolean;
-    symbol: string | null;
-    decimals: number | null;
-    message: string;
-    providerHost: string;
-  }> {
+  /**
+   * Indexed metadata via v3 GET /api/v3/jetton/masters?address=...
+   * get_jetton_data is a reachability check only — not sufficient alone for ok=true.
+   */
+  async getJettonMetadata(jettonMaster: string): Promise<ToncenterJettonMetadataResult> {
+    const requestedCanonical = toCanonicalFriendlyAddress(jettonMaster);
+    const fallbackObserved = requestedCanonical;
+
     try {
-      const stack = await this.runGetMethod(jettonMaster, 'get_jetton_data', []);
-      if (stack.length < 4) {
+      // Reachability (not authoritative for symbol/decimals).
+      let reachable = false;
+      try {
+        const stack = await this.runGetMethod(jettonMaster, 'get_jetton_data', []);
+        if (stack.length >= 4) {
+          void parseStackNumber(stack[0], 'total_supply');
+          void stackCellBase64(stack[3], 'jetton content');
+          reachable = true;
+        }
+      } catch {
+        reachable = false;
+      }
+
+      const v3Body = await this.getV3(
+        `/jetton/masters?address=${encodeURIComponent(jettonMaster)}`,
+        'ToncenterMainnet v3 jetton/masters',
+      );
+      const parsed = parseToncenterV3JettonIndexedMetadata(v3Body);
+
+      let observedJettonMaster: string | null = null;
+      if (parsed.observedAddress !== null) {
+        observedJettonMaster =
+          toCanonicalFriendlyAddress(parsed.observedAddress) ?? parsed.observedAddress;
+        if (
+          requestedCanonical !== null &&
+          !tonAddressesEqual(requestedCanonical, observedJettonMaster)
+        ) {
+          return {
+            ok: false,
+            symbol: parsed.symbol,
+            decimals: parsed.decimals,
+            observedJettonMaster,
+            metadataSource: parsed.metadataSource,
+            message: 'Toncenter v3 observed jetton master does not match requested master',
+            providerHost: this.providerHost,
+          };
+        }
+      } else {
+        observedJettonMaster = fallbackObserved;
+      }
+
+      if (parsed.symbol === null || parsed.decimals === null || parsed.metadataSource === null) {
         return {
           ok: false,
-          symbol: null,
-          decimals: null,
-          message: 'get_jetton_data stack incomplete',
+          symbol: parsed.symbol,
+          decimals: parsed.decimals,
+          observedJettonMaster,
+          metadataSource: parsed.metadataSource,
+          message: reachable
+            ? 'Toncenter get_jetton_data reachable but indexed v3 metadata missing symbol/decimals'
+            : 'Toncenter indexed v3 metadata missing symbol/decimals (get_jetton_data also incomplete)',
           providerHost: this.providerHost,
         };
       }
-      void parseStackNumber(stack[0], 'total_supply');
-      void stackCellBase64(stack[3], 'jetton content');
+
+      if (!reachable) {
+        return {
+          ok: false,
+          symbol: parsed.symbol,
+          decimals: parsed.decimals,
+          observedJettonMaster,
+          metadataSource: parsed.metadataSource,
+          message:
+            'Toncenter indexed metadata present but get_jetton_data reachability check failed',
+          providerHost: this.providerHost,
+        };
+      }
+
       return {
-        ok: false,
-        symbol: null,
-        decimals: null,
-        message:
-          'Toncenter get_jetton_data reachable but on-chain content is not treated as authoritative for symbol/decimals (use TonAPI or dual-provider)',
+        ok: true,
+        symbol: parsed.symbol,
+        decimals: parsed.decimals,
+        observedJettonMaster,
+        metadataSource: parsed.metadataSource,
+        message: 'Toncenter indexed jetton metadata ok (v3 + get_jetton_data reachability)',
         providerHost: this.providerHost,
       };
     } catch (error: unknown) {
@@ -218,6 +446,8 @@ export class ToncenterMainnetReadonlyClient {
         ok: false,
         symbol: null,
         decimals: null,
+        observedJettonMaster: fallbackObserved,
+        metadataSource: null,
         message: redactProviderErrorMessage(
           error instanceof Error ? error.message : String(error),
           this.baseUrl,
@@ -269,7 +499,8 @@ export class ToncenterMainnetReadonlyClient {
   }
 
   /**
-   * Read-only estimatefee if provider supports it. Never broadcasts.
+   * Read-only estimateFee. Never broadcasts.
+   * Pass bodyBase64 of unsigned Jetton transfer for realistic estimation.
    */
   async estimateFeeNanotons(input: {
     readonly address: string;

@@ -87,3 +87,8 @@ READY_FOR_LIVE_PAYOUT remains always false.
 | HOT_WALLET_REGISTRATION_TOOL | Gated hot wallet register tooling |
 
 READY_FOR_LIVE_PAYOUT remains false.
+
+## Phase 21 Step 3C final operational truth gate
+
+Step 3C adds ceremony observations that must PASS for READY_FOR_OWNER_PROVISIONING_CEREMONY: twoProviderMetadataOperational, realJettonFeeEstimation, usdtMasterFallbackRemoved, livePlanRequiresDatabase, ceremonyOwnerActorRequired, providerUrlSsrfProtection, hotWalletDerivationProofRequired, ceremonyEvidenceSchemaReady. READY_FOR_LIVE_PAYOUT remains always false. See PHASE_21_STEP3C_FINAL_OPERATIONAL_TRUTH_GATE.md.
+

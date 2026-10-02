@@ -5,6 +5,8 @@
  * are configured. Unit tests must not require live RPC (mock these runners).
  * Bare HTTP 200 is never treated as Mainnet identity proof.
  */
+import { tonAddressesEqual } from '@alex-rewards/ton';
+
 import { PHASE21_FORBIDDEN_JETTON_PLACEHOLDERS } from './phase21-config.js';
 
 /** Minimal TON address shape check without @ton/core dependency in withdrawals package. */
@@ -47,6 +49,7 @@ export interface MainnetIdentityProbeAdapter {
     networkGlobalId: number | null;
     message: string;
     providerHost: string;
+    verificationClass?: string | null;
   }>;
 }
 
@@ -59,6 +62,8 @@ export interface UsdtJettonMetadataProbeAdapter {
     ok: boolean;
     symbol: string | null;
     decimals: number | null;
+    observedJettonMaster: string | null;
+    metadataSource?: string | null;
     message: string;
     providerHost: string;
   }>;
@@ -82,6 +87,7 @@ export interface Phase21TwoProviderVerificationResult {
   readonly ok: boolean;
   readonly code: string;
   readonly message: string;
+  readonly incomplete?: boolean;
   readonly independence: Phase21ProviderIndependenceValidation;
   readonly primary: Phase21ProbeProvenance | null;
   readonly secondary: Phase21ProbeProvenance | null;
@@ -398,6 +404,37 @@ export async function verifyMainnetUsdtWithTwoProviders(input: {
 
   const metaAOk = metaA.ok && metaA.symbol === 'USDT' && metaA.decimals === 6;
   const metaBOk = metaB.ok && metaB.symbol === 'USDT' && metaB.decimals === 6;
+
+  if (metaAOk !== metaBOk) {
+    return {
+      ok: false,
+      incomplete: true,
+      code: 'USDT_METADATA_INCOMPLETE',
+      message:
+        'Only one provider returned trustworthy USDT metadata (symbol=USDT decimals=6); dual-provider gate incomplete',
+      independence,
+      primary: {
+        providerKind: primaryKind,
+        providerHost: metaA.providerHost || normalizeProviderHost(primaryUrl),
+        networkIdentity: '-239',
+        observedAt,
+        resource: 'jetton_metadata',
+        verificationMethod: 'metadata_adapter',
+        ok: metaAOk,
+      },
+      secondary: {
+        providerKind: secondaryKind,
+        providerHost: metaB.providerHost || normalizeProviderHost(secondaryUrl),
+        networkIdentity: '-239',
+        observedAt,
+        resource: 'jetton_metadata',
+        verificationMethod: 'metadata_adapter',
+        ok: metaBOk,
+      },
+      notes: [metaA.message, metaB.message, 'INCOMPLETE not PASS', 'No broadcast'],
+    };
+  }
+
   if (!metaAOk || !metaBOk) {
     return {
       ok: false,
@@ -454,6 +491,49 @@ export async function verifyMainnetUsdtWithTwoProviders(input: {
     };
   }
 
+  const observedA = metaA.observedJettonMaster;
+  const observedB = metaB.observedJettonMaster;
+  const masterMatchesRequested =
+    observedA !== null &&
+    observedB !== null &&
+    tonAddressesEqual(observedA, input.jettonMaster) &&
+    tonAddressesEqual(observedB, input.jettonMaster) &&
+    tonAddressesEqual(observedA, observedB);
+
+  if (!masterMatchesRequested) {
+    return {
+      ok: false,
+      code: 'OBSERVED_JETTON_MASTER_MISMATCH',
+      message:
+        'Observed jetton master from one or both providers does not equal requested master (canonical Address equality)',
+      independence,
+      primary: {
+        providerKind: primaryKind,
+        providerHost: metaA.providerHost || normalizeProviderHost(primaryUrl),
+        networkIdentity: '-239',
+        observedAt,
+        resource: 'jetton_metadata',
+        verificationMethod: 'metadata_adapter',
+        ok: false,
+      },
+      secondary: {
+        providerKind: secondaryKind,
+        providerHost: metaB.providerHost || normalizeProviderHost(secondaryUrl),
+        networkIdentity: '-239',
+        observedAt,
+        resource: 'jetton_metadata',
+        verificationMethod: 'metadata_adapter',
+        ok: false,
+      },
+      notes: [
+        `requested=${input.jettonMaster}`,
+        `primaryObserved=${observedA ?? 'null'}`,
+        `secondaryObserved=${observedB ?? 'null'}`,
+        'No broadcast',
+      ],
+    };
+  }
+
   if (
     input.walletDerivationAdapter !== undefined &&
     nonEmpty(input.ownerAddress)
@@ -477,7 +557,7 @@ export async function verifyMainnetUsdtWithTwoProviders(input: {
       !wB.ok ||
       wA.jettonWalletAddress === null ||
       wB.jettonWalletAddress === null ||
-      wA.jettonWalletAddress !== wB.jettonWalletAddress
+      !tonAddressesEqual(wA.jettonWalletAddress, wB.jettonWalletAddress)
     ) {
       return {
         ok: false,

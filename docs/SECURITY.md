@@ -232,3 +232,8 @@ Docs + readiness/preflight only. Signer hosting locked to `DEDICATED_CONTROLLED_
 - APPLY against staging is forbidden; fake local env against production DB is refused by DB identity gate.
 - External verification evidence redacts API keys (provider kind + hostname only).
 - Attached GRAM policy is not auto-promoted to OWNER_APPROVED by fee estimates.
+
+## Phase 21 Step 3C final operational truth gate
+
+Phase 21 Step 3C: provider URL SSRF allowlist (https only, no URL secrets), OWNER actor required for ceremony APPLY, dual-provider jetton derivation proof for hot wallet registration.
+

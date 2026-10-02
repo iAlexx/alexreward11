@@ -87,7 +87,7 @@ describe('phase21 production flag baseline', () => {
 
     const result = await applyPhase21ProductionFlagBaseline(fakeClient as never, {
       reason: 'test',
-      changedByAdminId: null,
+      changedByAdminId: '11111111-1111-4111-8111-111111111111',
     });
     expect(result.applied).toBe(false);
     expect(result.mode).toBe('REFUSED');
@@ -112,7 +112,7 @@ describe('phase21 production flag baseline', () => {
     };
     const result = await applyPhase21ProductionFlagBaseline(fakeClient as never, {
       reason: 'test',
-      changedByAdminId: null,
+      changedByAdminId: '11111111-1111-4111-8111-111111111111',
     });
     expect(result.applied).toBe(false);
     expect(result.refuseCode).toBe('STAGING_APPLY_FORBIDDEN');

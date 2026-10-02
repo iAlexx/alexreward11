@@ -13,9 +13,21 @@ import {
   Phase21CeremonyApplyGateError,
   type Phase21CeremonyApplyGateClient,
 } from './phase21-ceremony-apply-gates.js';
+import {
+  Phase21CeremonyOwnerAdminError,
+  resolvePhase21CeremonyOwnerAdmin,
+} from './phase21-ceremony-owner-admin.js';
+import { tonAddressesEqual } from '@alex-rewards/ton';
 import { PHASE21_WALLET_VERSION } from './phase21-config.js';
 
 export type Phase21HotWalletRegistrationMode = 'PLAN' | 'APPLY' | 'REFUSED';
+
+export interface Phase21HotWalletDerivationProof {
+  readonly primaryJettonWalletAddress: string;
+  readonly secondaryJettonWalletAddress: string;
+  readonly method: 'DUAL_PROVIDER_LIVE' | 'OWNER_SUPPLIED_EVIDENCE';
+  readonly verifiedAt?: string;
+}
 
 export interface Phase21HotWalletRegistrationInput {
   readonly address: string;
@@ -24,7 +36,10 @@ export interface Phase21HotWalletRegistrationInput {
   readonly payoutJettonWalletAddress: string;
   readonly label?: string | null;
   readonly reason: string;
+  /** Required ACTIVE OWNER admin for APPLY — SYSTEM/null forbidden on APPLY. */
   readonly changedByAdminId: string | null;
+  /** Dual-provider or Owner-supplied derivation proof required for APPLY / plan READY. */
+  readonly derivationProof?: Phase21HotWalletDerivationProof | null;
 }
 
 export interface Phase21HotWalletPlanItem {
@@ -213,6 +228,44 @@ export async function planPhase21HotWalletRegistration(
       });
     }
 
+    const proof = input.derivationProof ?? null;
+    if (proof === null) {
+      items.push({
+        check: 'jetton_wallet_derivation_proof',
+        status: 'MISSING',
+        details: {},
+        note: 'BLOCKED: dual-provider derivation proof or Owner-supplied evidence required',
+      });
+      inputsOk = false;
+    } else {
+      const primaryOk = tonAddressesEqual(proof.primaryJettonWalletAddress, payoutJetton);
+      const secondaryOk = tonAddressesEqual(proof.secondaryJettonWalletAddress, payoutJetton);
+      const agree = tonAddressesEqual(
+        proof.primaryJettonWalletAddress,
+        proof.secondaryJettonWalletAddress,
+      );
+      if (!primaryOk || !secondaryOk || !agree) {
+        items.push({
+          check: 'jetton_wallet_derivation_proof',
+          status: 'INVALID',
+          details: {
+            method: proof.method,
+            primary: proof.primaryJettonWalletAddress,
+            secondary: proof.secondaryJettonWalletAddress,
+          },
+          note: 'BLOCKED: Owner payoutJettonWalletAddress must match both providers derivation',
+        });
+        inputsOk = false;
+      } else {
+        items.push({
+          check: 'jetton_wallet_derivation_proof',
+          status: 'OK',
+          details: { method: proof.method },
+          note: 'derivation proof matches Owner-supplied payout jetton wallet',
+        });
+      }
+    }
+
     if (networkId !== null && inputsOk) {
       const dup = await client.query<{ id: string; status: string }>(
         `SELECT id, status::text AS status FROM hot_wallets
@@ -326,6 +379,26 @@ export async function applyPhase21HotWalletRegistration(
     };
   }
 
+  let ownerAdminUserId: string;
+  try {
+    const owner = await resolvePhase21CeremonyOwnerAdmin(client, input.changedByAdminId);
+    ownerAdminUserId = owner.adminUserId;
+  } catch (error: unknown) {
+    const code =
+      error instanceof Phase21CeremonyOwnerAdminError ? error.code : 'OWNER_ADMIN_REQUIRED';
+    const plan = await planPhase21HotWalletRegistration(client, input);
+    return {
+      mode: 'REFUSED',
+      applyAuthorized: false,
+      applied: false,
+      plan,
+      hotWalletId: null,
+      notes: [error instanceof Error ? error.message : String(error)],
+      refuseCode: code,
+    };
+  }
+
+
   await client.query('BEGIN');
   try {
     await client.query(
@@ -379,7 +452,7 @@ export async function applyPhase21HotWalletRegistration(
       throw new Error('hot_wallets INSERT failed');
     }
 
-    const actorType = input.changedByAdminId === null ? 'SYSTEM' : 'ADMIN';
+    const actorType = 'ADMIN';
     await client.query(
       `INSERT INTO audit_logs (
          admin_user_id, actor_type, action_type, resource_type, resource_id,
@@ -389,7 +462,7 @@ export async function applyPhase21HotWalletRegistration(
          $5::jsonb, $6, 'SYSTEM'::actor_source
        )`,
       [
-        input.changedByAdminId,
+        ownerAdminUserId,
         actorType,
         AUDIT_ACTION,
         hotWalletId,

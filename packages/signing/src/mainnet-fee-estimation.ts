@@ -5,6 +5,13 @@
  * Attached GRAM remains ESTIMATED / OWNER_DECISION_REQUIRED until Owner activates.
  * LIVE_READ_ONLY is only returned when an injected read-only provider succeeds with
  * Mainnet network identity — never by relabeling mock estimates.
+ *
+ * Field separation (Step 3C):
+ * - estimatedNetworkFeeAtomic: provider network fee (separate)
+ * - candidateAttachedGramAtomic: candidate gas attachment (NOT Owner-approved)
+ * - forwardGramAtomic: Owner-approved 1 nanogram
+ * - estimatedTotalNativeExposureAtomic: candidateAttached + forward
+ *   (network fee NOT double-counted into exposure)
  */
 import { PHASE21_OWNER_APPROVED_FORWARD_GRAM_ATOMIC } from './gram-native-currency.js';
 import {
@@ -19,14 +26,30 @@ export interface MainnetFeeEstimationInput {
   readonly netAmountAtomic: bigint;
   /** Optional; defaults to Owner-approved 1 nanogram. */
   readonly forwardTonAtomic?: bigint;
+  /** Optional destination for unsigned Jetton body construction. */
+  readonly destinationAddress?: string;
+  /** Optional response destination (usually Hot Wallet). */
+  readonly responseDestination?: string;
+  readonly queryId?: bigint;
+  /**
+   * Candidate attached for body construction / exposure only.
+   * NOT Owner-approved Mainnet attached policy.
+   */
+  readonly candidateAttachedTonAtomic?: bigint;
 }
 
 export interface MainnetFeeEstimationResult {
   readonly mode: 'MOCK' | 'LIVE_READ_ONLY' | 'UNAVAILABLE';
-  readonly forwardTonAtomic: bigint;
-  readonly attachedTonAtomicEstimated: bigint | null;
+  readonly estimatedNetworkFeeAtomic: bigint | null;
+  readonly candidateAttachedGramAtomic: bigint | null;
+  readonly forwardGramAtomic: bigint;
+  /**
+   * Gas attachment exposure = candidateAttached + forward.
+   * Network fee is reported separately and is NOT added here.
+   */
+  readonly estimatedTotalNativeExposureAtomic: bigint | null;
+  readonly emulationMethod: string;
   readonly attachedGramLifecycle: AttachedGramLifecycleStatus;
-  readonly estimatedTotalNativeAtomic: bigint | null;
   readonly broadcast: false;
   readonly notes: readonly string[];
   readonly providerKind?: string;
@@ -38,6 +61,12 @@ export interface MainnetFeeEstimationResult {
   readonly estimateMethod?: string;
   readonly walletVersion?: string;
   readonly jettonMaster?: string;
+  /** @deprecated Prefer forwardGramAtomic. */
+  readonly forwardTonAtomic: bigint;
+  /** @deprecated Prefer candidateAttachedGramAtomic. */
+  readonly attachedTonAtomicEstimated: bigint | null;
+  /** @deprecated Prefer estimatedTotalNativeExposureAtomic. */
+  readonly estimatedTotalNativeAtomic: bigint | null;
 }
 
 export interface MainnetFeeEstimator {
@@ -50,7 +79,14 @@ export interface MainnetFeeEstimator {
  */
 export interface ReadOnlyMainnetFeeProvider {
   estimate(input: MainnetFeeEstimationInput): Promise<{
+    estimatedNetworkFeeAtomic?: bigint | null;
+    candidateAttachedGramAtomic?: bigint | null;
+    forwardGramAtomic?: bigint;
+    estimatedTotalNativeExposureAtomic?: bigint | null;
+    emulationMethod?: string;
+    /** @deprecated Prefer candidateAttachedGramAtomic. */
     attachedTonAtomicEstimated: bigint | null;
+    /** @deprecated Prefer estimatedNetworkFeeAtomic. */
     estimatedFeeNativeAtomic?: bigint | null;
     providerKind: string;
     /** Hostname only, no credentials. */
@@ -66,6 +102,28 @@ function isMainnetNetworkIdentity(identity: string): boolean {
   return trimmed === '-239' || trimmed === 'ton:mainnet' || trimmed.toUpperCase() === 'MAINNET';
 }
 
+function unavailableResult(
+  forward: bigint,
+  notes: readonly string[],
+  extra: Partial<MainnetFeeEstimationResult> = {},
+): MainnetFeeEstimationResult {
+  return {
+    mode: 'UNAVAILABLE',
+    estimatedNetworkFeeAtomic: null,
+    candidateAttachedGramAtomic: null,
+    forwardGramAtomic: forward,
+    estimatedTotalNativeExposureAtomic: null,
+    emulationMethod: 'unavailable',
+    attachedGramLifecycle: PHASE21_ATTACHED_GRAM_POLICY_STATUS,
+    broadcast: false,
+    notes,
+    forwardTonAtomic: forward,
+    attachedTonAtomicEstimated: null,
+    estimatedTotalNativeAtomic: null,
+    ...extra,
+  };
+}
+
 /** Deterministic mock estimator for unit tests / offline readiness. */
 export class MockMainnetFeeEstimator implements MainnetFeeEstimator {
   constructor(private readonly estimatedAttachedAtomic: bigint | null = null) {}
@@ -75,18 +133,25 @@ export class MockMainnetFeeEstimator implements MainnetFeeEstimator {
       throw new Error('MockMainnetFeeEstimator only supports TON_MAINNET / -239');
     }
     const forward = input.forwardTonAtomic ?? PHASE21_OWNER_APPROVED_FORWARD_GRAM_ATOMIC;
-    const attached = this.estimatedAttachedAtomic;
+    const attached = input.candidateAttachedTonAtomic ?? this.estimatedAttachedAtomic;
+    const exposure = attached === null ? null : attached + forward;
     return {
       mode: 'MOCK',
+      estimatedNetworkFeeAtomic: null,
+      candidateAttachedGramAtomic: attached,
+      forwardGramAtomic: forward,
+      estimatedTotalNativeExposureAtomic: exposure,
+      emulationMethod: 'mock',
+      attachedGramLifecycle: PHASE21_ATTACHED_GRAM_POLICY_STATUS,
+      broadcast: false,
       forwardTonAtomic: forward,
       attachedTonAtomicEstimated: attached,
-      attachedGramLifecycle: PHASE21_ATTACHED_GRAM_POLICY_STATUS,
-      estimatedTotalNativeAtomic: attached === null ? null : attached + forward,
-      broadcast: false,
+      estimatedTotalNativeAtomic: exposure,
       notes: [
         'Read-only mock estimate; never broadcasts',
         'Attached GRAM lifecycle remains ESTIMATED / OWNER_DECISION_REQUIRED',
         'SPIKE 0.05 attached must not be treated as Mainnet Owner-approved',
+        'estimatedTotalNativeExposureAtomic = candidateAttached + forward (fee separate/null in MOCK)',
       ],
     };
   }
@@ -115,55 +180,52 @@ export class LiveOptionalMainnetFeeEstimator implements MainnetFeeEstimator {
     }
 
     if (this.liveProvider === null) {
-      return {
-        mode: 'UNAVAILABLE',
-        forwardTonAtomic: forward,
-        attachedTonAtomicEstimated: null,
-        attachedGramLifecycle: PHASE21_ATTACHED_GRAM_POLICY_STATUS,
-        estimatedTotalNativeAtomic: null,
-        broadcast: false,
-        notes: [
-          'PHASE21_FEE_ESTIMATION_LIVE=1 set but no ReadOnlyMainnetFeeProvider injected',
-          'Refusing to relabel mock estimates as LIVE_READ_ONLY',
-          'Attached GRAM remains ESTIMATED / OWNER_DECISION_REQUIRED',
-        ],
-      };
+      return unavailableResult(forward, [
+        'PHASE21_FEE_ESTIMATION_LIVE=1 set but no ReadOnlyMainnetFeeProvider injected',
+        'Refusing to relabel mock estimates as LIVE_READ_ONLY',
+        'Attached GRAM remains ESTIMATED / OWNER_DECISION_REQUIRED',
+      ]);
     }
 
     try {
       const liveResult = await this.liveProvider.estimate(input);
       if (!isMainnetNetworkIdentity(liveResult.networkIdentity)) {
-        return {
-          mode: 'UNAVAILABLE',
-          forwardTonAtomic: forward,
-          attachedTonAtomicEstimated: null,
-          attachedGramLifecycle: PHASE21_ATTACHED_GRAM_POLICY_STATUS,
-          estimatedTotalNativeAtomic: null,
-          broadcast: false,
-          providerKind: liveResult.providerKind,
-          providerHost: liveResult.providerHost,
-          networkIdentity: liveResult.networkIdentity,
-          observedAt: new Date().toISOString(),
-          estimateMethod: liveResult.estimateMethod,
-          jettonMaster: input.jettonMasterIdentity,
-          notes: [
+        return unavailableResult(
+          forward,
+          [
             'Live fee provider returned non-Mainnet network identity; fail closed',
             'Attached GRAM remains ESTIMATED / OWNER_DECISION_REQUIRED',
           ],
-        };
+          {
+            providerKind: liveResult.providerKind,
+            providerHost: liveResult.providerHost,
+            networkIdentity: liveResult.networkIdentity,
+            observedAt: new Date().toISOString(),
+            estimateMethod: liveResult.estimateMethod,
+            jettonMaster: input.jettonMasterIdentity,
+          },
+        );
       }
-      const attached = liveResult.attachedTonAtomicEstimated;
-      const estimatedFee = liveResult.estimatedFeeNativeAtomic;
-      const total =
-        attached === null
-          ? null
-          : attached + forward + (estimatedFee === null || estimatedFee === undefined ? 0n : estimatedFee);
+
+      const networkFee =
+        liveResult.estimatedNetworkFeeAtomic ?? liveResult.estimatedFeeNativeAtomic ?? null;
+      const candidate =
+        liveResult.candidateAttachedGramAtomic ?? liveResult.attachedTonAtomicEstimated;
+      const forwardOut = liveResult.forwardGramAtomic ?? forward;
+      const exposure =
+        liveResult.estimatedTotalNativeExposureAtomic ??
+        (candidate === null ? null : candidate + forwardOut);
+      const emulation =
+        liveResult.emulationMethod ?? liveResult.estimateMethod ?? 'live_provider';
+
       return {
         mode: 'LIVE_READ_ONLY',
-        forwardTonAtomic: forward,
-        attachedTonAtomicEstimated: attached,
+        estimatedNetworkFeeAtomic: networkFee,
+        candidateAttachedGramAtomic: candidate,
+        forwardGramAtomic: forwardOut,
+        estimatedTotalNativeExposureAtomic: exposure,
+        emulationMethod: emulation,
         attachedGramLifecycle: PHASE21_ATTACHED_GRAM_POLICY_STATUS,
-        estimatedTotalNativeAtomic: total,
         broadcast: false,
         providerKind: liveResult.providerKind,
         providerHost: liveResult.providerHost,
@@ -172,28 +234,29 @@ export class LiveOptionalMainnetFeeEstimator implements MainnetFeeEstimator {
         estimateMethod: liveResult.estimateMethod,
         walletVersion: 'v5R1',
         jettonMaster: input.jettonMasterIdentity,
+        forwardTonAtomic: forwardOut,
+        attachedTonAtomicEstimated: candidate,
+        estimatedTotalNativeAtomic: exposure,
         notes: [
           'Read-only live Mainnet fee estimate; never broadcasts',
           'Attached GRAM lifecycle remains ESTIMATED / OWNER_DECISION_REQUIRED',
           'Never auto Owner-approves attached GRAM',
+          'estimatedTotalNativeExposureAtomic = candidateAttached + forward; network fee separate',
         ],
       };
     } catch (error: unknown) {
-      return {
-        mode: 'UNAVAILABLE',
-        forwardTonAtomic: forward,
-        attachedTonAtomicEstimated: null,
-        attachedGramLifecycle: PHASE21_ATTACHED_GRAM_POLICY_STATUS,
-        estimatedTotalNativeAtomic: null,
-        broadcast: false,
-        observedAt: new Date().toISOString(),
-        jettonMaster: input.jettonMasterIdentity,
-        notes: [
+      return unavailableResult(
+        forward,
+        [
           'Live fee provider failed; returning UNAVAILABLE (not MOCK relabeled)',
           error instanceof Error ? error.message : String(error),
           'Attached GRAM remains ESTIMATED / OWNER_DECISION_REQUIRED',
         ],
-      };
+        {
+          observedAt: new Date().toISOString(),
+          jettonMaster: input.jettonMasterIdentity,
+        },
+      );
     }
   }
 }

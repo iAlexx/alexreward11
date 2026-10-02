@@ -59,3 +59,24 @@ export function parseTonConnectAccountAddress(accountAddress: string): Canonical
     throw new TonDomainError('INVALID_ADDRESS', 'TON address is invalid', { cause: error });
   }
 }
+
+/**
+ * Compare TON addresses by parsed identity (workchain+hash), not string form.
+ * Returns false when either side fails to parse.
+ */
+export function tonAddressesEqual(a: string, b: string): boolean {
+  try {
+    return Address.parse(a.trim()).equals(Address.parse(b.trim()));
+  } catch {
+    return false;
+  }
+}
+
+/** Canonical bounceable URL-safe friendly form, or null if unparseable. */
+export function toCanonicalFriendlyAddress(input: string): string | null {
+  try {
+    return Address.parse(input.trim()).toString({ urlSafe: true, bounceable: true });
+  } catch {
+    return null;
+  }
+}

@@ -63,3 +63,8 @@ READY_FOR_LIVE_PAYOUT remains always false. See PHASE_21_STEP3A_INDEPENDENT_REVI
 - [ ] readyForLivePayout remains false
 
 Canonical detail: PHASE_21_STEP3B_CEREMONY_TOOLING_HARDENING.md
+
+## Phase 21 Step 3C final operational truth gate
+
+Step 3C truth gate is required before READY_FOR_OWNER_PROVISIONING_CEREMONY. Live PLAN requires DATABASE_URL; APPLY requires ACTIVE OWNER admin. See PHASE_21_STEP3C_FINAL_OPERATIONAL_TRUTH_GATE.md.
+

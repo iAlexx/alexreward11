@@ -30,6 +30,30 @@ const databaseUrl = explicitUrl !== '' ? explicitUrl : optedInUrl;
 
 const describeDb = databaseUrl === '' ? describe.skip : describe;
 
+async function seedOwnerAdmin(pool: Pool): Promise<string> {
+  const result = await pool.query<{ id: string }>(
+    `INSERT INTO admin_users (email, display_name, status)
+     VALUES ($1, 'Phase21 Step3C Owner', 'ACTIVE')
+     RETURNING id`,
+    [`phase21-step3c-owner-${Date.now()}@example.local`],
+  );
+  const adminUserId = result.rows[0]?.id;
+  if (adminUserId === undefined) throw new Error('admin insert failed');
+  const role = await pool.query<{ id: string }>(
+    `SELECT id FROM admin_roles WHERE code = 'OWNER' AND status = 'ACTIVE'`,
+  );
+  const roleId = role.rows[0]?.id;
+  if (roleId === undefined) throw new Error('OWNER role missing');
+  await pool.query(
+    `INSERT INTO admin_role_bindings (admin_user_id, role_id)
+     VALUES ($1::uuid, $2::uuid)
+     ON CONFLICT DO NOTHING`,
+    [adminUserId, roleId],
+  );
+  return adminUserId;
+}
+
+
 const USDT_MASTER = 'EQD0vdSA_NedR9uvbgN9EikRX-suesDxGeFg69XQMavfLqIw';
 
 const envKeys = [
@@ -58,6 +82,7 @@ async function resetAndMigrate(url: string): Promise<void> {
 describeDb('phase21 step3b disposable DB apply', () => {
   let pool: Pool;
   let dbName: string;
+  let ownerAdminId: string;
   const prev: Record<string, string | undefined> = {};
 
   beforeAll(async () => {
@@ -65,6 +90,7 @@ describeDb('phase21 step3b disposable DB apply', () => {
     pool = new Pool({ connectionString: databaseUrl });
     const row = await pool.query<{ name: string }>(`SELECT current_database() AS name`);
     dbName = row.rows[0]!.name;
+    ownerAdminId = await seedOwnerAdmin(pool);
   }, 120_000);
 
   afterAll(async () => {
@@ -104,7 +130,7 @@ describeDb('phase21 step3b disposable DB apply', () => {
     try {
       const first = await applyPhase21ProductionFlagBaseline(client, {
         reason: 'phase21-step3b-disposable-flag-baseline',
-        changedByAdminId: null,
+        changedByAdminId: ownerAdminId,
       });
       expect(first.applied).toBe(true);
       expect(first.createdCount).toBe(PHASE21_PRODUCTION_FLAG_BASELINE.length);
@@ -122,7 +148,7 @@ describeDb('phase21 step3b disposable DB apply', () => {
 
       const second = await applyPhase21ProductionFlagBaseline(client, {
         reason: 'phase21-step3b-disposable-flag-baseline-retry',
-        changedByAdminId: null,
+        changedByAdminId: ownerAdminId,
       });
       expect(second.applied).toBe(true);
       expect(second.createdCount).toBe(0);
@@ -158,7 +184,7 @@ describeDb('phase21 step3b disposable DB apply', () => {
       try {
         const result = await applyPhase21ProductionFlagBaseline(client, {
           reason: 'phase21-step3b-rollback',
-          changedByAdminId: null,
+          changedByAdminId: ownerAdminId,
         });
         expect(result.applied).toBe(false);
         expect(result.refuseCode).toBe('APPLY_EXCEPTION');
@@ -188,8 +214,16 @@ describeDb('phase21 step3b disposable DB apply', () => {
 
       const first = await applyPhase21MainnetRegistryBootstrap(client, {
         usdtJettonMaster: USDT_MASTER,
+        changedByAdminId: ownerAdminId,
+        reason: 'phase21-step3c-disposable-registry',
       });
       expect(first.applied).toBe(true);
+
+      const regAudits = await client.query<{ c: number }>(
+        `SELECT COUNT(*)::int AS c FROM audit_logs
+         WHERE action_type = 'phase21.mainnet_registry.bootstrap'`,
+      );
+      expect(regAudits.rows[0]!.c).toBeGreaterThanOrEqual(1);
 
       const verified = await planPhase21MainnetRegistryBootstrap(client, {
         usdtJettonMaster: USDT_MASTER,
@@ -202,6 +236,8 @@ describeDb('phase21 step3b disposable DB apply', () => {
 
       const second = await applyPhase21MainnetRegistryBootstrap(client, {
         usdtJettonMaster: USDT_MASTER,
+        changedByAdminId: ownerAdminId,
+        reason: 'phase21-step3c-disposable-registry',
       });
       expect(second.applied).toBe(true);
       expect(

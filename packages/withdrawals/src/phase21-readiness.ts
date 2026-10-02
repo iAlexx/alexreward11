@@ -98,7 +98,17 @@ export interface Phase21ReadinessObservations {
   readonly concreteExternalAdaptersReady?: boolean;
   readonly concreteFeeAdapterReady?: boolean;
   readonly hotWalletRegistrationToolReady?: boolean;
+  /** Step 3C final operational truth gate observations. */
+  readonly twoProviderMetadataOperational?: boolean;
+  readonly realJettonFeeEstimation?: boolean;
+  readonly usdtMasterFallbackRemoved?: boolean;
+  readonly livePlanRequiresDatabase?: boolean;
+  readonly ceremonyOwnerActorRequired?: boolean;
+  readonly providerUrlSsrfProtection?: boolean;
+  readonly hotWalletDerivationProofRequired?: boolean;
+  readonly ceremonyEvidenceSchemaReady?: boolean;
 }
+
 
 export interface Phase21ReadinessReport {
   readonly overall: Phase21ReadinessStatus;
@@ -423,6 +433,91 @@ export function buildPhase21ReadinessReport(
       hotWalletRegistrationToolReady: observations.hotWalletRegistrationToolReady !== false,
     },
   });
+
+  items.push({
+    code: 'TWO_PROVIDER_METADATA_OPERATIONAL',
+    status: observations.twoProviderMetadataOperational === false ? 'BLOCKED' : 'PASS',
+    message:
+      observations.twoProviderMetadataOperational === false
+        ? 'Two-provider USDT metadata operational gate incomplete'
+        : 'Two-provider USDT metadata gate operational (indexed + observed master)',
+    details: {
+      twoProviderMetadataOperational: observations.twoProviderMetadataOperational !== false,
+    },
+  });
+
+  items.push({
+    code: 'REAL_JETTON_FEE_ESTIMATION',
+    status: observations.realJettonFeeEstimation === false ? 'BLOCKED' : 'PASS',
+    message:
+      observations.realJettonFeeEstimation === false
+        ? 'Real Jetton fee estimation incomplete (fee!=attached required)'
+        : 'Real Jetton fee estimation ready (unsigned body; fee distinct from attached)',
+    details: { realJettonFeeEstimation: observations.realJettonFeeEstimation !== false },
+  });
+
+  items.push({
+    code: 'USDT_MASTER_FALLBACK_REMOVED',
+    status: observations.usdtMasterFallbackRemoved === false ? 'BLOCKED' : 'PASS',
+    message:
+      observations.usdtMasterFallbackRemoved === false
+        ? 'Hardcoded USDT master fallback still present'
+        : 'Hardcoded USDT master fallback removed; TON_MAINNET_USDT_JETTON_MASTER required',
+    details: { usdtMasterFallbackRemoved: observations.usdtMasterFallbackRemoved !== false },
+  });
+
+  items.push({
+    code: 'LIVE_PLAN_REQUIRES_DATABASE',
+    status: observations.livePlanRequiresDatabase === false ? 'BLOCKED' : 'PASS',
+    message:
+      observations.livePlanRequiresDatabase === false
+        ? 'Live PLAN still allows silent mock empty-DB'
+        : 'Live PLAN requires DATABASE_URL (no silent mock empty-DB plan)',
+    details: { livePlanRequiresDatabase: observations.livePlanRequiresDatabase !== false },
+  });
+
+  items.push({
+    code: 'CEREMONY_OWNER_ACTOR_REQUIRED',
+    status: observations.ceremonyOwnerActorRequired === false ? 'BLOCKED' : 'PASS',
+    message:
+      observations.ceremonyOwnerActorRequired === false
+        ? 'Ceremony APPLY still allows SYSTEM/null actor'
+        : 'Ceremony APPLY requires ACTIVE OWNER admin actor',
+    details: { ceremonyOwnerActorRequired: observations.ceremonyOwnerActorRequired !== false },
+  });
+
+  items.push({
+    code: 'PROVIDER_URL_SSRF_PROTECTION',
+    status: observations.providerUrlSsrfProtection === false ? 'BLOCKED' : 'PASS',
+    message:
+      observations.providerUrlSsrfProtection === false
+        ? 'Provider URL SSRF/allowlist protection incomplete'
+        : 'Provider URL SSRF protection ready (https, no secrets, host allowlist)',
+    details: { providerUrlSsrfProtection: observations.providerUrlSsrfProtection !== false },
+  });
+
+  items.push({
+    code: 'HOT_WALLET_DERIVATION_PROOF_REQUIRED',
+    status: observations.hotWalletDerivationProofRequired === false ? 'BLOCKED' : 'PASS',
+    message:
+      observations.hotWalletDerivationProofRequired === false
+        ? 'Hot Wallet derivation proof not required'
+        : 'Hot Wallet dual-provider derivation proof required before register',
+    details: {
+      hotWalletDerivationProofRequired: observations.hotWalletDerivationProofRequired !== false,
+    },
+  });
+
+  items.push({
+    code: 'CEREMONY_EVIDENCE_SCHEMA_READY',
+    status: observations.ceremonyEvidenceSchemaReady === false ? 'BLOCKED' : 'PASS',
+    message:
+      observations.ceremonyEvidenceSchemaReady === false
+        ? 'Ceremony evidence schema incomplete'
+        : 'phase21-provisioning-evidence schema ready (sanitized fixtures only)',
+    details: { ceremonyEvidenceSchemaReady: observations.ceremonyEvidenceSchemaReady !== false },
+  });
+
 
   if (observations.mainnetJettonExternalVerified === true) {
     items.push({
@@ -928,5 +1023,13 @@ export function defaultPhase21Step1Observations(): Phase21ReadinessObservations 
     concreteExternalAdaptersReady: true,
     concreteFeeAdapterReady: true,
     hotWalletRegistrationToolReady: true,
+    twoProviderMetadataOperational: true,
+    realJettonFeeEstimation: true,
+    usdtMasterFallbackRemoved: true,
+    livePlanRequiresDatabase: true,
+    ceremonyOwnerActorRequired: true,
+    providerUrlSsrfProtection: true,
+    hotWalletDerivationProofRequired: true,
+    ceremonyEvidenceSchemaReady: true,
   };
 }

@@ -14,6 +14,10 @@ import {
   Phase21CeremonyApplyGateError,
   type Phase21CeremonyApplyGateClient,
 } from './phase21-ceremony-apply-gates.js';
+import {
+  Phase21CeremonyOwnerAdminError,
+  resolvePhase21CeremonyOwnerAdmin,
+} from './phase21-ceremony-owner-admin.js';
 
 export type Phase21MainnetRegistryBootstrapMode = 'PLAN' | 'APPLY' | 'REFUSED';
 
@@ -22,6 +26,9 @@ export interface Phase21MainnetRegistryBootstrapInput {
   readonly networkDisplayName?: string;
   readonly usdtDisplayName?: string;
   readonly gramDisplayName?: string;
+  /** Required for APPLY — ACTIVE OWNER admin. */
+  readonly changedByAdminId?: string | null;
+  readonly reason?: string | null;
 }
 
 export interface Phase21MainnetRegistryPlanItem {
@@ -608,6 +615,23 @@ export async function applyPhase21MainnetRegistryBootstrap(
     };
   }
 
+  try {
+    await resolvePhase21CeremonyOwnerAdmin(client, input.changedByAdminId);
+  } catch (error: unknown) {
+    const code =
+      error instanceof Phase21CeremonyOwnerAdminError ? error.code : 'OWNER_ADMIN_REQUIRED';
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      mode: 'REFUSED',
+      applyAuthorized: false,
+      applied: false,
+      items: [],
+      conflicts: [],
+      notes: [`APPLY refused: ${message}`],
+      refuseCode: code,
+    };
+  }
+
   await client.query('BEGIN');
   try {
     await client.query(
@@ -635,6 +659,10 @@ export async function applyPhase21MainnetRegistryBootstrap(
 
     await applyCreatesInTxn(client, input, planned);
 
+    const owner = await resolvePhase21CeremonyOwnerAdmin(client, input.changedByAdminId);
+    const reason =
+      (input.reason ?? '').trim() || 'Phase 21 Mainnet registry bootstrap ceremony';
+
     const verified = await planPhase21MainnetRegistryBootstrap(client, input);
     const incomplete = verified.filter(
       (i) =>
@@ -657,6 +685,53 @@ export async function applyPhase21MainnetRegistryBootstrap(
       };
     }
 
+    const networkRow = await client.query<{ id: string }>(
+      `SELECT id FROM networks WHERE code = 'TON_MAINNET' LIMIT 1`,
+    );
+    const usdtRow = await client.query<{ id: string; contract_identity: string | null }>(
+      `SELECT id, contract_identity FROM assets
+       WHERE symbol = 'USDT' AND network_id = $1::uuid LIMIT 1`,
+      [networkRow.rows[0]?.id],
+    );
+    const gramRow = await client.query<{ id: string }>(
+      `SELECT id FROM assets WHERE symbol = 'GRAM' AND network_id = $1::uuid LIMIT 1`,
+      [networkRow.rows[0]?.id],
+    );
+    const feeRow = await client.query<{ id: string }>(
+      `SELECT id FROM withdrawal_fee_rules WHERE network_id = $1::uuid ORDER BY rule_version LIMIT 1`,
+      [networkRow.rows[0]?.id],
+    );
+    const limitRow = await client.query<{ id: string }>(
+      `SELECT id FROM withdrawal_limit_rules WHERE network_id = $1::uuid ORDER BY rule_version LIMIT 1`,
+      [networkRow.rows[0]?.id],
+    );
+
+    await client.query(
+      `INSERT INTO audit_logs (
+         admin_user_id, actor_type, action_type, resource_type, resource_id,
+         after_snapshot, reason, source
+       ) VALUES (
+         $1::uuid, 'ADMIN'::actor_type, 'phase21.mainnet_registry.bootstrap', 'network', $2::uuid,
+         $3::jsonb, $4, 'SYSTEM'::actor_source
+       )`,
+      [
+        owner.adminUserId,
+        networkRow.rows[0]?.id,
+        JSON.stringify({
+          networkId: networkRow.rows[0]?.id ?? null,
+          usdtAssetId: usdtRow.rows[0]?.id ?? null,
+          gramAssetId: gramRow.rows[0]?.id ?? null,
+          usdtJettonMaster: usdtRow.rows[0]?.contract_identity ?? input.usdtJettonMaster,
+          feeRuleId: feeRow.rows[0]?.id ?? null,
+          limitRuleId: limitRow.rows[0]?.id ?? null,
+          adminUserId: owner.adminUserId,
+          reason,
+          source: 'phase21',
+        }),
+        reason,
+      ],
+    );
+
     await client.query('COMMIT');
     return {
       mode: 'APPLY',
@@ -669,6 +744,7 @@ export async function applyPhase21MainnetRegistryBootstrap(
         'Hot Wallet slot remains DOCUMENTED_ONLY',
         'No historical migration rewrite',
         'Idempotent second apply yields ALREADY_MATCHES',
+        'audit_logs snapshot written',
       ],
     };
   } catch (error: unknown) {

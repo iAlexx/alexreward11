@@ -353,3 +353,8 @@ Read-only: pnpm phase21:readiness, pnpm phase21:preflight, pnpm phase21:producti
 Mutation (later Owner ceremony only; gated): pnpm phase21:production-flags:apply -- --apply, pnpm phase21:mainnet-registry:apply -- --apply, pnpm phase21:hot-wallet:register -- --apply.
 
 Order: flag baseline -> verify flags -> registry bootstrap -> verify registry -> offline key -> signer host LOCKED -> external verify -> hot wallet register -> STOP (no funding/cutover/enable).
+
+## Phase 21 Step 3C final operational truth gate
+
+Phase 21 Step 3C CLI: production-flags/mainnet-registry live PLAN requires DATABASE_URL; :template commands are SCHEMA_TEMPLATE_NOT_LIVE; estimate-mainnet-fee reports distinct fee/attached/forward fields for 0.19 and 5 USDT cases.
+

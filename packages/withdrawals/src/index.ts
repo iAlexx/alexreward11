@@ -771,3 +771,13 @@ export type {
   Phase21PreflightVerdict,
 } from './phase21-preflight.js';
 
+export {
+  resolvePhase21CeremonyOwnerAdmin,
+  Phase21CeremonyOwnerAdminError,
+} from './phase21-ceremony-owner-admin.js';
+export {
+  Phase21ProvisioningEvidenceSchema,
+  buildEmptyPhase21ProvisioningEvidenceFixture,
+  parsePhase21ProvisioningEvidence,
+  type Phase21ProvisioningEvidence,
+} from './phase21-provisioning-evidence.js';

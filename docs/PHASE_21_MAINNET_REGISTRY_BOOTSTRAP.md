@@ -27,3 +27,8 @@
 - pnpm phase21:mainnet-registry:apply -- --apply
 
 See: PHASE_21_STEP3B_CEREMONY_TOOLING_HARDENING.md
+
+## Phase 21 Step 3C final operational truth gate
+
+Hardcoded USDT master fallback removed. PLAN/APPLY require TON_MAINNET_USDT_JETTON_MASTER. APPLY requires PHASE21_CEREMONY_ADMIN_USER_ID (ACTIVE OWNER) and writes audit_logs snapshot in the same transaction.
+

@@ -141,3 +141,8 @@ See `docs/PHASE_21_SIGNER_HOSTING_DECISION.md`, `docs/PHASE_21_PROVISIONING_CERE
   PHASE21_HOT_WALLET_PAYOUT_JETTON_WALLET
 - Inserts v5R1 + FALLBACK_ENCRYPTED + fingerprint + payout jetton wallet + audit
 - Refuses duplicate ACTIVE payout wallet; does not invent addresses
+
+## Phase 21 Step 3C final operational truth gate
+
+Hot Wallet register PLAN/APPLY require dual-provider (or Owner-supplied) derivation proof matching payoutJettonWalletAddress. APPLY requires ACTIVE OWNER admin; SYSTEM actor forbidden.
+

@@ -72,12 +72,31 @@ describe('phase21 hot wallet registration', () => {
         return { rows: [] as unknown as T[] };
       },
     };
-    const plan = await planPhase21HotWalletRegistration(client, {
+    const planMissingProof = await planPhase21HotWalletRegistration(client, {
       address: FAKE_ADDR,
       signerReference: FAKE_FP,
       payoutJettonWalletAddress: FAKE_JETTON,
       reason: 'test plan',
-      changedByAdminId: null,
+      changedByAdminId: '11111111-1111-4111-8111-111111111111',
+    });
+    expect(planMissingProof.canRegister).toBe(false);
+    expect(
+      planMissingProof.items.some(
+        (i) => i.check === 'jetton_wallet_derivation_proof' && i.status === 'MISSING',
+      ),
+    ).toBe(true);
+
+    const plan = await planPhase21HotWalletRegistration(client, {
+      address: FAKE_ADDR,
+      signerReference: FAKE_FP,
+      payoutJettonWalletAddress: FAKE_ADDR,
+      reason: 'test plan',
+      changedByAdminId: '11111111-1111-4111-8111-111111111111',
+      derivationProof: {
+        primaryJettonWalletAddress: FAKE_ADDR,
+        secondaryJettonWalletAddress: FAKE_ADDR,
+        method: 'OWNER_SUPPLIED_EVIDENCE',
+      },
     });
     expect(plan.canRegister).toBe(true);
   });
@@ -101,7 +120,7 @@ describe('phase21 hot wallet registration', () => {
       signerReference: FAKE_FP,
       payoutJettonWalletAddress: FAKE_JETTON,
       reason: 'test',
-      changedByAdminId: null,
+      changedByAdminId: '11111111-1111-4111-8111-111111111111',
     });
     expect(result.applied).toBe(false);
     expect(result.mode).toBe('REFUSED');
@@ -128,7 +147,7 @@ describe('phase21 hot wallet registration', () => {
       signerReference: FAKE_FP,
       payoutJettonWalletAddress: FAKE_JETTON,
       reason: 'test',
-      changedByAdminId: null,
+      changedByAdminId: '11111111-1111-4111-8111-111111111111',
     });
     expect(result.refuseCode).toBe('STAGING_APPLY_FORBIDDEN');
   });

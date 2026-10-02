@@ -58,6 +58,7 @@ describe('phase21 concrete mainnet adapters', () => {
           ok: true,
           symbol: 'USDT',
           decimals: 6,
+          observedJettonMaster: 'EQD0vdSA_NedR9uvbgN9EikRX-suesDxGeFg69XQMavfLqIw',
           message: 'mock metadata',
           providerHost: 'mock',
         };

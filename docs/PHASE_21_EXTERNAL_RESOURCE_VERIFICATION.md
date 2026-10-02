@@ -34,3 +34,8 @@ HTTP reachability only when `PHASE21_EXTERNAL_PROBE_LIVE=1`. No `sendBoc`. Unit 
 - CLI: pnpm phase21:verify-mainnet-external
 - Fee: ToncenterMainnetFeeProvider + pnpm phase21:estimate-mainnet-fee
 - Never broadcast / never sendBoc; API keys redacted to hostname in errors
+
+## Phase 21 Step 3C final operational truth gate
+
+Toncenter metadata uses indexed v3 jetton/masters (not get_jetton_data alone). Verification classes: VERIFIED_PROVIDER_MAINNET_ENDPOINT vs PROVEN_FROM_CHAIN_RESPONSE. Provider URLs must pass SSRF/allowlist hardening. Dual-provider observedJettonMaster must equal requested master.
+

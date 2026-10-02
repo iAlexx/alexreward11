@@ -32,10 +32,12 @@
     "phase10:closure-evaluate": "node dist/cli/phase10-ops.js closure-evaluate",
     "phase21:readiness": "node dist/cli/phase21-ops.js readiness",
     "phase21:preflight": "node dist/cli/phase21-ops.js preflight",
-    "test:phase21": "vitest run test/phase21-config-gate.test.ts test/phase21-expansion-gate.test.ts test/phase21-readiness.test.ts test/phase21-runtime-selection.test.ts test/phase21-external-probes.test.ts test/phase21-withdrawal-request-pause-fail-closed.test.ts test/phase21-production-flag-baseline.test.ts test/phase21-mainnet-registry-bootstrap.test.ts test/phase21-hot-wallet-registration.test.ts test/phase21-mainnet-adapters.test.ts test/phase21-ceremony-gates.test.ts test/phase21-step3b-disposable-db.test.ts",
+    "test:phase21": "vitest run test/phase21-config-gate.test.ts test/phase21-expansion-gate.test.ts test/phase21-readiness.test.ts test/phase21-runtime-selection.test.ts test/phase21-external-probes.test.ts test/phase21-withdrawal-request-pause-fail-closed.test.ts test/phase21-production-flag-baseline.test.ts test/phase21-mainnet-registry-bootstrap.test.ts test/phase21-hot-wallet-registration.test.ts test/phase21-mainnet-adapters.test.ts test/phase21-ceremony-gates.test.ts test/phase21-step3b-disposable-db.test.ts test/phase21-provisioning-evidence.test.ts test/phase21-ceremony-owner-admin.test.ts test/phase21-ops-plan-gates.test.ts",
     "phase21:production-flags:plan": "node dist/cli/phase21-ops.js production-flags:plan",
+    "phase21:production-flags:template": "node dist/cli/phase21-ops.js production-flags:template",
     "phase21:production-flags:apply": "node dist/cli/phase21-ops.js production-flags:apply",
     "phase21:mainnet-registry:plan": "node dist/cli/phase21-ops.js mainnet-registry:plan",
+    "phase21:mainnet-registry:template": "node dist/cli/phase21-ops.js mainnet-registry:template",
     "phase21:mainnet-registry:apply": "node dist/cli/phase21-ops.js mainnet-registry:apply",
     "phase21:verify-mainnet-external": "node dist/cli/phase21-ops.js verify-mainnet-external",
     "phase21:estimate-mainnet-fee": "node dist/cli/phase21-ops.js estimate-mainnet-fee",
@@ -50,7 +52,8 @@
     "@alex-rewards/ledger": "workspace:*",
     "@alex-rewards/ton": "workspace:*",
     "@temporalio/client": "1.23.0",
-    "pg": "8.23.0"
+    "pg": "8.23.0",
+    "zod": "4.5.4"
   },
   "devDependencies": {
     "@temporalio/testing": "1.23.0",

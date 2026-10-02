@@ -39,8 +39,10 @@ const COMMANDS = new Set([
   'readiness',
   'preflight',
   'production-flags:plan',
+  'production-flags:template',
   'production-flags:apply',
   'mainnet-registry:plan',
+  'mainnet-registry:template',
   'mainnet-registry:apply',
   'verify-mainnet-external',
   'estimate-mainnet-fee',
@@ -53,7 +55,7 @@ function usage(): never {
     JSON.stringify({
       ok: false,
       message:
-        'usage: phase21-ops <readiness|preflight|production-flags:plan|production-flags:apply|mainnet-registry:plan|mainnet-registry:apply|verify-mainnet-external|estimate-mainnet-fee|hot-wallet:plan|hot-wallet:register> [--apply]',
+        'usage: phase21-ops <readiness|preflight|production-flags:plan|production-flags:template|production-flags:apply|mainnet-registry:plan|mainnet-registry:template|mainnet-registry:apply|verify-mainnet-external|estimate-mainnet-fee|hot-wallet:plan|hot-wallet:register> [--apply]',
     }),
   );
   process.exit(2);
@@ -157,6 +159,48 @@ function listMissingFromEnv(observations: Phase21ReadinessObservations): string[
   }
 }
 
+
+async function assertLivePlanDatabaseOrRefuse(
+  command: string,
+): Promise<{ pool: Pool; currentDatabase: string; requiredDatabase: string | null } | null> {
+  const url = envNonEmpty('DATABASE_URL');
+  if (url === null) {
+    printJson({
+      ok: false,
+      command,
+      refuseCode: 'LIVE_DATABASE_REQUIRED_FOR_PLAN',
+      message: 'DATABASE_URL required for live PLAN (no silent mock empty-DB plan)',
+      readyForLivePayout: false,
+    });
+    process.exitCode = 1;
+    return null;
+  }
+  const pool = new Pool({ connectionString: url });
+  const client = await pool.connect();
+  try {
+    const row = await client.query<{ name: string }>(`SELECT current_database() AS name`);
+    const currentDatabase = row.rows[0]?.name ?? '';
+    const requiredDatabase = envNonEmpty('PHASE21_CEREMONY_REQUIRED_DATABASE_NAME');
+    if (requiredDatabase !== null && currentDatabase !== requiredDatabase) {
+      printJson({
+        ok: false,
+        command,
+        refuseCode: 'PLAN_DATABASE_IDENTITY_MISMATCH',
+        message: 'current_database does not match PHASE21_CEREMONY_REQUIRED_DATABASE_NAME',
+        current_database: currentDatabase,
+        required_database: requiredDatabase,
+        readyForLivePayout: false,
+      });
+      process.exitCode = 1;
+      await pool.end();
+      return null;
+    }
+    return { pool, currentDatabase, requiredDatabase };
+  } finally {
+    client.release();
+  }
+}
+
 async function withDatabaseUrl<T>(
   fn: (pool: Pool) => Promise<T>,
 ): Promise<T> {
@@ -212,30 +256,33 @@ async function main(): Promise<void> {
     return;
   }
 
+    if (command === 'production-flags:template') {
+    const mock = {
+      async query() {
+        return { rows: [] };
+      },
+    };
+    const rows = await planPhase21ProductionFlagBaseline(mock);
+    printJson({
+      ok: true,
+      command: 'production-flags:template',
+      mode: 'SCHEMA_TEMPLATE_NOT_LIVE',
+      applied: false,
+      rows,
+      notes: [
+        'SCHEMA_TEMPLATE_NOT_LIVE',
+        'Not a live PLAN; use production-flags:plan with DATABASE_URL',
+      ],
+      readyForLivePayout: false,
+    });
+    return;
+  }
+
   if (command === 'production-flags:plan') {
-    const url = envNonEmpty('DATABASE_URL');
-    if (url === null) {
-      const mock = {
-        async query() {
-          return { rows: [] };
-        },
-      };
-      const rows = await planPhase21ProductionFlagBaseline(mock);
-      printJson({
-        ok: true,
-        command: 'production-flags:plan',
-        mode: 'PLAN',
-        applied: false,
-        rows,
-        notes: [
-          'DATABASE_URL unset ? mock empty plan (readiness/preflight only)',
-          'Set DATABASE_URL for live PLAN against target DB',
-        ],
-      });
-      return;
-    }
-    await withDatabaseUrl(async (pool) => {
-      const client = await pool.connect();
+    const live = await assertLivePlanDatabaseOrRefuse('production-flags:plan');
+    if (live === null) return;
+    try {
+      const client = await live.pool.connect();
       try {
         const rows = await planPhase21ProductionFlagBaseline(client);
         printJson({
@@ -244,16 +291,21 @@ async function main(): Promise<void> {
           mode: 'PLAN',
           applied: false,
           rows,
+          current_database: live.currentDatabase,
+          required_database: live.requiredDatabase,
           notes: ['Read-only PLAN; APPLY requires --apply + env gates'],
+          readyForLivePayout: false,
         });
       } finally {
         client.release();
       }
-    });
+    } finally {
+      await live.pool.end();
+    }
     return;
   }
 
-  if (command === 'production-flags:apply') {
+if (command === 'production-flags:apply') {
     if (!hasApplyArg(argv)) {
       printJson({
         ok: false,
@@ -267,11 +319,22 @@ async function main(): Promise<void> {
     await withDatabaseUrl(async (pool) => {
       const client = await pool.connect();
       try {
+        const adminId = envNonEmpty('PHASE21_CEREMONY_ADMIN_USER_ID');
+        if (adminId === null) {
+          printJson({
+            ok: false,
+            command: 'production-flags:apply',
+            refuseCode: 'OWNER_ADMIN_REQUIRED',
+            message: 'PHASE21_CEREMONY_ADMIN_USER_ID required (SYSTEM/null forbidden)',
+          });
+          process.exitCode = 1;
+          return;
+        }
         const result = await applyPhase21ProductionFlagBaseline(client, {
           reason:
             envNonEmpty('PHASE21_PRODUCTION_FLAG_BASELINE_REASON') ??
             'Phase 21 PRODUCTION safety flag baseline ceremony',
-          changedByAdminId: envNonEmpty('PHASE21_CEREMONY_ADMIN_USER_ID'),
+          changedByAdminId: adminId,
         });
         printJson({ ok: result.applied, command: 'production-flags:apply', result });
         if (!result.applied) process.exitCode = 1;
@@ -282,35 +345,48 @@ async function main(): Promise<void> {
     return;
   }
 
+    if (command === 'mainnet-registry:template') {
+    const master = envNonEmpty('TON_MAINNET_USDT_JETTON_MASTER') ?? 'OWNER_SUPPLIED_MASTER_REQUIRED';
+    const mock = {
+      async query() {
+        return { rows: [] };
+      },
+    };
+    const items = await planPhase21MainnetRegistryBootstrap(mock, {
+      usdtJettonMaster: master,
+    });
+    printJson({
+      ok: true,
+      command: 'mainnet-registry:template',
+      mode: 'SCHEMA_TEMPLATE_NOT_LIVE',
+      applied: false,
+      items,
+      notes: [
+        'SCHEMA_TEMPLATE_NOT_LIVE',
+        'Not a live PLAN; use mainnet-registry:plan with DATABASE_URL + TON_MAINNET_USDT_JETTON_MASTER',
+      ],
+      readyForLivePayout: false,
+    });
+    return;
+  }
+
   if (command === 'mainnet-registry:plan') {
-    const master =
-      envNonEmpty('TON_MAINNET_USDT_JETTON_MASTER') ??
-      'EQD0vdSA_NedR9uvbgN9EikRX-suesDxGeFg69XQMavfLqIw';
-    const url = envNonEmpty('DATABASE_URL');
-    if (url === null) {
-      const mock = {
-        async query() {
-          return { rows: [] };
-        },
-      };
-      const items = await planPhase21MainnetRegistryBootstrap(mock, {
-        usdtJettonMaster: master,
-      });
+    const master = envNonEmpty('TON_MAINNET_USDT_JETTON_MASTER');
+    if (master === null) {
       printJson({
-        ok: true,
+        ok: false,
         command: 'mainnet-registry:plan',
-        mode: 'PLAN',
-        applied: false,
-        items,
-        notes: [
-          'DATABASE_URL unset ? mock empty plan',
-          'Set DATABASE_URL for live PLAN against target DB',
-        ],
+        refuseCode: 'USDT_MASTER_REQUIRED',
+        message: 'TON_MAINNET_USDT_JETTON_MASTER required for PLAN (hardcoded fallback removed)',
+        readyForLivePayout: false,
       });
+      process.exitCode = 1;
       return;
     }
-    await withDatabaseUrl(async (pool) => {
-      const client = await pool.connect();
+    const live = await assertLivePlanDatabaseOrRefuse('mainnet-registry:plan');
+    if (live === null) return;
+    try {
+      const client = await live.pool.connect();
       try {
         const items = await planPhase21MainnetRegistryBootstrap(client, {
           usdtJettonMaster: master,
@@ -321,16 +397,21 @@ async function main(): Promise<void> {
           mode: 'PLAN',
           applied: false,
           items,
+          current_database: live.currentDatabase,
+          required_database: live.requiredDatabase,
           notes: ['Read-only PLAN; APPLY requires --apply + env gates'],
+          readyForLivePayout: false,
         });
       } finally {
         client.release();
       }
-    });
+    } finally {
+      await live.pool.end();
+    }
     return;
   }
 
-  if (command === 'mainnet-registry:apply') {
+if (command === 'mainnet-registry:apply') {
     if (!hasApplyArg(argv)) {
       printJson({
         ok: false,
@@ -355,8 +436,23 @@ async function main(): Promise<void> {
     await withDatabaseUrl(async (pool) => {
       const client = await pool.connect();
       try {
+        const adminId = envNonEmpty('PHASE21_CEREMONY_ADMIN_USER_ID');
+        if (adminId === null) {
+          printJson({
+            ok: false,
+            command: 'mainnet-registry:apply',
+            refuseCode: 'OWNER_ADMIN_REQUIRED',
+            message: 'PHASE21_CEREMONY_ADMIN_USER_ID required (SYSTEM/null forbidden)',
+          });
+          process.exitCode = 1;
+          return;
+        }
         const result = await applyPhase21MainnetRegistryBootstrap(client, {
           usdtJettonMaster: master,
+          changedByAdminId: adminId,
+          reason:
+            envNonEmpty('PHASE21_MAINNET_REGISTRY_REASON') ??
+            'Phase 21 Mainnet registry bootstrap ceremony',
         });
         printJson({ ok: result.applied, command: 'mainnet-registry:apply', result });
         if (!result.applied) process.exitCode = 1;
@@ -416,16 +512,18 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (command === 'estimate-mainnet-fee') {
+    if (command === 'estimate-mainnet-fee') {
     const jettonMaster = envNonEmpty('TON_MAINNET_USDT_JETTON_MASTER');
     const primaryUrl = envNonEmpty('TON_PRIMARY_PROVIDER_URL');
     const primaryKind = (envNonEmpty('TON_PRIMARY_PROVIDER_KIND') ?? 'toncenter').toLowerCase();
     const forwardTonAtomic = 1n;
+    const amounts = [190_000n, 5_000_000n] as const; // 0.19 USDT and 5 USDT (6 decimals)
     if (jettonMaster === null || primaryUrl === null) {
       printJson({
         ok: false,
         command: 'estimate-mainnet-fee',
         message: 'Requires TON_MAINNET_USDT_JETTON_MASTER and TON_PRIMARY_PROVIDER_URL',
+        readyForLivePayout: false,
       });
       process.exitCode = 1;
       return;
@@ -436,21 +534,24 @@ async function main(): Promise<void> {
       printJson({
         ok: true,
         command: 'estimate-mainnet-fee',
-        result: {
+        cases: amounts.map((netAmountAtomic) => ({
+          netAmountAtomic: netAmountAtomic.toString(10),
           mode: 'MOCK',
-          forwardTonAtomic: forwardTonAtomic.toString(10),
-          attachedTonAtomicEstimated: null,
+          estimatedNetworkFeeAtomic: null,
+          candidateAttachedGramAtomic: null,
+          forwardGramAtomic: forwardTonAtomic.toString(10),
+          estimatedTotalNativeExposureAtomic: null,
           attachedGramLifecycle: 'ESTIMATED',
-          estimatedTotalNativeAtomic: null,
           broadcast: false,
           jettonMaster,
-        },
+        })),
         notes: [
           'MOCK mode (PHASE21_FEE_ESTIMATION_LIVE!=1)',
           'forward=1 nanogram',
-          'attached remains ESTIMATED',
+          'attached remains ESTIMATED; fee distinct from attached',
           'never broadcasts',
         ],
+        readyForLivePayout: false,
       });
       return;
     }
@@ -459,63 +560,102 @@ async function main(): Promise<void> {
       printJson({
         ok: true,
         command: 'estimate-mainnet-fee',
-        result: {
+        cases: amounts.map((netAmountAtomic) => ({
+          netAmountAtomic: netAmountAtomic.toString(10),
           mode: 'UNAVAILABLE',
-          forwardTonAtomic: forwardTonAtomic.toString(10),
-          attachedTonAtomicEstimated: null,
+          estimatedNetworkFeeAtomic: null,
+          candidateAttachedGramAtomic: null,
+          forwardGramAtomic: forwardTonAtomic.toString(10),
+          estimatedTotalNativeExposureAtomic: null,
           attachedGramLifecycle: 'ESTIMATED',
-          estimatedTotalNativeAtomic: null,
           broadcast: false,
           providerKind: primaryKind,
           jettonMaster,
-        },
+        })),
         notes: [
           'Concrete fee adapter currently implemented for toncenter only',
-          'forward=1 nanogram',
-          'attached remains ESTIMATED',
           'never broadcasts',
         ],
+        readyForLivePayout: false,
       });
       return;
     }
 
     try {
+      const estimateAddress =
+        envNonEmpty('TON_FEE_ESTIMATE_ADDRESS') ?? envNonEmpty('PHASE21_HOT_WALLET_ADDRESS');
       const provider = new ToncenterMainnetFeeProvider({
         baseUrl: primaryUrl,
         apiKey: envNonEmpty('TON_PRIMARY_PROVIDER_KEY'),
-        estimateAddress: envNonEmpty('TON_FEE_ESTIMATE_ADDRESS'),
+        estimateAddress,
       });
-      const liveResult = await provider.estimate({
-        networkCode: 'TON_MAINNET',
-        networkGlobalId: -239,
-        jettonMasterIdentity: jettonMaster,
-        netAmountAtomic: BigInt(envNonEmpty('TON_FEE_ESTIMATE_AMOUNT_ATOMIC') ?? '1000000'),
-        forwardTonAtomic,
-      });
-      const attached = liveResult.attachedTonAtomicEstimated;
+      const cases = [];
+      for (const netAmountAtomic of amounts) {
+        try {
+          const liveResult = await provider.estimate({
+            networkCode: 'TON_MAINNET',
+            networkGlobalId: -239,
+            jettonMasterIdentity: jettonMaster,
+            netAmountAtomic,
+            forwardTonAtomic,
+            ...(estimateAddress !== null
+              ? {
+                  destinationAddress: estimateAddress,
+                  responseDestination: estimateAddress,
+                }
+              : {}),
+          });
+          cases.push({
+            netAmountAtomic: netAmountAtomic.toString(10),
+            mode: 'LIVE_READ_ONLY',
+            estimatedNetworkFeeAtomic:
+              liveResult.estimatedNetworkFeeAtomic === null
+                ? null
+                : liveResult.estimatedNetworkFeeAtomic.toString(10),
+            candidateAttachedGramAtomic:
+              liveResult.candidateAttachedGramAtomic === null
+                ? null
+                : liveResult.candidateAttachedGramAtomic.toString(10),
+            forwardGramAtomic: liveResult.forwardGramAtomic.toString(10),
+            estimatedTotalNativeExposureAtomic:
+              liveResult.estimatedTotalNativeExposureAtomic === null
+                ? null
+                : liveResult.estimatedTotalNativeExposureAtomic.toString(10),
+            attachedGramLifecycle: 'ESTIMATED',
+            broadcast: false,
+            providerKind: liveResult.providerKind,
+            providerHost: liveResult.providerHost,
+            networkIdentity: liveResult.networkIdentity,
+            estimateMethod: liveResult.estimateMethod,
+            emulationMethod: liveResult.emulationMethod,
+            walletVersion: 'v5R1',
+            jettonMaster,
+          });
+        } catch (error: unknown) {
+          cases.push({
+            netAmountAtomic: netAmountAtomic.toString(10),
+            mode: 'UNAVAILABLE',
+            estimatedNetworkFeeAtomic: null,
+            candidateAttachedGramAtomic: null,
+            forwardGramAtomic: forwardTonAtomic.toString(10),
+            estimatedTotalNativeExposureAtomic: null,
+            attachedGramLifecycle: 'ESTIMATED',
+            broadcast: false,
+            jettonMaster,
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
       printJson({
         ok: true,
         command: 'estimate-mainnet-fee',
-        result: {
-          mode: 'LIVE_READ_ONLY',
-          forwardTonAtomic: forwardTonAtomic.toString(10),
-          attachedTonAtomicEstimated: attached === null ? null : attached.toString(10),
-          attachedGramLifecycle: 'ESTIMATED',
-          estimatedTotalNativeAtomic:
-            attached === null ? null : (attached + forwardTonAtomic).toString(10),
-          broadcast: false,
-          providerKind: liveResult.providerKind,
-          providerHost: liveResult.providerHost,
-          networkIdentity: liveResult.networkIdentity,
-          estimateMethod: liveResult.estimateMethod,
-          walletVersion: 'v5R1',
-          jettonMaster,
-        },
+        cases,
         notes: [
           'Read-only live Mainnet fee estimate; never broadcasts',
-          'forward=1 nanogram',
-          'attached remains ESTIMATED',
+          'Cases: 0.19 USDT (190000) and 5 USDT (5000000)',
+          'estimatedTotalNativeExposureAtomic = candidateAttached + forward; network fee separate',
         ],
+        readyForLivePayout: false,
       });
     } catch (error: unknown) {
       printJson({
@@ -523,26 +663,23 @@ async function main(): Promise<void> {
         command: 'estimate-mainnet-fee',
         result: {
           mode: 'UNAVAILABLE',
-          forwardTonAtomic: forwardTonAtomic.toString(10),
-          attachedTonAtomicEstimated: null,
+          estimatedNetworkFeeAtomic: null,
+          candidateAttachedGramAtomic: null,
+          forwardGramAtomic: forwardTonAtomic.toString(10),
+          estimatedTotalNativeExposureAtomic: null,
           attachedGramLifecycle: 'ESTIMATED',
-          estimatedTotalNativeAtomic: null,
           broadcast: false,
           jettonMaster,
           message: error instanceof Error ? error.message : String(error),
         },
-        notes: [
-          'Live fee provider failed or untrustworthy; UNAVAILABLE (not MOCK relabeled)',
-          'forward=1 nanogram',
-          'attached remains ESTIMATED',
-          'never broadcasts',
-        ],
+        notes: ['Live fee provider failed; UNAVAILABLE', 'never broadcasts'],
+        readyForLivePayout: false,
       });
     }
     return;
   }
 
-  if (command === 'hot-wallet:plan') {
+if (command === 'hot-wallet:plan') {
     const url = envNonEmpty('DATABASE_URL');
     const partial: Partial<{
       address: string;
@@ -572,31 +709,48 @@ async function main(): Promise<void> {
       changedByAdminId: envNonEmpty('PHASE21_CEREMONY_ADMIN_USER_ID'),
     };
     if (url === null) {
-      const mock = {
-        async query() {
-          return { rows: [] };
-        },
-      };
-      const plan = await planPhase21HotWalletRegistration(mock, partial);
       printJson({
-        ok: true,
+        ok: false,
         command: 'hot-wallet:plan',
-        mode: 'PLAN',
-        plan,
-        notes: ['DATABASE_URL unset ? mock plan'],
+        refuseCode: 'LIVE_DATABASE_REQUIRED_FOR_PLAN',
+        message: 'DATABASE_URL required for live PLAN (no silent mock empty-DB plan)',
+        readyForLivePayout: false,
       });
+      process.exitCode = 1;
       return;
     }
     await withDatabaseUrl(async (pool) => {
       const client = await pool.connect();
       try {
         const plan = await planPhase21HotWalletRegistration(client, partial);
+        const dbRow = await client.query<{ name: string }>(`SELECT current_database() AS name`);
+        const currentDatabase = dbRow.rows[0]?.name ?? null;
+        const requiredDatabase = envNonEmpty('PHASE21_CEREMONY_REQUIRED_DATABASE_NAME');
+        if (requiredDatabase !== null && currentDatabase !== requiredDatabase) {
+          printJson({
+            ok: false,
+            command: 'hot-wallet:plan',
+            refuseCode: 'PLAN_DATABASE_IDENTITY_MISMATCH',
+            current_database: currentDatabase,
+            required_database: requiredDatabase,
+            message: 'current_database does not match PHASE21_CEREMONY_REQUIRED_DATABASE_NAME',
+            readyForLivePayout: false,
+          });
+          process.exitCode = 1;
+          return;
+        }
         printJson({
           ok: true,
           command: 'hot-wallet:plan',
           mode: 'PLAN',
           plan,
-          notes: ['Read-only PLAN; register requires --apply + env gates'],
+          current_database: currentDatabase,
+          required_database: requiredDatabase,
+          notes: [
+            'Read-only PLAN; register requires --apply + env gates',
+            'Derivation proof required for canRegister/READY',
+          ],
+          readyForLivePayout: false,
         });
       } finally {
         client.release();
@@ -639,6 +793,17 @@ async function main(): Promise<void> {
     await withDatabaseUrl(async (pool) => {
       const client = await pool.connect();
       try {
+        const adminId = envNonEmpty('PHASE21_CEREMONY_ADMIN_USER_ID');
+        if (adminId === null) {
+          printJson({
+            ok: false,
+            command: 'hot-wallet:register',
+            refuseCode: 'OWNER_ADMIN_REQUIRED',
+            message: 'PHASE21_CEREMONY_ADMIN_USER_ID required (SYSTEM/null forbidden)',
+          });
+          process.exitCode = 1;
+          return;
+        }
         const result = await applyPhase21HotWalletRegistration(client, {
           address,
           signerReference,
@@ -646,7 +811,7 @@ async function main(): Promise<void> {
           reason,
           friendlyAddress: envNonEmpty('PHASE21_HOT_WALLET_FRIENDLY_ADDRESS'),
           label: envNonEmpty('PHASE21_HOT_WALLET_LABEL'),
-          changedByAdminId: envNonEmpty('PHASE21_CEREMONY_ADMIN_USER_ID'),
+          changedByAdminId: adminId,
         });
         printJson({ ok: result.applied, command: 'hot-wallet:register', result });
         if (!result.applied) process.exitCode = 1;

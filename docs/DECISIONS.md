@@ -1057,3 +1057,8 @@ See docs/PHASE_21_STEP3A_INDEPENDENT_REVIEW_CORRECTIONS.md.
 - Concrete Toncenter/TonAPI Mainnet read-only adapters and Toncenter fee provider added (no sendBoc).
 - Attached GRAM remains ESTIMATED / not Owner-approved.
 - No operational ceremony execution; production-runtime unchanged.
+
+## Phase 21 Step 3C final operational truth gate
+
+Phase 21 Step 3C (2026-10-02): final operational truth gate — indexed Toncenter metadata, real Jetton fee estimation without fee/attached double-count, no USDT master fallback, live PLAN requires DB, OWNER admin for APPLY, SSRF allowlist, ceremony evidence schema. Source/test/readiness only; no deploy.
+

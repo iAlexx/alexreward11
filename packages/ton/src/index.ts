@@ -3,6 +3,8 @@ export type { TonErrorCode } from './errors.js';
 export {
   canonicalizeTonAddress,
   parseTonConnectAccountAddress,
+  tonAddressesEqual,
+  toCanonicalFriendlyAddress,
   type CanonicalTonAddress,
 } from './address.js';
 export {
@@ -101,16 +103,31 @@ export {
   assertMainnetProviderUrl,
   normalizeMainnetProviderHost,
   redactProviderErrorMessage,
+  resolvePhase21ProviderHostAllowlist,
+  PHASE21_DEFAULT_PROVIDER_HOST_ALLOWLIST,
+  type MainnetProviderVerificationClass,
 } from './mainnet-provider-http.js';
 export {
   ToncenterMainnetReadonlyClient,
+  parseToncenterV3JettonIndexedMetadata,
   type ToncenterMainnetReadonlyConfig,
+  type ToncenterJettonMetadataResult,
 } from './toncenter-mainnet-readonly.js';
 export {
   TonapiMainnetReadonlyClient,
   type TonapiMainnetReadonlyConfig,
+  type TonapiJettonMetadataResult,
 } from './tonapi-mainnet-readonly.js';
 export {
   ToncenterMainnetFeeProvider,
   type ToncenterMainnetFeeProviderConfig,
+  type ToncenterMainnetFeeEstimateResult,
 } from './toncenter-mainnet-fee-provider.js';
+export {
+  JETTON_TRANSFER_OP,
+  PHASE21_FEE_ESTIMATE_CANDIDATE_ATTACHED_GRAM_ATOMIC,
+  buildUnsignedJettonTransferBody,
+  buildUnsignedJettonTransferBodyBase64,
+  type UnsignedJettonTransferBodyInput,
+} from './jetton-transfer-body.js';
+export { deriveTonCenterV3BaseUrl } from './toncenter-testnet-provider.js';
