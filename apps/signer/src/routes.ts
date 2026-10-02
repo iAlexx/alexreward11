@@ -244,6 +244,7 @@ export function runtimeFromEnv(config: {
   SIGNER_WALLET_VERSION: 'v5R1';
   SIGNER_WORKCHAIN: number;
   SIGNER_EXPECTED_ASSET_SYMBOL: string;
+  PHASE21_MAINNET_ENABLED?: boolean;
 }): SignerRuntimeConfig {
   return localSigningFixtureConfig({
     deploymentEnv: config.DEPLOYMENT_ENV,
@@ -256,5 +257,6 @@ export function runtimeFromEnv(config: {
     walletVersion: config.SIGNER_WALLET_VERSION,
     workchain: config.SIGNER_WORKCHAIN,
     expectedAssetSymbol: config.SIGNER_EXPECTED_ASSET_SYMBOL,
+    phase21MainnetEnabled: config.PHASE21_MAINNET_ENABLED === true,
   });
 }

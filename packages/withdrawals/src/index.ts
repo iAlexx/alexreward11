@@ -635,3 +635,54 @@ export type {
   Phase10ClosureEligibilityResult,
   Phase10ClosureEvidenceBindingSummary,
 } from './phase10-closure-gate.js';
+
+
+export {
+  PHASE21_FORBIDDEN_JETTON_PLACEHOLDERS,
+  PHASE21_MICRO_LAUNCH_USDT_ATOMIC_MAX,
+  PHASE21_MICRO_LAUNCH_USDT_ATOMIC_MIN,
+  PHASE21_NETWORK_CODE,
+  PHASE21_NETWORK_GLOBAL_ID,
+  PHASE21_REQUIRED_CONFIRMED_WITHDRAWALS,
+  PHASE21_TESTNET_NETWORK_GLOBAL_ID,
+  PHASE21_WALLET_VERSION,
+  assertPhase21Ready,
+  assessPhase21InitialFundingExposure,
+  buildPhase21PayoutConfig,
+  listPhase21MissingResources,
+  phase21ReadyCheck,
+} from './phase21-config.js';
+export type {
+  Phase21ConfigInput,
+  Phase21PayoutConfig,
+  Phase21ProviderEndpointConfig,
+  Phase21ProviderKind,
+  Phase21ReadyCheck,
+} from './phase21-config.js';
+
+export { evaluatePhase21ExpansionGate } from './phase21-expansion-gate.js';
+export type {
+  Phase21ExpansionGateInput,
+  Phase21ExpansionGateResult,
+  Phase21ExpansionGateVerdict,
+} from './phase21-expansion-gate.js';
+
+export {
+  buildPhase21ReadinessReport,
+  defaultPhase21Step1Observations,
+} from './phase21-readiness.js';
+export type {
+  Phase21ReadinessItem,
+  Phase21ReadinessObservations,
+  Phase21ReadinessReport,
+  Phase21ReadinessStatus,
+  Phase21WithdrawableBalanceSourceStatus,
+} from './phase21-readiness.js';
+
+export { runPhase21Preflight } from './phase21-preflight.js';
+export type {
+  Phase21ForbiddenPreflightVerdict,
+  Phase21PreflightReport,
+  Phase21PreflightVerdict,
+} from './phase21-preflight.js';
+

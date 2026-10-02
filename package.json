@@ -59,7 +59,10 @@
     "test:phase20-step2": "node scripts/phase20-step2-readiness.mjs",
     "phase20:step3": "node scripts/phase20-step3-provider-no-fill.mjs",
     "phase20:step4b:policy-check": "node scripts/phase20-step4b-policy-check.mjs",
-    "phase20:step4c:preflight": "node scripts/phase20-step4c-staging-preflight.mjs"
+    "phase20:step4c:preflight": "node scripts/phase20-step4c-staging-preflight.mjs",
+    "phase21:readiness": "pnpm --filter @alex-rewards/withdrawals run phase21:readiness",
+    "phase21:preflight": "pnpm --filter @alex-rewards/withdrawals run phase21:preflight",
+    "test:phase21": "pnpm --filter @alex-rewards/withdrawals run test:phase21 && pnpm --filter @alex-rewards/signing exec vitest run test/phase21-mainnet-policy.test.ts"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

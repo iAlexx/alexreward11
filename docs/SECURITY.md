@@ -197,3 +197,16 @@ Authoritative artifacts:
 Phase 19 residual OPEN findings (004–008, 010–012) are carried into the Phase 20 gap register
 and must not be silently discarded. P19-SEC-010/011/012 must be reconsidered before any
 provider production-money enablement.
+
+## Phase 21 — Mainnet micro-launch (Step 1 foundation)
+
+Phase 21 engineering started. Gate remains `BLOCKED_FOR_MAINNET_PROVISIONING`.
+Mainnet signing/config allow-path exists only behind explicit `PHASE21_MAINNET_ENABLED`
+(default false). Phase 9 Testnet rejection remains the default.
+
+`PRODUCTION_SIGNER_SERVICE=NOT_PROVISIONED`. No real production keys generated in Step 1.
+Railway signer hosting may be architecturally unsuitable for loopback-unlock /
+no-passphrase-in-env custody — see `docs/PHASE_21_SIGNER_HOT_WALLET_CEREMONY.md`.
+
+Phase 21 is **not** PASS and **not** archived.
+

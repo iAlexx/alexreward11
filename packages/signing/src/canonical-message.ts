@@ -60,9 +60,18 @@ export function buildJettonTransferBodyForIntent(intent: CanonicalPayoutIntent):
 
 export async function buildCanonicalSigningMessageAsync(
   intent: CanonicalPayoutIntent,
+  options?: { readonly phase21MainnetEnabled?: boolean },
 ): Promise<CanonicalMessageBuild> {
-  if (intent.networkGlobalId === -239) {
+  const phase21 = options?.phase21MainnetEnabled === true;
+  if (intent.networkGlobalId === -239 && !phase21) {
     throw new SignerError('MAINNET_REJECTED', 'Cannot build MAINNET canonical message in Phase 9');
+  }
+  if (phase21 && intent.networkGlobalId !== -239) {
+    throw new SignerError(
+      'POLICY_REJECTED',
+      'Phase 21 Mainnet mode requires networkGlobalId -239 for canonical message',
+      { networkGlobalId: intent.networkGlobalId },
+    );
   }
   if (!intent.jettonMasterIdentity || intent.jettonMasterIdentity.trim() === '') {
     throw new SignerError('POLICY_REJECTED', 'Jetton master identity required');

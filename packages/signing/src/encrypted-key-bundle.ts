@@ -195,13 +195,24 @@ export function generateHotWalletSeed(): Buffer {
 
 export function identityFromSeed(
   seed: Buffer,
-  opts: { networkGlobalId: number; workchain: number } = { networkGlobalId: -3, workchain: 0 },
+  opts: {
+    networkGlobalId: number;
+    workchain: number;
+    phase21MainnetEnabled?: boolean;
+  } = { networkGlobalId: -3, workchain: 0 },
 ): GeneratedHotWalletIdentity {
   if (seed.length !== 32) {
     throw new SignerError('KEY_BUNDLE_INVALID', 'Ed25519 seed must be 32 bytes');
   }
-  if (opts.networkGlobalId === -239) {
+  const phase21 = opts.phase21MainnetEnabled === true;
+  if (opts.networkGlobalId === -239 && !phase21) {
     throw new SignerError('MAINNET_REJECTED', 'MAINNET key generation is forbidden in Phase 9');
+  }
+  if (phase21 && opts.networkGlobalId !== -239) {
+    throw new SignerError(
+      'POLICY_REJECTED',
+      'Phase 21 Mainnet mode requires networkGlobalId -239 for key identity',
+    );
   }
   const keyPair = keyPairFromSeed(seed);
   const publicKey = Buffer.from(keyPair.publicKey);
@@ -209,6 +220,7 @@ export function identityFromSeed(
     publicKey,
     networkGlobalId: opts.networkGlobalId,
     workchain: opts.workchain,
+    phase21MainnetEnabled: phase21,
   });
   return {
     publicKey,
@@ -345,6 +357,7 @@ export interface DecryptedSigningMaterial {
 export function decryptKeyBundle(
   bundle: EncryptedKeyBundleV1,
   passphrase: string,
+  options?: { readonly phase21MainnetEnabled?: boolean },
 ): DecryptedSigningMaterial {
   // Re-validate shape (defense in depth for in-memory / mutated objects)
   const validated = parseBundle(bundle);
@@ -367,9 +380,11 @@ export function decryptKeyBundle(
   if (seed.length !== 32) {
     throw new SignerError('KEY_BUNDLE_INVALID', 'Decrypted seed length invalid');
   }
+  const phase21 = options?.phase21MainnetEnabled === true;
   const identity = identityFromSeed(seed, {
     networkGlobalId: validated.networkGlobalId,
     workchain: validated.workchain,
+    phase21MainnetEnabled: phase21,
   });
   if (identity.publicKeyFingerprint !== validated.publicKeyFingerprint) {
     throw new SignerError('KEY_IDENTITY_MISMATCH', 'Decrypted public key fingerprint mismatch');
@@ -377,8 +392,14 @@ export function decryptKeyBundle(
   if (identity.addressRaw !== validated.derivedAddressRaw) {
     throw new SignerError('KEY_IDENTITY_MISMATCH', 'Decrypted Wallet V5 R1 address mismatch');
   }
-  if (validated.networkGlobalId === -239) {
+  if (validated.networkGlobalId === -239 && !phase21) {
     throw new SignerError('MAINNET_REJECTED', 'MAINNET bundles are forbidden in Phase 9');
+  }
+  if (phase21 && validated.networkGlobalId !== -239) {
+    throw new SignerError(
+      'POLICY_REJECTED',
+      'Phase 21 Mainnet mode requires Mainnet key bundle (networkGlobalId -239)',
+    );
   }
   const keyPair = keyPairFromSeed(seed);
   return {

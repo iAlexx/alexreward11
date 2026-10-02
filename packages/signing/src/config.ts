@@ -11,6 +11,11 @@ export interface SignerRuntimeConfig {
   readonly walletVersion: 'v5R1';
   readonly workchain: number;
   readonly expectedAssetSymbol: string;
+  /**
+   * Explicit Phase 21 Mainnet allow-path. Default false preserves Phase 9 Testnet-only policy.
+   * When true, require MAINNET / networkGlobalId -239. Never inferred from NODE_ENV.
+   */
+  readonly phase21MainnetEnabled: boolean;
 }
 
 export function localSigningFixtureConfig(
@@ -27,6 +32,7 @@ export function localSigningFixtureConfig(
     walletVersion: 'v5R1',
     workchain: 0,
     expectedAssetSymbol: 'USDT',
+    phase21MainnetEnabled: false,
     ...overrides,
   };
 }

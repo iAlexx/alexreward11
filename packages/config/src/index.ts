@@ -522,6 +522,9 @@ const workerSchema = serviceSchema
   .superRefine((value, context) => {
     refineWithdrawalNetworkForDeployment(value, context);
     // Worker always refuses MAINNET codes (including under local/test).
+    // Phase 21 Step 1: live Mainnet payout dispatch is NOT wired through worker schema yet.
+    // Keep refusing WITHDRAWAL_NETWORK_CODE MAINNET here until a later Owner-authorized step
+    // explicitly enables Phase21 dispatch wiring (PHASE21_MAINNET_ENABLED alone is insufficient).
     if (
       !isStagingIntegrationMode(value) &&
       value.WITHDRAWAL_NETWORK_CODE.toUpperCase().includes('MAINNET')
@@ -579,6 +582,7 @@ const LOCAL_SIGNER_DEFAULTS = {
     'postgresql://alex_rewards_signer:local-signer-ro-only@localhost:55432/alex_rewards',
   SIGNER_KEY_MODE: 'local_ephemeral',
   SIGNER_SPIKE_ENABLED: 'true',
+  PHASE21_MAINNET_ENABLED: 'false',
   SIGNER_NETWORK_CODE: 'TON_TESTNET',
   SIGNER_NETWORK_GLOBAL_ID: '-3',
   SIGNER_WALLET_VERSION: 'v5R1',
@@ -620,6 +624,11 @@ const signerSchema = commonSchema
     SIGNER_MNEMONIC: z.never().optional(),
     SIGNER_KEY_PASSPHRASE: z.never().optional(),
     SIGNER_SPIKE_ENABLED: booleanFromString,
+    /**
+     * Explicit Phase 21 Mainnet allow-path. Default false preserves Phase 9 Testnet-only guards.
+     * Never inferred from NODE_ENV / Railway env name / branch name.
+     */
+    PHASE21_MAINNET_ENABLED: booleanFromString,
     SIGNER_NETWORK_CODE: z.string().min(1).max(64),
     SIGNER_NETWORK_GLOBAL_ID: z.coerce.number().int(),
     SIGNER_WALLET_VERSION: z.literal('v5R1'),
@@ -673,26 +682,57 @@ const signerSchema = commonSchema
         message: 'SIGNER_KEY_BUNDLE_PATH is required when SIGNER_KEY_MODE=self_hosted_encrypted',
       });
     }
-    if (value.SIGNER_NETWORK_CODE.toUpperCase().includes('MAINNET')) {
-      context.addIssue({
-        code: 'custom',
-        path: ['SIGNER_NETWORK_CODE'],
-        message: 'MAINNET network codes are forbidden in Phase 9 signer config',
-      });
-    }
-    if (value.SIGNER_NETWORK_GLOBAL_ID === -239) {
-      context.addIssue({
-        code: 'custom',
-        path: ['SIGNER_NETWORK_GLOBAL_ID'],
-        message: 'MAINNET networkGlobalId (-239) is forbidden in Phase 9',
-      });
-    }
-    if (value.SIGNER_NETWORK_GLOBAL_ID !== -3) {
-      context.addIssue({
-        code: 'custom',
-        path: ['SIGNER_NETWORK_GLOBAL_ID'],
-        message: 'Phase 9 requires TESTNET networkGlobalId -3',
-      });
+    if (value.PHASE21_MAINNET_ENABLED === true) {
+      if (value.SIGNER_NETWORK_CODE !== 'TON_MAINNET') {
+        context.addIssue({
+          code: 'custom',
+          path: ['SIGNER_NETWORK_CODE'],
+          message: 'PHASE21_MAINNET_ENABLED requires SIGNER_NETWORK_CODE=TON_MAINNET',
+        });
+      }
+      if (value.SIGNER_NETWORK_GLOBAL_ID !== -239) {
+        context.addIssue({
+          code: 'custom',
+          path: ['SIGNER_NETWORK_GLOBAL_ID'],
+          message: 'PHASE21_MAINNET_ENABLED requires SIGNER_NETWORK_GLOBAL_ID=-239',
+        });
+      }
+      if (value.SIGNER_KEY_MODE !== 'self_hosted_encrypted') {
+        context.addIssue({
+          code: 'custom',
+          path: ['SIGNER_KEY_MODE'],
+          message: 'PHASE21_MAINNET_ENABLED requires SIGNER_KEY_MODE=self_hosted_encrypted',
+        });
+      }
+      if (value.SIGNER_WALLET_VERSION !== 'v5R1') {
+        context.addIssue({
+          code: 'custom',
+          path: ['SIGNER_WALLET_VERSION'],
+          message: 'PHASE21_MAINNET_ENABLED requires SIGNER_WALLET_VERSION=v5R1',
+        });
+      }
+    } else {
+      if (value.SIGNER_NETWORK_CODE.toUpperCase().includes('MAINNET')) {
+        context.addIssue({
+          code: 'custom',
+          path: ['SIGNER_NETWORK_CODE'],
+          message: 'MAINNET network codes are forbidden in Phase 9 signer config',
+        });
+      }
+      if (value.SIGNER_NETWORK_GLOBAL_ID === -239) {
+        context.addIssue({
+          code: 'custom',
+          path: ['SIGNER_NETWORK_GLOBAL_ID'],
+          message: 'MAINNET networkGlobalId (-239) is forbidden in Phase 9',
+        });
+      }
+      if (value.SIGNER_NETWORK_GLOBAL_ID !== -3) {
+        context.addIssue({
+          code: 'custom',
+          path: ['SIGNER_NETWORK_GLOBAL_ID'],
+          message: 'Phase 9 requires TESTNET networkGlobalId -3',
+        });
+      }
     }
   });
 

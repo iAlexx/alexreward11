@@ -692,7 +692,44 @@ describe('environment validation', () => {
     ).toThrow(/TON_TESTNET_JETTON_MASTER/);
   });
 
+  it('signer Phase21 Mainnet allow-path requires TON_MAINNET/-239/self_hosted_encrypted', () => {
+    expect(() =>
+      loadSignerConfig({
+        ...common,
+        SIGNER_SERVICE_TOKEN: 'a-secure-local-token-that-is-long-enough',
+        PHASE21_MAINNET_ENABLED: 'true',
+        SIGNER_NETWORK_CODE: 'TON_MAINNET',
+        SIGNER_NETWORK_GLOBAL_ID: '-239',
+        SIGNER_KEY_MODE: 'local_ephemeral',
+      }),
+    ).toThrow(/self_hosted_encrypted|PHASE21_MAINNET_ENABLED/);
+
+    const enabled = loadSignerConfig({
+      ...common,
+      SIGNER_SERVICE_TOKEN: 'a-secure-local-token-that-is-long-enough',
+      PHASE21_MAINNET_ENABLED: 'true',
+      SIGNER_NETWORK_CODE: 'TON_MAINNET',
+      SIGNER_NETWORK_GLOBAL_ID: '-239',
+      SIGNER_KEY_MODE: 'self_hosted_encrypted',
+      SIGNER_KEY_BUNDLE_PATH: '/run/alex-rewards/signer/hot-wallet.enc',
+    });
+    expect(enabled.PHASE21_MAINNET_ENABLED).toBe(true);
+    expect(enabled.SIGNER_NETWORK_CODE).toBe('TON_MAINNET');
+    expect(enabled.SIGNER_NETWORK_GLOBAL_ID).toBe(-239);
+
+    expect(() =>
+      loadSignerConfig({
+        ...common,
+        SIGNER_SERVICE_TOKEN: 'a-secure-local-token-that-is-long-enough',
+        PHASE21_MAINNET_ENABLED: 'false',
+        SIGNER_NETWORK_CODE: 'TON_MAINNET',
+        SIGNER_NETWORK_GLOBAL_ID: '-239',
+      }),
+    ).toThrow(/MAINNET/);
+  });
+
   it('worker rejects MAINNET withdrawal network code', () => {
+
     expect(() =>
       loadWorkerConfig({
         ...common,

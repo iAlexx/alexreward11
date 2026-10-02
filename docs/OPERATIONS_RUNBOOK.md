@@ -305,3 +305,20 @@ Semantic markers: POLICY_CENTER_PAGE_READ_ONLY, REWARD_RULES_CREATE_VERSION_ROUT
 - Verification: dangerousCount=0 or Owner-accepted residual with freeze retained.
 - Forbidden: blind resend; ledger history edits; auto-unpause.
 - Audit: reconcile report digests. Marker: NO_BLIND_RESEND.
+
+## Phase 21 Mainnet readiness tooling (read-only / Step 1)
+
+```bash
+pnpm phase21:readiness
+pnpm phase21:preflight
+```
+
+- Read-only JSON reports; exit 0 even when overall `BLOCKED` (tooling success)
+- Default `PHASE21_MAINNET_ENABLED` unset/false
+- Does not unlock signer, enable real chain, fund wallets, or mutate DB/Railway
+- Expected Step 1: `BLOCKED` / `BLOCKED_FOR_EXTERNAL_RESOURCES`
+- Never treat output as `READY_FOR_LIVE_PAYOUT` authorization
+
+Ceremony / hosting notes: `docs/PHASE_21_SIGNER_HOT_WALLET_CEREMONY.md`.
+Plan: `docs/PHASE_21_MAINNET_MICRO_LAUNCH_PLAN.md`.
+

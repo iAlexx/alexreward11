@@ -987,3 +987,19 @@ See `docs/PHASE_20_STEP5_MISSION_REFERRAL_SCOPE_DECISION.md` and updated
 Final acceptance/archive ceremony performed no operational Railway/DB mutation.
 
 See `docs/PHASE_20_ACCEPTANCE_REPORT.md`.
+
+## Clarification — Phase 21 Step 1 Mainnet micro-launch foundation (2026-10-02)
+
+Owner authorized Phase 21 **engineering** start on branch `phase21-mainnet-micro-launch`
+(base `547117e`). Step 1 is SOURCE/TEST/READINESS only.
+
+- `PHASE21_STATUS=IN_PROGRESS`
+- `PHASE21_GATE=BLOCKED_FOR_MAINNET_PROVISIONING`
+- `PHASE21_MAINNET_ENABLED=NO` (default; never inferred from NODE_ENV/Railway/branch)
+- Phase 10 Testnet gates preserved; Phase 21 is an explicit Mainnet authority layer
+- Production signer / Hot Wallet / funding / live payout / archive **not** authorized
+- `CONTROLLED_MAINNET_WITHDRAWABLE_BALANCE_SOURCE=BLOCKED_OWNER_DECISION`
+- Phase 20 real-money gaps remain OPEN; mapping in `docs/PHASE_21_REAL_MONEY_BLOCKER_MAPPING.md`
+
+See `docs/PHASE_21_MAINNET_MICRO_LAUNCH_PLAN.md`.
+

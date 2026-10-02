@@ -41,6 +41,7 @@ if (config.SIGNER_KEY_MODE === 'self_hosted_encrypted') {
       : {}),
     expectedPublicKeyFingerprint: config.SIGNER_EXPECTED_SIGNER_REFERENCE ?? null,
     expectedNetworkGlobalId: config.SIGNER_NETWORK_GLOBAL_ID,
+    phase21MainnetEnabled: config.PHASE21_MAINNET_ENABLED === true,
   });
   signPort = provider;
   lockable = provider;

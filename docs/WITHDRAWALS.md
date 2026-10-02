@@ -311,3 +311,19 @@ mappings cannot point at a benefit rule for a different entitlement or another p
 
 See `docs/LEDGER.md` (Phase 7 accounting), `docs/DATABASE.md`, and
 `docs/PHASE_07_ACCEPTANCE_REPORT.md`.
+
+## Phase 21 Mainnet micro-launch foundation (Step 1)
+
+Phase 10 Testnet payout config remains unchanged and continues to refuse Mainnet.
+
+Phase 21 adds an explicit Mainnet layer (`packages/withdrawals/src/phase21-*.ts`):
+
+- Network: `TON_MAINNET` / `-239` only when `phase21MainnetEnabled=true`
+- Manual approval only; auto payout / auto unpause / auto resend forbidden
+- Jetton master must be Owner-supplied (`TON_MAINNET_USDT_JETTON_MASTER`); no placeholders
+- Expansion gate: 50 confirmed+reconciled+ledger_ok; never automatic expansion
+- CLI: `pnpm phase21:readiness` / `pnpm phase21:preflight` (expect BLOCKED in Step 1)
+
+Worker schema still refuses MAINNET `WITHDRAWAL_NETWORK_CODE` until a later step wires
+live Phase 21 dispatch. No real Mainnet payout in Step 1.
+

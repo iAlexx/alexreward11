@@ -32,7 +32,34 @@ export function assertSigningPolicy(
     );
   }
 
-  if (row.network_environment === 'MAINNET' || row.network_code.toUpperCase().includes('MAINNET')) {
+  if (config.phase21MainnetEnabled === true) {
+    if (
+      row.network_environment !== 'MAINNET' &&
+      !row.network_code.toUpperCase().includes('MAINNET')
+    ) {
+      throw new SignerError(
+        'POLICY_REJECTED',
+        'Phase 21 Mainnet mode requires MAINNET network environment/code',
+      );
+    }
+    if (config.networkGlobalId !== -239) {
+      throw new SignerError(
+        'POLICY_REJECTED',
+        'Phase 21 Mainnet mode requires signer networkGlobalId -239',
+        { networkGlobalId: config.networkGlobalId },
+      );
+    }
+    if (config.networkCode !== 'TON_MAINNET') {
+      throw new SignerError(
+        'POLICY_REJECTED',
+        'Phase 21 Mainnet mode requires signer networkCode TON_MAINNET',
+        { networkCode: config.networkCode },
+      );
+    }
+  } else if (
+    row.network_environment === 'MAINNET' ||
+    row.network_code.toUpperCase().includes('MAINNET')
+  ) {
     throw new SignerError('MAINNET_REJECTED', 'MAINNET signing is forbidden in Phase 9');
   }
 
@@ -42,7 +69,11 @@ export function assertSigningPolicy(
   if (row.network_status !== 'ACTIVE') {
     throw new SignerError('POLICY_REJECTED', 'Network must be ACTIVE');
   }
-  if (row.network_environment !== 'TESTNET') {
+  if (config.phase21MainnetEnabled === true) {
+    if (row.network_environment !== 'MAINNET') {
+      throw new SignerError('POLICY_REJECTED', 'Phase 21 requires MAINNET network environment');
+    }
+  } else if (row.network_environment !== 'TESTNET') {
     throw new SignerError('POLICY_REJECTED', 'Phase 9 requires TESTNET network environment');
   }
   if (row.network_code !== config.networkCode) {

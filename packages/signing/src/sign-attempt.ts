@@ -106,6 +106,7 @@ export async function signWithdrawalAttempt(
     publicKey,
     networkGlobalId: input.config.networkGlobalId,
     workchain: input.config.workchain,
+    phase21MainnetEnabled: input.config.phase21MainnetEnabled === true,
   });
 
   if (!addressesEqual(derived.addressRaw, row.hot_wallet_address)) {
@@ -120,7 +121,9 @@ export async function signWithdrawalAttempt(
   }
 
   const intent = intentFromRow(row, publicKey, input.config);
-  const canonical = await buildCanonicalSigningMessageAsync(intent);
+  const canonical = await buildCanonicalSigningMessageAsync(intent, {
+    phase21MainnetEnabled: input.config.phase21MainnetEnabled === true,
+  });
 
   if (row.canonical_message_hash !== canonical.canonicalMessageHashHex) {
     throw new SignerError(
@@ -222,6 +225,8 @@ export async function reconstructCanonicalHash(
   const row = await loadSigningView(input.pool, input.withdrawalAttemptId);
   assertSigningPolicy(row, input.config);
   const intent = intentFromRow(row, input.publicKey, input.config);
-  const canonical = await buildCanonicalSigningMessageAsync(intent);
+  const canonical = await buildCanonicalSigningMessageAsync(intent, {
+    phase21MainnetEnabled: input.config.phase21MainnetEnabled === true,
+  });
   return canonical.canonicalMessageHashHex;
 }
