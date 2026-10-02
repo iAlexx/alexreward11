@@ -1,6 +1,6 @@
 # Phase 21 - Production Runtime Deployment Manifest
 
-**CANONICAL_RUNTIME:** production-runtime @ b9dd700de428498493fb6e497ec16901684532c0
+**CANONICAL_RUNTIME:** `production-runtime @ b9dd700de428498493fb6e497ec16901684532c0`
 **PHASE21_DEPLOYED:** **NO**
 **Step 3 / 3A:** documentation / readiness only - no Railway/Vercel cutover of Phase 21
 
@@ -16,11 +16,11 @@
 | Bot | Telegram UX | Redeploy only if config/source diff requires |
 | Admin | Ops surfaces | Redeploy only if config/source diff requires |
 | Miniapp | TON Connect UX | i18n / GRAM wording if runtime asset changed |
-| Signer | self_hosted_encrypted on **DEDICATED_CONTROLLED_HOST** | NOT_PROVISIONED (external host) |
+| Signer | `self_hosted_encrypted` on **DEDICATED_CONTROLLED_HOST** | NOT_PROVISIONED (external host) |
 
 ## Safe future deploy sequence (do not execute in Step 3A)
 
-See docs/PHASE_21_PRODUCTION_ENVIRONMENT_CUTOVER.md. High-level order:
+See `docs/PHASE_21_PRODUCTION_ENVIRONMENT_CUTOVER.md`. High-level order:
 
 1. PRODUCTION safety flag baseline (all restrictive) — DRY_RUN tooling ready
 2. Mainnet network/assets/rules while request/dispatch remain paused
@@ -28,7 +28,7 @@ See docs/PHASE_21_PRODUCTION_ENVIRONMENT_CUTOVER.md. High-level order:
 4. Deploy/verify dedicated signer LOCKED
 5. Configure independent Mainnet providers
 6. Deploy Phase21-capable application runtime
-7. Switch relevant app services to DEPLOYMENT_ENV=production
+7. Switch relevant app services to `DEPLOYMENT_ENV=production`
 8. Verify TON Mainnet wallet proof path (-239)
 9. Verify policies/flags
 10. Keep Mainnet payout OFF
@@ -44,8 +44,8 @@ See docs/PHASE_21_PRODUCTION_ENVIRONMENT_CUTOVER.md. High-level order:
 
 ## Related
 
-- docs/PHASE_21_PRODUCTION_ENVIRONMENT_CUTOVER.md
-- docs/PHASE_21_STEP3A_INDEPENDENT_REVIEW_CORRECTIONS.md
-- docs/PHASE_21_SIGNER_HOSTING_DECISION.md -> DEDICATED_CONTROLLED_HOST
-- docs/PHASE_21_MAINNET_RUNTIME_WIRING.md
-- docs/PHASE_21_MAINNET_REGISTRY_BOOTSTRAP.md
+- `docs/PHASE_21_PRODUCTION_ENVIRONMENT_CUTOVER.md`
+- `docs/PHASE_21_STEP3A_INDEPENDENT_REVIEW_CORRECTIONS.md`
+- `docs/PHASE_21_SIGNER_HOSTING_DECISION.md` -> `DEDICATED_CONTROLLED_HOST`
+- `docs/PHASE_21_MAINNET_RUNTIME_WIRING.md`
+- `docs/PHASE_21_MAINNET_REGISTRY_BOOTSTRAP.md`
