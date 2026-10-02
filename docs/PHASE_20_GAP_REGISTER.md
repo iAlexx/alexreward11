@@ -1,10 +1,13 @@
 # Phase 20 — Gap Register (Step 1–3 / 4A decision pack)
 
-**PHASE20_GATE:** HOLD_FOR_FINAL_ACCEPTANCE_REVIEW
-**Step:** Step 5 mission/referral Owner scope decision complete; P20-GAP-017 deferred; awaiting final acceptance/archive review
+**PHASE20_GATE:** PASS
+**Step:** Phase 20 CLOSED / PASS / ARCHIVED — final acceptance + `PHASE_20_CLOSED_BETA` archive complete; Phase 21 NOT STARTED / NOT AUTHORIZED
 **Register scope:** Closed Beta readiness gaps + carried Phase 19 residuals
 **Rule:** Do not hide issues because they originated in an older phase.
 **Status values:** OPEN | DEFERRED | REMEDIATED | ACCEPTED_RESIDUAL (Owner only for Critical/High)
+**Canonical accepted source:** `b8135c2a94cf5939371100cdbbf2316ba2eeb5e8`
+**Canonical runtime:** `production-runtime @ b9dd700de428498493fb6e497ec16901684532c0`
+**PHASE20_REAL_MONEY_READY:** NO — seven real-money blockers remain OPEN
 
 Canonical IDs: `P20-GAP-001` .. contiguous.
 

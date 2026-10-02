@@ -1,9 +1,9 @@
 # Phase 20 — Closed Beta / Minimal Funds Plan (Step 1–3)
 
-**PHASE20_STATUS:** `IN_PROGRESS` — Step 5 mission/referral Owner scope recorded; awaiting final acceptance/archive review
-**PHASE20_GATE:** `HOLD_FOR_FINAL_ACCEPTANCE_REVIEW`
-**PHASE20_ARCHIVE:** `NOT CREATED`
-**Phase 21:** `NOT STARTED`
+**PHASE20_STATUS:** `CLOSED / PASS / ARCHIVED`
+**PHASE20_GATE:** `PASS`
+**PHASE20_ARCHIVE:** `PASS`
+**Phase 21:** `NOT STARTED` / `NOT AUTHORIZED`
 
 **Branch:** `phase20-closed-beta`
 **PHASE20_STARTING_HEAD:** `240d22a6c877f2d678668ba596238f6c8b234f71`
@@ -145,7 +145,7 @@ Historical and current state:
 9. **Step 9:** observe / reconcile / document results
 10. **Step 10:** final Phase 20 acceptance + `PHASE_20_CLOSED_BETA` archive — then **STOP**
 
-**Current Phase 20 state:** Steps 1–4C and Step 5 mission/referral Owner scope complete. `PHASE20_GATE=HOLD_FOR_FINAL_ACCEPTANCE_REVIEW`. Closed Beta blockers **0**; archive blockers **0**; real-money blockers **7** (P20-GAP-001–006, P20-GAP-011). P20-GAP-017 Owner-deferred: pre-existing staging Referral non-monetary accepted; missions deferred with honest empty Tasks state. Do not declare Phase 20 PASS or create archive until final acceptance task.
+**Current Phase 20 state:** `PHASE20_GATE=PASS` — `CLOSED / PASS / ARCHIVED`. Closed Beta blockers **0**; archive blockers **0**; real-money blockers **7** (P20-GAP-001–006, P20-GAP-011) remain OPEN. Phase 21 has **NOT** started and is **NOT** authorized.
 
 ---
 
@@ -232,7 +232,7 @@ Step 3 qualifiers:
 - real-money readiness is **NOT** implied
 - Step 4 **not** started
 
-Overall Phase 20 is `PHASE20_GATE=HOLD_FOR_FINAL_ACCEPTANCE_REVIEW` (Closed Beta blockers **0**, archive blockers **0**, real-money blockers **7**). No Phase 20 PASS. No Phase 20 archive. No Phase 21. No real-money execution authorized.
+Overall Phase 20 is `PHASE20_GATE=PASS` (`CLOSED / PASS / ARCHIVED`). Real-money blockers remain **7**. No Phase 21. No real-money execution authorized.
 
 ---
 
@@ -274,4 +274,8 @@ Canonical runtime cutover + staging policy activation complete. `P20-GAP-009` RE
 
 ## Step 5 notes
 
-Owner mission/referral content scope recorded: `FRIENDS_EXISTING_STAGING_NON_MONETARY_ACCEPTED__MISSIONS_DEFERRED_NO_LIVE_CONTENT`. Pre-existing staging Referral v1 + code policy accepted for non-monetary Friends validation; missions deferred with honest empty Tasks state. `500 bps` staging placeholder is **not** monetary approval. `P20-GAP-017` DEFERRED. **No operational DB mutation.** Evidence: `docs/PHASE_20_STEP5_MISSION_REFERRAL_SCOPE_DECISION.md`. Phase 20 gate: `HOLD_FOR_FINAL_ACCEPTANCE_REVIEW`.
+Owner mission/referral content scope recorded: `FRIENDS_EXISTING_STAGING_NON_MONETARY_ACCEPTED__MISSIONS_DEFERRED_NO_LIVE_CONTENT`. Pre-existing staging Referral v1 + code policy accepted for non-monetary Friends validation; missions deferred with honest empty Tasks state. `500 bps` staging placeholder is **not** monetary approval. `P20-GAP-017` DEFERRED. **No operational DB mutation.** Evidence: `docs/PHASE_20_STEP5_MISSION_REFERRAL_SCOPE_DECISION.md`.
+
+## Final acceptance / archive notes
+
+`PHASE 20 CLOSED BETA = PASS / ARCHIVED`. Canonical accepted source `b8135c2a94cf5939371100cdbbf2316ba2eeb5e8`. Canonical runtime remains `production-runtime @ b9dd700de428498493fb6e497ec16901684532c0`. Archive slug `PHASE_20_CLOSED_BETA` stamp `20261002-053037`. Phase 21 **NOT STARTED** / **NOT AUTHORIZED**. Real-money blockers **7** preserved OPEN. Final acceptance ceremony performed no operational mutation. Evidence: `docs/PHASE_20_ACCEPTANCE_REPORT.md`.

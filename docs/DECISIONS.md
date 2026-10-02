@@ -972,3 +972,18 @@ real-money **NO**, archive **NO**. Phase 20 gate: `HOLD_FOR_FINAL_ACCEPTANCE_REV
 
 See `docs/PHASE_20_STEP5_MISSION_REFERRAL_SCOPE_DECISION.md` and updated
 `docs/PHASE_20_CONTROLLED_CONTENT_PROPOSAL.md`.
+
+## Clarification — Phase 20 final acceptance + CLOSED_BETA archive (2026-10-02)
+
+`PHASE 20 CLOSED BETA = PASS / ARCHIVED`.
+
+- **CANONICAL_ACCEPTED_SOURCE_COMMIT:** `b8135c2a94cf5939371100cdbbf2316ba2eeb5e8`
+- **CANONICAL_RUNTIME_HEAD:** `production-runtime @ b9dd700de428498493fb6e497ec16901684532c0` (unchanged by archive)
+- **Archive:** `PHASE_20_CLOSED_BETA` stamp `20261002-053037`
+- **Meaning:** Closed Beta / non-monetary controlled validation PASS — **not** real-money, AdsGram monetary, Mainnet, payout, or Phase 21 readiness
+- **Real-money blockers remaining OPEN:** P20-GAP-001..006, P20-GAP-011 (count = 7)
+- **Phase 21:** NOT STARTED / NOT AUTHORIZED
+
+Final acceptance/archive ceremony performed no operational Railway/DB mutation.
+
+See `docs/PHASE_20_ACCEPTANCE_REPORT.md`.

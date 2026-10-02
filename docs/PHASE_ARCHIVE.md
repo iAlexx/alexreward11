@@ -78,3 +78,18 @@ pnpm archive:phase -- --phase 19 --slug SECURITY_REVIEW --commit <accepted-sha> 
 ```
 
 Phase 19 status: **CLOSED / PASS / ARCHIVED** — `PHASE19_GATE=PASS`, `PHASE19_ARCHIVE=PASS`. Canonical source `b5110524f90f29dc2a9235aac91ee9de731a03c0`. Phase 20 NOT STARTED. Archive acceptance does not authorize Mainnet, production monetary, AdsGram monetary, or payout resume.
+
+## Phase 20 archive slug (CLOSED / PASS / ARCHIVED)
+
+When Phase 20 is accepted after independent final review, archive with:
+
+- phase: `20`
+- slug: `PHASE_20_CLOSED_BETA` (helper argument typically `CLOSED_BETA`)
+
+Example:
+
+```powershell
+pnpm archive:phase -- --phase 20 --slug CLOSED_BETA --commit <accepted-sha> --report docs/PHASE_20_ACCEPTANCE_REPORT.md --roadmap-version 1.3 --next-phase-status "Phase 21 has NOT started and is NOT authorized by this archive."
+```
+
+Phase 20 status: **CLOSED / PASS / ARCHIVED** — `PHASE20_GATE=PASS`, `PHASE20_ARCHIVE=PASS`. Canonical accepted source `b8135c2a94cf5939371100cdbbf2316ba2eeb5e8`. Canonical runtime `production-runtime @ b9dd700de428498493fb6e497ec16901684532c0`. Phase 21 NOT STARTED / NOT AUTHORIZED. Archive acceptance does not authorize real money, AdsGram monetary, Mainnet, payout resume, signer unlock, or TON broadcast.

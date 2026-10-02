@@ -175,6 +175,12 @@ placeholder — not monetary rate approval. `REFERRAL_REWARD_PAUSE/STAGING=true`
 issuance paused. `MISSION_REWARD_PAUSE/STAGING` remains MISSING (no live mission content). No
 operational DB mutation in Step 5.
 
+**Phase 20 final:** `PHASE 20 CLOSED BETA = PASS / ARCHIVED`. Canonical accepted source
+`b8135c2a94cf5939371100cdbbf2316ba2eeb5e8`. Canonical runtime remains
+`production-runtime @ b9dd700de428498493fb6e497ec16901684532c0`. Real-money blockers **7** remain
+OPEN. Phase 21 **NOT STARTED** / **NOT AUTHORIZED**. Final acceptance ceremony: no operational
+mutation; Phase 18 restore sibling retained.
+
 Authoritative artifacts:
 
 - `docs/PHASE_20_CLOSED_BETA_PLAN.md`
@@ -186,6 +192,7 @@ Authoritative artifacts:
 - `docs/PHASE_20_STEP4_OWNER_POLICY_DECISION.md`
 - `docs/PHASE_20_STEP4_OWNER_POLICY_APPROVAL.md`
 - `docs/PHASE_20_STEP5_MISSION_REFERRAL_SCOPE_DECISION.md`
+- `docs/PHASE_20_ACCEPTANCE_REPORT.md`
 
 Phase 19 residual OPEN findings (004–008, 010–012) are carried into the Phase 20 gap register
 and must not be silently discarded. P19-SEC-010/011/012 must be reconsidered before any
