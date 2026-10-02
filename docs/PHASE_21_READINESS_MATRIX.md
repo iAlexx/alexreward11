@@ -1,4 +1,4 @@
-# Phase 21 — Readiness Matrix (Step 3)
+# Phase 21 - Readiness Matrix (Step 3)
 
 **PHASE21_GATE:** BLOCKED_FOR_MAINNET_PROVISIONING
 **PHASE21_MAINNET_ENABLED:** NO (operational)
