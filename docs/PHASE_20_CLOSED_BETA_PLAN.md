@@ -1,6 +1,6 @@
 # Phase 20 — Closed Beta / Minimal Funds Plan (Step 1–3)
 
-**PHASE20_STATUS:** `IN_PROGRESS` — Step 4C staging activation PREFLIGHT complete (activation pending Owner authorization); HOLD
+**PHASE20_STATUS:** `IN_PROGRESS` — Step 4C.1 preflight reproducibility + pause-seed plan (activation/seed pending); HOLD
 **PHASE20_GATE:** `HOLD`
 **PHASE20_ARCHIVE:** `NOT CREATED`
 **Phase 21:** `NOT STARTED`
@@ -261,3 +261,8 @@ Approved JSON remains canonical/source-controlled only. Removed from `@alex-rewa
 ## Step 4C notes
 
 Read-only staging preflight recorded in `docs/PHASE_20_STEP4C_STAGING_POLICY_ACTIVATION_PREFLIGHT.md` (+ snapshot JSON). Policy tables currently empty; proposed ACTIVE versions = 1/1/1. **No staging mutation. No activation.**
+
+
+## Step 4C.1 notes
+
+Preflight path resolution fixed (`phase20-step4c-paths.mjs`). Fresh read-only staging re-run confirms empty policy tables (proposed 1/1/1). Separate Owner decision: seed `WITHDRAWAL_REQUESTS_PAUSE/STAGING enabled=true` + `feature_flag_versions` v1 before/with policy activation. **Neither seed nor activation executed.**

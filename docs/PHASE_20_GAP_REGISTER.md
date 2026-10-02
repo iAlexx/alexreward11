@@ -1,7 +1,7 @@
 # Phase 20 — Gap Register (Step 1–3 / 4A decision pack)
 
 **PHASE20_GATE:** HOLD
-**Step:** 4C staging activation PREFLIGHT only (activation not executed); HOLD
+**Step:** 4C.1 preflight path fix + withdrawal pause seed PLAN (activation/seed not executed); HOLD
 **Register scope:** Closed Beta readiness gaps + carried Phase 19 residuals
 **Rule:** Do not hide issues because they originated in an older phase.
 **Status values:** OPEN | DEFERRED | REMEDIATED | ACCEPTED_RESIDUAL (Owner only for Critical/High)
@@ -158,6 +158,7 @@ Canonical IDs: `P20-GAP-001` .. contiguous.
 - **step4b note:** Owner approved exact Closed Beta Risk/Trust/Eligibility values; source artifact `packages/fraud/policy/phase20-closed-beta-owner-approved.json`; disposable validation only. Staging activation **not** performed. See `docs/PHASE_20_STEP4_OWNER_POLICY_APPROVAL.md`.
 - **step4b.1 note:** Runtime export graph decoupled — approved JSON is test/tool-only (not loaded by `@alex-rewards/fraud` import). Status unchanged.
 - **step4c note:** Staging activation preflight completed read-only. Tables empty; proposed versions 1/1/1. Activation **not** executed. See `docs/PHASE_20_STEP4C_STAGING_POLICY_ACTIVATION_PREFLIGHT.md`.
+- **step4c.1 note:** Preflight path bug fixed; fresh RO re-run confirms empty tables. Explicit `WITHDRAWAL_REQUESTS_PAUSE/STAGING enabled=true` seed planned (not executed).
 
 ### P20-GAP-010 — Provider-limit Admin UI ceremony incomplete
 

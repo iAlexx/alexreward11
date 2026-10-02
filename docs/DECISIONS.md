@@ -910,3 +910,12 @@ Read-only discovery of staging `risk_rule_versions` / `trust_rule_versions` /
 are 1/1/1. Canonical approved artifact remains `activationAuthorized=false`. No staging
 mutation, Railway change, or policy activation occurred. See
 `docs/PHASE_20_STEP4C_STAGING_POLICY_ACTIVATION_PREFLIGHT.md`.
+
+## Clarification — Phase 20 Step 4C.1 preflight path + withdrawal pause seed plan (2026-10-02)
+
+Fixed Step 4C preflight path resolution so artifact/snapshot/git resolve from
+`packages/fraud` vs repo root correctly. Fresh read-only staging discovery again
+showed empty Risk/Trust/Eligibility tables (proposed versions 1/1/1). Documented
+engine mismatch: Withdrawal Engine treats missing `WITHDRAWAL_REQUESTS_PAUSE` as
+not-paused; Eligibility fails closed. Recommended separate Owner-authorized STAGING
+seed `enabled=true` + `feature_flag_versions` v1 — **not executed** in 4C.1.

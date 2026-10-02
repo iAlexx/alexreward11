@@ -14,7 +14,13 @@ if (process.env.PHASE20_STEP4C_ACTIVATE === '1') {
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const result = spawnSync(
   'pnpm',
-  ['--filter', '@alex-rewards/fraud', 'exec', 'node', 'scripts/phase20-step4c-staging-preflight.mjs'],
+  [
+    '--filter',
+    '@alex-rewards/fraud',
+    'exec',
+    'node',
+    'scripts/phase20-step4c-staging-preflight.mjs',
+  ],
   { cwd: root, env: process.env, encoding: 'utf8', shell: true, stdio: 'inherit' },
 );
 process.exit(result.status ?? 1);

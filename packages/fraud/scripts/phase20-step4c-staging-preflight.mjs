@@ -9,23 +9,35 @@
  */
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import pg from 'pg';
 
-const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+import {
+  assertPhase20Step4cPathsHealthy,
+  resolvePhase20Step4cPaths,
+} from './phase20-step4c-paths.mjs';
+
+const { fraudPackageRoot, repoRoot, artifactPath, snapshotPath } = resolvePhase20Step4cPaths();
+assertPhase20Step4cPathsHealthy({ fraudPackageRoot, repoRoot, artifactPath, snapshotPath });
 
 if (process.env.PHASE20_STEP4C_ACTIVATE === '1') {
-  console.error('[phase20-step4c] REFUSED: activation mode is not implemented in Step 4C preflight tooling');
+  console.error(
+    '[phase20-step4c] REFUSED: activation mode is not implemented in Step 4C preflight tooling',
+  );
   process.exit(2);
 }
 
 const url = process.env.PHASE20_STAGING_PREFLIGHT_DATABASE_URL ?? '';
 if (!url) {
-  console.error('[phase20-step4c] PHASE20_STAGING_PREFLIGHT_DATABASE_URL required for live staging read-only discovery');
-  console.error('[phase20-step4c] Use railway connect Postgres --tunnel-only and point a read-only session at the tunnel.');
-  console.error('[phase20-step4c] Tip: existing snapshot docs/phase20-step4c-preflight-snapshot.json may already record a prior discovery.');
+  console.error(
+    '[phase20-step4c] PHASE20_STAGING_PREFLIGHT_DATABASE_URL required for live staging read-only discovery',
+  );
+  console.error(
+    '[phase20-step4c] Use railway connect Postgres --tunnel-only and point a read-only session at the tunnel.',
+  );
+  console.error(
+    '[phase20-step4c] Tip: existing snapshot docs/phase20-step4c-preflight-snapshot.json may already record a prior discovery.',
+  );
   process.exit(1);
 }
 
@@ -33,9 +45,7 @@ function digest(value) {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
-const artifact = JSON.parse(
-  readFileSync(join(root, 'packages/fraud/policy/phase20-closed-beta-owner-approved.json'), 'utf8'),
-);
+const artifact = JSON.parse(readFileSync(artifactPath, 'utf8'));
 if (artifact.activationAuthorized !== false) {
   console.error('[phase20-step4c] REFUSED: artifact activationAuthorized must remain false');
   process.exit(2);
@@ -73,14 +83,20 @@ async function domainSummary(client, table, versionCol) {
   const recent = await client.query(`
     SELECT id::text, ${versionCol} AS version, status::text, effective_from, effective_to, reason, audit_reference, created_at
     FROM ${table} ORDER BY ${versionCol} DESC LIMIT 5`);
-  return { table, ...counts.rows[0], resolverNowMatches: nowActive.rows, recentVersions: recent.rows };
+  return {
+    table,
+    ...counts.rows[0],
+    resolverNowMatches: nowActive.rows,
+    recentVersions: recent.rows,
+  };
 }
 
 function plan(domain) {
   const activeNow = domain.resolverNowMatches;
   return {
     activeCountNow: activeNow.length,
-    currentActiveVersion: activeNow.length === 1 ? activeNow[0].version : activeNow.length === 0 ? null : 'MULTIPLE',
+    currentActiveVersion:
+      activeNow.length === 1 ? activeNow[0].version : activeNow.length === 0 ? null : 'MULTIPLE',
     currentActiveId: activeNow.length === 1 ? activeNow[0].id : null,
     highestExistingVersion: domain.highest_version,
     proposedNextVersion: domain.highest_version + 1,
@@ -115,6 +131,16 @@ try {
   const ads = await client.query(`
     SELECT code, status::text, lifecycle_state::text, production_monetary_status::text
     FROM ad_providers WHERE code = 'ADSGRAM' LIMIT 1`);
+
+  // WITHDRAWAL_REQUESTS_PAUSE STAGING presence (dependency, not mutated here)
+  const wrpStaging = await client.query(`
+    SELECT enabled FROM feature_flags
+    WHERE flag_key = 'WITHDRAWAL_REQUESTS_PAUSE' AND environment = 'STAGING'::environment_name`);
+  const wrpVersions = await client.query(`
+    SELECT count(*)::int AS c FROM feature_flag_versions ffv
+    JOIN feature_flags ff ON ff.id = ffv.feature_flag_id
+    WHERE ff.flag_key = 'WITHDRAWAL_REQUESTS_PAUSE' AND ff.environment = 'STAGING'::environment_name`);
+
   await client.query('ROLLBACK');
 
   const approvedRisk = {
@@ -124,9 +150,30 @@ try {
     actions: artifact.risk.actions,
   };
   const plans = { risk: plan(risk), trust: plan(trust), eligibility: plan(eligibility) };
+  const git = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, encoding: 'utf8' });
+  const sourceCommit = (git.stdout ?? '').trim();
+  if (!sourceCommit || git.status !== 0) {
+    throw new Error('failed to resolve git HEAD from repoRoot');
+  }
+
+  const withdrawalRequestsPauseStaging =
+    wrpStaging.rows[0] === undefined
+      ? { state: 'MISSING', enabled: null, versionHistoryCount: wrpVersions.rows[0]?.c ?? 0 }
+      : {
+          state: 'PRESENT',
+          enabled: wrpStaging.rows[0].enabled,
+          versionHistoryCount: wrpVersions.rows[0]?.c ?? 0,
+        };
+
   const report = {
     preflightAt: new Date().toISOString(),
-    sourceCommit: spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout.trim(),
+    sourceCommit,
+    pathResolution: {
+      fraudPackageRoot,
+      repoRoot,
+      artifactPath,
+      snapshotPath,
+    },
     artifactPath: 'packages/fraud/policy/phase20-closed-beta-owner-approved.json',
     activationAuthorized: false,
     readOnlyConfirmed: true,
@@ -137,6 +184,9 @@ try {
       applicationName: identity.rows[0].application_name,
       observedAt: identity.rows[0].observed_at,
       accessMethod: 'PHASE20_STAGING_PREFLIGHT_DATABASE_URL + default_transaction_read_only=on',
+      serviceName: 'Postgres',
+      railwayEnvironmentName: 'production',
+      note: 'Railway environment name is production; services are staging-labeled. Used operational Postgres, not restore sibling.',
     },
     approvedDigests: {
       risk: digest(approvedRisk),
@@ -148,6 +198,7 @@ try {
     trust,
     eligibility,
     featureFlagsObserved: flags.rows,
+    withdrawalRequestsPauseStaging,
     adsgramMonetary: ads.rows[0] ?? null,
     plans,
     activationPreflight:
@@ -156,11 +207,15 @@ try {
         : 'READY_FOR_OWNER_AUTHORIZATION',
   };
 
-  const out = join(root, 'docs/phase20-step4c-preflight-snapshot.json');
-  writeFileSync(out, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
-  console.log('[phase20-step4c] wrote', out);
+  writeFileSync(snapshotPath, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
+  console.log('[phase20-step4c] wrote', snapshotPath);
+  console.log('[phase20-step4c] sourceCommit=', sourceCommit);
   console.log('[phase20-step4c] ACTIVATION_PREFLIGHT=', report.activationPreflight);
   console.log('[phase20-step4c] plans=', JSON.stringify(report.plans));
+  console.log(
+    '[phase20-step4c] WITHDRAWAL_REQUESTS_PAUSE_STAGING=',
+    JSON.stringify(withdrawalRequestsPauseStaging),
+  );
   console.log('[phase20-step4c] PASS (read-only; no activation)');
 } catch (e) {
   try {

@@ -1,6 +1,12 @@
 {
-  "preflightAt": "2026-10-01T23:45:32.492Z",
-  "sourceCommit": "f870842e88cbf5ca62b1cfd6a6e3a5458b6a6d54",
+  "preflightAt": "2026-10-02T04:06:25.626Z",
+  "sourceCommit": "70841608eb1fd79cf658f10559d58501a03d5c1f",
+  "pathResolution": {
+    "fraudPackageRoot": "C:\\Users\\Master aLEX\\Desktop\\project program\\alex reward\\alex-rewards-phase13-remediation\\packages\\fraud",
+    "repoRoot": "C:\\Users\\Master aLEX\\Desktop\\project program\\alex reward\\alex-rewards-phase13-remediation",
+    "artifactPath": "C:\\Users\\Master aLEX\\Desktop\\project program\\alex reward\\alex-rewards-phase13-remediation\\packages\\fraud\\policy\\phase20-closed-beta-owner-approved.json",
+    "snapshotPath": "C:\\Users\\Master aLEX\\Desktop\\project program\\alex reward\\alex-rewards-phase13-remediation\\docs\\phase20-step4c-preflight-snapshot.json"
+  },
   "artifactPath": "packages/fraud/policy/phase20-closed-beta-owner-approved.json",
   "activationAuthorized": false,
   "readOnlyConfirmed": true,
@@ -9,8 +15,8 @@
     "database": "railway",
     "dbUser": "postgres",
     "applicationName": "phase20-step4c-preflight-ro",
-    "observedAt": "2026-10-01T23:45:28.357Z",
-    "accessMethod": "railway-connect-ssh-tunnel + default_transaction_read_only=on",
+    "observedAt": "2026-10-02T04:06:22.566Z",
+    "accessMethod": "PHASE20_STAGING_PREFLIGHT_DATABASE_URL + default_transaction_read_only=on",
     "serviceName": "Postgres",
     "railwayEnvironmentName": "production",
     "note": "Railway environment name is production; services are staging-labeled. Used operational Postgres, not restore sibling."
@@ -23,31 +29,25 @@
   },
   "risk": {
     "table": "risk_rule_versions",
-    "versionColumn": "rule_version",
     "total_rows": 0,
     "active_rows": 0,
     "highest_version": 0,
-    "activeRows": [],
     "resolverNowMatches": [],
     "recentVersions": []
   },
   "trust": {
     "table": "trust_rule_versions",
-    "versionColumn": "rule_version",
     "total_rows": 0,
     "active_rows": 0,
     "highest_version": 0,
-    "activeRows": [],
     "resolverNowMatches": [],
     "recentVersions": []
   },
   "eligibility": {
     "table": "eligibility_policy_versions",
-    "versionColumn": "policy_version",
     "total_rows": 0,
     "active_rows": 0,
     "highest_version": 0,
-    "activeRows": [],
     "resolverNowMatches": [],
     "recentVersions": []
   },
@@ -83,6 +83,11 @@
       "enabled": false
     }
   ],
+  "withdrawalRequestsPauseStaging": {
+    "state": "MISSING",
+    "enabled": null,
+    "versionHistoryCount": 0
+  },
   "adsgramMonetary": {
     "code": "ADSGRAM",
     "status": "ACTIVE",
@@ -118,12 +123,5 @@
       "zeroActive": true
     }
   },
-  "activationPreflight": "READY_FOR_OWNER_AUTHORIZATION",
-  "killSwitchObservations": {
-    "PAYOUT_DISPATCH_PAUSE_STAGING": true,
-    "REFERRAL_REWARD_PAUSE_STAGING": true,
-    "WITHDRAWAL_REQUESTS_PAUSE_STAGING_ROW": "MISSING",
-    "WITHDRAWAL_REQUESTS_PAUSE_LOCAL": false,
-    "note": "Missing STAGING WITHDRAWAL_REQUESTS_PAUSE causes ELIGIBILITY_GATE_SOURCE_UNAVAILABLE for WITHDRAWAL_REQUEST on STAGING until a separate flag row exists. Policy activation must NOT auto-create flags."
-  }
+  "activationPreflight": "READY_FOR_OWNER_AUTHORIZATION"
 }
