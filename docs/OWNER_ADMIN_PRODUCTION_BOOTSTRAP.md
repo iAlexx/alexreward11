@@ -54,3 +54,12 @@ No `forceApply`. Password/TOTP never via env/argv.
 ## Hot Wallet separation
 
 Phase21 payout Hot Wallet fingerprint must never be used as Owner bootstrap / seal / grant signing key.
+
+## Step 4A.1 corrections
+
+- `AuthenticatedProductionBootstrapTrust` (WeakSet-branded); caller `trustClass` refused
+- `ProductionCeremonyBundleV1` root-binds intended admin; Channel B authenticates bundle digest via live Owner TTY
+- Same-host Channel B JSON is documentary only
+- Production lifecycle wrappers; isolated path unchanged
+- Fail-closed existing-admin auth/session inspection (correct `idle_expires_at` / `absolute_expires_at`)
+- Witness model: HUMAN_ATTESTED (not cryptographic identity proof)

@@ -30,10 +30,25 @@ import {
 import {
   generateEd25519KeyPair,
   bytesToHex,
+  hexToBytes,
 } from './ed25519.js';
 import { fingerprintPublicKey } from './grant.js';
 import { assertWitnessesAreConcrete } from './isolated-ceremony-gate.js';
 import { PRODUCTION_OWNER_BOOTSTRAP_TRUST_CLASS } from './production-trust-class.js';
+import {
+  digestProductionCeremonyBundleV1,
+  validateProductionCeremonyBundleV1,
+  type ProductionCeremonyBundleV1,
+  PRODUCTION_CEREMONY_BUNDLE_PURPOSE,
+} from './production-ceremony-bundle-v1.js';
+import {
+  mintAuthenticatedProductionBootstrapTrust,
+  type AuthenticatedProductionBootstrapTrust,
+} from './authenticated-production-trust.js';
+import {
+  createBootstrapTrustMaterial,
+  createProductionOwnerBootstrapPool,
+} from './pool.js';
 
 export const PRODUCTION_CEREMONY_PROFILE_NAME = 'production-endpoint-profile.json';
 export const PRODUCTION_CEREMONY_SEAL_NAME = 'ceremony-seal-public.json';
@@ -43,6 +58,8 @@ export const PRODUCTION_PUBLIC_KEY_NAME = 'bootstrap-public.json';
 export const PRODUCTION_PRIVATE_SEED_NAME = 'bootstrap-private-seed.hex';
 export const PRODUCTION_MANIFEST_NAME = 'ceremony-public-manifest.json';
 export const PRODUCTION_TARGET_ADMIN_NAME = 'intended-existing-admin.json';
+export const PRODUCTION_BUNDLE_NAME = 'production-ceremony-bundle-v1.json';
+export const WITNESS_MODEL = 'HUMAN_ATTESTED' as const;
 
 const FORBIDDEN_WITNESS_LABEL =
   /^(cursor|system|railway|placeholder|todo|tbd|n\/a|test_witness_placeholder)$/i;
@@ -67,7 +84,8 @@ export interface ProductionIntendedExistingAdminBinding {
 export interface ProductionChannelBRecord {
   readonly provenance_channel_b: typeof CEREMONY_SEAL_PROVENANCE_CHANNEL_B_V1;
   readonly recorded_via: 'owner_interactive_tty';
-  readonly seal_content_digest_hex: string;
+  /** Documentary only — NOT operational Layer C/D authority. */
+  readonly production_bundle_digest_hex: string;
   readonly recorded_unix: number;
   readonly note: string;
 }
@@ -138,7 +156,31 @@ export function assertProductionProfileRequiresSystemIdentifier(
 export function generateProductionBootstrapKeypairFiles(input: {
   readonly ceremonyDir: string;
   readonly keyId: string;
+  /** Must be true — CLI passes only with --phase21-production-owner-bootstrap. */
+  readonly phase21ProductionOwnerBootstrap: boolean;
+  /** When true, require interactive TTY (default). Test hooks may disable only under ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1. */
+  readonly requireInteractiveTty?: boolean;
 }): ProductionCeremonyPublicKeyRecord {
+  if (input.phase21ProductionOwnerBootstrap !== true) {
+    throw new AuthDomainError(
+      'FORBIDDEN',
+      'generate-keypair requires --phase21-production-owner-bootstrap',
+    );
+  }
+  const requireTty = input.requireInteractiveTty !== false;
+  if (requireTty) {
+    if (!process.stdin.isTTY || !process.stdout.isTTY) {
+      throw new AuthDomainError(
+        'FORBIDDEN',
+        'INTERACTIVE_TTY_REQUIRED for production Owner-bootstrap key generation',
+      );
+    }
+  } else if (process.env.ALEX_OWNER_BOOTSTRAP_TEST_HOOKS !== '1') {
+    throw new AuthDomainError(
+      'FORBIDDEN',
+      'TTY bypass only allowed with ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1',
+    );
+  }
   const dir = resolveDir(input.ceremonyDir);
   mkdirSync(dir, { recursive: true });
   const privPath = join(dir, PRODUCTION_PRIVATE_SEED_NAME);
@@ -292,6 +334,30 @@ export function draftProductionCeremonySeal(input: {
     JSON.stringify(channelA, null, 2) + '\n',
     { encoding: 'utf8' },
   );
+  const intended = loadIntendedExistingAdminBinding(input.ceremonyDir);
+  const sealDigest = digestCeremonySealV1(validated);
+  const bundle = validateProductionCeremonyBundleV1({
+    v: 1,
+    purpose: PRODUCTION_CEREMONY_BUNDLE_PURPOSE,
+    deployment_env: 'production',
+    ceremony_id: validated.ceremony_id,
+    seal_content_digest_hex: sealDigest,
+    endpoint_profile_id: profile.profile_id,
+    endpoint_profile_digest_hex: profileDigest,
+    bootstrap_key_id: pub.key_id,
+    bootstrap_public_key_sha256_hex: pub.public_key_sha256_hex,
+    enrollment_mode: 'CLAIM_EXISTING_ADMIN',
+    intended_admin_user_id: intended.intended_admin_user_id,
+    intended_admin_email: intended.intended_admin_email,
+    witness_model: WITNESS_MODEL,
+    witness_cryptographic_identity_proven: false,
+    witness_count: validated.witnesses.length,
+  });
+  writeFileSync(
+    join(resolveDir(input.ceremonyDir), PRODUCTION_BUNDLE_NAME),
+    JSON.stringify(bundle, null, 2) + '\n',
+    { encoding: 'utf8' },
+  );
   return validated;
 }
 
@@ -299,23 +365,21 @@ export function recordProductionChannelBDigest(input: {
   readonly ceremonyDir: string;
   readonly ownerTypedDigestHex: string;
 }): ProductionChannelBRecord {
-  const seal = parseCeremonySealV1Json(
-    readFileSync(join(resolveDir(input.ceremonyDir), PRODUCTION_CEREMONY_SEAL_NAME), 'utf8'),
-  );
-  const expected = digestCeremonySealV1(seal);
+  const bundle = loadProductionCeremonyBundle(input.ceremonyDir);
+  const expected = digestProductionCeremonyBundleV1(bundle);
   const typed = input.ownerTypedDigestHex.trim().toLowerCase();
   if (!/^[0-9a-f]{64}$/.test(typed)) {
     throw new AuthDomainError('VALIDATION', 'Channel B digest must be 64 lowercase hex chars');
   }
   if (typed !== expected) {
-    throw new AuthDomainError('FORBIDDEN', 'Channel B digest does not match seal content digest');
+    throw new AuthDomainError('FORBIDDEN', 'Channel B digest does not match production bundle digest');
   }
   const record: ProductionChannelBRecord = {
     provenance_channel_b: CEREMONY_SEAL_PROVENANCE_CHANNEL_B_V1,
     recorded_via: 'owner_interactive_tty',
-    seal_content_digest_hex: typed,
+    production_bundle_digest_hex: typed,
     recorded_unix: Math.floor(Date.now() / 1000),
-    note: 'Owner-typed offline paper digest — not a same-host file checksum',
+    note: 'DOCUMENTARY ONLY — operational Layer C/D requires fresh live Owner TTY entry',
   };
   writeFileSync(
     join(resolveDir(input.ceremonyDir), PRODUCTION_CHANNEL_B_NAME),
@@ -325,14 +389,26 @@ export function recordProductionChannelBDigest(input: {
   return record;
 }
 
-export function assertProductionCeremonyAllowsEnrollment(ceremonyDir: string): {
+
+export function loadProductionCeremonyBundle(ceremonyDir: string): ProductionCeremonyBundleV1 {
+  const text = readFileSync(join(resolveDir(ceremonyDir), PRODUCTION_BUNDLE_NAME), 'utf8');
+  return validateProductionCeremonyBundleV1(JSON.parse(text));
+}
+
+/**
+ * Structural validation only — provenanceAuthenticated is always false.
+ * MUST NOT be used as enrollment authority.
+ */
+export function validateProductionCeremonyBundleStructurally(ceremonyDir: string): {
   readonly seal: CeremonySealV1;
   readonly profile: CeremonyEndpointProfileV1;
-  readonly sealContentDigestHex: string;
+  readonly bundle: ProductionCeremonyBundleV1;
+  readonly bundleDigestHex: string;
   readonly authorityPublic: ProductionCeremonyPublicKeyRecord;
   readonly intendedAdmin: ProductionIntendedExistingAdminBinding;
   readonly provenanceAuthenticated: false;
-  readonly trustClass: typeof PRODUCTION_OWNER_BOOTSTRAP_TRUST_CLASS;
+  readonly witnessModel: typeof WITNESS_MODEL;
+  readonly witnessCryptographicIdentityProven: false;
 } {
   const profile = loadProductionEndpointProfile(ceremonyDir);
   const seal = parseCeremonySealV1Json(
@@ -340,6 +416,7 @@ export function assertProductionCeremonyAllowsEnrollment(ceremonyDir: string): {
   );
   const authorityPublic = loadProductionPublicKey(ceremonyDir);
   const intendedAdmin = loadIntendedExistingAdminBinding(ceremonyDir);
+  const bundle = loadProductionCeremonyBundle(ceremonyDir);
   refusePlaceholderWitnesses(seal.witnesses);
   assertSealProfileDigestMatchesProfile(seal, profile);
   if (seal.key_id !== authorityPublic.key_id) {
@@ -348,32 +425,136 @@ export function assertProductionCeremonyAllowsEnrollment(ceremonyDir: string): {
   if (seal.public_key_sha256_hex !== authorityPublic.public_key_sha256_hex) {
     throw new AuthDomainError('FORBIDDEN', 'seal public key fingerprint mismatch');
   }
-  const channelA = validateDeploymentTrustDerivativeV1(seal);
-  const channelB = JSON.parse(
-    readFileSync(join(resolveDir(ceremonyDir), PRODUCTION_CHANNEL_B_NAME), 'utf8'),
-  ) as ProductionChannelBRecord;
-  if (channelB.seal_content_digest_hex !== channelA.seal_content_digest_hex) {
-    throw new AuthDomainError('FORBIDDEN', 'Channel A/B seal digest mismatch');
+  if (seal.public_key_raw_hex !== authorityPublic.public_key_raw_hex) {
+    throw new AuthDomainError('FORBIDDEN', 'seal public key mismatch');
   }
-  if (channelB.recorded_via !== 'owner_interactive_tty') {
-    throw new AuthDomainError('FORBIDDEN', 'Channel B must be owner_interactive_tty');
+  const sealDigest = digestCeremonySealV1(seal);
+  const profileDigest = digestCeremonyEndpointProfileV1(profile);
+  if (bundle.seal_content_digest_hex !== sealDigest) {
+    throw new AuthDomainError('FORBIDDEN', 'bundle seal digest mismatch');
   }
-  // Layer C/D provenance auth remains unimplemented — fail closed.
-  try {
-    claimDerivativeProvenanceAuthenticated(channelA);
-  } catch (err) {
-    if (!(err instanceof AuthDomainError) || err.code !== 'FORBIDDEN') throw err;
+  if (bundle.endpoint_profile_digest_hex !== profileDigest) {
+    throw new AuthDomainError('FORBIDDEN', 'bundle profile digest mismatch');
   }
+  if (bundle.bootstrap_key_id !== authorityPublic.key_id) {
+    throw new AuthDomainError('FORBIDDEN', 'bundle key_id mismatch');
+  }
+  if (bundle.bootstrap_public_key_sha256_hex !== authorityPublic.public_key_sha256_hex) {
+    throw new AuthDomainError('FORBIDDEN', 'bundle public key fingerprint mismatch');
+  }
+  if (bundle.intended_admin_user_id !== intendedAdmin.intended_admin_user_id) {
+    throw new AuthDomainError('FORBIDDEN', 'bundle intended admin id mismatch vs binding file');
+  }
+  if (
+    bundle.intended_admin_email.trim().toLowerCase() !==
+    intendedAdmin.intended_admin_email.trim().toLowerCase()
+  ) {
+    throw new AuthDomainError('FORBIDDEN', 'bundle intended admin email mismatch vs binding file');
+  }
+  // Channel B file may exist as documentary evidence but does NOT authenticate.
   return {
     seal,
     profile,
-    sealContentDigestHex: channelA.seal_content_digest_hex,
+    bundle,
+    bundleDigestHex: digestProductionCeremonyBundleV1(bundle),
     authorityPublic,
     intendedAdmin,
     provenanceAuthenticated: false,
-    trustClass: PRODUCTION_OWNER_BOOTSTRAP_TRUST_CLASS,
+    witnessModel: WITNESS_MODEL,
+    witnessCryptographicIdentityProven: false,
   };
 }
+
+/**
+ * MUST throw unless Layer C/D live Owner TTY authentication completed.
+ * Same-host Channel B file alone is never sufficient.
+ */
+export function assertAuthenticatedProductionCeremony(_ceremonyDir: string): never {
+  throw new AuthDomainError(
+    'FORBIDDEN',
+    'assertAuthenticatedProductionCeremony requires live authenticateProductionCeremonyFromOwnerTty result',
+  );
+}
+
+/**
+ * Operational Layer C/D: Owner types production bundle digest from offline/witnessed media
+ * into a real interactive TTY. Never accepts env/argv/file/pipe as operational authority.
+ */
+export async function authenticateProductionCeremonyFromOwnerTty(input: {
+  readonly ceremonyDir: string;
+  readonly connectionString: string;
+  readonly pinnedPublicKeyRawHex: string;
+  /**
+   * Live digest reader. Production CLI supplies interactive TTY prompt.
+   * Test hooks may inject only when ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1 and requireInteractiveTty=false.
+   */
+  readonly readOfflineBundleDigestHex: () => Promise<string>;
+  readonly requireInteractiveTty?: boolean;
+}): Promise<AuthenticatedProductionBootstrapTrust> {
+  const structural = validateProductionCeremonyBundleStructurally(input.ceremonyDir);
+  const requireTty = input.requireInteractiveTty !== false;
+  if (requireTty) {
+    if (!process.stdin.isTTY || !process.stdout.isTTY) {
+      throw new AuthDomainError(
+        'FORBIDDEN',
+        'INTERACTIVE_TTY_REQUIRED for operational Channel B / Layer C-D authentication',
+      );
+    }
+  } else if (process.env.ALEX_OWNER_BOOTSTRAP_TEST_HOOKS !== '1') {
+    throw new AuthDomainError(
+      'FORBIDDEN',
+      'TTY bypass for Channel B only allowed with ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1',
+    );
+  }
+  const typed = (await input.readOfflineBundleDigestHex()).trim().toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(typed)) {
+    throw new AuthDomainError('VALIDATION', 'Owner-typed digest must be 64 lowercase hex chars');
+  }
+  if (typed !== structural.bundleDigestHex) {
+    throw new AuthDomainError(
+      'FORBIDDEN',
+      'live Owner TTY digest does not match recomputed ProductionCeremonyBundleV1 digest',
+    );
+  }
+  // Same-host Channel B JSON file must NEVER satisfy operational auth by itself — ignored here.
+  const pubBytes = hexToBytes(input.pinnedPublicKeyRawHex);
+  if (bytesToHex(pubBytes) !== structural.authorityPublic.public_key_raw_hex) {
+    throw new AuthDomainError('FORBIDDEN', 'pinned public key bytes mismatch');
+  }
+  const bootstrap = await createProductionOwnerBootstrapPool({
+    connectionString: input.connectionString,
+    profile: {
+      profileId: structural.profile.profile_id,
+      deploymentEnv: 'production',
+      expectedDatabaseName: structural.profile.expected_database_name,
+      expectedSystemIdentifier: structural.profile.expected_system_identifier!,
+      tls: {
+        mode: 'verify_full',
+        caPem: structural.profile.tls.ca_pem,
+        tlsServerName: structural.profile.tls.tls_server_name!,
+      },
+    },
+  });
+  const trust = createBootstrapTrustMaterial(
+    bootstrap,
+    new Map([[structural.authorityPublic.key_id, pubBytes]]),
+  );
+  return mintAuthenticatedProductionBootstrapTrust({
+    trust,
+    bundle: structural.bundle,
+    bundleDigestHex: structural.bundleDigestHex,
+  });
+}
+
+/** @deprecated Use validateProductionCeremonyBundleStructurally — never enrollment authority. */
+export function assertProductionCeremonyAllowsEnrollment(ceremonyDir: string): never {
+  void validateProductionCeremonyBundleStructurally(ceremonyDir);
+  throw new AuthDomainError(
+    'FORBIDDEN',
+    'UNAUTHENTICATED_PROVENANCE — use authenticateProductionCeremonyFromOwnerTty for enrollment',
+  );
+}
+
 
 export function missingProductionTrustResources(ceremonyDir: string | null): readonly string[] {
   const missing: string[] = [];
@@ -385,7 +566,8 @@ export function missingProductionTrustResources(ceremonyDir: string | null): rea
       'EXPECTED_SYSTEM_IDENTIFIER',
       'TLS_SERVER_NAME',
       'INDEPENDENT_HUMAN_WITNESS',
-      'CHANNEL_B_OWNER_TYPED_DIGEST',
+      'PRODUCTION_CEREMONY_BUNDLE_V1',
+      'LIVE_OWNER_TTY_CHANNEL_B_AUTHENTICATION',
       'CEREMONY_SEAL',
       'INTENDED_EXISTING_ADMIN_BINDING',
     ];
@@ -399,16 +581,18 @@ export function missingProductionTrustResources(ceremonyDir: string | null): rea
     missing.push('TLS_SERVER_NAME');
   } else {
     try {
-      const p = loadProductionEndpointProfile(dir);
-      if (!p.expected_system_identifier) missing.push('EXPECTED_SYSTEM_IDENTIFIER');
-      if (!p.tls.ca_pem) missing.push('OWNER_APPROVED_CA_PEM');
-      if (!p.tls.tls_server_name) missing.push('TLS_SERVER_NAME');
+      const profile = loadProductionEndpointProfile(dir);
+      if (!profile.expected_system_identifier) missing.push('EXPECTED_SYSTEM_IDENTIFIER');
+      if (!profile.tls.ca_pem) missing.push('OWNER_APPROVED_CA_PEM');
+      if (!profile.tls.tls_server_name) missing.push('TLS_SERVER_NAME');
     } catch {
       missing.push('PRODUCTION_ENDPOINT_PROFILE_INVALID');
     }
   }
-  if (!existsSync(join(dir, PRODUCTION_CEREMONY_SEAL_NAME))) missing.push('CEREMONY_SEAL');
-  else {
+  if (!existsSync(join(dir, PRODUCTION_CEREMONY_SEAL_NAME))) {
+    missing.push('CEREMONY_SEAL');
+    missing.push('INDEPENDENT_HUMAN_WITNESS');
+  } else {
     try {
       const seal = parseCeremonySealV1Json(
         readFileSync(join(dir, PRODUCTION_CEREMONY_SEAL_NAME), 'utf8'),
@@ -418,9 +602,9 @@ export function missingProductionTrustResources(ceremonyDir: string | null): rea
       missing.push('CEREMONY_SEAL_INVALID');
     }
   }
-  if (!existsSync(join(dir, PRODUCTION_CHANNEL_B_NAME))) {
-    missing.push('CHANNEL_B_OWNER_TYPED_DIGEST');
-  }
+  if (!existsSync(join(dir, PRODUCTION_BUNDLE_NAME))) missing.push('PRODUCTION_CEREMONY_BUNDLE_V1');
+  // Operational Channel B is live TTY — always report until ceremony executes.
+  missing.push('LIVE_OWNER_TTY_CHANNEL_B_AUTHENTICATION');
   if (!existsSync(join(dir, PRODUCTION_TARGET_ADMIN_NAME))) {
     missing.push('INTENDED_EXISTING_ADMIN_BINDING');
   }

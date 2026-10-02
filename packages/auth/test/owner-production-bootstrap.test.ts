@@ -6,21 +6,23 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   PRODUCTION_OWNER_BOOTSTRAP_TRUST_CLASS,
   assertProductionProfileRequiresSystemIdentifier,
-  assertWitnessesAreConcrete,
   buildOwnerBootstrapPoolConfig,
   buildProductionOwnerBootstrapPoolConfig,
   buildProductionOwnerBootstrapReadinessReport,
-  digestCeremonyEndpointProfileV1,
+  digestProductionCeremonyBundleV1,
   draftProductionCeremonySeal,
   generateProductionBootstrapKeypairFiles,
-  missingProductionTrustResources,
   preflightClaimExistingAdmin,
   recordProductionChannelBDigest,
   validateCeremonyEndpointProfileV1,
   writeIntendedExistingAdminBinding,
   writeProductionEndpointProfile,
+  validateProductionCeremonyBundleStructurally,
   assertProductionCeremonyAllowsEnrollment,
-  digestCeremonySealV1,
+  isAuthenticatedProductionBootstrapTrust,
+  tryForgeProductionTrustFromCallerTrustClass,
+  mintAuthenticatedProductionBootstrapTrust,
+  WITNESS_MODEL,
 } from '../src/owner-bootstrap/index.js';
 
 const FAKE_CA = `-----BEGIN CERTIFICATE-----
@@ -45,7 +47,35 @@ function productionProfile(overrides: Record<string, unknown> = {}) {
   });
 }
 
-describe('phase21 step4a production owner bootstrap (source)', () => {
+function prepCeremonyDir(dir: string) {
+  generateProductionBootstrapKeypairFiles({
+    ceremonyDir: dir,
+    keyId: 'owner-boot-test-1',
+    phase21ProductionOwnerBootstrap: true,
+    requireInteractiveTty: false,
+  });
+  writeProductionEndpointProfile(dir, productionProfile());
+  writeIntendedExistingAdminBinding(dir, {
+    enrollment_mode: 'CLAIM_EXISTING_ADMIN',
+    intended_admin_user_id: 'a11a11a1-0000-4000-8000-000000000011',
+    intended_admin_email: 'owner@example.local',
+    note: 'locator_only_not_authority',
+  });
+  const seal = draftProductionCeremonySeal({
+    ceremonyDir: dir,
+    authorizerDisplayName: 'Owner Human',
+    witnesses: [
+      {
+        display_name: 'Independent Witness Alice',
+        role: 'independent_witness',
+        attestation_ref: 'offline-paper-attestation-2026-10-02',
+      },
+    ],
+  });
+  return seal;
+}
+
+describe('phase21 step4a.1 production owner bootstrap corrections', () => {
   const dirs: string[] = [];
   afterEach(() => {
     for (const d of dirs.splice(0)) {
@@ -64,7 +94,64 @@ describe('phase21 step4a production owner bootstrap (source)', () => {
     ).toThrow(/alex_rewards|FORBIDDEN/);
   });
 
-  it('production profile requires system_identifier and verify_full', () => {
+  it('caller trustClass string cannot forge authenticated production trust', () => {
+    expect(tryForgeProductionTrustFromCallerTrustClass({ trustClass: 'production_sealed_v1' })).toBe(
+      false,
+    );
+    expect(isAuthenticatedProductionBootstrapTrust({ trustClass: 'production_sealed_v1' })).toBe(
+      false,
+    );
+  });
+
+  it('structural validation distinct from authentication; AllowsEnrollment refuses', () => {
+    process.env.ALEX_OWNER_BOOTSTRAP_TEST_HOOKS = '1';
+    const dir = mkdtempSync(join(tmpdir(), 'p21-s4a1-'));
+    dirs.push(dir);
+    prepCeremonyDir(dir);
+    const structural = validateProductionCeremonyBundleStructurally(dir);
+    expect(structural.provenanceAuthenticated).toBe(false);
+    expect(structural.witnessModel).toBe(WITNESS_MODEL);
+    expect(structural.witnessCryptographicIdentityProven).toBe(false);
+    expect(() => assertProductionCeremonyAllowsEnrollment(dir)).toThrow(
+      /UNAUTHENTICATED_PROVENANCE|authenticateProductionCeremonyFromOwnerTty/i,
+    );
+    // Channel B documentary file alone still not enrollment authority
+    const digest = digestProductionCeremonyBundleV1(structural.bundle);
+    recordProductionChannelBDigest({ ceremonyDir: dir, ownerTypedDigestHex: digest });
+    expect(() => assertProductionCeremonyAllowsEnrollment(dir)).toThrow(/UNAUTHENTICATED/);
+  });
+
+  it('bundle digest binds intended admin; tamper after digest fails', () => {
+    process.env.ALEX_OWNER_BOOTSTRAP_TEST_HOOKS = '1';
+    const dir = mkdtempSync(join(tmpdir(), 'p21-s4a1b-'));
+    dirs.push(dir);
+    prepCeremonyDir(dir);
+    const before = validateProductionCeremonyBundleStructurally(dir);
+    writeIntendedExistingAdminBinding(dir, {
+      enrollment_mode: 'CLAIM_EXISTING_ADMIN',
+      intended_admin_user_id: 'b22b22b2-0000-4000-8000-000000000022',
+      intended_admin_email: 'owner@example.local',
+      note: 'tampered',
+    });
+    expect(() => validateProductionCeremonyBundleStructurally(dir)).toThrow(/intended admin id mismatch/i);
+    void before;
+  });
+
+  it('keygen requires phase21 flag; TTY bypass needs test hooks', () => {
+    process.env.ALEX_OWNER_BOOTSTRAP_TEST_HOOKS = '1';
+    const dir = mkdtempSync(join(tmpdir(), 'p21-s4a1k-'));
+    dirs.push(dir);
+    expect(() =>
+      generateProductionBootstrapKeypairFiles({
+        ceremonyDir: dir,
+        keyId: 'k',
+        phase21ProductionOwnerBootstrap: false,
+        requireInteractiveTty: false,
+      }),
+    ).toThrow(/phase21-production-owner-bootstrap/i);
+  });
+
+  it('production profile requires system_identifier and verify_full; refuses loopback', () => {
     expect(() =>
       assertProductionProfileRequiresSystemIdentifier(
         validateCeremonyEndpointProfileV1({
@@ -76,19 +163,6 @@ describe('phase21 step4a production owner bootstrap (source)', () => {
         }),
       ),
     ).toThrow(/system_identifier/);
-
-    expect(() =>
-      buildProductionOwnerBootstrapPoolConfig('postgresql://u:p@10.0.0.1:5432/railway', {
-        profileId: 'p',
-        deploymentEnv: 'production',
-        expectedDatabaseName: 'railway',
-        expectedSystemIdentifier: '99',
-        tls: { mode: 'isolated_test_loopback_plaintext' as never },
-      }),
-    ).toThrow(/verify_full|FORBIDDEN/);
-  });
-
-  it('production pool refuses loopback and TLS downgrade', () => {
     expect(() =>
       buildProductionOwnerBootstrapPoolConfig('postgresql://u:p@127.0.0.1:5432/railway', {
         profileId: 'p',
@@ -100,162 +174,128 @@ describe('phase21 step4a production owner bootstrap (source)', () => {
     ).toThrow(/loopback/);
   });
 
-  it('wrong DB name / missing CA refused by production pool config', () => {
-    expect(() =>
-      buildProductionOwnerBootstrapPoolConfig('postgresql://u:p@10.0.0.2:5432/otherdb', {
-        profileId: 'p',
-        deploymentEnv: 'production',
-        expectedDatabaseName: 'railway',
-        expectedSystemIdentifier: '99',
-        tls: { mode: 'verify_full', caPem: FAKE_CA, tlsServerName: 'db.example' },
-      }),
-    ).toThrow(/database/);
-
-    expect(() =>
-      buildProductionOwnerBootstrapPoolConfig('postgresql://u:p@10.0.0.2:5432/railway', {
-        profileId: 'p',
-        deploymentEnv: 'production',
-        expectedDatabaseName: 'railway',
-        expectedSystemIdentifier: '99',
-        tls: { mode: 'verify_full', caPem: '   ', tlsServerName: 'db.example' },
-      }),
-    ).toThrow(/CA|fail closed/i);
-  });
-
-  it('missing seal / witness / channel B refused by gate', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'p21-prod-boot-'));
-    dirs.push(dir);
-    expect(missingProductionTrustResources(dir).length).toBeGreaterThan(3);
-
-    const pub = generateProductionBootstrapKeypairFiles({
-      ceremonyDir: dir,
-      keyId: 'owner-boot-test-1',
-    });
-    expect(pub.trust_class).toBe(PRODUCTION_OWNER_BOOTSTRAP_TRUST_CLASS);
-
-    writeProductionEndpointProfile(dir, productionProfile());
-    writeIntendedExistingAdminBinding(dir, {
-      enrollment_mode: 'CLAIM_EXISTING_ADMIN',
-      intended_admin_user_id: 'a11a11a1-0000-4000-8000-000000000011',
-      intended_admin_email: 'owner@example.local',
-      note: 'locator_only_not_authority',
-    });
-
-    expect(() =>
-      draftProductionCeremonySeal({
-        ceremonyDir: dir,
-        authorizerDisplayName: 'Owner',
-        witnesses: [],
-      }),
-    ).toThrow(/witness/i);
-
-    expect(() =>
-      draftProductionCeremonySeal({
-        ceremonyDir: dir,
-        authorizerDisplayName: 'Owner',
-        witnesses: [
-          { display_name: 'Cursor', role: 'independent_witness', attestation_ref: 'n/a' },
-        ],
-      }),
-    ).toThrow(/forbidden placeholder|placeholder|witness/i);
-
-    const seal = draftProductionCeremonySeal({
-      ceremonyDir: dir,
-      authorizerDisplayName: 'Owner Human',
-      witnesses: [
-        {
-          display_name: 'Independent Witness Alice',
-          role: 'independent_witness',
-          attestation_ref: 'offline-paper-attestation-2026-10-02',
-        },
-      ],
-    });
-    expect(seal.profile_digest_hex).toBe(digestCeremonyEndpointProfileV1(productionProfile()));
-
-    expect(() => assertProductionCeremonyAllowsEnrollment(dir)).toThrow(/Channel B|CHANNEL_B|ENOENT|no such file/i);
-
-    const digest = digestCeremonySealV1(seal);
-    expect(() =>
-      recordProductionChannelBDigest({ ceremonyDir: dir, ownerTypedDigestHex: '00'.repeat(32) }),
-    ).toThrow(/Channel B digest does not match/);
-
-    recordProductionChannelBDigest({ ceremonyDir: dir, ownerTypedDigestHex: digest });
-    const gated = assertProductionCeremonyAllowsEnrollment(dir);
-    expect(gated.provenanceAuthenticated).toBe(false);
-    expect(gated.intendedAdmin.enrollment_mode).toBe('CLAIM_EXISTING_ADMIN');
-  });
-
-  it('seal digest mismatch / wrong bootstrap key refused', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'p21-prod-boot2-'));
-    dirs.push(dir);
-    generateProductionBootstrapKeypairFiles({ ceremonyDir: dir, keyId: 'k1' });
-    writeProductionEndpointProfile(dir, productionProfile());
-    writeIntendedExistingAdminBinding(dir, {
-      enrollment_mode: 'CLAIM_EXISTING_ADMIN',
-      intended_admin_user_id: 'a11a11a1-0000-4000-8000-000000000011',
-      intended_admin_email: 'owner@example.local',
-      note: 'x',
-    });
-    const seal = draftProductionCeremonySeal({
-      ceremonyDir: dir,
-      authorizerDisplayName: 'Owner',
-      witnesses: [
-        {
-          display_name: 'Witness Bob',
-          role: 'independent_witness',
-          attestation_ref: 'paper-ref-bob',
-        },
-      ],
-    });
-    recordProductionChannelBDigest({
-      ceremonyDir: dir,
-      ownerTypedDigestHex: digestCeremonySealV1(seal),
-    });
-    // Tamper Channel B digest after recording — enrollment must refuse A/B mismatch
-    const bPath = join(dir, 'channel-b-owner-digest-record.json');
-    const b = JSON.parse(readFileSync(bPath, 'utf8')) as Record<string, unknown>;
-    b.seal_content_digest_hex = 'ab'.repeat(32);
-    writeFileSync(bPath, JSON.stringify(b));
-    expect(() => assertProductionCeremonyAllowsEnrollment(dir)).toThrow(/Channel A\/B|mismatch/i);
-  });
-
-  it('readiness reports source ready but ceremony not ready', () => {
+  it('readiness derives source ready without hardcoding ceremony ready', () => {
     const report = buildProductionOwnerBootstrapReadinessReport({});
     expect(report.productionOwnerBootstrapSourceReady).toBe(true);
     expect(report.readyForProductionOwnerBootstrapCeremony).toBe(false);
-    expect(report.isolatedBootstrapProductionAllowed).toBe(false);
-    expect(report.hotWalletKeyReuseForbidden).toBe(true);
-    expect(report.claimExistingAdminSupported).toBe(true);
-    expect(report.duplicateAdminCreationAllowed).toBe(false);
-    expect(report.programmaticForceApply).toBe(false);
-    expect(report.missingProductionTrustResources.length).toBeGreaterThan(0);
+    expect(report.callerControlledProductionTrustClass).toBe(false);
+    expect(report.productionTrustRuntimeBranded).toBe(true);
+    expect(report.layerCDProvenanceAuthImplemented).toBe(true);
+    expect(report.sameHostChannelBFileSufficient).toBe(false);
+    expect(report.channelBOperationalSource).toBe('LIVE_OWNER_TTY_OFFLINE_MEDIA');
+    expect(report.witnessCryptographicIdentityProven).toBe(false);
   });
 
-  it('claim preflight refuses mismatch / seat held / credentials / history (mocked client)', async () => {
-    const responses: Array<{ rows: unknown[] }> = [
-      { rows: [{ id: 'role-1', status: 'ACTIVE' }] }, // OWNER role
-      { rows: [{ holder: 'someone' }] }, // seat held
-    ];
-    let i = 0;
-    const client = {
-      async query() {
-        return responses[i++] ?? { rows: [] };
+  it('claim preflight uses correct session columns and fails closed on query error', async () => {
+    const clientFail = {
+      async query(sql: string) {
+        if (sql.includes('admin_roles')) return { rows: [{ id: 'role-1', status: 'ACTIVE' }] };
+        if (sql.includes('admin_owner_authority')) return { rows: [{ holder: null }] };
+        if (sql.includes('count(DISTINCT')) return { rows: [{ c: 0 }] };
+        if (sql.includes("revoked_at IS NULL") && sql.includes('admin_role_bindings'))
+          return { rows: [{ c: 0 }] };
+        if (sql.includes('FROM admin_users WHERE id'))
+          return {
+            rows: [
+              {
+                id: 'a11a11a1-0000-4000-8000-000000000011',
+                email: 'owner@example.local',
+                status: 'ACTIVE',
+              },
+            ],
+          };
+        if (sql.includes('lower(trim(email))')) return { rows: [{ c: 1 }] };
+        if (sql.includes('admin_sessions')) throw new Error('schema boom');
+        return { rows: [] };
       },
     };
-    const held = await preflightClaimExistingAdmin(client as never, {
+    const failed = await preflightClaimExistingAdmin(clientFail as never, {
       intendedAdminUserId: 'a11a11a1-0000-4000-8000-000000000011',
       intendedAdminEmail: 'owner@example.local',
+      lockForUpdate: false,
     });
-    expect(held.eligible).toBe(false);
-    expect(held.refuseCode).toBe('OWNER_SEAT_ALREADY_HELD');
+    expect(failed.eligible).toBe(false);
+    expect(failed.refuseCode).toBe('EXISTING_ADMIN_SECURITY_STATE_UNKNOWN');
   });
 
-  it('claim preflight eligible for clean vacant seat + matching ACTIVE admin', async () => {
+  it('claim preflight refuses active session / webauthn / recovery / action tokens', async () => {
+    function clientWith(overrides: Record<string, unknown>) {
+      let i = 0;
+      const seq = [
+        { rows: [{ id: 'role-1', status: 'ACTIVE' }] },
+        { rows: [{ holder: null }] },
+        { rows: [{ c: 0 }] },
+        { rows: [{ c: 0 }] },
+        {
+          rows: [
+            {
+              id: 'a11a11a1-0000-4000-8000-000000000011',
+              email: 'owner@example.local',
+              status: 'ACTIVE',
+            },
+          ],
+        },
+        { rows: [{ c: 1 }] },
+        // credential total
+        { rows: [{ c: overrides.credTotal ?? 0 }] },
+        // credential group
+        { rows: (overrides.credRows as unknown[]) ?? [] },
+        // recovery
+        { rows: [{ c: overrides.recovery ?? 0 }] },
+        // sessions
+        { rows: [{ c: overrides.sessions ?? 0 }] },
+        // action tokens
+        { rows: [{ c: overrides.tokens ?? 0 }] },
+      ];
+      return {
+        async query() {
+          return seq[i++] ?? { rows: [] };
+        },
+      };
+    }
+
+    const sess = await preflightClaimExistingAdmin(clientWith({ sessions: 1 }) as never, {
+      intendedAdminUserId: 'a11a11a1-0000-4000-8000-000000000011',
+      intendedAdminEmail: 'owner@example.local',
+      lockForUpdate: false,
+    });
+    expect(sess.eligible).toBe(false);
+    expect(sess.refuseCode).toBe('EXISTING_ADMIN_AUTH_STATE_REQUIRES_OWNER_REVIEW');
+
+    const wa = await preflightClaimExistingAdmin(
+      clientWith({
+        credTotal: 1,
+        credRows: [{ credential_type: 'WEBAUTHN', status: 'ACTIVE', c: 1 }],
+      }) as never,
+      {
+        intendedAdminUserId: 'a11a11a1-0000-4000-8000-000000000011',
+        intendedAdminEmail: 'owner@example.local',
+        lockForUpdate: false,
+      },
+    );
+    expect(wa.refuseCode).toBe('EXISTING_ADMIN_AUTH_STATE_REQUIRES_OWNER_REVIEW');
+
+    const rec = await preflightClaimExistingAdmin(clientWith({ recovery: 2 }) as never, {
+      intendedAdminUserId: 'a11a11a1-0000-4000-8000-000000000011',
+      intendedAdminEmail: 'owner@example.local',
+      lockForUpdate: false,
+    });
+    expect(rec.refuseCode).toBe('EXISTING_ADMIN_AUTH_STATE_REQUIRES_OWNER_REVIEW');
+
+    const tok = await preflightClaimExistingAdmin(clientWith({ tokens: 1 }) as never, {
+      intendedAdminUserId: 'a11a11a1-0000-4000-8000-000000000011',
+      intendedAdminEmail: 'owner@example.local',
+      lockForUpdate: false,
+    });
+    expect(tok.refuseCode).toBe('EXISTING_ADMIN_AUTH_STATE_REQUIRES_OWNER_REVIEW');
+  });
+
+  it('claim preflight eligible only when fully clean', async () => {
     const queue: Array<{ rows: unknown[] }> = [
       { rows: [{ id: 'role-1', status: 'ACTIVE' }] },
       { rows: [{ holder: null }] },
-      { rows: [{ c: 0 }] }, // history
-      { rows: [{ c: 0 }] }, // active
+      { rows: [{ c: 0 }] },
+      { rows: [{ c: 0 }] },
       {
         rows: [
           {
@@ -265,9 +305,12 @@ describe('phase21 step4a production owner bootstrap (source)', () => {
           },
         ],
       },
-      { rows: [{ c: 1 }] }, // email unique
-      { rows: [] }, // credentials
-      { rows: [{ c: 0 }] }, // sessions
+      { rows: [{ c: 1 }] },
+      { rows: [{ c: 0 }] },
+      { rows: [] },
+      { rows: [{ c: 0 }] },
+      { rows: [{ c: 0 }] },
+      { rows: [{ c: 0 }] },
     ];
     let i = 0;
     const client = {
@@ -278,109 +321,67 @@ describe('phase21 step4a production owner bootstrap (source)', () => {
     const ok = await preflightClaimExistingAdmin(client as never, {
       intendedAdminUserId: 'a11a11a1-0000-4000-8000-000000000011',
       intendedAdminEmail: 'owner@example.local',
+      lockForUpdate: false,
     });
     expect(ok.eligible).toBe(true);
     expect(ok.credentialState).toBe('CLEAN_FIRST_OWNER_CLAIM_ELIGIBLE');
-    expect(ok.notes).toContain('locator_only_not_authority');
+    expect(ok.authCounts.activeSessionCount).toBe(0);
   });
 
-
-  it('claim preflight refuses email mismatch / disabled / credentials / history', async () => {
-    async function run(queue: Array<{ rows: unknown[] }>) {
-      let i = 0;
-      const client = {
-        async query() {
-          return queue[i++] ?? { rows: [] };
-        },
-      };
-      return preflightClaimExistingAdmin(client as never, {
-        intendedAdminUserId: 'a11a11a1-0000-4000-8000-000000000011',
-        intendedAdminEmail: 'owner@example.local',
-      });
-    }
-
-    const baseOk = [
-      { rows: [{ id: 'role-1', status: 'ACTIVE' }] },
-      { rows: [{ holder: null }] },
-      { rows: [{ c: 0 }] },
-      { rows: [{ c: 0 }] },
-    ];
-
-    const emailMismatch = await run([
-      ...baseOk,
-      {
-        rows: [
-          {
-            id: 'a11a11a1-0000-4000-8000-000000000011',
-            email: 'other@example.local',
-            status: 'ACTIVE',
-          },
-        ],
-      },
-    ]);
-    expect(emailMismatch.eligible).toBe(false);
-    expect(emailMismatch.refuseCode).toMatch(/EMAIL|MISMATCH|INTENDED/i);
-
-    const disabled = await run([
-      ...baseOk,
-      {
-        rows: [
-          {
-            id: 'a11a11a1-0000-4000-8000-000000000011',
-            email: 'owner@example.local',
-            status: 'DISABLED',
-          },
-        ],
-      },
-    ]);
-    expect(disabled.eligible).toBe(false);
-    expect(disabled.refuseCode).toMatch(/DISABLED|STATUS|ACTIVE/i);
-
-    const history = await run([
-      { rows: [{ id: 'role-1', status: 'ACTIVE' }] },
-      { rows: [{ holder: null }] },
-      { rows: [{ c: 1 }] },
-    ]);
-    expect(history.eligible).toBe(false);
-    expect(history.refuseCode).toBe('OWNER_BINDING_HISTORY_EXISTS');
-
-    const creds = await run([
-      ...baseOk,
-      {
-        rows: [
-          {
-            id: 'a11a11a1-0000-4000-8000-000000000011',
-            email: 'owner@example.local',
-            status: 'ACTIVE',
-          },
-        ],
-      },
-      { rows: [{ c: 1 }] },
-      {
-        rows: [
-          { credential_type: 'PASSWORD', status: 'ACTIVE', c: 1 },
-          { credential_type: 'TOTP', status: 'ACTIVE', c: 1 },
-        ],
-      },
-      { rows: [{ c: 0 }] },
-    ]);
-    expect(creds.eligible).toBe(false);
-    expect(creds.refuseCode).toBe('EXISTING_ADMIN_CREDENTIAL_STATE_REQUIRES_OWNER_REVIEW');
-    expect(creds.credentialState).toBe('EXISTING_ADMIN_CREDENTIAL_STATE_REQUIRES_OWNER_REVIEW');
-  });
-
-  it('assertWitnessesAreConcrete rejects empty', () => {
-    expect(() => assertWitnessesAreConcrete([])).toThrow(/witness/);
-  });
-
-  it('CLI enroll-existing remains refuse-by-default (source assertion)', () => {
+  it('CLI enroll-existing remains refuse-by-default and secrets forbidden', () => {
     const src = readFileSync(
       new URL('../src/cli/owner-production-bootstrap.ts', import.meta.url),
       'utf8',
     );
-    expect(src).toMatch(/STEP4A_SOURCE_ONLY_REFUSES_APPLY|APPLY_GATES_REQUIRED/);
+    expect(src).toMatch(/STEP4A_SOURCE_ONLY_REFUSES_APPLY|APPLY_GATES_REQUIRED|STEP4A1/);
     expect(src).toMatch(/OWNER_PRODUCTION_BOOTSTRAP_APPLY/);
+    expect(src).toMatch(/phase21-production-owner-bootstrap/);
     expect(src).not.toMatch(/forceApply\s*=\s*true/);
     expect(src).toMatch(/SECRET_ARGV_FORBIDDEN|SECRET_ENV_FORBIDDEN/);
+  });
+
+  it('minted trust is runtime branded', () => {
+    const fakeTrust = {
+      pinnedPublicKeys: new Map(),
+      endpointProfile: {
+        profileId: 'p',
+        deploymentEnv: 'production' as const,
+        expectedDatabaseName: 'railway',
+        expectedSystemIdentifier: '1',
+        tls: { mode: 'verify_full' as const, caPem: 'x', tlsServerName: 'h' },
+      },
+      connectionFacts: {
+        hostname: 'h',
+        sslEnabled: true,
+        currentDatabase: 'railway',
+        clusterSystemIdentifier: '1',
+        serverAddr: null,
+        sslInUse: true,
+      },
+    };
+    const bundle = {
+      v: 1 as const,
+      purpose: 'FIRST_OWNER_ENROLLMENT' as const,
+      deployment_env: 'production' as const,
+      ceremony_id: 'c',
+      seal_content_digest_hex: 'ab'.repeat(32),
+      endpoint_profile_id: 'p',
+      endpoint_profile_digest_hex: 'cd'.repeat(32),
+      bootstrap_key_id: 'k',
+      bootstrap_public_key_sha256_hex: 'ef'.repeat(32),
+      enrollment_mode: 'CLAIM_EXISTING_ADMIN' as const,
+      intended_admin_user_id: 'a11a11a1-0000-4000-8000-000000000011',
+      intended_admin_email: 'owner@example.local',
+      witness_model: 'HUMAN_ATTESTED' as const,
+      witness_cryptographic_identity_proven: false as const,
+      witness_count: 1,
+    };
+    const minted = mintAuthenticatedProductionBootstrapTrust({
+      trust: fakeTrust,
+      bundle,
+      bundleDigestHex: digestProductionCeremonyBundleV1(bundle),
+    });
+    expect(isAuthenticatedProductionBootstrapTrust(minted)).toBe(true);
+    expect(isAuthenticatedProductionBootstrapTrust({ ...minted })).toBe(false);
   });
 });

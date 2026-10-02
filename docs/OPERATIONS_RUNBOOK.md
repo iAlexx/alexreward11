@@ -361,3 +361,7 @@ Phase 21 Step 3C CLI: production-flags/mainnet-registry live PLAN requires DATAB
 ### Phase 21 Step 4A — Production Owner bootstrap (source ready)
 
 Operational Step4 APPLY remains paused until Owner authority exists. Use `pnpm --filter @alex-rewards/auth run owner-production-bootstrap -- readiness` for source readiness. Do not run `enroll-existing --apply` until Owner-authorized production ceremony after trust resources are established. See `docs/OWNER_ADMIN_PRODUCTION_BOOTSTRAP.md`.
+
+### Phase 21 Step 4A.1
+
+Railway Postgres currently exposes internal `DATABASE_URL` only (no `DATABASE_PUBLIC_URL`). Do not treat `railway connect` tunnel as ceremony endpoint trust. Ceremony requires verify-full endpoint profile + live Owner TTY bundle digest.

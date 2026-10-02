@@ -1,6 +1,7 @@
 /**
- * CLAIM_EXISTING_ADMIN eligibility + binding helpers (Phase 21 Step 4A).
+ * CLAIM_EXISTING_ADMIN eligibility + binding helpers (Phase 21 Step 4A.1).
  * Existing admin UUID/email is a locator only — never Owner authority by itself.
+ * Fail-closed on auth/session/recovery/action-token inspection failures.
  */
 import type { PoolClient } from 'pg';
 
@@ -8,8 +9,20 @@ import { AuthDomainError } from '../errors.js';
 
 export type ExistingAdminCredentialState =
   | 'CLEAN_FIRST_OWNER_CLAIM_ELIGIBLE'
-  | 'EXISTING_ADMIN_CREDENTIAL_STATE_REQUIRES_OWNER_REVIEW'
+  | 'EXISTING_ADMIN_AUTH_STATE_REQUIRES_OWNER_REVIEW'
+  | 'EXISTING_ADMIN_SECURITY_STATE_UNKNOWN'
   | 'INELIGIBLE';
+
+export interface ClaimExistingAdminAuthCounts {
+  readonly credentialRowsTotal: number;
+  readonly activePasswordCount: number;
+  readonly activeTotpCount: number;
+  readonly activeWebauthnCount: number;
+  readonly otherActiveCredentialCount: number;
+  readonly unconsumedRecoveryCodeCount: number;
+  readonly activeSessionCount: number;
+  readonly openAdminActionTokenCount: number;
+}
 
 export interface ClaimExistingAdminPreflightResult {
   readonly eligible: boolean;
@@ -25,11 +38,112 @@ export interface ClaimExistingAdminPreflightResult {
   readonly passwordCredentialCount: number;
   readonly totpCredentialCount: number;
   readonly activeSessionCount: number;
+  readonly authCounts: ClaimExistingAdminAuthCounts;
   readonly notes: readonly string[];
 }
 
 function normalizeEmail(value: string): string {
   return value.trim().toLowerCase();
+}
+
+const ZERO_AUTH: ClaimExistingAdminAuthCounts = {
+  credentialRowsTotal: 0,
+  activePasswordCount: 0,
+  activeTotpCount: 0,
+  activeWebauthnCount: 0,
+  otherActiveCredentialCount: 0,
+  unconsumedRecoveryCodeCount: 0,
+  activeSessionCount: 0,
+  openAdminActionTokenCount: 0,
+};
+
+async function inspectExistingAdminAuthMaterial(
+  client: PoolClient,
+  adminUserId: string,
+): Promise<{ ok: true; counts: ClaimExistingAdminAuthCounts } | { ok: false; refuseCode: string }> {
+  let credentialRowsTotal = 0;
+  let activePasswordCount = 0;
+  let activeTotpCount = 0;
+  let activeWebauthnCount = 0;
+  let otherActiveCredentialCount = 0;
+  try {
+    const total = await client.query<{ c: number }>(
+      `SELECT count(*)::int AS c FROM admin_credentials WHERE admin_user_id = $1::uuid`,
+      [adminUserId],
+    );
+    credentialRowsTotal = total.rows[0]?.c ?? 0;
+    const creds = await client.query<{ credential_type: string; status: string; c: number }>(
+      `SELECT credential_type::text AS credential_type, status::text AS status, count(*)::int AS c
+       FROM admin_credentials
+       WHERE admin_user_id = $1::uuid
+       GROUP BY credential_type, status`,
+      [adminUserId],
+    );
+    for (const c of creds.rows) {
+      if (c.status !== 'ACTIVE') continue;
+      if (c.credential_type === 'PASSWORD') activePasswordCount += c.c;
+      else if (c.credential_type === 'TOTP') activeTotpCount += c.c;
+      else if (c.credential_type === 'WEBAUTHN') activeWebauthnCount += c.c;
+      else otherActiveCredentialCount += c.c;
+    }
+  } catch {
+    return { ok: false, refuseCode: 'EXISTING_ADMIN_SECURITY_STATE_UNKNOWN' };
+  }
+
+  let unconsumedRecoveryCodeCount = 0;
+  try {
+    const recovery = await client.query<{ c: number }>(
+      `SELECT count(*)::int AS c FROM admin_recovery_codes
+       WHERE admin_user_id = $1::uuid AND consumed_at IS NULL`,
+      [adminUserId],
+    );
+    unconsumedRecoveryCodeCount = recovery.rows[0]?.c ?? 0;
+  } catch {
+    return { ok: false, refuseCode: 'EXISTING_ADMIN_SECURITY_STATE_UNKNOWN' };
+  }
+
+  let activeSessionCount = 0;
+  try {
+    const sessions = await client.query<{ c: number }>(
+      `SELECT count(*)::int AS c FROM admin_sessions
+       WHERE admin_user_id = $1::uuid
+         AND revoked_at IS NULL
+         AND idle_expires_at > now()
+         AND absolute_expires_at > now()`,
+      [adminUserId],
+    );
+    activeSessionCount = sessions.rows[0]?.c ?? 0;
+  } catch {
+    return { ok: false, refuseCode: 'EXISTING_ADMIN_SECURITY_STATE_UNKNOWN' };
+  }
+
+  let openAdminActionTokenCount = 0;
+  try {
+    const tokens = await client.query<{ c: number }>(
+      `SELECT count(*)::int AS c FROM admin_action_tokens
+       WHERE admin_user_id = $1::uuid
+         AND consumed_at IS NULL
+         AND expires_at > now()`,
+      [adminUserId],
+    );
+    openAdminActionTokenCount = tokens.rows[0]?.c ?? 0;
+  } catch {
+    return { ok: false, refuseCode: 'EXISTING_ADMIN_SECURITY_STATE_UNKNOWN' };
+  }
+
+  return {
+    ok: true,
+    counts: {
+      credentialRowsTotal,
+      activePasswordCount,
+      activeTotpCount,
+      activeWebauthnCount,
+      otherActiveCredentialCount,
+      unconsumedRecoveryCodeCount,
+      activeSessionCount,
+      openAdminActionTokenCount,
+    },
+  };
 }
 
 /**
@@ -42,10 +156,13 @@ export async function preflightClaimExistingAdmin(
   input: {
     readonly intendedAdminUserId: string;
     readonly intendedAdminEmail: string;
+    /** When true (default), lock seat + target admin for enrollment TX recheck. */
+    readonly lockForUpdate?: boolean;
   },
 ): Promise<ClaimExistingAdminPreflightResult> {
   const intendedId = input.intendedAdminUserId.trim();
   const intendedEmail = normalizeEmail(input.intendedAdminEmail);
+  const lockSql = input.lockForUpdate === false ? '' : ' FOR UPDATE';
 
   const notes: string[] = [];
   const empty = (
@@ -65,6 +182,7 @@ export async function preflightClaimExistingAdmin(
     passwordCredentialCount: partial.passwordCredentialCount ?? 0,
     totpCredentialCount: partial.totpCredentialCount ?? 0,
     activeSessionCount: partial.activeSessionCount ?? 0,
+    authCounts: partial.authCounts ?? ZERO_AUTH,
     notes: [...notes, ...(partial.notes ?? [])],
   });
 
@@ -80,7 +198,7 @@ export async function preflightClaimExistingAdmin(
   }
 
   const seat = await client.query<{ holder: string | null }>(
-    `SELECT holder_admin_user_id::text AS holder FROM admin_owner_authority WHERE seat = 1`,
+    `SELECT holder_admin_user_id::text AS holder FROM admin_owner_authority WHERE seat = 1${lockSql}`,
   );
   const seatHolder = seat.rows[0]?.holder ?? null;
   if (seatHolder !== null) {
@@ -122,7 +240,7 @@ export async function preflightClaimExistingAdmin(
 
   const byId = await client.query<{ id: string; email: string; status: string }>(
     `SELECT id::text AS id, email, status::text AS status
-     FROM admin_users WHERE id = $1::uuid`,
+     FROM admin_users WHERE id = $1::uuid${lockSql}`,
     [intendedId],
   );
   const row = byId.rows[0];
@@ -171,46 +289,44 @@ export async function preflightClaimExistingAdmin(
     });
   }
 
-  const creds = await client.query<{ credential_type: string; status: string; c: number }>(
-    `SELECT credential_type::text AS credential_type, status::text AS status, count(*)::int AS c
-     FROM admin_credentials
-     WHERE admin_user_id = $1::uuid
-     GROUP BY credential_type, status`,
-    [row.id],
-  );
-  let passwordCredentialCount = 0;
-  let totpCredentialCount = 0;
-  for (const c of creds.rows) {
-    if (c.credential_type === 'PASSWORD' && c.status === 'ACTIVE') passwordCredentialCount += c.c;
-    if (c.credential_type === 'TOTP' && c.status === 'ACTIVE') totpCredentialCount += c.c;
-  }
-  if (passwordCredentialCount > 0 || totpCredentialCount > 0) {
-    return empty('EXISTING_ADMIN_CREDENTIAL_STATE_REQUIRES_OWNER_REVIEW', {
+  const auth = await inspectExistingAdminAuthMaterial(client, row.id);
+  if (!auth.ok) {
+    return empty(auth.refuseCode, {
       targetAdminUserId: row.id,
       targetAdminStatus: row.status,
       targetAdminEmail: row.email,
       ownerRoleStatus: ownerRole.status,
       activeOwnerBindingCount,
       ownerBindingHistoryCount,
-      passwordCredentialCount,
-      totpCredentialCount,
-      credentialState: 'EXISTING_ADMIN_CREDENTIAL_STATE_REQUIRES_OWNER_REVIEW',
+      credentialState: 'EXISTING_ADMIN_SECURITY_STATE_UNKNOWN',
     });
   }
 
-  let activeSessionCount = 0;
-  try {
-    const sessions = await client.query<{ c: number }>(
-      `SELECT count(*)::int AS c FROM admin_sessions
-       WHERE admin_user_id = $1::uuid
-         AND (revoked_at IS NULL OR expires_at > now())`,
-      [row.id],
-    );
-    activeSessionCount = sessions.rows[0]?.c ?? 0;
-  } catch {
-    // Schema variance — treat as unknown/zero for eligibility; credentials remain authoritative.
-    activeSessionCount = 0;
-    notes.push('admin_sessions_count_unavailable');
+  const counts = auth.counts;
+  const dirty =
+    counts.activePasswordCount > 0 ||
+    counts.activeTotpCount > 0 ||
+    counts.activeWebauthnCount > 0 ||
+    counts.otherActiveCredentialCount > 0 ||
+    counts.unconsumedRecoveryCodeCount > 0 ||
+    counts.activeSessionCount > 0 ||
+    counts.openAdminActionTokenCount > 0 ||
+    counts.credentialRowsTotal > 0;
+
+  if (dirty) {
+    return empty('EXISTING_ADMIN_AUTH_STATE_REQUIRES_OWNER_REVIEW', {
+      targetAdminUserId: row.id,
+      targetAdminStatus: row.status,
+      targetAdminEmail: row.email,
+      ownerRoleStatus: ownerRole.status,
+      activeOwnerBindingCount,
+      ownerBindingHistoryCount,
+      passwordCredentialCount: counts.activePasswordCount,
+      totpCredentialCount: counts.activeTotpCount,
+      activeSessionCount: counts.activeSessionCount,
+      authCounts: counts,
+      credentialState: 'EXISTING_ADMIN_AUTH_STATE_REQUIRES_OWNER_REVIEW',
+    });
   }
 
   notes.push('locator_only_not_authority');
@@ -226,9 +342,10 @@ export async function preflightClaimExistingAdmin(
     seatHolderAdminUserId: null,
     ownerRoleStatus: ownerRole.status,
     credentialState: 'CLEAN_FIRST_OWNER_CLAIM_ELIGIBLE',
-    passwordCredentialCount,
-    totpCredentialCount,
-    activeSessionCount,
+    passwordCredentialCount: 0,
+    totpCredentialCount: 0,
+    activeSessionCount: 0,
+    authCounts: counts,
     notes,
   };
 }

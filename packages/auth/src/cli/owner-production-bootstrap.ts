@@ -10,17 +10,15 @@ import { resolve } from 'node:path';
 
 import {
   assertCeremonyDirOutsideRepo,
-  assertProductionCeremonyAllowsEnrollment,
   assertProductionProfileRequiresSystemIdentifier,
   buildProductionOwnerBootstrapReadinessReport,
   draftProductionCeremonySeal,
   generateProductionBootstrapKeypairFiles,
-  loadProductionEndpointProfile,
-  loadProductionPublicKey,
   missingProductionTrustResources,
   recordProductionChannelBDigest,
   writeIntendedExistingAdminBinding,
   writeProductionEndpointProfile,
+  validateProductionCeremonyBundleStructurally,
   PRODUCTION_OWNER_BOOTSTRAP_TRUST_CLASS,
   validateCeremonyEndpointProfileV1,
 } from '../owner-bootstrap/index.js';
@@ -139,7 +137,12 @@ async function main(): Promise<void> {
       return;
     }
     assertCeremonyDirOutsideRepo(ceremonyDir, repoRoot);
-    const pub = generateProductionBootstrapKeypairFiles({ ceremonyDir, keyId });
+    const pub = generateProductionBootstrapKeypairFiles({
+      ceremonyDir,
+      keyId,
+      phase21ProductionOwnerBootstrap: true,
+      requireInteractiveTty: true,
+    });
     printJson({
       ok: true,
       command,
@@ -229,7 +232,7 @@ async function main(): Promise<void> {
   if (command === 'record-channel-b') {
     const ceremonyDir = argValue(argv, '--ceremony-dir');
     if (ceremonyDir === null) usage();
-    const digest = await readLine('Type Channel B seal digest (64 hex): ');
+    const digest = await readLine('Type Channel B production bundle digest (64 hex, documentary record): ');
     const record = recordProductionChannelBDigest({
       ceremonyDir,
       ownerTypedDigestHex: digest,
@@ -247,18 +250,21 @@ async function main(): Promise<void> {
     const ceremonyDir = argValue(argv, '--ceremony-dir');
     if (ceremonyDir === null) usage();
     try {
-      const gated = assertProductionCeremonyAllowsEnrollment(ceremonyDir);
+      const structural = validateProductionCeremonyBundleStructurally(ceremonyDir);
       printJson({
         ok: true,
         command,
-        trust_class: gated.trustClass,
-        provenance_authenticated: gated.provenanceAuthenticated,
-        seal_digest: gated.sealContentDigestHex,
-        intended_admin_user_id: gated.intendedAdmin.intended_admin_user_id,
-        enrollment_mode: gated.intendedAdmin.enrollment_mode,
+        structural_only: true,
+        provenance_authenticated: structural.provenanceAuthenticated,
+        bundle_digest_hex: structural.bundleDigestHex,
+        intended_admin_user_id: structural.intendedAdmin.intended_admin_user_id,
+        enrollment_mode: structural.intendedAdmin.enrollment_mode,
+        witness_model: structural.witnessModel,
+        witness_cryptographic_identity_proven: structural.witnessCryptographicIdentityProven,
         notes: [
-          'Local package structurally valid',
-          'Layer C/D provenance auth still unimplemented — operational ceremony not ready',
+          'STRUCTURAL validation only — not enrollment authority',
+          'Operational Layer C/D requires authenticateProductionCeremonyFromOwnerTty (live Owner TTY)',
+          'Same-host Channel B file is documentary only',
         ],
         readyForProductionOwnerBootstrapCeremony: false,
       });
@@ -284,9 +290,9 @@ async function main(): Promise<void> {
     printJson({
       ok: false,
       command,
-      refuseCode: apply ? 'STEP4A_SOURCE_ONLY_REFUSES_APPLY' : 'APPLY_GATES_REQUIRED',
+      refuseCode: apply ? 'STEP4A1_SOURCE_ONLY_REFUSES_APPLY' : 'APPLY_GATES_REQUIRED',
       message: apply
-        ? 'Step4A is source/readiness only — refuse operational enroll-existing apply'
+        ? 'Step4A.1 is source/readiness only — refuse operational enroll-existing apply'
         : 'Requires DEPLOYMENT_ENV=production + OWNER_PRODUCTION_BOOTSTRAP_ENABLED=true + OWNER_PRODUCTION_BOOTSTRAP_APPLY=1 + --apply',
       trust_class: PRODUCTION_OWNER_BOOTSTRAP_TRUST_CLASS,
       forceApply: false,

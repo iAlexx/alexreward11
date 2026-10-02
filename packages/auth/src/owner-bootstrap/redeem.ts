@@ -37,7 +37,7 @@ import {
   assertClaimExistingAdminEligible,
   preflightClaimExistingAdmin,
 } from './claim-existing-admin.js';
-import { PRODUCTION_OWNER_BOOTSTRAP_TRUST_CLASS } from './production-trust-class.js';
+import { isProductionBoundBootstrapTrustMaterial } from './authenticated-production-trust.js';
 import {
   encodeUint64Be,
   intendedSubjectFromPayload,
@@ -469,12 +469,30 @@ export async function startOwnerBootstrapAttempt(
     preflightNow,
   );
   const payload = verified.envelope.payload;
-  assertBootstrapTlsAndEndpoint(
-    input.trust.endpointProfile,
-    payload.deployment_env,
-    payload.endpoint_profile_id,
-    input.trust.connectionFacts,
-  );
+  if (isProductionBoundBootstrapTrustMaterial(input.trust)) {
+    assertProductionBootstrapTlsAndEndpoint(
+      input.trust.endpointProfile,
+      payload.deployment_env,
+      payload.endpoint_profile_id,
+      input.trust.connectionFacts,
+    );
+  } else {
+    if (isProductionBoundBootstrapTrustMaterial(input.trust)) {
+    assertProductionBootstrapTlsAndEndpoint(
+      input.trust.endpointProfile,
+      payload.deployment_env,
+      payload.endpoint_profile_id,
+      input.trust.connectionFacts,
+    );
+  } else {
+    assertBootstrapTlsAndEndpoint(
+      input.trust.endpointProfile,
+      payload.deployment_env,
+      payload.endpoint_profile_id,
+      input.trust.connectionFacts,
+    );
+  }
+  }
 
   const channelFp = createHash('sha256').update(input.channelPublicKey).digest('hex');
   const attemptId = randomUUID();
@@ -635,12 +653,21 @@ export async function submitOwnerBootstrapPop(
     if (attempt === undefined) {
       throw new AuthDomainError('FORBIDDEN', 'REDEEM_POP_MISSING_OR_INVALID');
     }
+    if (isProductionBoundBootstrapTrustMaterial(input.trust)) {
+    assertProductionBootstrapTlsAndEndpoint(
+      input.trust.endpointProfile,
+      attempt.deployment_env as 'isolated_test' | 'staging' | 'production',
+      attempt.endpoint_profile_id,
+      input.trust.connectionFacts,
+    );
+  } else {
     assertBootstrapTlsAndEndpoint(
       input.trust.endpointProfile,
       attempt.deployment_env as 'isolated_test' | 'staging' | 'production',
       attempt.endpoint_profile_id,
       input.trust.connectionFacts,
     );
+  }
 
     const nowSec = await readAuthoritativeNowSec(client, pool);
     await assertPersistedGrantNotExpired(client, attempt.grant_id, nowSec);
@@ -828,12 +855,21 @@ export async function abortOwnerBootstrapAttempt(
     if (attempt.challenge_id !== input.challengeId) {
       throw new AuthDomainError('FORBIDDEN', 'challenge_id mismatch');
     }
+    if (isProductionBoundBootstrapTrustMaterial(input.trust)) {
+    assertProductionBootstrapTlsAndEndpoint(
+      input.trust.endpointProfile,
+      attempt.deployment_env as 'isolated_test' | 'staging' | 'production',
+      attempt.endpoint_profile_id,
+      input.trust.connectionFacts,
+    );
+  } else {
     assertBootstrapTlsAndEndpoint(
       input.trust.endpointProfile,
       attempt.deployment_env as 'isolated_test' | 'staging' | 'production',
       attempt.endpoint_profile_id,
       input.trust.connectionFacts,
     );
+  }
     const nowSec = await readAuthoritativeNowSec(client, pool);
     if (attempt.pop_status !== 'PENDING' && attempt.pop_status !== 'VERIFIED') {
       throw new AuthDomainError('FORBIDDEN', `attempt not abortable (${attempt.pop_status})`);
@@ -937,16 +973,12 @@ export interface CompleteEnrollmentInput {
   readonly trust: BootstrapTrustMaterial;
   /**
    * CREATE_ADMIN = isolated Stage B insert path (default).
-   * CLAIM_EXISTING_ADMIN = production_sealed_v1 claim of an existing ACTIVE admin row.
+   * CLAIM_EXISTING_ADMIN = production path only via completeProductionOwnerBootstrapEnrollment
+   * (AuthenticatedProductionBootstrapTrust). Caller trustClass strings are rejected.
    */
   readonly enrollmentMode?: 'CREATE_ADMIN' | 'CLAIM_EXISTING_ADMIN';
-  /** Required when enrollmentMode=CLAIM_EXISTING_ADMIN. Locator only — not authority. */
+  /** Required when enrollmentMode=CLAIM_EXISTING_ADMIN — must match root-bound UUID from branded trust. */
   readonly intendedAdminUserId?: string;
-  /**
-   * When production_sealed_v1, use production TLS/endpoint assert (ops DB allowed with verify_full).
-   * Isolated Stage B must omit this (default isolated assert remains fail-closed on ops DBs).
-   */
-  readonly trustClass?: typeof PRODUCTION_OWNER_BOOTSTRAP_TRUST_CLASS | 'ephemeral_isolated_test_only';
   /**
    * Test-only deliberate delay after credential hashing and before the final TX.
    * Enabled only when ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1 (S-01 delayed prep).
@@ -963,6 +995,12 @@ export async function completeOwnerBootstrapEnrollment(
   pool: Pool,
   input: CompleteEnrollmentInput,
 ): Promise<CompleteEnrollmentResult> {
+  if ('trustClass' in (input as object) && (input as { trustClass?: unknown }).trustClass !== undefined) {
+    throw new AuthDomainError(
+      'FORBIDDEN',
+      'caller-controlled trustClass is not production authority — use AuthenticatedProductionBootstrapTrust',
+    );
+  }
   requireBootstrapTrust(pool, input.trust);
   assertPasswordPolicy(input.password);
   assertTotpCodeFormat(input.totpConfirmCode);
@@ -1034,7 +1072,7 @@ export async function completeOwnerBootstrapEnrollment(
     if (attempt === undefined || attempt.pop_status !== 'VERIFIED') {
       throw new AuthDomainError('FORBIDDEN', 'attempt not VERIFIED');
     }
-    if (input.trustClass === PRODUCTION_OWNER_BOOTSTRAP_TRUST_CLASS) {
+    if (isProductionBoundBootstrapTrustMaterial(input.trust)) {
       assertProductionBootstrapTlsAndEndpoint(
         input.trust.endpointProfile,
         attempt.deployment_env as 'isolated_test' | 'staging' | 'production',
@@ -1042,12 +1080,21 @@ export async function completeOwnerBootstrapEnrollment(
         input.trust.connectionFacts,
       );
     } else {
-      assertBootstrapTlsAndEndpoint(
+      if (isProductionBoundBootstrapTrustMaterial(input.trust)) {
+    assertProductionBootstrapTlsAndEndpoint(
         input.trust.endpointProfile,
         attempt.deployment_env as 'isolated_test' | 'staging' | 'production',
         attempt.endpoint_profile_id,
         input.trust.connectionFacts,
       );
+  } else {
+    assertBootstrapTlsAndEndpoint(
+        input.trust.endpointProfile,
+        attempt.deployment_env as 'isolated_test' | 'staging' | 'production',
+        attempt.endpoint_profile_id,
+        input.trust.connectionFacts,
+      );
+  }
     }
 
     // Fresh authoritative time AFTER locks and AFTER slow password hashing (S-01).
@@ -1131,10 +1178,10 @@ export async function completeOwnerBootstrapEnrollment(
     let adminUsersCreated = 0;
 
     if (enrollmentMode === 'CLAIM_EXISTING_ADMIN') {
-      if (input.trustClass !== PRODUCTION_OWNER_BOOTSTRAP_TRUST_CLASS) {
+      if (!isProductionBoundBootstrapTrustMaterial(input.trust)) {
         throw new AuthDomainError(
           'FORBIDDEN',
-          'CLAIM_EXISTING_ADMIN requires production_sealed_v1 trust class',
+          'CLAIM_EXISTING_ADMIN requires AuthenticatedProductionBootstrapTrust',
         );
       }
       const intendedAdminUserId = input.intendedAdminUserId?.trim();
@@ -1148,10 +1195,10 @@ export async function completeOwnerBootstrapEnrollment(
       assertClaimExistingAdminEligible(eligibility);
       adminUserId = eligibility.targetAdminUserId!;
     } else {
-      if (input.trustClass === PRODUCTION_OWNER_BOOTSTRAP_TRUST_CLASS) {
+      if (isProductionBoundBootstrapTrustMaterial(input.trust)) {
         throw new AuthDomainError(
           'FORBIDDEN',
-          'production_sealed_v1 must use CLAIM_EXISTING_ADMIN (ADMIN_USERS_CREATED_BY_PRODUCTION_BOOTSTRAP=0)',
+          'production path must use CLAIM_EXISTING_ADMIN (ADMIN_USERS_CREATED_BY_PRODUCTION_BOOTSTRAP=0)',
         );
       }
       const adminIns = await client.query<{ id: string }>(
@@ -1243,7 +1290,9 @@ export async function completeOwnerBootstrapEnrollment(
           enrollment_mode: enrollmentMode,
           owner_binding_id: bindingId,
           owner_authority_seat: 1,
-          trust_class: input.trustClass ?? 'ephemeral_isolated_test_only',
+          trust_class: isProductionBoundBootstrapTrustMaterial(input.trust)
+            ? 'production_sealed_v1'
+            : 'ephemeral_isolated_test_only',
           // Explicitly no secrets
         }),
       ],

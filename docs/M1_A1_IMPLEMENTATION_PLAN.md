@@ -66,3 +66,7 @@ add-on; grant lifetime ≤15m recommended; authorize Stage B local; later go-liv
 ## Phase 21 Step 4A — production path status
 
 Isolated Option C remains `ephemeral_isolated_test_only`. Production first-Owner claim uses a separate `owner-production-bootstrap` path with `CLAIM_EXISTING_ADMIN`. Operational ceremony is still blocked pending trust resources (witness, CA, Channel B, endpoint identity).
+
+## Step 4A.1 status
+
+Production path now requires `AuthenticatedProductionBootstrapTrust` and explicit production lifecycle functions. Isolated Stage B unchanged.

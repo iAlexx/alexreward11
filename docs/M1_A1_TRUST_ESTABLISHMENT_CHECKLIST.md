@@ -88,3 +88,7 @@ authorization and (for 0028) without a passing D.1 preflight decision.
 ## Phase 21 Step 4A update
 
 Source scaffolding for `production_sealed_v1` is present. Checklist items for witnessed production seal, Owner CA, Channel B install, and Layer C/D provenance auth remain **OPEN / BLOCKED** for operational go-live.
+
+## Step 4A.1 checklist update
+
+Layer C/D operational model implemented as live Owner TTY. Real ceremony resources (witness, CA, public endpoint, key) remain OPEN.

@@ -752,3 +752,7 @@ NOT use production seal material.
 ## Production path note (Phase 21 Step 4A)
 
 A parallel production ceremony CLI (`owner-production-bootstrap`, trust class `production_sealed_v1`) was added for `CLAIM_EXISTING_ADMIN`. It does not replace or relax isolated Stage B Option C tooling. See `docs/OWNER_ADMIN_PRODUCTION_BOOTSTRAP.md`.
+
+## Step 4A.1 production note
+
+Operational Layer C/D authentication is live Owner TTY equality against `ProductionCeremonyBundleV1` digest. A same-host Channel B file is not sufficient.

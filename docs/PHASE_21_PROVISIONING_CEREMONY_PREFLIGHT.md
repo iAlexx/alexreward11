@@ -71,3 +71,7 @@ Step 3C truth gate is required before READY_FOR_OWNER_PROVISIONING_CEREMONY. Liv
 ## Step 4A — Owner authority prerequisite (2026-10-02)
 
 Step4 APPLY remains `PAUSED_OWNER_AUTHORITY_REQUIRED`. Production first-Owner bootstrap source path (`production_sealed_v1` / `CLAIM_EXISTING_ADMIN`) is implemented; operational ceremony blocked until trust resources exist. See `docs/PHASE_21_STEP4A_PRODUCTION_OWNER_BOOTSTRAP_READINESS.md`.
+
+## Step 4A.1
+
+Owner authority still required. Production bootstrap source corrected; endpoint trust not established (no public Railway Postgres URL). See `docs/PHASE_21_STEP4A1_PRODUCTION_OWNER_BOOTSTRAP_CORRECTIONS.md`.

@@ -164,6 +164,7 @@ export {
   assertClaimExistingAdminEligible,
   type ClaimExistingAdminPreflightResult,
   type ExistingAdminCredentialState,
+  type ClaimExistingAdminAuthCounts,
 } from './claim-existing-admin.js';
 export {
   PRODUCTION_CEREMONY_PROFILE_NAME,
@@ -174,14 +175,19 @@ export {
   PRODUCTION_PRIVATE_SEED_NAME,
   PRODUCTION_MANIFEST_NAME,
   PRODUCTION_TARGET_ADMIN_NAME,
+  PRODUCTION_BUNDLE_NAME,
+  WITNESS_MODEL,
   assertProductionProfileRequiresSystemIdentifier,
   assertProductionCeremonyAllowsEnrollment,
+  validateProductionCeremonyBundleStructurally,
+  authenticateProductionCeremonyFromOwnerTty,
   generateProductionBootstrapKeypairFiles,
   loadProductionPublicKey,
   writeProductionEndpointProfile,
   loadProductionEndpointProfile,
   writeIntendedExistingAdminBinding,
   loadIntendedExistingAdminBinding,
+  loadProductionCeremonyBundle,
   draftProductionCeremonySeal,
   recordProductionChannelBDigest,
   missingProductionTrustResources,
@@ -189,6 +195,31 @@ export {
   type ProductionIntendedExistingAdminBinding,
   type ProductionChannelBRecord,
 } from './production-ceremony-gate.js';
+export {
+  digestProductionCeremonyBundleV1,
+  validateProductionCeremonyBundleV1,
+  type ProductionCeremonyBundleV1,
+} from './production-ceremony-bundle-v1.js';
+export {
+  isAuthenticatedProductionBootstrapTrust,
+  assertAuthenticatedProductionBootstrapTrust,
+  mintAuthenticatedProductionBootstrapTrust,
+  tryForgeProductionTrustFromCallerTrustClass,
+  isProductionBoundBootstrapTrustMaterial,
+  type AuthenticatedProductionBootstrapTrust,
+} from './authenticated-production-trust.js';
+export {
+  startProductionOwnerBootstrapAttempt,
+  submitProductionOwnerBootstrapPop,
+  abortProductionOwnerBootstrapAttempt,
+  completeProductionOwnerBootstrapEnrollment,
+} from './production-lifecycle.js';
+export {
+  preflightProductionOwnerBootstrapSchema,
+  assertProductionOwnerBootstrapSchemaReady,
+  REQUIRED_PRODUCTION_OWNER_BOOTSTRAP_MIGRATIONS,
+  type ProductionOwnerBootstrapSchemaPreflightResult,
+} from './production-schema-preflight.js';
 export {
   buildProductionOwnerBootstrapReadinessReport,
   type ProductionOwnerBootstrapReadinessReport,

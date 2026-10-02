@@ -145,3 +145,7 @@ stricter path. Lifting login/reauth deny is a separate Owner authorization.
 ## Production bootstrap note (Phase 21 Step 4A)
 
 Production `production_sealed_v1` endpoint profiles must bind expected DB name, PostgreSQL `system_identifier`, TLS hostname/SNI, and Owner-approved CA digest. DB name alone (e.g. `railway`) is not trust evidence. See `docs/OWNER_ADMIN_PRODUCTION_BOOTSTRAP.md`.
+
+## Step 4A.1
+
+Production endpoint trust requires verify-full + `system_identifier`. Railway internal hostname / connect tunnel is discovery-only, not ceremony trust authority.

@@ -240,3 +240,7 @@ Phase 21 Step 3C: provider URL SSRF allowlist (https only, no URL secrets), OWNE
 ### Phase 21 Step 4A — Production Owner bootstrap
 
 Production first-Owner trust uses `production_sealed_v1` with verify-full TLS, required `system_identifier`, dual-channel seal evidence, and independent human witnesses. Isolated `owner-bootstrap-ceremony` remains production-refusing. Existing admin UUID is a locator only — never Owner authority by itself.
+
+### Phase 21 Step 4A.1
+
+Production Owner bootstrap: branded trust, fail-closed session/auth inspection, live TTY Channel B, no same-host Channel B authority, no caller `trustClass`.
