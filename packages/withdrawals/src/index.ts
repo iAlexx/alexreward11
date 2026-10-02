@@ -755,7 +755,17 @@ export type {
   Phase21HotWalletRegistrationInput,
   Phase21HotWalletRegistrationPlan,
   Phase21HotWalletRegistrationResult,
+  Phase21HotWalletDerivationProof,
 } from './phase21-hot-wallet-registration.js';
+
+export {
+  PHASE21_DERIVATION_PROOF_SCHEMA,
+  buildPhase21HotWalletDerivationProofDocument,
+  readPhase21HotWalletDerivationProofFile,
+  resolvePhase21HotWalletDerivationProofFromEnv,
+  writePhase21HotWalletDerivationProofFile,
+} from './phase21-hot-wallet-derivation-proof.js';
+export type { Phase21HotWalletDerivationProofDocument } from './phase21-hot-wallet-derivation-proof.js';
 
 export {
   realPayoutNetworkFromPhase10,

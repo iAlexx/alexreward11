@@ -20,6 +20,11 @@ import {
   planPhase21HotWalletRegistration,
 } from '../phase21-hot-wallet-registration.js';
 import {
+  buildPhase21HotWalletDerivationProofDocument,
+  resolvePhase21HotWalletDerivationProofFromEnv,
+  writePhase21HotWalletDerivationProofFile,
+} from '../phase21-hot-wallet-derivation-proof.js';
+import {
   applyPhase21MainnetRegistryBootstrap,
   planPhase21MainnetRegistryBootstrap,
 } from '../phase21-mainnet-registry-bootstrap.js';
@@ -507,7 +512,45 @@ if (command === 'mainnet-registry:apply') {
       metadataAdapter: adapters.metadata,
       walletDerivationAdapter: adapters.derivation,
     });
-    printJson({ ok: result.ok, command: 'verify-mainnet-external', result });
+
+    let derivationProofPath: string | null = null;
+    if (
+      result.ok &&
+      ownerAddress !== null &&
+      result.primaryJettonWalletAddress &&
+      result.secondaryJettonWalletAddress &&
+      result.derivedJettonWalletsAgree === true
+    ) {
+      const outPath = envNonEmpty('PHASE21_HOT_WALLET_DERIVATION_PROOF_OUT');
+      if (outPath !== null) {
+        const doc = buildPhase21HotWalletDerivationProofDocument({
+          primaryJettonWalletAddress: result.primaryJettonWalletAddress,
+          secondaryJettonWalletAddress: result.secondaryJettonWalletAddress,
+          ownerAddress,
+          jettonMaster,
+          primaryProviderKind: primaryKind,
+          secondaryProviderKind: secondaryKind,
+        });
+        writePhase21HotWalletDerivationProofFile(outPath, doc);
+        derivationProofPath = outPath;
+      }
+    }
+
+    printJson({
+      ok: result.ok,
+      command: 'verify-mainnet-external',
+      result,
+      ...(derivationProofPath !== null
+        ? {
+            derivationProofPath,
+            derivationProofMethod: 'DUAL_PROVIDER_LIVE',
+            notes: [
+              'Sanitized derivation proof written for hot-wallet:plan / hot-wallet:register',
+              'Set PHASE21_HOT_WALLET_DERIVATION_PROOF_FILE to this path',
+            ],
+          }
+        : {}),
+    });
     if (!result.ok) process.exitCode = 1;
     return;
   }
@@ -681,6 +724,18 @@ if (command === 'mainnet-registry:apply') {
 
 if (command === 'hot-wallet:plan') {
     const url = envNonEmpty('DATABASE_URL');
+    const derivationResolved = resolvePhase21HotWalletDerivationProofFromEnv();
+    if (derivationResolved.refuseCode !== undefined) {
+      printJson({
+        ok: false,
+        command: 'hot-wallet:plan',
+        refuseCode: derivationResolved.refuseCode,
+        message: derivationResolved.message ?? 'derivation proof refused',
+        readyForLivePayout: false,
+      });
+      process.exitCode = 1;
+      return;
+    }
     const partial: Partial<{
       address: string;
       signerReference: string;
@@ -689,6 +744,7 @@ if (command === 'hot-wallet:plan') {
       label: string | null;
       reason: string;
       changedByAdminId: string | null;
+      derivationProof: NonNullable<typeof derivationResolved.proof>;
     }> = {
       ...(envNonEmpty('PHASE21_HOT_WALLET_ADDRESS')
         ? { address: envNonEmpty('PHASE21_HOT_WALLET_ADDRESS')! }
@@ -707,6 +763,9 @@ if (command === 'hot-wallet:plan') {
         ? { reason: envNonEmpty('PHASE21_HOT_WALLET_REASON')! }
         : {}),
       changedByAdminId: envNonEmpty('PHASE21_CEREMONY_ADMIN_USER_ID'),
+      ...(derivationResolved.proof !== null
+        ? { derivationProof: derivationResolved.proof }
+        : {}),
     };
     if (url === null) {
       printJson({
@@ -746,9 +805,11 @@ if (command === 'hot-wallet:plan') {
           plan,
           current_database: currentDatabase,
           required_database: requiredDatabase,
+          derivationProofSource: derivationResolved.source,
+          derivationProofMethod: derivationResolved.proof?.method ?? null,
           notes: [
             'Read-only PLAN; register requires --apply + env gates',
-            'Derivation proof required for canRegister/READY',
+            'Derivation proof required for canRegister/READY (DUAL_PROVIDER_LIVE via file or env)',
           ],
           readyForLivePayout: false,
         });
@@ -790,6 +851,22 @@ if (command === 'hot-wallet:plan') {
       process.exitCode = 1;
       return;
     }
+    const derivationResolved = resolvePhase21HotWalletDerivationProofFromEnv();
+    if (derivationResolved.refuseCode !== undefined || derivationResolved.proof === null) {
+      printJson({
+        ok: false,
+        command: 'hot-wallet:register',
+        refuseCode:
+          derivationResolved.refuseCode ?? 'DERIVATION_PROOF_REQUIRED',
+        message:
+          derivationResolved.message ??
+          'DUAL_PROVIDER_LIVE derivation proof required (PHASE21_HOT_WALLET_DERIVATION_PROOF_FILE or env fields)',
+      });
+      process.exitCode = 1;
+      return;
+    }
+    const derivationProof = derivationResolved.proof;
+    const derivationProofSource = derivationResolved.source;
     await withDatabaseUrl(async (pool) => {
       const client = await pool.connect();
       try {
@@ -812,8 +889,15 @@ if (command === 'hot-wallet:plan') {
           friendlyAddress: envNonEmpty('PHASE21_HOT_WALLET_FRIENDLY_ADDRESS'),
           label: envNonEmpty('PHASE21_HOT_WALLET_LABEL'),
           changedByAdminId: adminId,
+          derivationProof,
         });
-        printJson({ ok: result.applied, command: 'hot-wallet:register', result });
+        printJson({
+          ok: result.applied,
+          command: 'hot-wallet:register',
+          result,
+          derivationProofSource,
+          derivationProofMethod: derivationProof.method,
+        });
         if (!result.applied) process.exitCode = 1;
       } finally {
         client.release();

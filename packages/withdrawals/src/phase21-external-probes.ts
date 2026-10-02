@@ -91,6 +91,10 @@ export interface Phase21TwoProviderVerificationResult {
   readonly independence: Phase21ProviderIndependenceValidation;
   readonly primary: Phase21ProbeProvenance | null;
   readonly secondary: Phase21ProbeProvenance | null;
+  /** Dual-provider derived Hot Wallet USDT Jetton wallet (when ownerAddress provided). */
+  readonly primaryJettonWalletAddress?: string | null;
+  readonly secondaryJettonWalletAddress?: string | null;
+  readonly derivedJettonWalletsAgree?: boolean;
   readonly notes: readonly string[];
 }
 
@@ -582,9 +586,42 @@ export async function verifyMainnetUsdtWithTwoProviders(input: {
           verificationMethod: 'wallet_derivation_adapter',
           ok: false,
         },
+        primaryJettonWalletAddress: wA.jettonWalletAddress,
+        secondaryJettonWalletAddress: wB.jettonWalletAddress,
+        derivedJettonWalletsAgree: false,
         notes: [wA.message, wB.message, 'No broadcast'],
       };
     }
+
+    return {
+      ok: true,
+      code: 'MAINNET_USDT_TWO_PROVIDER_OK',
+      message:
+        'Mainnet identity (-239), USDT metadata, and Jetton wallet derivation agreed across independent providers',
+      independence,
+      primary: {
+        providerKind: primaryKind,
+        providerHost: metaA.providerHost || normalizeProviderHost(primaryUrl),
+        networkIdentity: '-239',
+        observedAt,
+        resource: 'jetton_metadata_and_wallet_derivation',
+        verificationMethod: 'two_provider_orchestrated',
+        ok: true,
+      },
+      secondary: {
+        providerKind: secondaryKind,
+        providerHost: metaB.providerHost || normalizeProviderHost(secondaryUrl),
+        networkIdentity: '-239',
+        observedAt,
+        resource: 'jetton_metadata_and_wallet_derivation',
+        verificationMethod: 'two_provider_orchestrated',
+        ok: true,
+      },
+      primaryJettonWalletAddress: wA.jettonWalletAddress,
+      secondaryJettonWalletAddress: wB.jettonWalletAddress,
+      derivedJettonWalletsAgree: true,
+      notes: ['Read-only verification only', 'No broadcast', 'DUAL_PROVIDER_LIVE derivation ready'],
+    };
   }
 
   return {
@@ -610,6 +647,12 @@ export async function verifyMainnetUsdtWithTwoProviders(input: {
       verificationMethod: 'two_provider_orchestrated',
       ok: true,
     },
-    notes: ['Read-only verification only', 'No broadcast'],
+    primaryJettonWalletAddress: null,
+    secondaryJettonWalletAddress: null,
+    notes: [
+      'Read-only verification only',
+      'No broadcast',
+      'ownerAddress absent — Jetton wallet derivation skipped',
+    ],
   };
 }
