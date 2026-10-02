@@ -84,3 +84,7 @@ PostgreSQL 18 rehearsal only — **operational database was not touched.**
 Operational enrollment; real ops grants; ops private keys in any archive;
 broad default-deny disable; operational migrate of 0024–0028 without Owner
 authorization and (for 0028) without a passing D.1 preflight decision.
+
+## Phase 21 Step 4A update
+
+Source scaffolding for `production_sealed_v1` is present. Checklist items for witnessed production seal, Owner CA, Channel B install, and Layer C/D provenance auth remain **OPEN / BLOCKED** for operational go-live.

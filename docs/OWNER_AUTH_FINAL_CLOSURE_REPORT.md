@@ -74,3 +74,7 @@ Ops DB: NOT ACCESSED
 | Commit readiness | **Not granted** |
 | Operational readiness | **BLOCKED** |
 | Recovery readiness | **BLOCKED** |
+
+## Phase 21 Step 4A note
+
+Ops trust ceremony for production remains unimplemented as an *operational* go-live. Source scaffolding for `production_sealed_v1` + `CLAIM_EXISTING_ADMIN` exists; readiness stays `TRUST_RESOURCES_READY=NO` until Owner ceremony materials exist.

@@ -18,7 +18,7 @@
     "test:phase15": "cross-env PHASE15_AUTH_TESTS=1 vitest run --fileParallelism=false test/phase15-referral-attribution.test.ts",
     "test:owner-admin-auth": "cross-env OWNER_ADMIN_AUTH_TESTS=1 vitest run --fileParallelism=false test/owner-admin-auth.test.ts",
     "test:phase13-admin-auth": "cross-env PHASE13_ADMIN_AUTH_TESTS=1 vitest run --fileParallelism=false test/phase13-admin-auth.test.ts",
-    "test:owner-bootstrap": "cross-env OWNER_BOOTSTRAP_TESTS=1 ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1 vitest run --fileParallelism=false test/owner-bootstrap.test.ts test/owner-bootstrap-unit.test.ts test/owner-bootstrap-remediation.test.ts test/owner-bootstrap-acceptance.test.ts test/ceremony-profile-v1.test.ts test/ceremony-seal-v1.test.ts test/ceremony-trust-derivative-v1.test.ts test/g5-tls-verify-full.test.ts test/cv01-pg-tls-hostname.test.ts test/cv03-security-gate-db-summary.test.ts test/pr02-pr03-pr04.test.ts test/owner-bootstrap-ceremony.test.ts",
+    "test:owner-bootstrap": "cross-env OWNER_BOOTSTRAP_TESTS=1 ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1 vitest run --fileParallelism=false test/owner-bootstrap.test.ts test/owner-bootstrap-unit.test.ts test/owner-bootstrap-remediation.test.ts test/owner-bootstrap-acceptance.test.ts test/ceremony-profile-v1.test.ts test/ceremony-seal-v1.test.ts test/ceremony-trust-derivative-v1.test.ts test/g5-tls-verify-full.test.ts test/cv01-pg-tls-hostname.test.ts test/cv03-security-gate-db-summary.test.ts test/pr02-pr03-pr04.test.ts test/owner-bootstrap-ceremony.test.ts test/owner-production-bootstrap.test.ts",
     "test:owner-bootstrap-ceremony": "cross-env OWNER_BOOTSTRAP_TESTS=1 ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1 vitest run --fileParallelism=false test/owner-bootstrap-ceremony.test.ts",
     "test:isolated-telegram-owner-bootstrap": "cross-env OWNER_BOOTSTRAP_TESTS=1 ALEX_ISOLATED_TELEGRAM_OWNER_BOOTSTRAP_TEST_HOOKS=1 vitest run --fileParallelism=false test/isolated-telegram-owner-bootstrap.test.ts",
     "test:ceremony-profile-v1": "vitest run test/ceremony-profile-v1.test.ts",
@@ -26,10 +26,12 @@
     "test:ceremony-trust-derivative-v1": "vitest run test/ceremony-trust-derivative-v1.test.ts",
     "test:g5-tls": "vitest run test/g5-tls-verify-full.test.ts",
     "test:pr02-pr03-pr04": "cross-env OWNER_BOOTSTRAP_TESTS=1 ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1 vitest run --fileParallelism=false test/pr02-pr03-pr04.test.ts test/ceremony-profile-v1.test.ts",
-    "test:m1-security-gate": "cross-env M1_CI_SECURITY_GATE=1 OWNER_BOOTSTRAP_TESTS=1 OWNER_ADMIN_AUTH_TESTS=1 ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1 ALEX_ISOLATED_TELEGRAM_OWNER_BOOTSTRAP_TEST_HOOKS=1 vitest run --fileParallelism=false test/owner-admin-auth.test.ts test/owner-bootstrap.test.ts test/owner-bootstrap-unit.test.ts test/owner-bootstrap-remediation.test.ts test/owner-bootstrap-acceptance.test.ts test/ceremony-profile-v1.test.ts test/ceremony-seal-v1.test.ts test/ceremony-trust-derivative-v1.test.ts test/g5-tls-verify-full.test.ts test/cv01-pg-tls-hostname.test.ts test/cv03-security-gate-db-summary.test.ts test/pr02-pr03-pr04.test.ts test/owner-bootstrap-ceremony.test.ts test/isolated-telegram-owner-bootstrap.test.ts",
+    "test:m1-security-gate": "cross-env M1_CI_SECURITY_GATE=1 OWNER_BOOTSTRAP_TESTS=1 OWNER_ADMIN_AUTH_TESTS=1 ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1 ALEX_ISOLATED_TELEGRAM_OWNER_BOOTSTRAP_TEST_HOOKS=1 vitest run --fileParallelism=false test/owner-admin-auth.test.ts test/owner-bootstrap.test.ts test/owner-bootstrap-unit.test.ts test/owner-bootstrap-remediation.test.ts test/owner-bootstrap-acceptance.test.ts test/ceremony-profile-v1.test.ts test/ceremony-seal-v1.test.ts test/ceremony-trust-derivative-v1.test.ts test/g5-tls-verify-full.test.ts test/cv01-pg-tls-hostname.test.ts test/cv03-security-gate-db-summary.test.ts test/pr02-pr03-pr04.test.ts test/owner-bootstrap-ceremony.test.ts test/isolated-telegram-owner-bootstrap.test.ts test/owner-production-bootstrap.test.ts",
     "owner-admin-auth": "node dist/cli/owner-admin-auth.js",
     "owner-bootstrap-ceremony": "node dist/cli/owner-bootstrap-ceremony.js",
-    "owner-isolated-telegram-bootstrap": "node dist/cli/owner-isolated-telegram-bootstrap.js"
+    "owner-isolated-telegram-bootstrap": "node dist/cli/owner-isolated-telegram-bootstrap.js",
+    "owner-production-bootstrap": "node dist/cli/owner-production-bootstrap.js",
+    "test:owner-production-bootstrap": "cross-env OWNER_BOOTSTRAP_TESTS=1 vitest run --fileParallelism=false test/owner-production-bootstrap.test.ts"
   },
   "dependencies": {
     "@alex-rewards/config": "workspace:*",

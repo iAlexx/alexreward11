@@ -545,7 +545,11 @@ describe.skipIf(databaseUrl === '')(
       }),
     ).rejects.toThrow(/intended_subject|FORBIDDEN/i);
 
-    const users = await pool.query<{ c: number }>(`SELECT count(*)::int AS c FROM admin_users`);
+    // Migration 0030 seeds phase11-policy admin; assert enrollment subjects were not created.
+    const users = await pool.query<{ c: number }>(
+      `SELECT count(*)::int AS c FROM admin_users
+       WHERE email IN ('sub@local.test', 'evil@local.test')`,
+    );
     expect(users.rows[0]?.c).toBe(0);
     const grants = await pool.query<{ status: string }>(`SELECT status FROM owner_bootstrap_grants`);
     expect(grants.rows[0]?.status).toBe('ISSUED');

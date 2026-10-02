@@ -549,3 +549,199 @@ export function assertBootstrapTlsAndEndpoint(
   }
   assertSpkiPinningUnsupportedForV1(profile.tls.spkiSha256Hex, 'spkiSha256Hex');
 }
+
+
+/**
+ * Production_sealed_v1 pool config — verify_full only; operational DB names allowed.
+ * Does NOT weaken isolated Stage B path (buildOwnerBootstrapPoolConfig unchanged).
+ */
+export function buildProductionOwnerBootstrapPoolConfig(
+  connectionString: string,
+  profile: BootstrapEndpointProfile,
+): { readonly config: PoolConfig; readonly hostname: string; readonly database: string } {
+  if (profile.deploymentEnv !== 'production') {
+    throw new AuthDomainError(
+      'FORBIDDEN',
+      'production_sealed_v1 pool requires deploymentEnv=production',
+    );
+  }
+  if (profile.tls.mode !== 'verify_full') {
+    throw new AuthDomainError(
+      'FORBIDDEN',
+      'production_sealed_v1 refuses non-verify_full TLS (no plaintext downgrade)',
+    );
+  }
+  if (
+    profile.expectedSystemIdentifier === undefined ||
+    profile.expectedSystemIdentifier.trim() === ''
+  ) {
+    throw new AuthDomainError(
+      'FORBIDDEN',
+      'production_sealed_v1 requires expectedSystemIdentifier',
+    );
+  }
+  assertNoConflictingSslConnectionParams(connectionString, {});
+  const parsed = parseConnectionString(connectionString);
+  assertNoConflictingSslConnectionParams(connectionString, parsed);
+
+  const hostname = asNonEmptyString(parsed['host'] ?? parsed['hostname'], 'host');
+  const database = asNonEmptyString(parsed['database'], 'database');
+  if (database !== profile.expectedDatabaseName) {
+    throw new AuthDomainError('FORBIDDEN', 'URL database does not match endpoint profile');
+  }
+  if (isNumericLoopback(hostname)) {
+    throw new AuthDomainError(
+      'FORBIDDEN',
+      'production_sealed_v1 refuses loopback plaintext / loopback dial targets',
+    );
+  }
+
+  const base: PoolConfig = {
+    host: hostname,
+    database,
+    max: 4,
+  };
+  const port = optionalPort(parsed['port']);
+  if (port !== undefined) base.port = port;
+  const user = optionalString(parsed['user']);
+  if (user !== undefined) base.user = user;
+  const password = optionalString(parsed['password']);
+  if (password !== undefined) base.password = password;
+
+  if (profile.tls.caPem.trim() === '') {
+    throw new AuthDomainError('FORBIDDEN', 'Owner CA trust anchor missing; fail closed');
+  }
+  if (profile.tls.tlsServerName.trim() === '') {
+    throw new AuthDomainError('FORBIDDEN', 'tls_server_name required; fail closed');
+  }
+  const dialHost = hostname.trim().toLowerCase().replace(/^\[|\]$/g, '');
+  const approvedName = profile.tls.tlsServerName.trim().toLowerCase();
+  if (isIP(dialHost) === 0 && dialHost !== approvedName) {
+    throw new AuthDomainError(
+      'FORBIDDEN',
+      'URL host must be a numeric IP or exactly equal tls_server_name',
+    );
+  }
+  const ssl = buildVerifyFullTlsSocketOptions({
+    caPem: profile.tls.caPem,
+    tlsServerName: profile.tls.tlsServerName,
+    ...(profile.tls.spkiSha256Hex !== undefined
+      ? { spkiSha256Hex: profile.tls.spkiSha256Hex }
+      : {}),
+  });
+
+  return {
+    hostname,
+    database,
+    config: {
+      ...base,
+      application_name: 'alex-owner-production-bootstrap-verify-full',
+      ssl,
+    },
+  };
+}
+
+export async function createProductionOwnerBootstrapPool(input: {
+  readonly connectionString: string;
+  readonly profile: BootstrapEndpointProfile;
+}): Promise<OwnerBootstrapPool> {
+  const built = buildProductionOwnerBootstrapPoolConfig(input.connectionString, input.profile);
+  const pool = new Pool(built.config);
+  try {
+    const client = await pool.connect();
+    try {
+      const dbRes = await client.query<{ current_database: string }>(`SELECT current_database()`);
+      const currentDatabase = dbRes.rows[0]?.current_database ?? '';
+      if (currentDatabase !== built.database) {
+        throw new AuthDomainError('FORBIDDEN', 'connected database != URL database');
+      }
+      const sidRes = await client.query<{ system_identifier: string }>(
+        `SELECT system_identifier::text AS system_identifier FROM pg_control_system()`,
+      );
+      const clusterSystemIdentifier = sidRes.rows[0]?.system_identifier ?? '';
+      if (clusterSystemIdentifier !== input.profile.expectedSystemIdentifier) {
+        throw new AuthDomainError('FORBIDDEN', 'system_identifier mismatch');
+      }
+      const sslRes = await client.query<{ ssl: boolean | null }>(
+        `SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()`,
+      );
+      const sslInUse = sslRes.rows[0]?.ssl === true;
+      if (!sslInUse) {
+        throw new AuthDomainError(
+          'FORBIDDEN',
+          'TLS required but pg_stat_ssl reports ssl=false for this backend',
+        );
+      }
+      const addrRes = await client.query<{ server_addr: string | null }>(
+        `SELECT inet_server_addr()::text AS server_addr`,
+      );
+      const serverAddr = addrRes.rows[0]?.server_addr ?? null;
+      const connectionFacts: BootstrapConnectionFacts = {
+        hostname: built.hostname,
+        sslEnabled: sslInUse,
+        currentDatabase,
+        clusterSystemIdentifier,
+        serverAddr,
+        sslInUse,
+      };
+      const result: OwnerBootstrapPool = {
+        pool,
+        connectionFacts,
+        hostname: built.hostname,
+        database: built.database,
+        profile: input.profile,
+      };
+      verifiedBootstrapByPool.set(pool, result);
+      return result;
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    await pool.end().catch(() => undefined);
+    throw error;
+  }
+}
+
+/**
+ * Production TLS/endpoint assert — requires verify_full + system_identifier.
+ * Isolated assertBootstrapTlsAndEndpoint remains unchanged (refuses ops DBs).
+ */
+export function assertProductionBootstrapTlsAndEndpoint(
+  profile: BootstrapEndpointProfile,
+  grantEnv: DeploymentEnv,
+  grantProfileId: string,
+  connection: BootstrapConnectionFacts,
+): void {
+  if (profile.profileId !== grantProfileId) {
+    throw new AuthDomainError('FORBIDDEN', 'endpoint_profile_id mismatch');
+  }
+  if (profile.deploymentEnv !== 'production' || grantEnv !== 'production') {
+    throw new AuthDomainError('FORBIDDEN', 'production_sealed_v1 requires production env');
+  }
+  if (connection.currentDatabase !== profile.expectedDatabaseName) {
+    throw new AuthDomainError('FORBIDDEN', 'expected_database_name mismatch');
+  }
+  if (
+    profile.expectedSystemIdentifier === undefined ||
+    profile.expectedSystemIdentifier === '' ||
+    profile.expectedSystemIdentifier !== connection.clusterSystemIdentifier
+  ) {
+    throw new AuthDomainError('FORBIDDEN', 'system_identifier mismatch');
+  }
+  if (profile.tls.mode !== 'verify_full') {
+    throw new AuthDomainError('FORBIDDEN', 'production refuses non-verify_full TLS');
+  }
+  if (!connection.sslInUse) {
+    throw new AuthDomainError('FORBIDDEN', 'TLS required; plaintext refused');
+  }
+  if (profile.tls.caPem.trim() === '') {
+    throw new AuthDomainError('FORBIDDEN', 'Owner CA trust anchor missing; fail closed');
+  }
+  if (profile.tls.tlsServerName.trim() === '') {
+    throw new AuthDomainError('FORBIDDEN', 'tls_server_name required; fail closed');
+  }
+  if (isNumericLoopback(connection.hostname)) {
+    throw new AuthDomainError('FORBIDDEN', 'production refuses loopback dial host');
+  }
+  assertSpkiPinningUnsupportedForV1(profile.tls.spkiSha256Hex, 'spkiSha256Hex');
+}

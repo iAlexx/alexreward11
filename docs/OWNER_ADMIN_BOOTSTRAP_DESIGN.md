@@ -748,3 +748,7 @@ harnesses. That MUST NOT mark Checklist **B** or state **D** complete and MUST
 NOT use production seal material.
 
 **Report label:** `DESIGN READY — TRUST ESTABLISHMENT BLOCKED`
+
+## Production path note (Phase 21 Step 4A)
+
+A parallel production ceremony CLI (`owner-production-bootstrap`, trust class `production_sealed_v1`) was added for `CLAIM_EXISTING_ADMIN`. It does not replace or relax isolated Stage B Option C tooling. See `docs/OWNER_ADMIN_PRODUCTION_BOOTSTRAP.md`.

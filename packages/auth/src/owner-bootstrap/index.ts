@@ -153,3 +153,48 @@ export {
 
 // Re-export internal helper only from this subpath module (not packages/auth public API).
 export { internalSupersedePendingBootstrapAttempt } from './redeem.js';
+
+export {
+  PRODUCTION_OWNER_BOOTSTRAP_TRUST_CLASS,
+  ISOLATED_OWNER_BOOTSTRAP_TRUST_CLASS,
+  type ProductionOwnerBootstrapTrustClass,
+} from './production-trust-class.js';
+export {
+  preflightClaimExistingAdmin,
+  assertClaimExistingAdminEligible,
+  type ClaimExistingAdminPreflightResult,
+  type ExistingAdminCredentialState,
+} from './claim-existing-admin.js';
+export {
+  PRODUCTION_CEREMONY_PROFILE_NAME,
+  PRODUCTION_CEREMONY_SEAL_NAME,
+  PRODUCTION_CHANNEL_A_NAME,
+  PRODUCTION_CHANNEL_B_NAME,
+  PRODUCTION_PUBLIC_KEY_NAME,
+  PRODUCTION_PRIVATE_SEED_NAME,
+  PRODUCTION_MANIFEST_NAME,
+  PRODUCTION_TARGET_ADMIN_NAME,
+  assertProductionProfileRequiresSystemIdentifier,
+  assertProductionCeremonyAllowsEnrollment,
+  generateProductionBootstrapKeypairFiles,
+  loadProductionPublicKey,
+  writeProductionEndpointProfile,
+  loadProductionEndpointProfile,
+  writeIntendedExistingAdminBinding,
+  loadIntendedExistingAdminBinding,
+  draftProductionCeremonySeal,
+  recordProductionChannelBDigest,
+  missingProductionTrustResources,
+  type ProductionCeremonyPublicKeyRecord,
+  type ProductionIntendedExistingAdminBinding,
+  type ProductionChannelBRecord,
+} from './production-ceremony-gate.js';
+export {
+  buildProductionOwnerBootstrapReadinessReport,
+  type ProductionOwnerBootstrapReadinessReport,
+} from './production-owner-bootstrap-readiness.js';
+export {
+  buildProductionOwnerBootstrapPoolConfig,
+  createProductionOwnerBootstrapPool,
+  assertProductionBootstrapTlsAndEndpoint,
+} from './pool.js';

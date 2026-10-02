@@ -160,8 +160,9 @@ describe.skipIf(
   'isolated Option C ceremony enrollment (disposable DB)',
   { timeout: 180_000 },
   () => {
-    const dbName = dbNameFromUrl(databaseUrl);
-    const port = portFromUrl(databaseUrl);
+    // Suite factory still evaluates under skipIf; guard empty URL.
+    const dbName = databaseUrl === '' ? '' : dbNameFromUrl(databaseUrl);
+    const port = databaseUrl === '' ? 0 : portFromUrl(databaseUrl);
     let ceremonyDir = '';
 
     beforeAll(async () => {

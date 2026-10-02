@@ -1062,3 +1062,6 @@ See docs/PHASE_21_STEP3A_INDEPENDENT_REVIEW_CORRECTIONS.md.
 
 Phase 21 Step 3C (2026-10-02): final operational truth gate — indexed Toncenter metadata, real Jetton fee estimation without fee/attached double-count, no USDT master fallback, live PLAN requires DB, OWNER admin for APPLY, SSRF allowlist, ceremony evidence schema. Source/test/readiness only; no deploy.
 
+## ADR-PHASE21-STEP4A — Production Owner bootstrap path (2026-10-02)
+
+Decision: implement parallel `production_sealed_v1` Owner-bootstrap path with `CLAIM_EXISTING_ADMIN`; do not weaken `ephemeral_isolated_test_only` tooling. Hot Wallet keys must never be reused as Owner bootstrap keys. Step4A is source/readiness only — no operational Owner claim.

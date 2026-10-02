@@ -237,3 +237,6 @@ Docs + readiness/preflight only. Signer hosting locked to `DEDICATED_CONTROLLED_
 
 Phase 21 Step 3C: provider URL SSRF allowlist (https only, no URL secrets), OWNER actor required for ceremony APPLY, dual-provider jetton derivation proof for hot wallet registration.
 
+### Phase 21 Step 4A — Production Owner bootstrap
+
+Production first-Owner trust uses `production_sealed_v1` with verify-full TLS, required `system_identifier`, dual-channel seal evidence, and independent human witnesses. Isolated `owner-bootstrap-ceremony` remains production-refusing. Existing admin UUID is a locator only — never Owner authority by itself.

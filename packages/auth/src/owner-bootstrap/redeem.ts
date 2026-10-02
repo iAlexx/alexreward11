@@ -27,11 +27,17 @@ import {
 import type { BootstrapEndpointProfile } from './endpoint.js';
 import {
   assertBootstrapTlsAndEndpoint,
+  assertProductionBootstrapTlsAndEndpoint,
   assertPoolBoundBootstrapTrust,
   peekIsolatedTestBootstrapClock,
   readAuthoritativeBootstrapNowSec,
   type BootstrapConnectionFacts,
 } from './pool.js';
+import {
+  assertClaimExistingAdminEligible,
+  preflightClaimExistingAdmin,
+} from './claim-existing-admin.js';
+import { PRODUCTION_OWNER_BOOTSTRAP_TRUST_CLASS } from './production-trust-class.js';
 import {
   encodeUint64Be,
   intendedSubjectFromPayload,
@@ -930,6 +936,18 @@ export interface CompleteEnrollmentInput {
   readonly displayName?: string;
   readonly trust: BootstrapTrustMaterial;
   /**
+   * CREATE_ADMIN = isolated Stage B insert path (default).
+   * CLAIM_EXISTING_ADMIN = production_sealed_v1 claim of an existing ACTIVE admin row.
+   */
+  readonly enrollmentMode?: 'CREATE_ADMIN' | 'CLAIM_EXISTING_ADMIN';
+  /** Required when enrollmentMode=CLAIM_EXISTING_ADMIN. Locator only — not authority. */
+  readonly intendedAdminUserId?: string;
+  /**
+   * When production_sealed_v1, use production TLS/endpoint assert (ops DB allowed with verify_full).
+   * Isolated Stage B must omit this (default isolated assert remains fail-closed on ops DBs).
+   */
+  readonly trustClass?: typeof PRODUCTION_OWNER_BOOTSTRAP_TRUST_CLASS | 'ephemeral_isolated_test_only';
+  /**
    * Test-only deliberate delay after credential hashing and before the final TX.
    * Enabled only when ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1 (S-01 delayed prep).
    */
@@ -1016,12 +1034,21 @@ export async function completeOwnerBootstrapEnrollment(
     if (attempt === undefined || attempt.pop_status !== 'VERIFIED') {
       throw new AuthDomainError('FORBIDDEN', 'attempt not VERIFIED');
     }
-    assertBootstrapTlsAndEndpoint(
-      input.trust.endpointProfile,
-      attempt.deployment_env as 'isolated_test' | 'staging' | 'production',
-      attempt.endpoint_profile_id,
-      input.trust.connectionFacts,
-    );
+    if (input.trustClass === PRODUCTION_OWNER_BOOTSTRAP_TRUST_CLASS) {
+      assertProductionBootstrapTlsAndEndpoint(
+        input.trust.endpointProfile,
+        attempt.deployment_env as 'isolated_test' | 'staging' | 'production',
+        attempt.endpoint_profile_id,
+        input.trust.connectionFacts,
+      );
+    } else {
+      assertBootstrapTlsAndEndpoint(
+        input.trust.endpointProfile,
+        attempt.deployment_env as 'isolated_test' | 'staging' | 'production',
+        attempt.endpoint_profile_id,
+        input.trust.connectionFacts,
+      );
+    }
 
     // Fresh authoritative time AFTER locks and AFTER slow password hashing (S-01).
     const nowSec = await readAuthoritativeNowSec(client, pool);
@@ -1099,25 +1126,64 @@ export async function completeOwnerBootstrapEnrollment(
 
     const email = input.intendedSubject;
     const displayName = input.displayName ?? 'Owner';
-    const adminIns = await client.query<{ id: string }>(
-      `INSERT INTO admin_users (email, display_name, status)
-       VALUES ($1, $2, 'ACTIVE')
-       RETURNING id::text`,
-      [email, displayName],
-    );
-    const adminUserId = adminIns.rows[0]?.id;
-    if (adminUserId === undefined) {
-      throw new AuthDomainError('INTERNAL', 'admin_users insert failed');
+    const enrollmentMode = input.enrollmentMode ?? 'CREATE_ADMIN';
+    let adminUserId: string;
+    let adminUsersCreated = 0;
+
+    if (enrollmentMode === 'CLAIM_EXISTING_ADMIN') {
+      if (input.trustClass !== PRODUCTION_OWNER_BOOTSTRAP_TRUST_CLASS) {
+        throw new AuthDomainError(
+          'FORBIDDEN',
+          'CLAIM_EXISTING_ADMIN requires production_sealed_v1 trust class',
+        );
+      }
+      const intendedAdminUserId = input.intendedAdminUserId?.trim();
+      if (intendedAdminUserId === undefined || intendedAdminUserId === '') {
+        throw new AuthDomainError('VALIDATION', 'intendedAdminUserId required for CLAIM_EXISTING_ADMIN');
+      }
+      const eligibility = await preflightClaimExistingAdmin(client, {
+        intendedAdminUserId,
+        intendedAdminEmail: email,
+      });
+      assertClaimExistingAdminEligible(eligibility);
+      adminUserId = eligibility.targetAdminUserId!;
+    } else {
+      if (input.trustClass === PRODUCTION_OWNER_BOOTSTRAP_TRUST_CLASS) {
+        throw new AuthDomainError(
+          'FORBIDDEN',
+          'production_sealed_v1 must use CLAIM_EXISTING_ADMIN (ADMIN_USERS_CREATED_BY_PRODUCTION_BOOTSTRAP=0)',
+        );
+      }
+      const adminIns = await client.query<{ id: string }>(
+        `INSERT INTO admin_users (email, display_name, status)
+         VALUES ($1, $2, 'ACTIVE')
+         RETURNING id::text`,
+        [email, displayName],
+      );
+      const createdId = adminIns.rows[0]?.id;
+      if (createdId === undefined) {
+        throw new AuthDomainError('INTERNAL', 'admin_users insert failed');
+      }
+      adminUserId = createdId;
+      adminUsersCreated = 1;
     }
 
-    const role = await client.query<{ id: string }>(
-      `SELECT id::text FROM admin_roles WHERE code = 'OWNER' FOR UPDATE`,
+    const role = await client.query<{ id: string; status: string }>(
+      `SELECT id::text AS id, status::text AS status FROM admin_roles WHERE code = 'OWNER' FOR UPDATE`,
     );
     const roleId = role.rows[0]?.id;
+    const roleStatus = role.rows[0]?.status;
     if (roleId === undefined) {
       throw new AuthDomainError('INTERNAL', 'OWNER role missing');
     }
-    await client.query(`UPDATE admin_roles SET status = 'ACTIVE' WHERE id = $1::uuid`, [roleId]);
+    if (enrollmentMode === 'CLAIM_EXISTING_ADMIN') {
+      // Production must NOT silently reactivate a disabled Owner role.
+      if (roleStatus !== 'ACTIVE') {
+        throw new AuthDomainError('FORBIDDEN', 'OWNER role must already be ACTIVE for production claim');
+      }
+    } else {
+      await client.query(`UPDATE admin_roles SET status = 'ACTIVE' WHERE id = $1::uuid`, [roleId]);
+    }
     const binding = await client.query<{ id: string }>(
       `INSERT INTO admin_role_bindings (admin_user_id, role_id)
        VALUES ($1::uuid, $2::uuid)
@@ -1128,6 +1194,7 @@ export async function completeOwnerBootstrapEnrollment(
     if (bindingId === undefined) {
       throw new AuthDomainError('INTERNAL', 'OWNER binding insert failed');
     }
+    void adminUsersCreated;
 
     await client.query(
       `INSERT INTO admin_credentials (
@@ -1173,6 +1240,10 @@ export async function completeOwnerBootstrapEnrollment(
           challenge_id: input.challengeId,
           endpoint_profile_id: attempt.endpoint_profile_id,
           channel_fp: attempt.channel_fp_hex,
+          enrollment_mode: enrollmentMode,
+          owner_binding_id: bindingId,
+          owner_authority_seat: 1,
+          trust_class: input.trustClass ?? 'ephemeral_isolated_test_only',
           // Explicitly no secrets
         }),
       ],

@@ -68,3 +68,6 @@ Canonical detail: PHASE_21_STEP3B_CEREMONY_TOOLING_HARDENING.md
 
 Step 3C truth gate is required before READY_FOR_OWNER_PROVISIONING_CEREMONY. Live PLAN requires DATABASE_URL; APPLY requires ACTIVE OWNER admin. See PHASE_21_STEP3C_FINAL_OPERATIONAL_TRUTH_GATE.md.
 
+## Step 4A — Owner authority prerequisite (2026-10-02)
+
+Step4 APPLY remains `PAUSED_OWNER_AUTHORITY_REQUIRED`. Production first-Owner bootstrap source path (`production_sealed_v1` / `CLAIM_EXISTING_ADMIN`) is implemented; operational ceremony blocked until trust resources exist. See `docs/PHASE_21_STEP4A_PRODUCTION_OWNER_BOOTSTRAP_READINESS.md`.

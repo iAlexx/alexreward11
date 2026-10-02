@@ -92,3 +92,9 @@ READY_FOR_LIVE_PAYOUT remains false.
 
 Step 3C adds ceremony observations that must PASS for READY_FOR_OWNER_PROVISIONING_CEREMONY: twoProviderMetadataOperational, realJettonFeeEstimation, usdtMasterFallbackRemoved, livePlanRequiresDatabase, ceremonyOwnerActorRequired, providerUrlSsrfProtection, hotWalletDerivationProofRequired, ceremonyEvidenceSchemaReady. READY_FOR_LIVE_PAYOUT remains always false. See PHASE_21_STEP3C_FINAL_OPERATIONAL_TRUTH_GATE.md.
 
+### Step 4A (2026-10-02)
+
+- `PRODUCTION_OWNER_BOOTSTRAP_SOURCE_READY=YES`
+- `PRODUCTION_OWNER_BOOTSTRAP_TRUST_RESOURCES_READY=NO`
+- `READY_FOR_PRODUCTION_OWNER_BOOTSTRAP_CEREMONY=NO`
+- Step4 remains `PAUSED_OWNER_AUTHORITY_REQUIRED`

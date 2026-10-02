@@ -62,3 +62,7 @@ Keep FS-01; feature absent without provenance; no general ops unlock.
 Witness set; dual-channel pair; Owner CA trust anchor material; optional SPKI
 add-on; grant lifetime ≤15m recommended; authorize Stage B local; later go-live
 (**D**); later login FS-01 lift.
+
+## Phase 21 Step 4A — production path status
+
+Isolated Option C remains `ephemeral_isolated_test_only`. Production first-Owner claim uses a separate `owner-production-bootstrap` path with `CLAIM_EXISTING_ADMIN`. Operational ceremony is still blocked pending trust resources (witness, CA, Channel B, endpoint identity).

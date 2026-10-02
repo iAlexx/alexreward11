@@ -141,3 +141,7 @@ stricter path. Lifting login/reauth deny is a separate Owner authorization.
 ## Intent literal
 
 `I_CONFIRM_OWNER_ADMIN_AUTH_ON_ALEX_REWARDS` = intent only, never identity.
+
+## Production bootstrap note (Phase 21 Step 4A)
+
+Production `production_sealed_v1` endpoint profiles must bind expected DB name, PostgreSQL `system_identifier`, TLS hostname/SNI, and Owner-approved CA digest. DB name alone (e.g. `railway`) is not trust evidence. See `docs/OWNER_ADMIN_PRODUCTION_BOOTSTRAP.md`.

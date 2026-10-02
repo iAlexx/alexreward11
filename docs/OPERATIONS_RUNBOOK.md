@@ -358,3 +358,6 @@ Order: flag baseline -> verify flags -> registry bootstrap -> verify registry ->
 
 Phase 21 Step 3C CLI: production-flags/mainnet-registry live PLAN requires DATABASE_URL; :template commands are SCHEMA_TEMPLATE_NOT_LIVE; estimate-mainnet-fee reports distinct fee/attached/forward fields for 0.19 and 5 USDT cases.
 
+### Phase 21 Step 4A — Production Owner bootstrap (source ready)
+
+Operational Step4 APPLY remains paused until Owner authority exists. Use `pnpm --filter @alex-rewards/auth run owner-production-bootstrap -- readiness` for source readiness. Do not run `enroll-existing --apply` until Owner-authorized production ceremony after trust resources are established. See `docs/OWNER_ADMIN_PRODUCTION_BOOTSTRAP.md`.

@@ -201,8 +201,9 @@ describe.skipIf(
           email: 'wrong@local.test',
         }),
       ).rejects.toThrow(/does not match configured Owner Telegram id/);
+      // Migration 0030 seeds a non-Owner policy admin; assert refused enroll did not insert.
       const admins = await pool.query<{ c: number }>(
-        `SELECT count(*)::int AS c FROM admin_users`,
+        `SELECT count(*)::int AS c FROM admin_users WHERE email = 'wrong@local.test'`,
       );
       expect(admins.rows[0]?.c).toBe(0);
     });
