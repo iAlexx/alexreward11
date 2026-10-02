@@ -307,7 +307,9 @@
     "state_HELD": "موقوف",
     "state_FAILED_PRE_BROADCAST": "فشل قبل البث",
     "state_RECONCILE_REQUIRED": "يحتاج مطابقة",
-    "state_REJECTED": "مرفوض"
+    "state_REJECTED": "مرفوض",
+    "assetUsdtMainnet": "USDT على شبكة TON الرئيسية",
+    "nativeGram": "Gram (GRAM)"
   },
   "profile": {
     "title": "الملف الشخصي",

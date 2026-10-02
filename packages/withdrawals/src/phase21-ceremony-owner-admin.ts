@@ -21,8 +21,9 @@ export interface Phase21CeremonyOwnerAdminClient {
   ): Promise<{ rows: T[]; rowCount?: number | null }>;
 }
 
+/** Align with ledger Phase21 provision UUID acceptance (v1-v8). */
 const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function assertUuid(value: string, field: string): string {
   const trimmed = value.trim();

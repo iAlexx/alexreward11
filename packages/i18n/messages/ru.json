@@ -307,7 +307,9 @@
     "state_HELD": "Удержан",
     "state_FAILED_PRE_BROADCAST": "Ошибка до отправки",
     "state_RECONCILE_REQUIRED": "Требуется сверка",
-    "state_REJECTED": "Отклонён"
+    "state_REJECTED": "Отклонён",
+    "assetUsdtMainnet": "USDT в сети TON Mainnet",
+    "nativeGram": "Gram (GRAM)"
   },
   "profile": {
     "title": "Профиль",

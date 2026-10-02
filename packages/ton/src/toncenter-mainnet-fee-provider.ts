@@ -8,6 +8,9 @@
  * - forwardGramAtomic: Owner-approved 1 nanogram forward
  * - estimatedTotalNativeExposureAtomic: candidateAttached + forward
  *   (gas attachment exposure; network fee reported separately — not added here)
+ *
+ * Jetton master is required and used to derive (or verify) the Hot Wallet USDT Jetton wallet
+ * before estimation. Empty/ignored master is refused.
  */
 import {
   PHASE21_FEE_ESTIMATE_CANDIDATE_ATTACHED_GRAM_ATOMIC,
@@ -21,8 +24,13 @@ export interface ToncenterMainnetFeeProviderConfig {
   readonly apiKey?: string | null;
   readonly fetchImpl?: typeof fetch;
   readonly expectedNetworkGlobalId?: number | null;
-  /** Optional address used for estimateFee; Owner-supplied when live (Hot Wallet). */
+  /** Hot Wallet owner address used as estimateFee account (sender). */
   readonly estimateAddress?: string | null;
+  /**
+   * Optional pre-derived Hot Wallet USDT Jetton wallet. When omitted, derived via
+   * get_wallet_address(master, estimateAddress).
+   */
+  readonly estimateJettonWalletAddress?: string | null;
   /**
    * Candidate attached GRAM for unsigned body construction only.
    * Default PHASE21_FEE_ESTIMATE_CANDIDATE_ATTACHED_GRAM_ATOMIC (50_000_000n).
@@ -48,6 +56,9 @@ export interface ToncenterMainnetFeeEstimateResult {
   readonly providerHost: string;
   readonly networkIdentity: string;
   readonly estimateMethod: string;
+  readonly jettonMaster: string;
+  readonly jettonWalletAddress: string;
+  readonly netAmountAtomic: bigint;
 }
 
 /** Owner-approved forward (1 nanogram). */
@@ -56,6 +67,7 @@ const FORWARD_GRAM_ATOMIC = 1n;
 export class ToncenterMainnetFeeProvider {
   private readonly client: ToncenterMainnetReadonlyClient;
   private readonly estimateAddress: string | null;
+  private readonly estimateJettonWalletAddress: string | null;
   private readonly candidateAttached: bigint;
 
   constructor(config: ToncenterMainnetFeeProviderConfig) {
@@ -67,6 +79,7 @@ export class ToncenterMainnetFeeProvider {
         config.expectedNetworkGlobalId ?? TON_MAINNET_NETWORK_GLOBAL_ID,
     });
     this.estimateAddress = config.estimateAddress?.trim() || null;
+    this.estimateJettonWalletAddress = config.estimateJettonWalletAddress?.trim() || null;
     this.candidateAttached =
       config.candidateAttachedTonAtomic ?? PHASE21_FEE_ESTIMATE_CANDIDATE_ATTACHED_GRAM_ATOMIC;
   }
@@ -82,6 +95,16 @@ export class ToncenterMainnetFeeProvider {
     readonly queryId?: bigint;
     readonly candidateAttachedTonAtomic?: bigint;
   }): Promise<ToncenterMainnetFeeEstimateResult> {
+    const master = input.jettonMasterIdentity.trim();
+    if (master.length === 0) {
+      throw new Error(
+        'ToncenterMainnetFeeProvider: jettonMasterIdentity required (cannot void/ignore master)',
+      );
+    }
+    if (input.netAmountAtomic <= 0n) {
+      throw new Error('ToncenterMainnetFeeProvider: netAmountAtomic must be positive');
+    }
+
     const forward = input.forwardTonAtomic ?? FORWARD_GRAM_ATOMIC;
     const candidate =
       input.candidateAttachedTonAtomic ?? this.candidateAttached;
@@ -89,7 +112,7 @@ export class ToncenterMainnetFeeProvider {
     const identity = await this.client.probeNetworkIdentity();
     if (!identity.ok || identity.networkGlobalId !== TON_MAINNET_NETWORK_GLOBAL_ID) {
       throw new Error(
-        `ToncenterMainnetFeeProvider identity incomplete: ${identity.message}`,
+        'ToncenterMainnetFeeProvider identity incomplete: ' + identity.message,
       );
     }
 
@@ -99,15 +122,26 @@ export class ToncenterMainnetFeeProvider {
       );
     }
 
+    let jettonWallet = this.estimateJettonWalletAddress;
+    if (jettonWallet === null) {
+      const derived = await this.client.getJettonWalletAddress(master, this.estimateAddress);
+      if (!derived.ok || derived.jettonWalletAddress === null) {
+        throw new Error(
+          'ToncenterMainnetFeeProvider: jetton wallet derivation UNAVAILABLE for master: ' +
+            derived.message,
+        );
+      }
+      jettonWallet = derived.jettonWalletAddress;
+    }
+
     const destination =
       input.destinationAddress?.trim() || this.estimateAddress;
     const responseDestination =
       input.responseDestination?.trim() || this.estimateAddress;
     const queryId = input.queryId ?? 0n;
 
-    // Unsigned body only — never sign, never sendBoc.
-    // jettonMasterIdentity is required for provenance; body encodes amount/forward/dest.
-    void input.jettonMasterIdentity;
+    // Unsigned Jetton transfer body — amount/forward/dest used; never sign / never sendBoc.
+    // estimateFee is invoked on the Hot Wallet (sender); jetton wallet is derived from master.
     const bodyBase64 = buildUnsignedJettonTransferBodyBase64({
       queryId,
       netAmountAtomic: input.netAmountAtomic,
@@ -116,12 +150,14 @@ export class ToncenterMainnetFeeProvider {
       forwardTonAtomic: forward,
     });
 
+    // estimateFee against the derived Jetton wallet with the unsigned transfer body
+    // (not the owner address with an empty body). Never sign / never sendBoc.
     const fee = await this.client.estimateFeeNanotons({
-      address: this.estimateAddress,
+      address: jettonWallet,
       bodyBase64,
     });
     if (!fee.ok || fee.feeNanotons === null) {
-      throw new Error(`Toncenter estimateFee UNAVAILABLE: ${fee.message}`);
+      throw new Error('Toncenter estimateFee UNAVAILABLE: ' + fee.message);
     }
 
     const exposure = candidate + forward;
@@ -141,6 +177,9 @@ export class ToncenterMainnetFeeProvider {
       providerHost: this.client.providerHost,
       networkIdentity: '-239',
       estimateMethod: fee.estimateMethod,
+      jettonMaster: master,
+      jettonWalletAddress: jettonWallet,
+      netAmountAtomic: input.netAmountAtomic,
     };
   }
 }

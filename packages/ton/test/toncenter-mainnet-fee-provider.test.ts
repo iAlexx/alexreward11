@@ -4,11 +4,14 @@ import { PHASE21_FEE_ESTIMATE_CANDIDATE_ATTACHED_GRAM_ATOMIC } from '../src/jett
 import { ToncenterMainnetFeeProvider } from '../src/toncenter-mainnet-fee-provider.js';
 
 const MASTER = 'EQCxE6mUtQJKFnGfaROTKOt1lZbDiiX1kCixRv7Nw2Id_sDs';
-const ADDR = 'EQD0vdSA_NedR9uvbgN9EikRX-suesDxGeFg69XQMavfLqIw';
+const OWNER = 'EQD0vdSA_NedR9uvbgN9EikRX-suesDxGeFg69XQMavfLqIw';
+const JETTON_WALLET = 'EQBynBO23ywHy_CgarY9NK9FTz0yDsG82PtcbSTQgGoXwiuA';
 
 describe('ToncenterMainnetFeeProvider Step3C', () => {
-  it('passes unsigned jetton body to estimateFee and keeps fee != attached', async () => {
+  it('uses jetton master + amount in unsigned body; fee != attached', async () => {
     let estimateBody: string | null = null;
+    let estimateAddress: string | null = null;
+    let sawRunGetMethod = false;
     const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
       if (url.includes('getMasterchainInfo')) {
@@ -16,10 +19,20 @@ describe('ToncenterMainnetFeeProvider Step3C', () => {
           status: 200,
         });
       }
-      if (url.includes('estimateFee') || init?.method === 'POST') {
-        const payload =
-          typeof init?.body === 'string' ? (JSON.parse(init.body) as Record<string, unknown>) : {};
+      const payload =
+        typeof init?.body === 'string' ? (JSON.parse(init.body) as Record<string, unknown>) : {};
+      if (
+        payload.method === 'runGetMethod' ||
+        (typeof payload.method === 'string' && String(payload.method).includes('get_wallet'))
+      ) {
+        sawRunGetMethod = true;
+        return new Response(JSON.stringify({ ok: false, error: 'unexpected derivation' }), {
+          status: 500,
+        });
+      }
+      if (url.includes('estimateFee') || payload.address !== undefined) {
         estimateBody = typeof payload.body === 'string' ? payload.body : null;
+        estimateAddress = typeof payload.address === 'string' ? payload.address : null;
         return new Response(
           JSON.stringify({
             ok: true,
@@ -41,7 +54,8 @@ describe('ToncenterMainnetFeeProvider Step3C', () => {
     const provider = new ToncenterMainnetFeeProvider({
       baseUrl: 'https://toncenter.com/api/v2',
       fetchImpl,
-      estimateAddress: ADDR,
+      estimateAddress: OWNER,
+      estimateJettonWalletAddress: JETTON_WALLET,
     });
 
     const cases = [
@@ -51,17 +65,22 @@ describe('ToncenterMainnetFeeProvider Step3C', () => {
 
     for (const c of cases) {
       estimateBody = null;
+      estimateAddress = null;
       const result = await provider.estimate({
         networkCode: 'TON_MAINNET',
         networkGlobalId: -239,
         jettonMasterIdentity: MASTER,
         netAmountAtomic: c.net,
         forwardTonAtomic: 1n,
-        destinationAddress: ADDR,
-        responseDestination: ADDR,
+        destinationAddress: OWNER,
+        responseDestination: OWNER,
       });
       expect(estimateBody, c.label).toBeTruthy();
       expect((estimateBody ?? '').length, c.label).toBeGreaterThan(10);
+      expect(estimateAddress, c.label).toBe(JETTON_WALLET);
+      expect(result.jettonMaster).toBe(MASTER);
+      expect(result.jettonWalletAddress).toBe(JETTON_WALLET);
+      expect(result.netAmountAtomic).toBe(c.net);
       expect(result.estimatedNetworkFeeAtomic).toBe(10000n);
       expect(result.candidateAttachedGramAtomic).toBe(
         PHASE21_FEE_ESTIMATE_CANDIDATE_ATTACHED_GRAM_ATOMIC,
@@ -70,7 +89,6 @@ describe('ToncenterMainnetFeeProvider Step3C', () => {
       expect(result.estimatedTotalNativeExposureAtomic).toBe(
         PHASE21_FEE_ESTIMATE_CANDIDATE_ATTACHED_GRAM_ATOMIC + 1n,
       );
-      // Fee must not equal attached and must not be double-counted into exposure.
       expect(result.estimatedNetworkFeeAtomic).not.toBe(result.candidateAttachedGramAtomic);
       expect(result.estimatedTotalNativeExposureAtomic).not.toBe(
         (result.candidateAttachedGramAtomic ?? 0n) +
@@ -81,6 +99,27 @@ describe('ToncenterMainnetFeeProvider Step3C', () => {
       expect(result.attachedGramLifecycle).toBe('ESTIMATED');
       expect(result.emulationMethod).toMatch(/estimateFee/);
     }
+    expect(sawRunGetMethod).toBe(false);
+  });
+
+  it('refuses empty jetton master (cannot void/ignore)', async () => {
+    const fetchImpl = vi.fn(async () => {
+      return new Response(JSON.stringify({ ok: true, result: { last: {} } }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const provider = new ToncenterMainnetFeeProvider({
+      baseUrl: 'https://toncenter.com/api/v2',
+      fetchImpl,
+      estimateAddress: OWNER,
+      estimateJettonWalletAddress: JETTON_WALLET,
+    });
+    await expect(
+      provider.estimate({
+        networkCode: 'TON_MAINNET',
+        networkGlobalId: -239,
+        jettonMasterIdentity: '   ',
+        netAmountAtomic: 190_000n,
+      }),
+    ).rejects.toThrow(/jettonMasterIdentity required/);
   });
 
   it('throws UNAVAILABLE when estimateAddress missing', async () => {
