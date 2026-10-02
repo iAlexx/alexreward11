@@ -1,7 +1,7 @@
 # Phase 20 — Gap Register (Step 1–3 / 4A decision pack)
 
-**PHASE20_GATE:** HOLD
-**Step:** Canonical runtime cutover + Step 4C staging policy activation complete; HOLD (P20-GAP-017 remains)
+**PHASE20_GATE:** HOLD_FOR_FINAL_ACCEPTANCE_REVIEW
+**Step:** Step 5 mission/referral Owner scope decision complete; P20-GAP-017 deferred; awaiting final acceptance/archive review
 **Register scope:** Closed Beta readiness gaps + carried Phase 19 residuals
 **Rule:** Do not hide issues because they originated in an older phase.
 **Status values:** OPEN | DEFERRED | REMEDIATED | ACCEPTED_RESIDUAL (Owner only for Critical/High)
@@ -15,9 +15,9 @@ Canonical IDs: `P20-GAP-001` .. contiguous.
 | Metric                                                   | Count |
 | -------------------------------------------------------- | ----- |
 | Total gaps                                               | 18    |
-| Blocks Closed Beta (observation / non-money)             | 1     |
+| Blocks Closed Beta (observation / non-money)             | 0     |
 | Blocks real-money beta                                   | 7     |
-| Blocks Phase 20 archive (until resolved or Owner-scoped) | 1     |
+| Blocks Phase 20 archive (until resolved or Owner-scoped) | 0     |
 | Carried Phase 19 residuals mapped                        | 8     |
 
 ---
@@ -269,11 +269,12 @@ Canonical IDs: `P20-GAP-001` .. contiguous.
 - **impact:** Closed Beta UX incomplete until content/config present
 - **prerequisite:** Owner-published ACTIVE mission versions / referral config
 - **proposed remediation/test:** Step 2 empty-list / authority proofs + `docs/PHASE_20_CONTROLLED_CONTENT_PROPOSAL.md`; no operational publish
-- **blocks Closed Beta?** YES — until ACTIVE mission/referral content exists for Spec category validation (or Owner documents deferral)
-- **blocks real-money beta?** NO
-- **blocks Phase 20 archive?** YES — until missions category evidenced OR Owner defers with documented scope
-- **status:** OPEN / READY_FOR_OWNER_CONTENT_APPROVAL
+- **blocks Closed Beta?** NO — Owner accepted pre-existing staging Referral non-monetary config + deferred missions with honest empty Tasks state
+- **blocks real-money beta?** NO — Referral money remains paused; mission content deferred; real-money blocked by other gaps
+- **blocks Phase 20 archive?** NO — Phase15/16 engine evidence + Phase20 validation + Owner scope documented
+- **status:** DEFERRED / OWNER_SCOPED_FOR_PHASE20 — FRIENDS EXISTING STAGING NON-MONETARY ACCEPTED; MISSIONS NO LIVE CONTENT
 - **step2 note:** Empty mission list honesty + referral self-referral/ALREADY_ATTRIBUTED proofs exist; do not activate live content without Owner. See `docs/PHASE_20_CONTROLLED_CONTENT_PROPOSAL.md`.
+- **step5 note:** Owner scope `FRIENDS_EXISTING_STAGING_NON_MONETARY_ACCEPTED__MISSIONS_DEFERRED_NO_LIVE_CONTENT`. Pre-existing Referral v1 + code policy accepted; 500bps staging placeholder not monetary approval. See `docs/PHASE_20_STEP5_MISSION_REFERRAL_SCOPE_DECISION.md`.
 
 ### P20-GAP-018 — No second rewarded-ad provider
 
@@ -313,9 +314,9 @@ Blockers: Closed Beta **NO**, real-money **NO**, archive **NO**.
 Counts below MUST match mechanical derivation from each gap section (`YES` / `NO` first token).
 Do not add inferred items that lack a canonical `P20-GAP-xxx` entry.
 
-**P20_BLOCKING_CLOSED_BETA_GAPS** (count = 1):
+**P20_BLOCKING_CLOSED_BETA_GAPS** (count = 0):
 
-- P20-GAP-017
+_(none)_
 
 **P20_BLOCKING_REAL_MONEY_GAPS** (count = 7):
 
@@ -327,9 +328,9 @@ Do not add inferred items that lack a canonical `P20-GAP-xxx` entry.
 - P20-GAP-006
 - P20-GAP-011
 
-**P20_BLOCKING_ARCHIVE_GAPS** (count = 1):
+**P20_BLOCKING_ARCHIVE_GAPS** (count = 0):
 
-- P20-GAP-017
+_(none)_
 
 ---
 

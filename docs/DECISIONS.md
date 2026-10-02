@@ -945,7 +945,30 @@ ceremony COMMITTED:
 
 Controlled post-validation passed. `P20-GAP-009` closed as REMEDIATED /
 OWNER_APPROVED / STAGING_ACTIVE / CONTROLLED_VALIDATION_PASS.
-`P20-GAP-017` remains OPEN. Production money, payout resume, signer, TON, Mainnet, and
-AdsGram monetary enablement remain unauthorized.
+`P20-GAP-017` was OPEN at Step 4C closure. Production money, payout resume, signer, TON,
+Mainnet, and AdsGram monetary enablement remain unauthorized.
 
 See `docs/PHASE_20_CANONICAL_RUNTIME_CUTOVER_AND_STEP4C_ACTIVATION.md`.
+
+## Clarification — Phase 20 Step 5 mission/referral Owner content scope (2026-10-02)
+
+Owner decision:
+
+`PHASE20_CONTENT_SCOPE = FRIENDS_EXISTING_STAGING_NON_MONETARY_ACCEPTED__MISSIONS_DEFERRED_NO_LIVE_CONTENT`
+
+**Friends / Referral:** Accept pre-existing staging Referral rule v1 + code policy v1 for
+**non-monetary** Closed-Beta validation only. Referral edge activation is a state transition;
+Referral money remains blocked by `REFERRAL_REWARD_PAUSE/STAGING=true`.
+
+**500 bps:** `base_rate_bps=500` on the pre-existing staging rule is a **staging placeholder**,
+not production, real-money beta, Phase 21, or public monetary launch rate approval.
+
+**Missions / Tasks:** `MISSIONS_SCOPE = DEFERRED_NO_LIVE_CONTENT`. No ACTIVE mission publish in
+Phase 20. Mission producers lack a Phase 20 approved-tester cohort filter; global publish would
+exceed Closed-Beta scope. `MISSION_REWARD_PAUSE/STAGING` remains **MISSING** (not seeded).
+
+`P20-GAP-017` status: **DEFERRED / OWNER_SCOPED_FOR_PHASE20** — blocks Closed Beta **NO**,
+real-money **NO**, archive **NO**. Phase 20 gate: `HOLD_FOR_FINAL_ACCEPTANCE_REVIEW`.
+
+See `docs/PHASE_20_STEP5_MISSION_REFERRAL_SCOPE_DECISION.md` and updated
+`docs/PHASE_20_CONTROLLED_CONTENT_PROPOSAL.md`.

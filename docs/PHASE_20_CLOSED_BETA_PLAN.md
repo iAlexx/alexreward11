@@ -1,7 +1,7 @@
 # Phase 20 — Closed Beta / Minimal Funds Plan (Step 1–3)
 
-**PHASE20_STATUS:** `IN_PROGRESS` — Canonical LOOTRA runtime cutover + Step 4C staging policies ACTIVE; HOLD (P20-GAP-017 remains)
-**PHASE20_GATE:** `HOLD`
+**PHASE20_STATUS:** `IN_PROGRESS` — Step 5 mission/referral Owner scope recorded; awaiting final acceptance/archive review
+**PHASE20_GATE:** `HOLD_FOR_FINAL_ACCEPTANCE_REVIEW`
 **PHASE20_ARCHIVE:** `NOT CREATED`
 **Phase 21:** `NOT STARTED`
 
@@ -145,7 +145,7 @@ Historical and current state:
 9. **Step 9:** observe / reconcile / document results
 10. **Step 10:** final Phase 20 acceptance + `PHASE_20_CLOSED_BETA` archive — then **STOP**
 
-**Current Phase 20 state:** Step 3 completed; overall `PHASE20_GATE=HOLD` because Closed Beta / archive blockers **P20-GAP-009** and **P20-GAP-017** remain. Step 4 is not started. Do not activate staging policies/content/send without Owner approval.
+**Current Phase 20 state:** Steps 1–4C and Step 5 mission/referral Owner scope complete. `PHASE20_GATE=HOLD_FOR_FINAL_ACCEPTANCE_REVIEW`. Closed Beta blockers **0**; archive blockers **0**; real-money blockers **7** (P20-GAP-001–006, P20-GAP-011). P20-GAP-017 Owner-deferred: pre-existing staging Referral non-monetary accepted; missions deferred with honest empty Tasks state. Do not declare Phase 20 PASS or create archive until final acceptance task.
 
 ---
 
@@ -232,7 +232,7 @@ Step 3 qualifiers:
 - real-money readiness is **NOT** implied
 - Step 4 **not** started
 
-Overall Phase 20 remains `PHASE20_GATE=HOLD` (blockers P20-GAP-009, P20-GAP-017). No Phase 20 PASS. No Closed Beta activated. No Phase 20 archive. No Phase 21. No real-money execution authorized.
+Overall Phase 20 is `PHASE20_GATE=HOLD_FOR_FINAL_ACCEPTANCE_REVIEW` (Closed Beta blockers **0**, archive blockers **0**, real-money blockers **7**). No Phase 20 PASS. No Phase 20 archive. No Phase 21. No real-money execution authorized.
 
 ---
 
@@ -267,3 +267,11 @@ Preflight path resolution fixed (`phase20-step4c-paths.mjs`). Fresh read-only st
 ## Step 4C.2 notes
 
 Two-commit evidence seal complete: TOOLING_HEAD=`cc15f1a89b46f8b86008b2359d11449ac83d35ab` then EVIDENCE_HEAD (snapshot/docs). Snapshot `sourceCommit` = TOOLING_HEAD only; paths repository-relative. Fresh RO state still empty 0/0/0 → proposed 1/1/1. Withdrawal pause seed still **not** executed.
+
+## Step 4C activation notes
+
+Canonical runtime cutover + staging policy activation complete. `P20-GAP-009` REMEDIATED. Evidence: `docs/PHASE_20_CANONICAL_RUNTIME_CUTOVER_AND_STEP4C_ACTIVATION.md`.
+
+## Step 5 notes
+
+Owner mission/referral content scope recorded: `FRIENDS_EXISTING_STAGING_NON_MONETARY_ACCEPTED__MISSIONS_DEFERRED_NO_LIVE_CONTENT`. Pre-existing staging Referral v1 + code policy accepted for non-monetary Friends validation; missions deferred with honest empty Tasks state. `500 bps` staging placeholder is **not** monetary approval. `P20-GAP-017` DEFERRED. **No operational DB mutation.** Evidence: `docs/PHASE_20_STEP5_MISSION_REFERRAL_SCOPE_DECISION.md`. Phase 20 gate: `HOLD_FOR_FINAL_ACCEPTANCE_REVIEW`.

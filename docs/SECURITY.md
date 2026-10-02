@@ -168,7 +168,12 @@ fixture proofs (REFERENCE ONLY — NOT APPROVED FOR STAGING); empty mission list
 referral self-referral / ALREADY_ATTRIBUTED smoke.
 Step 3 (complete): Owner `DRAFT_ONLY_NO_SEND`; AdsGram BLOCKED observation/no-fill/Earn UX validated on disposable DB.
 `RAILWAY_DEPLOYMENT_PERFORMED=NO`. GitHub commit status reported `alex-rewards-miniapp` Vercel success for the Step 3 commit (automatic; not Railway validation).
-Do **not** activate staging policies, mission/referral content, or notification send without Owner approval. Step 4 not started.
+Step 4C staging policy activation complete (P20-GAP-009 REMEDIATED). Step 5 Owner content scope
+recorded: pre-existing staging Referral v1 + code policy accepted for **non-monetary** Friends
+validation; missions deferred (`DEFERRED_NO_LIVE_CONTENT`). `base_rate_bps=500` is a staging
+placeholder — not monetary rate approval. `REFERRAL_REWARD_PAUSE/STAGING=true` keeps Referral
+issuance paused. `MISSION_REWARD_PAUSE/STAGING` remains MISSING (no live mission content). No
+operational DB mutation in Step 5.
 
 Authoritative artifacts:
 
@@ -180,6 +185,7 @@ Authoritative artifacts:
 - `docs/PHASE_20_STEP3_PROVIDER_NO_FILL_EVIDENCE.md`
 - `docs/PHASE_20_STEP4_OWNER_POLICY_DECISION.md`
 - `docs/PHASE_20_STEP4_OWNER_POLICY_APPROVAL.md`
+- `docs/PHASE_20_STEP5_MISSION_REFERRAL_SCOPE_DECISION.md`
 
 Phase 19 residual OPEN findings (004–008, 010–012) are carried into the Phase 20 gap register
 and must not be silently discarded. P19-SEC-010/011/012 must be reconsidered before any
