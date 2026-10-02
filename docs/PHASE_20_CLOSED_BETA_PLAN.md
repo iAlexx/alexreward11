@@ -1,6 +1,6 @@
 # Phase 20 — Closed Beta / Minimal Funds Plan (Step 1–3)
 
-**PHASE20_STATUS:** `IN_PROGRESS` — Step 4C.1 preflight reproducibility + pause-seed plan (activation/seed pending); HOLD
+**PHASE20_STATUS:** `IN_PROGRESS` — Step 4C.2 sealed preflight evidence (activation/seed pending); HOLD
 **PHASE20_GATE:** `HOLD`
 **PHASE20_ARCHIVE:** `NOT CREATED`
 **Phase 21:** `NOT STARTED`
@@ -248,7 +248,6 @@ Evidence: `docs/PHASE_20_STEP3_PROVIDER_NO_FILL_EVIDENCE.md`.
 
 Owner decision pack for P20-GAP-009 published: `docs/PHASE_20_STEP4_OWNER_POLICY_DECISION.md`. Step 4A.1 corrected ACCOUNT_STATE (withdrawal-scoped) and FEATURE_FLAG bindings (no withdrawal-pause fallback). **No policy activation.** Owner has not approved values. Step 4 activation not started.
 
-
 ## Step 4B notes
 
 Owner-approved Closed Beta Risk/Trust/Eligibility recorded in `packages/fraud/policy/phase20-closed-beta-owner-approved.json`. Disposable validation via `pnpm phase20:step4b:policy-check`. **No staging activation.**
@@ -257,12 +256,14 @@ Owner-approved Closed Beta Risk/Trust/Eligibility recorded in `packages/fraud/po
 
 Approved JSON remains canonical/source-controlled only. Removed from `@alex-rewards/fraud` runtime export graph (`readFileSync` / Phase20 artifact no longer loaded on package import). Test/tool loader: `packages/fraud/test/load-phase20-approved-policy.ts`.
 
-
 ## Step 4C notes
 
 Read-only staging preflight recorded in `docs/PHASE_20_STEP4C_STAGING_POLICY_ACTIVATION_PREFLIGHT.md` (+ snapshot JSON). Policy tables currently empty; proposed ACTIVE versions = 1/1/1. **No staging mutation. No activation.**
 
-
 ## Step 4C.1 notes
 
 Preflight path resolution fixed (`phase20-step4c-paths.mjs`). Fresh read-only staging re-run confirms empty policy tables (proposed 1/1/1). Separate Owner decision: seed `WITHDRAWAL_REQUESTS_PAUSE/STAGING enabled=true` + `feature_flag_versions` v1 before/with policy activation. **Neither seed nor activation executed.**
+
+## Step 4C.2 notes
+
+Two-commit evidence seal complete: TOOLING_HEAD=`cc15f1a89b46f8b86008b2359d11449ac83d35ab` then EVIDENCE_HEAD (snapshot/docs). Snapshot `sourceCommit` = TOOLING_HEAD only; paths repository-relative. Fresh RO state still empty 0/0/0 → proposed 1/1/1. Withdrawal pause seed still **not** executed.

@@ -1,11 +1,12 @@
 {
-  "preflightAt": "2026-10-02T04:06:25.626Z",
-  "sourceCommit": "70841608eb1fd79cf658f10559d58501a03d5c1f",
+  "preflightAt": "2026-10-02T04:19:01.550Z",
+  "sourceCommit": "cc15f1a89b46f8b86008b2359d11449ac83d35ab",
+  "sourceCommitSemantics": "sourceCommit is the clean tooling/source HEAD that performed discovery; the evidence commit that stores this snapshot is a later SHA and must not be self-referential",
   "pathResolution": {
-    "fraudPackageRoot": "C:\\Users\\Master aLEX\\Desktop\\project program\\alex reward\\alex-rewards-phase13-remediation\\packages\\fraud",
-    "repoRoot": "C:\\Users\\Master aLEX\\Desktop\\project program\\alex reward\\alex-rewards-phase13-remediation",
-    "artifactPath": "C:\\Users\\Master aLEX\\Desktop\\project program\\alex reward\\alex-rewards-phase13-remediation\\packages\\fraud\\policy\\phase20-closed-beta-owner-approved.json",
-    "snapshotPath": "C:\\Users\\Master aLEX\\Desktop\\project program\\alex reward\\alex-rewards-phase13-remediation\\docs\\phase20-step4c-preflight-snapshot.json"
+    "fraudPackageRoot": "packages/fraud",
+    "repoRoot": ".",
+    "artifactPath": "packages/fraud/policy/phase20-closed-beta-owner-approved.json",
+    "snapshotPath": "docs/phase20-step4c-preflight-snapshot.json"
   },
   "artifactPath": "packages/fraud/policy/phase20-closed-beta-owner-approved.json",
   "activationAuthorized": false,
@@ -15,7 +16,7 @@
     "database": "railway",
     "dbUser": "postgres",
     "applicationName": "phase20-step4c-preflight-ro",
-    "observedAt": "2026-10-02T04:06:22.566Z",
+    "observedAt": "2026-10-02T04:18:58.528Z",
     "accessMethod": "PHASE20_STAGING_PREFLIGHT_DATABASE_URL + default_transaction_read_only=on",
     "serviceName": "Postgres",
     "railwayEnvironmentName": "production",
