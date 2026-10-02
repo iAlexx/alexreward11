@@ -15,8 +15,10 @@
 | **Tooling/source commit (`sourceCommit` / TOOLING_HEAD)** | Exact clean tracked commit whose preflight tooling performed the read-only discovery. Recorded **inside** the snapshot.                                             |
 | **Evidence commit (EVIDENCE_HEAD)**                       | Later commit that stores the regenerated snapshot/docs. **Not** embedded as `sourceCommit` (would be circular). Filled in return output / DECISIONS after Commit B. |
 
-**Tooling/source commit used for fresh discovery:** _(filled after Commit A — TOOLING_HEAD)_  
-**Evidence commit storing snapshot/docs:** _(filled after Commit B — EVIDENCE_HEAD; not equal to sourceCommit)_
+**Tooling/source commit used for fresh discovery (TOOLING_HEAD / snapshot `sourceCommit`):** `cc15f1a89b46f8b86008b2359d11449ac83d35ab`  
+**Evidence commit storing snapshot/docs (EVIDENCE_HEAD):** `49d4fa1b276838b78e5eccc398deb8ff51514113` (must not equal `sourceCommit`)  
+**Fresh snapshot timestamp:** `2026-10-02T04:19:01.550Z`  
+**Fresh activationPreflight:** `READY_FOR_OWNER_AUTHORIZATION`
 
 ## Explicit non-authorizations
 
