@@ -1069,3 +1069,7 @@ Decision: implement parallel `production_sealed_v1` Owner-bootstrap path with `C
 ## ADR-PHASE21-STEP4A1 — Production Owner bootstrap corrections (2026-10-02)
 
 Decision: replace caller-controlled `trustClass` with runtime-branded `AuthenticatedProductionBootstrapTrust`; require live Owner TTY for Layer C/D; root-bind intended admin in `ProductionCeremonyBundleV1`. Isolated ceremony tooling remains production-refusing.
+
+## ADR-PHASE21-STEP4A2 — Encrypted Owner bootstrap key + private mint (2026-10-03)
+
+Decision: keep `mintAuthenticatedProductionBootstrapTrust` package-private (not exported). Store Production Owner bootstrap private key only as Argon2id + XChaCha20-Poly1305 encrypted `.enc` bundle (no plaintext `bootstrap-private-seed.hex`); passphrase interactive TTY only. Remove public `tryForgeProductionTrustFromCallerTrustClass` (test hook only). Step4A.2 is source hardening only - no real Owner key, binding, or ceremony APPLY.

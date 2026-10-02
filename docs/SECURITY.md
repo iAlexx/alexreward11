@@ -244,3 +244,7 @@ Production first-Owner trust uses `production_sealed_v1` with verify-full TLS, r
 ### Phase 21 Step 4A.1
 
 Production Owner bootstrap: branded trust, fail-closed session/auth inspection, live TTY Channel B, no same-host Channel B authority, no caller `trustClass`.
+
+### Phase 21 Step 4A.2
+
+Production Owner bootstrap final source hardening: `mintAuthenticatedProductionBootstrapTrust` not exported; forge helper test-only (`ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1`); Owner private key as Argon2id + XChaCha20-Poly1305 `.enc` (no plaintext seed); passphrase TTY-only (never env/argv/JSON/stdout); >=2 offline ciphertext backups; key dir outside repo/temp/cloud sync; APPLY default NO / Step4A.2 refuses real apply; no `forceApply`.

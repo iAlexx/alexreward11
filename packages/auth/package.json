@@ -31,7 +31,7 @@
     "owner-bootstrap-ceremony": "node dist/cli/owner-bootstrap-ceremony.js",
     "owner-isolated-telegram-bootstrap": "node dist/cli/owner-isolated-telegram-bootstrap.js",
     "owner-production-bootstrap": "node dist/cli/owner-production-bootstrap.js",
-    "test:owner-production-bootstrap": "cross-env OWNER_BOOTSTRAP_TESTS=1 vitest run --fileParallelism=false test/owner-production-bootstrap.test.ts"
+    "test:owner-production-bootstrap": "cross-env OWNER_BOOTSTRAP_TESTS=1 ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1 ALEX_OWNER_BOOTSTRAP_ALLOW_TEST_TEMP_DIR=1 vitest run --fileParallelism=false test/owner-production-bootstrap.test.ts"
   },
   "dependencies": {
     "@alex-rewards/config": "workspace:*",

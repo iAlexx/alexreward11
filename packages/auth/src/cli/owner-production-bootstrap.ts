@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 /**
- * Production Owner-bootstrap ceremony CLI (Phase 21 Step 4A).
+ * Production Owner-bootstrap ceremony CLI (Phase 21 Step 4A.2).
  * Default: read-only / dry validation. Mutation requires multi-gate --apply.
  * Does NOT weaken owner-bootstrap-ceremony (isolated-only).
- * DO NOT reuse Hot Wallet keys.
+ * DO NOT reuse Hot Wallet keys. DO NOT accept secrets via argv/env.
  */
 import { createInterface } from 'node:readline';
 import { resolve } from 'node:path';
+import { stdin as stdinFd, stdout as stdoutFd } from 'node:process';
 
 import {
   assertCeremonyDirOutsideRepo,
@@ -21,6 +22,7 @@ import {
   validateProductionCeremonyBundleStructurally,
   PRODUCTION_OWNER_BOOTSTRAP_TRUST_CLASS,
   validateCeremonyEndpointProfileV1,
+  assertProductionCeremonyApplyGates,
 } from '../owner-bootstrap/index.js';
 
 function usage(): never {
@@ -30,10 +32,11 @@ function usage(): never {
       tool: 'owner-production-bootstrap',
       trust_class: PRODUCTION_OWNER_BOOTSTRAP_TRUST_CLASS,
       message:
-        'usage: owner-production-bootstrap <preflight|generate-keypair|write-profile|write-intended-admin|draft-seal|record-channel-b|validate|readiness|enroll-existing|verify> ...',
+        'usage: owner-production-bootstrap <preflight|generate-keypair|write-profile|write-intended-admin|draft-seal|record-channel-b|validate|readiness|enroll-existing|run|verify> ...',
       notes: [
-        'enroll-existing mutation is gated and not executed by Step4A',
+        'run/enroll-existing mutation is gated; Step4A.2 refuses operational apply',
         'Hot Wallet keys must never be reused',
+        'secrets: interactive TTY only (never --password/--totp/--bootstrap-passphrase)',
       ],
     }),
   );
@@ -56,24 +59,38 @@ function envTrue(name: string): boolean {
 }
 
 function assertNoSecretArgv(argv: string[]): void {
+  const forbidden = [
+    '--password',
+    '--totp',
+    '--bootstrap-private-key',
+    '--bootstrap-passphrase',
+    '--passphrase',
+  ];
   for (const a of argv) {
-    if (a === '--password' || a === '--totp' || a.startsWith('--password=') || a.startsWith('--totp=')) {
-      console.error(
-        JSON.stringify({
-          ok: false,
-          refuseCode: 'SECRET_ARGV_FORBIDDEN',
-          message: 'password/TOTP via argv forbidden — interactive TTY only',
-        }),
-      );
-      process.exit(1);
+    for (const f of forbidden) {
+      if (a === f || a.startsWith(`${f}=`)) {
+        console.error(
+          JSON.stringify({
+            ok: false,
+            refuseCode: 'SECRET_ARGV_FORBIDDEN',
+            message: 'password/TOTP/passphrase via argv forbidden — interactive TTY only',
+          }),
+        );
+        process.exit(1);
+      }
     }
   }
-  if (process.env.PASSWORD || process.env.TOTP || process.env.OWNER_BOOTSTRAP_PASSWORD) {
+  if (
+    process.env.PASSWORD ||
+    process.env.TOTP ||
+    process.env.OWNER_BOOTSTRAP_PASSWORD ||
+    process.env.OWNER_BOOTSTRAP_PASSPHRASE
+  ) {
     console.error(
       JSON.stringify({
         ok: false,
         refuseCode: 'SECRET_ENV_FORBIDDEN',
-        message: 'password/TOTP via env forbidden',
+        message: 'password/TOTP/passphrase via env forbidden',
       }),
     );
     process.exit(1);
@@ -92,6 +109,57 @@ async function readLine(prompt: string): Promise<string> {
     });
   });
   return answer.trim();
+}
+
+async function readSecret(prompt: string): Promise<string> {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    throw new Error('INTERACTIVE_TTY_REQUIRED');
+  }
+  // Best-effort no-echo on POSIX; Windows may still echo — never log the value.
+  const stdin = stdinFd;
+  const wasRaw = stdin.isRaw;
+  try {
+    if (typeof stdin.setRawMode === 'function') {
+      stdin.setRawMode(true);
+    }
+  } catch {
+    // ignore
+  }
+  process.stdout.write(prompt);
+  let value = '';
+  await new Promise<void>((resolvePromise, reject) => {
+    const onData = (chunk: Buffer) => {
+      const s = chunk.toString('utf8');
+      for (const ch of s) {
+        if (ch === '\n' || ch === '\r') {
+          stdin.off('data', onData);
+          process.stdout.write('\n');
+          resolvePromise();
+          return;
+        }
+        if (ch === '\u0003') {
+          stdin.off('data', onData);
+          reject(new Error('interrupted'));
+          return;
+        }
+        if (ch === '\u007f' || ch === '\b') {
+          value = value.slice(0, -1);
+          continue;
+        }
+        value += ch;
+      }
+    };
+    stdin.on('data', onData);
+  });
+  try {
+    if (typeof stdin.setRawMode === 'function') {
+      stdin.setRawMode(wasRaw ?? false);
+    }
+  } catch {
+    // ignore
+  }
+  void stdoutFd;
+  return value;
 }
 
 function printJson(value: unknown): void {
@@ -137,11 +205,16 @@ async function main(): Promise<void> {
       return;
     }
     assertCeremonyDirOutsideRepo(ceremonyDir, repoRoot);
+    const passphrase = await readSecret('Owner bootstrap passphrase (min 16, not echoed): ');
+    const passphraseConfirm = await readSecret('Confirm passphrase: ');
     const pub = generateProductionBootstrapKeypairFiles({
       ceremonyDir,
       keyId,
       phase21ProductionOwnerBootstrap: true,
       requireInteractiveTty: true,
+      passphrase,
+      passphraseConfirm,
+      repoRootHint: repoRoot,
     });
     printJson({
       ok: true,
@@ -149,8 +222,12 @@ async function main(): Promise<void> {
       trust_class: pub.trust_class,
       key_id: pub.key_id,
       public_key_sha256_hex: pub.public_key_sha256_hex,
+      encrypted_bundle_path_basename: pub.encrypted_bundle_path_basename,
+      ciphertext_sha256_hex: pub.ciphertext_sha256_hex,
       warning: pub.warning,
       private_bytes_emitted: false,
+      plaintext_seed_file: false,
+      backups_required: 'at least 2 encrypted offline backups; passphrase stored separately',
     });
     return;
   }
@@ -232,7 +309,9 @@ async function main(): Promise<void> {
   if (command === 'record-channel-b') {
     const ceremonyDir = argValue(argv, '--ceremony-dir');
     if (ceremonyDir === null) usage();
-    const digest = await readLine('Type Channel B production bundle digest (64 hex, documentary record): ');
+    const digest = await readLine(
+      'Type Channel B production bundle digest (64 hex, documentary record): ',
+    );
     const record = recordProductionChannelBDigest({
       ceremonyDir,
       ownerTypedDigestHex: digest,
@@ -280,23 +359,38 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (command === 'enroll-existing') {
-    // Mutation surface exists but Step4A must not execute it.
-    const apply =
-      hasFlag(argv, '--apply') &&
+  if (command === 'enroll-existing' || command === 'run') {
+    const applyFlag = hasFlag(argv, '--apply');
+    const gatesOk =
+      applyFlag &&
       process.env.DEPLOYMENT_ENV === 'production' &&
       envTrue('OWNER_PRODUCTION_BOOTSTRAP_ENABLED') &&
       envTrue('OWNER_PRODUCTION_BOOTSTRAP_APPLY');
+    try {
+      if (gatesOk) {
+        assertProductionCeremonyApplyGates({
+          apply: true,
+          deploymentEnvIsProduction: true,
+          ownerProductionBootstrapEnabled: true,
+          ownerProductionBootstrapApply: true,
+        });
+      }
+    } catch {
+      // fall through to refuse messaging
+    }
     printJson({
       ok: false,
       command,
-      refuseCode: apply ? 'STEP4A1_SOURCE_ONLY_REFUSES_APPLY' : 'APPLY_GATES_REQUIRED',
-      message: apply
-        ? 'Step4A.1 is source/readiness only — refuse operational enroll-existing apply'
+      refuseCode: gatesOk ? 'STEP4A2_SOURCE_ONLY_REFUSES_APPLY' : 'APPLY_GATES_REQUIRED',
+      message: gatesOk
+        ? 'Step4A.2 implements operator orchestrator source path but refuses operational apply — no real Owner ceremony'
         : 'Requires DEPLOYMENT_ENV=production + OWNER_PRODUCTION_BOOTSTRAP_ENABLED=true + OWNER_PRODUCTION_BOOTSTRAP_APPLY=1 + --apply',
       trust_class: PRODUCTION_OWNER_BOOTSTRAP_TRUST_CLASS,
       forceApply: false,
+      applyDefault: false,
       applied: false,
+      orchestrator: 'orchestrateProductionOwnerBootstrapCeremony',
+      secrets: 'interactive_TTY_only',
     });
     process.exitCode = 1;
     return;

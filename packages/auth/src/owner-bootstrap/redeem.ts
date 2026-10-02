@@ -447,6 +447,29 @@ export interface StartAttemptResult {
   readonly grantId: string;
 }
 
+
+function assertBootstrapEndpointForTrust(
+  trust: BootstrapTrustMaterial,
+  grantEnv: 'isolated_test' | 'staging' | 'production',
+  grantProfileId: string,
+): void {
+  if (isProductionBoundBootstrapTrustMaterial(trust)) {
+    assertProductionBootstrapTlsAndEndpoint(
+      trust.endpointProfile,
+      grantEnv,
+      grantProfileId,
+      trust.connectionFacts,
+    );
+  } else {
+    assertBootstrapTlsAndEndpoint(
+      trust.endpointProfile,
+      grantEnv,
+      grantProfileId,
+      trust.connectionFacts,
+    );
+  }
+}
+
 export async function startOwnerBootstrapAttempt(
   pool: Pool,
   input: {
@@ -469,30 +492,11 @@ export async function startOwnerBootstrapAttempt(
     preflightNow,
   );
   const payload = verified.envelope.payload;
-  if (isProductionBoundBootstrapTrustMaterial(input.trust)) {
-    assertProductionBootstrapTlsAndEndpoint(
-      input.trust.endpointProfile,
-      payload.deployment_env,
-      payload.endpoint_profile_id,
-      input.trust.connectionFacts,
-    );
-  } else {
-    if (isProductionBoundBootstrapTrustMaterial(input.trust)) {
-    assertProductionBootstrapTlsAndEndpoint(
-      input.trust.endpointProfile,
-      payload.deployment_env,
-      payload.endpoint_profile_id,
-      input.trust.connectionFacts,
-    );
-  } else {
-    assertBootstrapTlsAndEndpoint(
-      input.trust.endpointProfile,
-      payload.deployment_env,
-      payload.endpoint_profile_id,
-      input.trust.connectionFacts,
-    );
-  }
-  }
+  assertBootstrapEndpointForTrust(
+    input.trust,
+    payload.deployment_env,
+    payload.endpoint_profile_id,
+  );
 
   const channelFp = createHash('sha256').update(input.channelPublicKey).digest('hex');
   const attemptId = randomUUID();
@@ -653,21 +657,11 @@ export async function submitOwnerBootstrapPop(
     if (attempt === undefined) {
       throw new AuthDomainError('FORBIDDEN', 'REDEEM_POP_MISSING_OR_INVALID');
     }
-    if (isProductionBoundBootstrapTrustMaterial(input.trust)) {
-    assertProductionBootstrapTlsAndEndpoint(
-      input.trust.endpointProfile,
-      attempt.deployment_env as 'isolated_test' | 'staging' | 'production',
-      attempt.endpoint_profile_id,
-      input.trust.connectionFacts,
-    );
-  } else {
-    assertBootstrapTlsAndEndpoint(
-      input.trust.endpointProfile,
-      attempt.deployment_env as 'isolated_test' | 'staging' | 'production',
-      attempt.endpoint_profile_id,
-      input.trust.connectionFacts,
-    );
-  }
+    assertBootstrapEndpointForTrust(
+    input.trust,
+    attempt.deployment_env as 'isolated_test' | 'staging' | 'production',
+    attempt.endpoint_profile_id,
+  );
 
     const nowSec = await readAuthoritativeNowSec(client, pool);
     await assertPersistedGrantNotExpired(client, attempt.grant_id, nowSec);
@@ -855,21 +849,11 @@ export async function abortOwnerBootstrapAttempt(
     if (attempt.challenge_id !== input.challengeId) {
       throw new AuthDomainError('FORBIDDEN', 'challenge_id mismatch');
     }
-    if (isProductionBoundBootstrapTrustMaterial(input.trust)) {
-    assertProductionBootstrapTlsAndEndpoint(
-      input.trust.endpointProfile,
-      attempt.deployment_env as 'isolated_test' | 'staging' | 'production',
-      attempt.endpoint_profile_id,
-      input.trust.connectionFacts,
-    );
-  } else {
-    assertBootstrapTlsAndEndpoint(
-      input.trust.endpointProfile,
-      attempt.deployment_env as 'isolated_test' | 'staging' | 'production',
-      attempt.endpoint_profile_id,
-      input.trust.connectionFacts,
-    );
-  }
+    assertBootstrapEndpointForTrust(
+    input.trust,
+    attempt.deployment_env as 'isolated_test' | 'staging' | 'production',
+    attempt.endpoint_profile_id,
+  );
     const nowSec = await readAuthoritativeNowSec(client, pool);
     if (attempt.pop_status !== 'PENDING' && attempt.pop_status !== 'VERIFIED') {
       throw new AuthDomainError('FORBIDDEN', `attempt not abortable (${attempt.pop_status})`);
@@ -1072,30 +1056,11 @@ export async function completeOwnerBootstrapEnrollment(
     if (attempt === undefined || attempt.pop_status !== 'VERIFIED') {
       throw new AuthDomainError('FORBIDDEN', 'attempt not VERIFIED');
     }
-    if (isProductionBoundBootstrapTrustMaterial(input.trust)) {
-      assertProductionBootstrapTlsAndEndpoint(
-        input.trust.endpointProfile,
-        attempt.deployment_env as 'isolated_test' | 'staging' | 'production',
-        attempt.endpoint_profile_id,
-        input.trust.connectionFacts,
-      );
-    } else {
-      if (isProductionBoundBootstrapTrustMaterial(input.trust)) {
-    assertProductionBootstrapTlsAndEndpoint(
-        input.trust.endpointProfile,
-        attempt.deployment_env as 'isolated_test' | 'staging' | 'production',
-        attempt.endpoint_profile_id,
-        input.trust.connectionFacts,
-      );
-  } else {
-    assertBootstrapTlsAndEndpoint(
-        input.trust.endpointProfile,
-        attempt.deployment_env as 'isolated_test' | 'staging' | 'production',
-        attempt.endpoint_profile_id,
-        input.trust.connectionFacts,
-      );
-  }
-    }
+    assertBootstrapEndpointForTrust(
+    input.trust,
+    attempt.deployment_env as 'isolated_test' | 'staging' | 'production',
+    attempt.endpoint_profile_id,
+  );
 
     // Fresh authoritative time AFTER locks and AFTER slow password hashing (S-01).
     const nowSec = await readAuthoritativeNowSec(client, pool);

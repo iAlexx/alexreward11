@@ -75,3 +75,7 @@ Step4 APPLY remains `PAUSED_OWNER_AUTHORITY_REQUIRED`. Production first-Owner bo
 ## Step 4A.1
 
 Owner authority still required. Production bootstrap source corrected; endpoint trust not established (no public Railway Postgres URL). See `docs/PHASE_21_STEP4A1_PRODUCTION_OWNER_BOOTSTRAP_CORRECTIONS.md`.
+
+## Step 4A.2
+
+Owner authority still required. Source hardening complete (`SOURCE_READY=YES`); schema/endpoint/trust-resources/ceremony remain NO. Do not enable TCP Proxy; tunnel is discovery-only. No real Owner key generated. See `docs/PHASE_21_STEP4A2_FINAL_OWNER_BOOTSTRAP_HARDENING.md`.

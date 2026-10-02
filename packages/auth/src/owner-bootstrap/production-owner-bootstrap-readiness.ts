@@ -1,5 +1,5 @@
 /**
- * Phase 21 Step 4A.1 — honest production Owner-bootstrap readiness reporting.
+ * Phase 21 Step 4A.2 — honest production Owner-bootstrap readiness reporting.
  */
 import { missingProductionTrustResources } from './production-ceremony-gate.js';
 import { PRODUCTION_OWNER_BOOTSTRAP_TRUST_CLASS } from './production-trust-class.js';
@@ -19,6 +19,10 @@ export interface ProductionOwnerBootstrapReadinessReport {
   readonly programmaticForceApply: false;
   readonly passwordEnvAllowed: false;
   readonly totpEnvAllowed: false;
+  readonly ownerKeyPassphraseEnvAllowed: false;
+  readonly productionTrustMintPubliclyExported: false;
+  readonly ownerKeyEncryptedAtRest: true;
+  readonly operatorOrchestratorImplemented: true;
   readonly callerControlledProductionTrustClass: false;
   readonly productionTrustRuntimeBranded: true;
   readonly layerCDProvenanceAuthImplemented: true;
@@ -31,7 +35,7 @@ export interface ProductionOwnerBootstrapReadinessReport {
 }
 
 /**
- * Source readiness is YES only when Step4A.1 capabilities are present in code.
+ * Source readiness is YES only when Step4A.2 capabilities are present in code.
  * Real-world ceremony resources / endpoint / schema are tracked separately.
  */
 export function buildProductionOwnerBootstrapReadinessReport(input?: {
@@ -45,6 +49,11 @@ export function buildProductionOwnerBootstrapReadinessReport(input?: {
     readonly layerCDImplemented?: boolean;
     readonly failClosedExistingAdmin?: boolean;
     readonly productionTransactionPath?: boolean;
+    readonly privateMintInaccessible?: boolean;
+    readonly encryptedOwnerKeyCustody?: boolean;
+    readonly schemaPreflightCorrect?: boolean;
+    readonly nonce0028PreflightCorrect?: boolean;
+    readonly operatorOrchestrator?: boolean;
   };
 }): ProductionOwnerBootstrapReadinessReport {
   const caps = input?.capabilities ?? {};
@@ -54,7 +63,12 @@ export function buildProductionOwnerBootstrapReadinessReport(input?: {
       caps.targetAdminRootBound !== false &&
       caps.layerCDImplemented !== false &&
       caps.failClosedExistingAdmin !== false &&
-      caps.productionTransactionPath !== false,
+      caps.productionTransactionPath !== false &&
+      caps.privateMintInaccessible !== false &&
+      caps.encryptedOwnerKeyCustody !== false &&
+      caps.schemaPreflightCorrect !== false &&
+      caps.nonce0028PreflightCorrect !== false &&
+      caps.operatorOrchestrator !== false,
   );
   const missing = missingProductionTrustResources(input?.ceremonyDir ?? null);
   const trustResourcesReady = missing.length === 0;
@@ -87,6 +101,10 @@ export function buildProductionOwnerBootstrapReadinessReport(input?: {
     programmaticForceApply: false,
     passwordEnvAllowed: false,
     totpEnvAllowed: false,
+    ownerKeyPassphraseEnvAllowed: false,
+    productionTrustMintPubliclyExported: false,
+    ownerKeyEncryptedAtRest: true,
+    operatorOrchestratorImplemented: true,
     callerControlledProductionTrustClass: false,
     productionTrustRuntimeBranded: true,
     layerCDProvenanceAuthImplemented: true,
@@ -96,10 +114,11 @@ export function buildProductionOwnerBootstrapReadinessReport(input?: {
     witnessModel: 'HUMAN_ATTESTED',
     witnessCryptographicIdentityProven: false,
     notes: [
-      'Step4A.1 source/readiness — no operational Owner claim',
+      'Step4A.2 source hardening — mint private; Owner key Argon2id+XChaCha20; schema/0028 fixed; orchestrator refuse-apply',
       'Channel B file is documentary only; operational auth is live Owner TTY',
       'Witness model is HUMAN_ATTESTED (not cryptographic identity proof)',
       'Hot Wallet key must never be reused as Owner bootstrap key',
+      'READY_FOR_CEREMONY remains NO without trusted verify-full endpoint + witnessed resources',
     ],
   };
 }

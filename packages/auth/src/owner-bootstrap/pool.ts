@@ -555,6 +555,64 @@ export function assertBootstrapTlsAndEndpoint(
  * Production_sealed_v1 pool config — verify_full only; operational DB names allowed.
  * Does NOT weaken isolated Stage B path (buildOwnerBootstrapPoolConfig unchanged).
  */
+
+/**
+ * Test-only disposable production simulation pool.
+ * Uses loopback plaintext against approved *_test DB with deploymentEnv=production
+ * so CLAIM_EXISTING_ADMIN lifecycle can be exercised without a real verify-full endpoint.
+ * Requires ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1 + ALEX_OWNER_BOOTSTRAP_DISPOSABLE_PRODUCTION_SIM=1.
+ */
+export async function createDisposableProductionSimPool(input: {
+  readonly connectionString: string;
+  readonly profileId: string;
+  readonly expectedDatabaseName: string;
+}): Promise<OwnerBootstrapPool> {
+  if (process.env.ALEX_OWNER_BOOTSTRAP_TEST_HOOKS !== '1') {
+    throw new AuthDomainError('FORBIDDEN', 'disposable production sim requires ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1');
+  }
+  if (process.env.ALEX_OWNER_BOOTSTRAP_DISPOSABLE_PRODUCTION_SIM !== '1') {
+    throw new AuthDomainError(
+      'FORBIDDEN',
+      'disposable production sim requires ALEX_OWNER_BOOTSTRAP_DISPOSABLE_PRODUCTION_SIM=1',
+    );
+  }
+  if (input.expectedDatabaseName === 'alex_rewards') {
+    throw new AuthDomainError('FORBIDDEN', 'refuse operational alex_rewards');
+  }
+  if (!isApprovedDestructiveTestDatabaseName(input.expectedDatabaseName)) {
+    throw new AuthDomainError('FORBIDDEN', 'disposable production sim requires approved test database');
+  }
+  // Open as isolated_test first to capture live system_identifier, then re-register as production sim profile.
+  const isolatedProfile: BootstrapEndpointProfile = {
+    profileId: input.profileId,
+    deploymentEnv: 'isolated_test',
+    expectedDatabaseName: input.expectedDatabaseName,
+    tls: { mode: 'isolated_test_loopback_plaintext' },
+  };
+  const opened = await createOwnerBootstrapPool({
+    connectionString: input.connectionString,
+    profile: isolatedProfile,
+  });
+  const simProfile: BootstrapEndpointProfile = {
+    profileId: input.profileId,
+    deploymentEnv: 'production',
+    expectedDatabaseName: input.expectedDatabaseName,
+    expectedSystemIdentifier: opened.connectionFacts.clusterSystemIdentifier,
+    tls: { mode: 'isolated_test_loopback_plaintext' },
+  };
+  const result: OwnerBootstrapPool = {
+    pool: opened.pool,
+    profile: simProfile,
+    connectionFacts: {
+      ...opened.connectionFacts,
+    },
+    hostname: opened.hostname,
+    database: opened.database,
+  };
+  verifiedBootstrapByPool.set(opened.pool, result);
+  return result;
+}
+
 export function buildProductionOwnerBootstrapPoolConfig(
   connectionString: string,
   profile: BootstrapEndpointProfile,
@@ -717,6 +775,30 @@ export function assertProductionBootstrapTlsAndEndpoint(
   }
   if (profile.deploymentEnv !== 'production' || grantEnv !== 'production') {
     throw new AuthDomainError('FORBIDDEN', 'production_sealed_v1 requires production env');
+  }
+  // Disposable production simulation (test-only): approved destructive DB + TEST_HOOKS.
+  // Does NOT authorize real production endpoint trust.
+  if (
+    process.env.ALEX_OWNER_BOOTSTRAP_TEST_HOOKS === '1' &&
+    process.env.ALEX_OWNER_BOOTSTRAP_DISPOSABLE_PRODUCTION_SIM === '1' &&
+    profile.tls.mode === 'isolated_test_loopback_plaintext' &&
+    isApprovedDestructiveTestDatabaseName(connection.currentDatabase) &&
+    connection.currentDatabase !== 'alex_rewards'
+  ) {
+    if (connection.currentDatabase !== profile.expectedDatabaseName) {
+      throw new AuthDomainError('FORBIDDEN', 'expected_database_name mismatch');
+    }
+    if (
+      profile.expectedSystemIdentifier === undefined ||
+      profile.expectedSystemIdentifier === '' ||
+      profile.expectedSystemIdentifier !== connection.clusterSystemIdentifier
+    ) {
+      throw new AuthDomainError('FORBIDDEN', 'system_identifier mismatch');
+    }
+    if (!isNumericLoopback(connection.hostname)) {
+      throw new AuthDomainError('FORBIDDEN', 'disposable production sim requires loopback');
+    }
+    return;
   }
   if (connection.currentDatabase !== profile.expectedDatabaseName) {
     throw new AuthDomainError('FORBIDDEN', 'expected_database_name mismatch');

@@ -43,6 +43,13 @@ function toPrivateKeyObject(rawPrivateSeed: Uint8Array): KeyObject {
   return createPrivateKey({ key: der, format: 'der', type: 'pkcs8' });
 }
 
+export function publicKeyFromPrivateSeed(rawPrivateSeed: Uint8Array): Uint8Array {
+  const priv = toPrivateKeyObject(rawPrivateSeed);
+  const pub = createPublicKey(priv);
+  const pubDer = pub.export({ type: 'spki', format: 'der' }) as Buffer;
+  return new Uint8Array(pubDer.subarray(pubDer.length - 32));
+}
+
 export function ed25519Sign(rawPrivateSeed: Uint8Array, message: Uint8Array): Uint8Array {
   const key = toPrivateKeyObject(rawPrivateSeed);
   const sig = sign(null, Buffer.from(message), key);

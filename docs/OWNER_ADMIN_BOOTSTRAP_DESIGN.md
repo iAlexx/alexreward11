@@ -756,3 +756,7 @@ A parallel production ceremony CLI (`owner-production-bootstrap`, trust class `p
 ## Step 4A.1 production note
 
 Operational Layer C/D authentication is live Owner TTY equality against `ProductionCeremonyBundleV1` digest. A same-host Channel B file is not sufficient.
+
+## Step 4A.2 production note
+
+Trust mint remains internal (not public API). Production Owner private material is Argon2id + XChaCha20-Poly1305 encrypted `.enc` only (no plaintext seed file). Passphrase and secrets are TTY-only. Real ceremony still blocked: `READY_FOR_PRODUCTION_OWNER_BOOTSTRAP_CEREMONY=NO`. See `docs/PHASE_21_STEP4A2_FINAL_OWNER_BOOTSTRAP_HARDENING.md`.

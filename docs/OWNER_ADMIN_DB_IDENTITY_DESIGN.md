@@ -149,3 +149,7 @@ Production `production_sealed_v1` endpoint profiles must bind expected DB name, 
 ## Step 4A.1
 
 Production endpoint trust requires verify-full + `system_identifier`. Railway internal hostname / connect tunnel is discovery-only, not ceremony trust authority.
+
+## Step 4A.2
+
+Schema preflight reads `schema_migrations.version` ORDER BY version; requires 0024-0028. 0028 preflight detects cross-purpose nonce reuse via `(attempt_id, nonce_hex)` grouping and does not apply the migration. Railway: no `DATABASE_PUBLIC_URL`; do not enable TCP Proxy; tunnel remains `DISCOVERY_ONLY_NOT_TRUST_AUTHORITY`. `ENDPOINT_TRUST_READY=NO`.

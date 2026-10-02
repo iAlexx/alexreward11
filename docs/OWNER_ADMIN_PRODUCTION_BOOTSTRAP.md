@@ -63,3 +63,15 @@ Phase21 payout Hot Wallet fingerprint must never be used as Owner bootstrap / se
 - Production lifecycle wrappers; isolated path unchanged
 - Fail-closed existing-admin auth/session inspection (correct `idle_expires_at` / `absolute_expires_at`)
 - Witness model: HUMAN_ATTESTED (not cryptographic identity proof)
+
+## Step 4A.2 final hardening (source only)
+
+- `mintAuthenticatedProductionBootstrapTrust` package-private (not exported from `owner-bootstrap/index` or `@alex-rewards/auth` root)
+- Public API: `AuthenticatedProductionBootstrapTrust` type, is/assert helpers, `authenticateProductionCeremonyFromOwnerTty`
+- `tryForgeProductionTrustFromCallerTrustClass` removed from public API; test-only under `ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1`
+- Production Owner key: Argon2id + XChaCha20-Poly1305 `.enc` bundle; no plaintext `bootstrap-private-seed.hex`; passphrase TTY-only
+- Schema preflight: `version` ORDER BY version; migrations 0024-0028; 0028 duplicate `(attempt_id, nonce_hex)` check does not apply
+- CLI `run` orchestrates lifecycle; APPLY default NO; Step4A.2 refuses real apply; no `forceApply`
+- Encrypted key backups: >=2 offline ciphertext copies; key dir outside repo / not temp / not cloud sync
+- `SOURCE_READY=YES`; `SCHEMA_READY` / `ENDPOINT_TRUST_READY` / `TRUST_RESOURCES` / `READY_FOR_CEREMONY=NO`; `REAL_OWNER_BOOTSTRAP_KEY_GENERATED=NO`
+- See `docs/PHASE_21_STEP4A2_FINAL_OWNER_BOOTSTRAP_HARDENING.md`

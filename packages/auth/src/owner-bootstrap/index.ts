@@ -172,7 +172,6 @@ export {
   PRODUCTION_CHANNEL_A_NAME,
   PRODUCTION_CHANNEL_B_NAME,
   PRODUCTION_PUBLIC_KEY_NAME,
-  PRODUCTION_PRIVATE_SEED_NAME,
   PRODUCTION_MANIFEST_NAME,
   PRODUCTION_TARGET_ADMIN_NAME,
   PRODUCTION_BUNDLE_NAME,
@@ -203,17 +202,32 @@ export {
 export {
   isAuthenticatedProductionBootstrapTrust,
   assertAuthenticatedProductionBootstrapTrust,
-  mintAuthenticatedProductionBootstrapTrust,
-  tryForgeProductionTrustFromCallerTrustClass,
-  isProductionBoundBootstrapTrustMaterial,
   type AuthenticatedProductionBootstrapTrust,
 } from './authenticated-production-trust.js';
+// mintAuthenticatedProductionBootstrapTrust is intentionally NOT exported (package-private).
+export {
+  OWNER_BOOTSTRAP_KEY_KDF,
+  OWNER_BOOTSTRAP_KEY_AEAD,
+  generateEncryptedProductionOwnerBootstrapKey,
+  decryptOwnerBootstrapPrivateSeed,
+  encryptOwnerBootstrapPrivateSeed,
+  assertNoPlaintextOwnerBootstrapSeedFile,
+  assertOwnerBootstrapCeremonyDirSafe,
+  type OwnerBootstrapEncryptedKeyBundleV1,
+} from './owner-bootstrap-encrypted-key.js';
 export {
   startProductionOwnerBootstrapAttempt,
   submitProductionOwnerBootstrapPop,
   abortProductionOwnerBootstrapAttempt,
   completeProductionOwnerBootstrapEnrollment,
 } from './production-lifecycle.js';
+export {
+  orchestrateProductionOwnerBootstrapCeremony,
+  assertProductionCeremonyApplyGates,
+  loadEncryptedOwnerBootstrapKeyBundle,
+  type ProductionCeremonyOrchestratorInput,
+  type ProductionCeremonyOrchestratorResult,
+} from './production-ceremony-orchestrator.js';
 export {
   preflightProductionOwnerBootstrapSchema,
   assertProductionOwnerBootstrapSchemaReady,

@@ -1,0 +1,316 @@
+/**
+ * Production Owner-bootstrap ceremony orchestrator (Phase 21 Step 4A.2).
+ * Owner-workstation only. Decrypts encrypted bootstrap key in memory for signing,
+ * then zeroizes. Never accepts secrets via env/argv. Apply default is refuse.
+ */
+import { randomBytes } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import type { Pool } from 'pg';
+
+import { AuthDomainError } from '../errors.js';
+import { assertPasswordPolicy, generateTotpSecretBytes } from '../admin-password.js';
+import { assertTotpCodeFormat, generateTotpCode, verifyTotpCode } from '../admin-totp.js';
+import { bytesToHex, hexToBytes, publicKeyFromPrivateSeed } from './ed25519.js';
+import {
+  buildTestGrantPayload,
+  fingerprintPublicKey,
+  signGrantEnvelope,
+  type CeremonyAuthority,
+  type OwnerBootstrapGrantEnvelope,
+} from './grant.js';
+import {
+  decryptOwnerBootstrapPrivateSeed,
+  zeroizeBytes,
+  type OwnerBootstrapEncryptedKeyBundleV1,
+} from './owner-bootstrap-encrypted-key.js';
+import {
+  assertAuthenticatedProductionBootstrapTrust,
+  type AuthenticatedProductionBootstrapTrust,
+} from './authenticated-production-trust.js';
+import {
+  createEnrollmentChannelKeypair,
+  signChannelPop,
+  signFinalCredReq,
+  signOwnerRedeemChallenge,
+} from './redeem.js';
+import {
+  startProductionOwnerBootstrapAttempt,
+  submitProductionOwnerBootstrapPop,
+  completeProductionOwnerBootstrapEnrollment,
+} from './production-lifecycle.js';
+import { preflightProductionOwnerBootstrapSchema } from './production-schema-preflight.js';
+import {
+  preflightClaimExistingAdmin,
+  assertClaimExistingAdminEligible,
+} from './claim-existing-admin.js';
+import { PRODUCTION_OWNER_BOOTSTRAP_TRUST_CLASS } from './production-trust-class.js';
+
+export interface ProductionCeremonyOrchestratorInput {
+  readonly pool: Pool;
+  readonly productionTrust: AuthenticatedProductionBootstrapTrust;
+  readonly encryptedKeyBundle: OwnerBootstrapEncryptedKeyBundleV1;
+  readonly bootstrapPassphrase: string;
+  readonly password: string;
+  readonly passwordConfirm: string;
+  readonly totpSecretBytes?: Uint8Array;
+  readonly totpConfirmCode?: string;
+  /** Must be true only with CLI --apply + env gates. */
+  readonly apply: boolean;
+  readonly deploymentEnvIsProduction: boolean;
+  readonly ownerProductionBootstrapEnabled: boolean;
+  readonly ownerProductionBootstrapApply: boolean;
+  /**
+   * Step4A.2 hard refuse even when gates pass (source-only).
+   * Disposable tests may set false only under ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1.
+   */
+  readonly step4a2RefuseApply?: boolean;
+  readonly subjectDisplay?: string;
+}
+
+export interface ProductionCeremonyOrchestratorResult {
+  readonly adminUserId: string;
+  readonly email: string;
+  readonly grantId: string;
+  readonly attemptId: string;
+  readonly applied: true;
+}
+
+export function assertProductionCeremonyApplyGates(input: {
+  readonly apply: boolean;
+  readonly deploymentEnvIsProduction: boolean;
+  readonly ownerProductionBootstrapEnabled: boolean;
+  readonly ownerProductionBootstrapApply: boolean;
+}): void {
+  if (!input.apply) {
+    throw new AuthDomainError('FORBIDDEN', 'APPLY_GATES_REQUIRED: pass --apply');
+  }
+  if (!input.deploymentEnvIsProduction) {
+    throw new AuthDomainError('FORBIDDEN', 'DEPLOYMENT_ENV must be production');
+  }
+  if (!input.ownerProductionBootstrapEnabled) {
+    throw new AuthDomainError('FORBIDDEN', 'OWNER_PRODUCTION_BOOTSTRAP_ENABLED must be true');
+  }
+  if (!input.ownerProductionBootstrapApply) {
+    throw new AuthDomainError('FORBIDDEN', 'OWNER_PRODUCTION_BOOTSTRAP_APPLY must be 1');
+  }
+}
+
+/**
+ * Full production CLAIM_EXISTING_ADMIN lifecycle.
+ * Does not accept forceApply. Secrets must already be collected via interactive TTY by caller.
+ */
+export async function orchestrateProductionOwnerBootstrapCeremony(
+  input: ProductionCeremonyOrchestratorInput,
+): Promise<ProductionCeremonyOrchestratorResult> {
+  assertAuthenticatedProductionBootstrapTrust(input.productionTrust);
+  if (input.productionTrust.trustClass !== PRODUCTION_OWNER_BOOTSTRAP_TRUST_CLASS) {
+    throw new AuthDomainError('FORBIDDEN', 'production trust class required');
+  }
+
+  assertProductionCeremonyApplyGates({
+    apply: input.apply,
+    deploymentEnvIsProduction: input.deploymentEnvIsProduction,
+    ownerProductionBootstrapEnabled: input.ownerProductionBootstrapEnabled,
+    ownerProductionBootstrapApply: input.ownerProductionBootstrapApply,
+  });
+
+  const refuseStep4a2 = input.step4a2RefuseApply !== false;
+  if (refuseStep4a2) {
+    throw new AuthDomainError(
+      'FORBIDDEN',
+      'STEP4A2_SOURCE_ONLY_REFUSES_APPLY — operator orchestrator implemented; real ceremony not authorized in Step4A.2',
+    );
+  }
+  if (
+    input.step4a2RefuseApply === false &&
+    process.env.ALEX_OWNER_BOOTSTRAP_TEST_HOOKS !== '1'
+  ) {
+    throw new AuthDomainError(
+      'FORBIDDEN',
+      'step4a2RefuseApply=false only allowed with ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1',
+    );
+  }
+
+  if (process.env.PASSWORD || process.env.TOTP || process.env.OWNER_BOOTSTRAP_PASSPHRASE) {
+    throw new AuthDomainError('FORBIDDEN', 'secrets via env forbidden');
+  }
+
+  assertPasswordPolicy(input.password);
+  if (input.password !== input.passwordConfirm) {
+    throw new AuthDomainError('VALIDATION', 'password confirmation mismatch');
+  }
+
+  const client = await input.pool.connect();
+  try {
+    const schema = await preflightProductionOwnerBootstrapSchema(client);
+    if (!schema.schemaReady) {
+      throw new AuthDomainError(
+        'FORBIDDEN',
+        schema.refuseCode ?? 'PRODUCTION_OWNER_BOOTSTRAP_SCHEMA_READY=NO',
+      );
+    }
+    const eligibility = await preflightClaimExistingAdmin(client, {
+      intendedAdminUserId: input.productionTrust.intendedAdminUserId,
+      intendedAdminEmail: input.productionTrust.intendedAdminEmail,
+      lockForUpdate: false,
+    });
+    assertClaimExistingAdminEligible(eligibility);
+  } finally {
+    client.release();
+  }
+
+  let seed: Uint8Array | null = null;
+  let channelSk: Uint8Array | null = null;
+  try {
+    seed = decryptOwnerBootstrapPrivateSeed(input.encryptedKeyBundle, input.bootstrapPassphrase);
+    const pub = publicKeyFromPrivateSeed(seed);
+    const fp = fingerprintPublicKey(pub);
+    if (fp !== input.productionTrust.publicKeyFingerprintHex) {
+      throw new AuthDomainError(
+        'FORBIDDEN',
+        'decrypted public key fingerprint mismatch root-bound bundle',
+      );
+    }
+    if (bytesToHex(pub) !== input.encryptedKeyBundle.public_key_raw_hex) {
+      throw new AuthDomainError('FORBIDDEN', 'decrypted public key mismatch');
+    }
+
+    const authority: CeremonyAuthority = {
+      keyId: input.encryptedKeyBundle.key_id,
+      publicKey: pub,
+      privateKey: seed,
+      fingerprintHex: fp,
+    };
+    if (authority.keyId !== input.productionTrust.keyId) {
+      throw new AuthDomainError('FORBIDDEN', 'encrypted key_id != authenticated bundle key_id');
+    }
+
+    const now = Math.floor(Date.now() / 1000);
+    const basePayload = buildTestGrantPayload({
+      authority,
+      endpointProfileId: input.productionTrust.endpointProfileId,
+      deploymentEnv: 'production',
+      intendedAdminEmail: input.productionTrust.intendedAdminEmail,
+      nowSec: now,
+      lifetimeSec: 900,
+    });
+    const grantEnvelope: OwnerBootstrapGrantEnvelope = signGrantEnvelope(
+      {
+        ...basePayload,
+        owner_identity_ref: {
+          ...basePayload.owner_identity_ref,
+          ceremony_id: input.productionTrust.bundle.ceremony_id,
+          evidence_fingerprint: input.productionTrust.bundleDigestHex,
+          subject_display: input.subjectDisplay ?? 'Production Owner',
+        },
+      },
+      authority,
+    );
+
+    const channel = createEnrollmentChannelKeypair();
+    channelSk = new Uint8Array(channel.privateKey);
+
+    const started = await startProductionOwnerBootstrapAttempt(input.pool, {
+      grantEnvelope,
+      channelPublicKey: channel.publicKey,
+      productionTrust: input.productionTrust,
+    });
+
+    const challengeBytes = hexToBytes(started.challengeBytesHex);
+    const sigRedeem = signOwnerRedeemChallenge(authority, challengeBytes);
+    const noncePop = bytesToHex(randomBytes(32));
+    const sigChannelPop = signChannelPop(channelSk, {
+      attemptId: started.attemptId,
+      challengeId: started.challengeId,
+      grantId: started.grantId,
+      channelFpHex: started.channelFp,
+      clientUnixTime: now,
+      nonce32: hexToBytes(noncePop),
+    });
+    const pop = await submitProductionOwnerBootstrapPop(input.pool, {
+      attemptId: started.attemptId,
+      challengeId: started.challengeId,
+      keyId: started.keyId,
+      sigRedeemB64: sigRedeem,
+      clientUnixTime: now,
+      nonce32Hex: noncePop,
+      sigChannelPopB64: sigChannelPop,
+      productionTrust: input.productionTrust,
+    });
+
+    const totpSecret = input.totpSecretBytes ?? generateTotpSecretBytes();
+    let totpCode = input.totpConfirmCode;
+    if (totpCode === undefined || totpCode === '') {
+      totpCode = generateTotpCode(totpSecret);
+    } else {
+      assertTotpCodeFormat(totpCode);
+      if (!verifyTotpCode(totpSecret, totpCode)) {
+        throw new AuthDomainError('FORBIDDEN', 'TOTP confirmation failed');
+      }
+    }
+
+    const nonceCred = bytesToHex(randomBytes(32));
+    const publicHeader = {
+      v: 1 as const,
+      purpose: 'FIRST_OWNER_CREDENTIAL_SETUP' as const,
+      grant_id: started.grantId,
+      attempt_id: started.attemptId,
+      challenge_id: started.challengeId,
+      ticket_id: pop.ticketId,
+      channel_fp: started.channelFp,
+      intended_subject: input.productionTrust.intendedAdminEmail,
+      credential_setup: {
+        password_encoding: 'utf8' as const,
+        totp_secret_encoding: 'base32_nopad_uppercase' as const,
+        totp_digits: 6 as const,
+        totp_period_seconds: 30 as const,
+        totp_algorithm: 'SHA1' as const,
+      },
+      client_unix_time: now,
+      nonce32: nonceCred,
+    };
+    const sigCred = signFinalCredReq(channelSk, {
+      publicHeader,
+      passwordUtf8: Buffer.from(input.password, 'utf8'),
+      totpSecretBytes: totpSecret,
+    });
+
+    const completed = await completeProductionOwnerBootstrapEnrollment(input.pool, {
+      attemptId: started.attemptId,
+      challengeId: started.challengeId,
+      ticketId: pop.ticketId,
+      enrollmentTicket: pop.enrollmentTicket,
+      intendedSubject: input.productionTrust.intendedAdminEmail,
+      password: input.password,
+      totpSecretBytes: totpSecret,
+      totpConfirmCode: totpCode,
+      clientUnixTime: now,
+      nonce32Hex: nonceCred,
+      sigChannelCredB64: sigCred,
+      productionTrust: input.productionTrust,
+    });
+
+    return {
+      adminUserId: completed.adminUserId,
+      email: completed.email,
+      grantId: started.grantId,
+      attemptId: started.attemptId,
+      applied: true,
+    };
+  } finally {
+    if (seed !== null) zeroizeBytes(seed);
+    if (channelSk !== null) zeroizeBytes(channelSk);
+  }
+}
+
+/** Load encrypted Owner key bundle JSON from path (ciphertext only). */
+export function loadEncryptedOwnerBootstrapKeyBundle(
+  path: string,
+): OwnerBootstrapEncryptedKeyBundleV1 {
+  const raw = JSON.parse(readFileSync(resolve(path), 'utf8')) as OwnerBootstrapEncryptedKeyBundleV1;
+  if (raw.formatVersion !== 1) {
+    throw new AuthDomainError('FORBIDDEN', 'unsupported encrypted key format');
+  }
+  return raw;
+}

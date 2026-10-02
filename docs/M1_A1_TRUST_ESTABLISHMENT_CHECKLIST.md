@@ -92,3 +92,7 @@ Source scaffolding for `production_sealed_v1` is present. Checklist items for wi
 ## Step 4A.1 checklist update
 
 Layer C/D operational model implemented as live Owner TTY. Real ceremony resources (witness, CA, public endpoint, key) remain OPEN.
+
+## Step 4A.2 checklist update
+
+Source trust-mint privacy + encrypted Owner key path hardened. Checklist items for real Owner key generation, witnessed seal, Owner CA, trusted endpoint, and operational enrollment remain **OPEN / BLOCKED**. `REAL_OWNER_BOOTSTRAP_KEY_GENERATED=NO`.

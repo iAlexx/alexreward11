@@ -590,12 +590,23 @@ describe.skipIf(databaseUrl === '')(
           }),
           trust,
         });
+        // Attach the rejection handler immediately: the enrollment may reject while the
+        // test is still sleeping (before `expect` subscribes), which Vitest reports as an
+        // unhandled rejection even though the outcome is asserted below.
+        const enrollOutcome: Promise<unknown> = enrollPromise.then(
+          () => null,
+          (err: unknown) => err,
+        );
 
         await sleep(lifetimeSec * 1000 + 1500);
         await locker.query('COMMIT');
         await locker.end();
 
-        await expect(enrollPromise).rejects.toThrow(/grant expired|freshness|ticket expired/i);
+        const enrollErr = await enrollOutcome;
+        expect(enrollErr).toBeInstanceOf(Error);
+        expect(String((enrollErr as Error).message)).toMatch(
+          /grant expired|freshness|ticket expired/i,
+        );
         await assertNoOwnerResidue(pool);
       });
 

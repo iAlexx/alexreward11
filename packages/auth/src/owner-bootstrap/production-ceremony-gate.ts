@@ -42,20 +42,25 @@ import {
   PRODUCTION_CEREMONY_BUNDLE_PURPOSE,
 } from './production-ceremony-bundle-v1.js';
 import {
-  mintAuthenticatedProductionBootstrapTrust,
   type AuthenticatedProductionBootstrapTrust,
 } from './authenticated-production-trust.js';
+import { mintAuthenticatedProductionBootstrapTrust } from './production-trust-mint-internal.js';
 import {
   createBootstrapTrustMaterial,
   createProductionOwnerBootstrapPool,
 } from './pool.js';
+import {
+  generateEncryptedProductionOwnerBootstrapKey,
+  assertNoPlaintextOwnerBootstrapSeedFile,
+} from './owner-bootstrap-encrypted-key.js';
 
 export const PRODUCTION_CEREMONY_PROFILE_NAME = 'production-endpoint-profile.json';
 export const PRODUCTION_CEREMONY_SEAL_NAME = 'ceremony-seal-public.json';
 export const PRODUCTION_CHANNEL_A_NAME = 'channel-a-seal-derivative.json';
 export const PRODUCTION_CHANNEL_B_NAME = 'channel-b-owner-digest-record.json';
 export const PRODUCTION_PUBLIC_KEY_NAME = 'bootstrap-public.json';
-export const PRODUCTION_PRIVATE_SEED_NAME = 'bootstrap-private-seed.hex';
+/** @deprecated Plaintext seed files are forbidden (Step 4A.2). */
+export const PRODUCTION_PRIVATE_SEED_NAME_FORBIDDEN = 'bootstrap-private-seed.hex';
 export const PRODUCTION_MANIFEST_NAME = 'ceremony-public-manifest.json';
 export const PRODUCTION_TARGET_ADMIN_NAME = 'intended-existing-admin.json';
 export const PRODUCTION_BUNDLE_NAME = 'production-ceremony-bundle-v1.json';
@@ -160,34 +165,14 @@ export function generateProductionBootstrapKeypairFiles(input: {
   readonly phase21ProductionOwnerBootstrap: boolean;
   /** When true, require interactive TTY (default). Test hooks may disable only under ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1. */
   readonly requireInteractiveTty?: boolean;
-}): ProductionCeremonyPublicKeyRecord {
-  if (input.phase21ProductionOwnerBootstrap !== true) {
-    throw new AuthDomainError(
-      'FORBIDDEN',
-      'generate-keypair requires --phase21-production-owner-bootstrap',
-    );
-  }
-  const requireTty = input.requireInteractiveTty !== false;
-  if (requireTty) {
-    if (!process.stdin.isTTY || !process.stdout.isTTY) {
-      throw new AuthDomainError(
-        'FORBIDDEN',
-        'INTERACTIVE_TTY_REQUIRED for production Owner-bootstrap key generation',
-      );
-    }
-  } else if (process.env.ALEX_OWNER_BOOTSTRAP_TEST_HOOKS !== '1') {
-    throw new AuthDomainError(
-      'FORBIDDEN',
-      'TTY bypass only allowed with ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1',
-    );
-  }
-  const dir = resolveDir(input.ceremonyDir);
-  mkdirSync(dir, { recursive: true });
-  const privPath = join(dir, PRODUCTION_PRIVATE_SEED_NAME);
-  const pubPath = join(dir, PRODUCTION_PUBLIC_KEY_NAME);
-  if (existsSync(privPath) || existsSync(pubPath)) {
-    throw new AuthDomainError('FORBIDDEN', 'refusing to overwrite existing bootstrap key files');
-  }
+  readonly passphrase: string;
+  readonly passphraseConfirm: string;
+  readonly repoRootHint: string;
+  readonly testFastKdf?: boolean;
+}): ProductionCeremonyPublicKeyRecord & {
+  readonly encrypted_bundle_path_basename: string;
+  readonly ciphertext_sha256_hex: string;
+} {
   if (process.env.ALEX_SIGNER_CEREMONY_TEST_HOOK === '1') {
     throw new AuthDomainError(
       'FORBIDDEN',
@@ -200,28 +185,33 @@ export function generateProductionBootstrapKeypairFiles(input: {
       'PHASE21_CEREMONY_TEST_PASSPHRASE forbidden on production Owner-bootstrap key path',
     );
   }
-  const kp = generateEd25519KeyPair();
-  const publicHex = bytesToHex(kp.publicKey);
-  const fp = fingerprintPublicKey(kp.publicKey);
-  const record: ProductionCeremonyPublicKeyRecord = {
-    trust_class: PRODUCTION_OWNER_BOOTSTRAP_TRUST_CLASS,
-    key_id: input.keyId,
+  const generated = generateEncryptedProductionOwnerBootstrapKey({
+    ceremonyDir: input.ceremonyDir,
+    keyId: input.keyId,
+    passphrase: input.passphrase,
+    passphraseConfirm: input.passphraseConfirm,
+    phase21ProductionOwnerBootstrap: input.phase21ProductionOwnerBootstrap,
+    repoRootHint: input.repoRootHint,
+    ...(input.requireInteractiveTty !== undefined
+      ? { requireInteractiveTty: input.requireInteractiveTty }
+      : {}),
+    ...(input.testFastKdf !== undefined ? { testFastKdf: input.testFastKdf } : {}),
+  });
+  assertNoPlaintextOwnerBootstrapSeedFile(input.ceremonyDir);
+  const pub = generated.publicRecord;
+  return {
+    trust_class: pub.trust_class,
+    key_id: pub.key_id,
     alg: 'Ed25519',
-    public_key_raw_hex: publicHex,
-    public_key_sha256_hex: fp,
-    created_unix: Math.floor(Date.now() / 1000),
-    warning:
-      'PRIVATE SEED IS OWNER OFFLINE MATERIAL — never commit; never reuse Hot Wallet keys',
+    public_key_raw_hex: pub.public_key_raw_hex,
+    public_key_sha256_hex: pub.public_key_sha256_hex,
+    created_unix: pub.created_unix,
+    warning: pub.warning,
+    encrypted_bundle_path_basename: pub.encrypted_bundle_path_basename,
+    ciphertext_sha256_hex: pub.ciphertext_sha256_hex,
   };
-  writeFileSync(privPath, bytesToHex(kp.privateKey) + '\n', { encoding: 'utf8', mode: 0o600 });
-  try {
-    chmodSync(privPath, 0o600);
-  } catch {
-    // best-effort on Windows
-  }
-  writeFileSync(pubPath, JSON.stringify(record, null, 2) + '\n', { encoding: 'utf8' });
-  return record;
 }
+
 
 export function loadProductionPublicKey(ceremonyDir: string): ProductionCeremonyPublicKeyRecord {
   const text = readFileSync(join(resolveDir(ceremonyDir), PRODUCTION_PUBLIC_KEY_NAME), 'utf8');

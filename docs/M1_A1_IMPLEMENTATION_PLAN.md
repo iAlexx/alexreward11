@@ -70,3 +70,7 @@ Isolated Option C remains `ephemeral_isolated_test_only`. Production first-Owner
 ## Step 4A.1 status
 
 Production path now requires `AuthenticatedProductionBootstrapTrust` and explicit production lifecycle functions. Isolated Stage B unchanged.
+
+## Step 4A.2 status
+
+Source hardening complete: private mint, encrypted Owner `.enc` key (no plaintext seed), TTY-only passphrase, schema 0024-0028 preflight, APPLY refused. `PRODUCTION_OWNER_BOOTSTRAP_SOURCE_READY=YES`. Ceremony / Owner binding still blocked (`READY_FOR_CEREMONY=NO`, `REAL_OWNER_BOOTSTRAP_KEY_GENERATED=NO`).

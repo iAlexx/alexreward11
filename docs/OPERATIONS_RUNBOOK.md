@@ -365,3 +365,7 @@ Operational Step4 APPLY remains paused until Owner authority exists. Use `pnpm -
 ### Phase 21 Step 4A.1
 
 Railway Postgres currently exposes internal `DATABASE_URL` only (no `DATABASE_PUBLIC_URL`). Do not treat `railway connect` tunnel as ceremony endpoint trust. Ceremony requires verify-full endpoint profile + live Owner TTY bundle digest.
+
+### Phase 21 Step 4A.2
+
+Do not enable Railway TCP Proxy for bootstrap. Tunnel remains discovery-only. Operator CLI `owner-production-bootstrap run` may orchestrate lifecycle planning; APPLY default is NO and Step4A.2 refuses real apply. Hot Wallet stays frozen (`EQD4NWgFbqCOIGQL9k0SDIP8onQH9cj_MxDcBr3N7DYLy8Lf`). Encrypted Owner key backups (>=2 offline ciphertext) and TTY passphrase are required before any future real ceremony - not executed in 4A.2. See `docs/PHASE_21_STEP4A2_FINAL_OWNER_BOOTSTRAP_HARDENING.md`.
