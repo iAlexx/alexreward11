@@ -1041,3 +1041,10 @@ Operational Mainnet remains OFF. **No live payout.**
 - `readyForLivePayout` always false; never emit `READY_FOR_LIVE_PAYOUT`
 
 See `docs/PHASE_21_READINESS_MATRIX.md` and Step 3 docs listed in the micro-launch plan.
+
+## Phase 21 Step 3A — ceremony readiness corrections (source only)
+
+Accepted source corrections for controlled provision env modes, honest fee estimator modes,
+external verifier hardening, withdrawal-request pause fail-closed, PRODUCTION flag baseline
+tooling, and Mainnet registry bootstrap tooling. No operational ceremony executed.
+See docs/PHASE_21_STEP3A_INDEPENDENT_REVIEW_CORRECTIONS.md.

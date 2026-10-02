@@ -56,6 +56,7 @@ function toRuntimeConfig(
   return {
     enabled: config.PHASE21_CONTROLLED_AVAILABLE_PROVISION_ENABLED,
     deploymentEnv: config.DEPLOYMENT_ENV,
+    operationalCeremonyEnabled: config.PHASE21_OPERATIONAL_CEREMONY_ENABLED,
     withdrawalNetworkCode: config.WITHDRAWAL_NETWORK_CODE,
     withdrawalAssetSymbol: config.WITHDRAWAL_ASSET_SYMBOL,
     allowedUserId: config.PHASE21_CONTROLLED_AVAILABLE_PROVISION_ALLOWED_USER_ID,

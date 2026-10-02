@@ -51,6 +51,12 @@ const FORBIDDEN_JETTON_MARKERS = ['TESTNET', 'LOCAL', 'PLACEHOLDER'] as const;
 export interface Phase21ControlledAvailableProvisionRuntimeConfig {
   readonly enabled: boolean;
   readonly deploymentEnv: 'local' | 'test' | 'staging' | 'production';
+  /**
+   * From PHASE21_OPERATIONAL_CEREMONY_ENABLED.
+   * Required true (with enabled) for production operational ceremony mode.
+   * Test/local may run with this false.
+   */
+  readonly operationalCeremonyEnabled: boolean;
   readonly withdrawalNetworkCode: string;
   readonly withdrawalAssetSymbol: string;
   readonly allowedUserId: string;
@@ -60,7 +66,9 @@ export interface Phase21ControlledAvailableProvisionRuntimeConfig {
   /** Exact Mainnet USDT Jetton master; never TESTNET/LOCAL/PLACEHOLDER. */
   readonly requiredUsdtJettonMaster: string;
   /**
-   * Optional. When set, must equal PostgreSQL current_database() and never alex_rewards.
+   * Test/local: optional; when set must match current_database().
+   * Production operational ceremony: required non-empty; must match current_database().
+   * May equal the operational DB name only on the production ceremony path.
    */
   readonly requiredDatabaseName: string;
 }
@@ -147,6 +155,12 @@ function assertUsdtJettonMasterNotPlaceholder(master: string): string {
   return trimmed;
 }
 
+function isTestProvisionMode(
+  deploymentEnv: Phase21ControlledAvailableProvisionRuntimeConfig['deploymentEnv'],
+): boolean {
+  return deploymentEnv === 'local' || deploymentEnv === 'test';
+}
+
 function assertFeatureAndEnv(config: Phase21ControlledAvailableProvisionRuntimeConfig): void {
   if (!config.enabled) {
     throw new LedgerDomainError(
@@ -155,10 +169,36 @@ function assertFeatureAndEnv(config: Phase21ControlledAvailableProvisionRuntimeC
       { details: { reason: 'PROVISION_DISABLED' } },
     );
   }
-  if (config.deploymentEnv !== 'local' && config.deploymentEnv !== 'test') {
+  if (config.deploymentEnv === 'staging') {
     throw new LedgerDomainError(
       'VALIDATION',
-      'Phase 21 controlled Available provisioning is forbidden outside local/test',
+      'Phase 21 controlled Available provisioning is forbidden in staging',
+      {
+        details: {
+          reason: 'STAGING_PROVISION_FORBIDDEN',
+          deploymentEnv: config.deploymentEnv,
+        },
+      },
+    );
+  }
+  if (config.deploymentEnv === 'production') {
+    if (config.operationalCeremonyEnabled !== true) {
+      throw new LedgerDomainError(
+        'VALIDATION',
+        'Phase 21 production provision requires operational ceremony gate',
+        {
+          details: {
+            reason: 'OPERATIONAL_CEREMONY_GATE_REQUIRED',
+            deploymentEnv: config.deploymentEnv,
+            operationalCeremonyEnabled: config.operationalCeremonyEnabled,
+          },
+        },
+      );
+    }
+  } else if (!isTestProvisionMode(config.deploymentEnv)) {
+    throw new LedgerDomainError(
+      'VALIDATION',
+      'Phase 21 controlled Available provisioning deploymentEnv is invalid',
       { details: { reason: 'INVALID_DEPLOYMENT_ENV', deploymentEnv: config.deploymentEnv } },
     );
   }
@@ -193,44 +233,99 @@ function assertFeatureAndEnv(config: Phase21ControlledAvailableProvisionRuntimeC
   assertUsdtJettonMasterNotPlaceholder(config.requiredUsdtJettonMaster);
 }
 
-async function assertOptionalDatabaseIdentity(
+/**
+ * Database identity gate for Phase 21 controlled provision.
+ * Test/local: refuse accidental connection to operational DB name; required name optional.
+ * Production operational ceremony: required name mandatory and must match; ops DB allowed.
+ */
+export async function assertPhase21ProvisionDatabaseIdentity(
   client: PoolClient,
-  requiredDatabaseName: string,
+  config: Pick<
+    Phase21ControlledAvailableProvisionRuntimeConfig,
+    'deploymentEnv' | 'operationalCeremonyEnabled' | 'requiredDatabaseName'
+  >,
 ): Promise<void> {
-  const required = requiredDatabaseName.trim();
-  if (required.length === 0) return;
-  if (required === PHASE21_OPERATIONAL_DATABASE_NAME) {
+  const required = config.requiredDatabaseName.trim();
+  const testMode = isTestProvisionMode(config.deploymentEnv);
+  const operationalCeremony =
+    config.deploymentEnv === 'production' && config.operationalCeremonyEnabled === true;
+
+  if (operationalCeremony && required.length === 0) {
     throw new LedgerDomainError(
       'VALIDATION',
-      'Phase 21 provision cannot target the operational database name',
-      { details: { reason: 'OPERATIONAL_DATABASE_FORBIDDEN', database: required } },
+      'production operational ceremony requires non-empty requiredDatabaseName',
+      { details: { reason: 'REQUIRED_DATABASE_NAME_MISSING' } },
     );
   }
+
   const result = await client.query<{ name: string }>(`SELECT current_database() AS name`);
   const current = result.rows[0]?.name;
   if (current === undefined) {
     throw new LedgerDomainError('INTERNAL', 'current_database() returned no row');
   }
-  if (current === PHASE21_OPERATIONAL_DATABASE_NAME) {
-    throw new LedgerDomainError(
-      'VALIDATION',
-      'connected database is the operational alex_rewards database',
-      { details: { reason: 'OPERATIONAL_DATABASE_CONNECTED', database: current } },
-    );
-  }
-  if (current !== required) {
-    throw new LedgerDomainError(
-      'VALIDATION',
-      'connected database does not match required database identity',
-      {
-        details: {
-          reason: 'DATABASE_IDENTITY_MISMATCH',
-          required,
-          current,
+
+  if (testMode) {
+    if (current === PHASE21_OPERATIONAL_DATABASE_NAME) {
+      throw new LedgerDomainError(
+        'VALIDATION',
+        'connected database is the operational alex_rewards database',
+        { details: { reason: 'OPERATIONAL_DATABASE_CONNECTED', database: current } },
+      );
+    }
+    if (required.length === 0) {
+      return;
+    }
+    if (required === PHASE21_OPERATIONAL_DATABASE_NAME) {
+      throw new LedgerDomainError(
+        'VALIDATION',
+        'Phase 21 test/local provision cannot require the operational database name',
+        { details: { reason: 'OPERATIONAL_DATABASE_FORBIDDEN', database: required } },
+      );
+    }
+    if (current !== required) {
+      throw new LedgerDomainError(
+        'VALIDATION',
+        'connected database does not match required database identity',
+        {
+          details: {
+            reason: 'DATABASE_IDENTITY_MISMATCH',
+            required,
+            current,
+          },
         },
-      },
-    );
+      );
+    }
+    return;
   }
+
+  if (operationalCeremony) {
+    if (current !== required) {
+      throw new LedgerDomainError(
+        'VALIDATION',
+        'connected database does not match required database identity',
+        {
+          details: {
+            reason: 'DATABASE_IDENTITY_MISMATCH',
+            required,
+            current,
+          },
+        },
+      );
+    }
+    return;
+  }
+
+  throw new LedgerDomainError(
+    'VALIDATION',
+    'Phase 21 provision database identity check refused for this mode',
+    {
+      details: {
+        reason: 'DATABASE_IDENTITY_MODE_FORBIDDEN',
+        deploymentEnv: config.deploymentEnv,
+        operationalCeremonyEnabled: config.operationalCeremonyEnabled,
+      },
+    },
+  );
 }
 
 async function resolveOwnerAdmin(
@@ -277,7 +372,7 @@ async function resolveMainnetUsdtAsset(
   client: PoolClient,
   config: Phase21ControlledAvailableProvisionRuntimeConfig,
 ): Promise<{ networkId: string; assetId: string; symbol: string }> {
-  await assertOptionalDatabaseIdentity(client, config.requiredDatabaseName);
+  await assertPhase21ProvisionDatabaseIdentity(client, config);
 
   const expectedMaster = assertUsdtJettonMasterNotPlaceholder(config.requiredUsdtJettonMaster);
   const networkCode = PHASE21_CONTROLLED_PROVISION_NETWORK_CODE;

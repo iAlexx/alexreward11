@@ -89,6 +89,7 @@ export {
   PHASE21_REVERSE_AUDIT_ACTION,
   PHASE21_REVERSE_BUSINESS_REF_TYPE,
   PHASE21_REVERSE_IDEMPOTENCY_SCOPE,
+  assertPhase21ProvisionDatabaseIdentity,
   provisionPhase21ControlledAvailable,
   reversePhase21ControlledAvailableProvision,
 } from './phase21-mainnet-controlled-available.js';

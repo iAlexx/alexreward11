@@ -115,37 +115,37 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const seed = generateHotWalletSeed();
-  const identity = identityFromSeed(seed, {
-    networkGlobalId: -239,
-    workchain: 0,
-    phase21MainnetEnabled: true,
-  });
-
   console.log('ALEx Rewards — Hot Wallet key generation (MAINNET ceremony tooling)');
   console.log('Network: TON_MAINNET (global_id=-239) Wallet V5 R1');
-  console.log(`Public key fingerprint: ${identity.publicKeyFingerprint}`);
-  console.log(`Derived address (raw):  ${identity.addressRaw}`);
-  console.log(`Derived address (friendly): ${identity.addressFriendly}`);
   console.log('');
-  console.log('Enter a strong encryption passphrase (min 16 chars).');
+  console.log('Enter a strong encryption passphrase (min 16 chars) BEFORE seed generation.');
   console.log(
     'This passphrase is NEVER stored in env. Loss of passphrase OR bundle = permanent Hot Wallet loss.',
   );
 
-  const { pass1, pass2 } = await obtainPassphrasePair();
-  if (pass1 !== pass2) {
-    scrubBuffer(seed);
-    console.error('Passphrases do not match. Aborting.');
-    process.exit(1);
-  }
-  if (pass1.length < 16) {
-    scrubBuffer(seed);
-    console.error('Passphrase too short (min 16). Aborting.');
-    process.exit(1);
-  }
-
+  let seed: Buffer | undefined;
   try {
+    const { pass1, pass2 } = await obtainPassphrasePair();
+    if (pass1 !== pass2) {
+      console.error('Passphrases do not match. Aborting.');
+      process.exit(1);
+    }
+    if (pass1.length < 16) {
+      console.error('Passphrase too short (min 16). Aborting.');
+      process.exit(1);
+    }
+
+    seed = generateHotWalletSeed();
+    const identity = identityFromSeed(seed, {
+      networkGlobalId: -239,
+      workchain: 0,
+      phase21MainnetEnabled: true,
+    });
+
+    console.log(`Public key fingerprint: ${identity.publicKeyFingerprint}`);
+    console.log(`Derived address (raw):  ${identity.addressRaw}`);
+    console.log(`Derived address (friendly): ${identity.addressFriendly}`);
+
     const bundle = encryptKeyBundle({
       seed,
       passphrase: pass1,
@@ -163,7 +163,9 @@ async function main(): Promise<void> {
     );
     console.log('Step 3 engineering must NOT run a real production ceremony.');
   } finally {
-    scrubBuffer(seed);
+    if (seed !== undefined) {
+      scrubBuffer(seed);
+    }
   }
 }
 

@@ -36,3 +36,18 @@ Owner-facing preflight before any later provisioning ceremony. Completing this c
 - SPIKE transfer policy on Mainnet
 - Renaming `TON_MAINNET` -> `GRAM_MAINNET`
 - Mutating operational DB for provision
+
+
+## Step 3A source corrections gate
+
+READY_FOR_OWNER_PROVISIONING_CEREMONY additionally requires PASS on:
+
+- CONTROLLED_PROVISION_OPERATIONAL_MODE
+- LIVE_FEE_ESTIMATOR_HONEST
+- PRODUCTION_ENV_CUTOVER_PLAN
+- EXTERNAL_VERIFIER_HARDENED
+- WITHDRAWAL_REQUEST_PAUSE_FAIL_CLOSED
+- PRODUCTION_FLAG_BASELINE_TOOL
+- MAINNET_REGISTRY_BOOTSTRAP
+
+READY_FOR_LIVE_PAYOUT remains always false. See PHASE_21_STEP3A_INDEPENDENT_REVIEW_CORRECTIONS.md.

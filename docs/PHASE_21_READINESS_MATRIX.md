@@ -60,3 +60,17 @@ FORWARD_GRAM_ATOMIC=1 (Owner-approved)
 | M28 | Micro-launch band math | 50 x 0.20 gross=10.00; net 9.50 @ 0.01 fee | docs | READY (documented) |
 
 CLI: `pnpm phase21:readiness` / `pnpm phase21:preflight` - overall readiness BLOCKED; preflight may reach `READY_FOR_OWNER_PROVISIONING_CEREMONY` when source foundations complete and remaining items are external. Never `READY_FOR_LIVE_PAYOUT`. No live payout from Step 3.
+
+## Step 3A source corrections (must PASS before ceremony readiness)
+
+| Code | Meaning |
+| --- | --- |
+| CONTROLLED_PROVISION_OPERATIONAL_MODE | Test vs production ceremony env gates |
+| LIVE_FEE_ESTIMATOR_HONEST | MOCK / LIVE_READ_ONLY / UNAVAILABLE honesty |
+| PRODUCTION_ENV_CUTOVER_PLAN | Cutover docs present; not executed |
+| EXTERNAL_VERIFIER_HARDENED | Provider independence + provenance |
+| WITHDRAWAL_REQUEST_PAUSE_FAIL_CLOSED | Missing pause row fails closed |
+| PRODUCTION_FLAG_BASELINE_TOOL | DRY_RUN baseline tooling present |
+| MAINNET_REGISTRY_BOOTSTRAP | DRY_RUN registry bootstrap present |
+
+READY_FOR_LIVE_PAYOUT remains always false.

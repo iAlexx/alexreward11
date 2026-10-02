@@ -18,14 +18,22 @@ import {
   defaultPhase21Step1Observations,
   type Phase21ReadinessObservations,
 } from '../phase21-readiness.js';
+import { planPhase21ProductionFlagBaseline } from '../phase21-production-flag-baseline.js';
+import { planPhase21MainnetRegistryBootstrap } from '../phase21-mainnet-registry-bootstrap.js';
 
-const COMMANDS = new Set(['readiness', 'preflight']);
+const COMMANDS = new Set([
+  'readiness',
+  'preflight',
+  'production-flag-baseline-plan',
+  'mainnet-registry-bootstrap-plan',
+]);
 
 function usage(): never {
   console.error(
     JSON.stringify({
       ok: false,
-      message: 'usage: phase21-ops <readiness|preflight>',
+      message:
+        'usage: phase21-ops <readiness|preflight|production-flag-baseline-plan|mainnet-registry-bootstrap-plan>',
     }),
   );
   process.exit(2);
@@ -127,7 +135,7 @@ function printJson(value: unknown): void {
   console.log(JSON.stringify(value, null, 2));
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   const command = argv[0];
   if (command === undefined || !COMMANDS.has(command)) {
@@ -161,13 +169,61 @@ function main(): void {
     return;
   }
 
+  if (command === 'production-flag-baseline-plan') {
+    const mock = {
+      async query() {
+        return { rows: [] };
+      },
+    };
+    const rows = await planPhase21ProductionFlagBaseline(mock);
+    printJson({
+      ok: true,
+      command: 'production-flag-baseline-plan',
+      mode: 'DRY_RUN',
+      applied: false,
+      rows,
+      notes: [
+        'Plan-only CLI surface; does not connect to operational DB',
+        'Apply requires PHASE21_PRODUCTION_FLAG_BASELINE_APPLY=1 and PHASE21_OPERATIONAL_CEREMONY_ENABLED=true',
+        'Step 3A must not execute apply against ops DB',
+      ],
+    });
+    return;
+  }
+
+  if (command === 'mainnet-registry-bootstrap-plan') {
+    const master =
+      envNonEmpty('TON_MAINNET_USDT_JETTON_MASTER') ??
+      'EQD0vdSA_NedR9uvbgN9EikRX-suesDxGeFg69XQMavfLqIw';
+    const mock = {
+      async query() {
+        return { rows: [] };
+      },
+    };
+    const items = await planPhase21MainnetRegistryBootstrap(mock, {
+      usdtJettonMaster: master,
+    });
+    printJson({
+      ok: true,
+      command: 'mainnet-registry-bootstrap-plan',
+      mode: 'DRY_RUN',
+      applied: false,
+      items,
+      notes: [
+        'Plan-only CLI surface; does not connect to operational DB',
+        'Apply requires PHASE21_MAINNET_REGISTRY_BOOTSTRAP_APPLY=1 and PHASE21_OPERATIONAL_CEREMONY_ENABLED=true',
+        'Hot Wallet values remain OWNER_DECISION_REQUIRED',
+        'Step 3A must not execute apply against ops DB',
+      ],
+    });
+    return;
+  }
+
   usage();
 }
 
-try {
-  main();
-} catch (error: unknown) {
+main().catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
   console.error(JSON.stringify({ ok: false, message }));
   process.exit(1);
-}
+});

@@ -1094,6 +1094,7 @@ export const loadPhase10TestnetProvisionConfig = (
  */
 const LOCAL_PHASE21_CONTROLLED_AVAILABLE_PROVISION_DEFAULTS = {
   PHASE21_CONTROLLED_AVAILABLE_PROVISION_ENABLED: 'false',
+  PHASE21_OPERATIONAL_CEREMONY_ENABLED: 'false',
   PHASE21_CONTROLLED_AVAILABLE_PROVISION_ALLOWED_USER_ID: '',
   PHASE21_CONTROLLED_AVAILABLE_PROVISION_MAX_ATOMIC: '1000000',
   PHASE21_CONTROLLED_AVAILABLE_PROVISION_OWNER_ADMIN_USER_ID: '',
@@ -1108,6 +1109,7 @@ const phase21ControlledAvailableProvisionSchema = commonSchema
   .extend({
     DATABASE_URL: postgresUrl,
     PHASE21_CONTROLLED_AVAILABLE_PROVISION_ENABLED: booleanFromString,
+    PHASE21_OPERATIONAL_CEREMONY_ENABLED: booleanFromString,
     PHASE21_CONTROLLED_AVAILABLE_PROVISION_ALLOWED_USER_ID: optionalUuidOrEmpty,
     PHASE21_CONTROLLED_AVAILABLE_PROVISION_MAX_ATOMIC: optionalPositiveAtomicOrEmpty,
     PHASE21_CONTROLLED_AVAILABLE_PROVISION_OWNER_ADMIN_USER_ID: optionalUuidOrEmpty,
@@ -1125,11 +1127,36 @@ const phase21ControlledAvailableProvisionSchema = commonSchema
   })
   .superRefine((value, context) => {
     if (value.PHASE21_CONTROLLED_AVAILABLE_PROVISION_ENABLED) {
-      if (value.DEPLOYMENT_ENV !== 'local' && value.DEPLOYMENT_ENV !== 'test') {
+      if (value.DEPLOYMENT_ENV === 'staging') {
         context.addIssue({
           code: 'custom',
           path: ['PHASE21_CONTROLLED_AVAILABLE_PROVISION_ENABLED'],
-          message: 'Phase 21 controlled provision cannot be enabled outside local/test',
+          message: 'Phase 21 controlled provision is forbidden in staging',
+        });
+      } else if (value.DEPLOYMENT_ENV === 'production') {
+        if (value.PHASE21_OPERATIONAL_CEREMONY_ENABLED !== true) {
+          context.addIssue({
+            code: 'custom',
+            path: ['PHASE21_OPERATIONAL_CEREMONY_ENABLED'],
+            message:
+              'PHASE21_OPERATIONAL_CEREMONY_ENABLED=true required for production provision ceremony',
+          });
+        }
+        if (
+          value.PHASE21_CONTROLLED_AVAILABLE_PROVISION_REQUIRED_DATABASE_NAME.trim() === ''
+        ) {
+          context.addIssue({
+            code: 'custom',
+            path: ['PHASE21_CONTROLLED_AVAILABLE_PROVISION_REQUIRED_DATABASE_NAME'],
+            message:
+              'REQUIRED_DATABASE_NAME is required for production operational ceremony provision',
+          });
+        }
+      } else if (value.DEPLOYMENT_ENV !== 'local' && value.DEPLOYMENT_ENV !== 'test') {
+        context.addIssue({
+          code: 'custom',
+          path: ['PHASE21_CONTROLLED_AVAILABLE_PROVISION_ENABLED'],
+          message: 'Phase 21 controlled provision deployment env is invalid',
         });
       }
       if (value.WITHDRAWAL_NETWORK_CODE !== 'TON_MAINNET') {
@@ -1192,13 +1219,17 @@ const phase21ControlledAvailableProvisionSchema = commonSchema
           message: 'Testnet/local/PLACEHOLDER Jetton masters forbidden for Phase 21 provision',
         });
       }
-      const requiredDb =
-        value.PHASE21_CONTROLLED_AVAILABLE_PROVISION_REQUIRED_DATABASE_NAME.trim();
-      if (requiredDb === 'alex_rewards') {
+      // Forbid requiring operational DB name only on local/test tooling paths.
+      if (
+        (value.DEPLOYMENT_ENV === 'local' || value.DEPLOYMENT_ENV === 'test') &&
+        value.PHASE21_CONTROLLED_AVAILABLE_PROVISION_REQUIRED_DATABASE_NAME.trim() ===
+          'alex_rewards'
+      ) {
         context.addIssue({
           code: 'custom',
           path: ['PHASE21_CONTROLLED_AVAILABLE_PROVISION_REQUIRED_DATABASE_NAME'],
-          message: 'operational database name alex_rewards is forbidden',
+          message:
+            'operational database name alex_rewards is forbidden for local/test provision tooling',
         });
       }
     }

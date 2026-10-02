@@ -169,3 +169,9 @@ Application roles used for posting must not hold `UPDATE`/`DELETE` on `ledger_tr
 ## Phase 21 Step 3 controlled Mainnet Available (docs / tooling only)
 
 Separate from Phase 10 Testnet provision. Future Owner-authorized Mainnet Available credits use `SUPPORT_ADJUSTMENT` on `TON_MAINNET` / USDT with campaign ceiling `10_000_000` atomic. Status: `SOURCE_IMPLEMENTED_OWNER_APPROVED_BUT_NOT_EXECUTED` — not executed in Step 3. Legacy account types `HOT_WALLET_TON_ASSET` and `TON_NETWORK_FEE_EXPENSE` remain LEGACY_INTERNAL_IDENTIFIER while native display = GRAM. AdsGram gaps remain OPEN.
+
+## Phase 21 Step 3A controlled provision modes
+
+Test/local provision refuses operational DB connection. Production operational ceremony requires
+ceremony gate + required database identity match and may intentionally target the authoritative
+ledger name when Owner configures it. Staging provision remains forbidden.

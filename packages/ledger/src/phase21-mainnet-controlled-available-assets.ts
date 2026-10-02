@@ -18,4 +18,10 @@ export const PHASE21_MICRO_LAUNCH_FEE_USDT = '0.01' as const;
 export const PHASE21_MICRO_LAUNCH_WITHDRAWAL_COUNT = 50 as const;
 export const PHASE21_MICRO_LAUNCH_GROSS_PER_WITHDRAWAL_USDT = '0.20' as const;
 
+/**
+ * Operational Postgres database name.
+ * Used only to refuse accidental ops-DB use from **test/local** provision tooling.
+ * Production operational ceremony intentionally targets the Owner-configured authoritative
+ * ledger name (may equal this value) — do not forbid it on the production ceremony path.
+ */
 export const PHASE21_OPERATIONAL_DATABASE_NAME = 'alex_rewards' as const;

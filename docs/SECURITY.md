@@ -218,3 +218,9 @@ Mainnet bundle encrypt requires explicit phase21MainnetEnabled. Mainnet jetton t
 ## Phase 21 Step 3
 
 Docs + readiness/preflight only. Signer hosting locked to `DEDICATED_CONTROLLED_HOST` (`self_hosted_encrypted`, LOCKED boot, passphrase not in env). Attached Mainnet GRAM remains ESTIMATED; SPIKE policy forbidden for Phase21. Canonical runtime still `b9dd700`; Phase21 not deployed. No live payout.
+
+## Phase 21 Step 3A pause / ceremony gates
+
+- WITHDRAWAL_REQUESTS_PAUSE missing row fails closed in STAGING/PRODUCTION (mirrors payout pause).
+- PRODUCTION safety flag baseline tooling exists (DRY_RUN default; apply ceremony-gated).
+- Controlled Available provision production path requires PHASE21_OPERATIONAL_CEREMONY_ENABLED.

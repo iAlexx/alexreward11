@@ -5,6 +5,7 @@ import {
   MockMainnetFeeEstimator,
   PHASE21_ATTACHED_GRAM_POLICY_STATUS,
   PHASE21_OWNER_APPROVED_FORWARD_GRAM_ATOMIC,
+  type ReadOnlyMainnetFeeProvider,
 } from '../src/index.js';
 
 describe('mainnet fee estimation', () => {
@@ -58,7 +59,7 @@ describe('mainnet fee estimation', () => {
     expect(result.attachedGramLifecycle).toBe('ESTIMATED');
   });
 
-  it('live flag still never broadcasts', async () => {
+  it('LIVE=1 without provider returns UNAVAILABLE (never relabels mock)', async () => {
     process.env.PHASE21_FEE_ESTIMATION_LIVE = '1';
     const estimator = new LiveOptionalMainnetFeeEstimator();
     const result = await estimator.estimate({
@@ -67,7 +68,60 @@ describe('mainnet fee estimation', () => {
       jettonMasterIdentity: 'EQ_PHASE21_TEST_ONLY_MAINNET_USDT_MASTER',
       netAmountAtomic: 1n,
     });
+    expect(result.mode).toBe('UNAVAILABLE');
+    expect(result.broadcast).toBe(false);
+    expect(result.attachedGramLifecycle).toBe('ESTIMATED');
+    expect(result.attachedTonAtomicEstimated).toBeNull();
+  });
+
+  it('LIVE=1 with failing provider returns UNAVAILABLE', async () => {
+    process.env.PHASE21_FEE_ESTIMATION_LIVE = '1';
+    const failing: ReadOnlyMainnetFeeProvider = {
+      async estimate() {
+        throw new Error('rpc down');
+      },
+    };
+    const estimator = new LiveOptionalMainnetFeeEstimator(new MockMainnetFeeEstimator(), failing);
+    const result = await estimator.estimate({
+      networkCode: 'TON_MAINNET',
+      networkGlobalId: -239,
+      jettonMasterIdentity: 'EQ_PHASE21_TEST_ONLY_MAINNET_USDT_MASTER',
+      netAmountAtomic: 1n,
+    });
+    expect(result.mode).toBe('UNAVAILABLE');
+    expect(result.broadcast).toBe(false);
+  });
+
+  it('LIVE=1 with injected Mainnet provider returns LIVE_READ_ONLY provenance', async () => {
+    process.env.PHASE21_FEE_ESTIMATION_LIVE = '1';
+    const provider: ReadOnlyMainnetFeeProvider = {
+      async estimate() {
+        return {
+          attachedTonAtomicEstimated: 50_000_000n,
+          estimatedFeeNativeAtomic: 1_000n,
+          providerKind: 'toncenter',
+          providerHost: 'toncenter.example',
+          networkIdentity: '-239',
+          estimateMethod: 'estimateFee',
+        };
+      },
+    };
+    const estimator = new LiveOptionalMainnetFeeEstimator(new MockMainnetFeeEstimator(), provider);
+    const result = await estimator.estimate({
+      networkCode: 'TON_MAINNET',
+      networkGlobalId: -239,
+      jettonMasterIdentity: 'EQ_PHASE21_TEST_ONLY_MAINNET_USDT_MASTER',
+      netAmountAtomic: 1n,
+    });
     expect(result.mode).toBe('LIVE_READ_ONLY');
     expect(result.broadcast).toBe(false);
+    expect(result.attachedGramLifecycle).toBe('ESTIMATED');
+    expect(result.providerKind).toBe('toncenter');
+    expect(result.providerHost).toBe('toncenter.example');
+    expect(result.networkIdentity).toBe('-239');
+    expect(result.estimateMethod).toBe('estimateFee');
+    expect(result.walletVersion).toBe('v5R1');
+    expect(result.observedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(result.attachedTonAtomicEstimated).toBe(50_000_000n);
   });
 });

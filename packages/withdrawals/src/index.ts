@@ -689,13 +689,43 @@ export type { WithdrawalPayoutAuthority } from './phase21-runtime-selection.js';
 export {
   validateMainnetJettonMasterAddress,
   validateProviderIndependence,
+  normalizeProviderHost,
   runOptionalMainnetProviderReachabilityProbe,
+  verifyMainnetUsdtWithTwoProviders,
 } from './phase21-external-probes.js';
 export type {
   Phase21ExternalProbeResult,
   Phase21JettonMasterValidation,
   Phase21ProviderIndependenceValidation,
+  Phase21ProbeProvenance,
+  Phase21TwoProviderVerificationResult,
+  MainnetIdentityProbeAdapter,
+  UsdtJettonMetadataProbeAdapter,
+  JettonWalletDerivationProbeAdapter,
 } from './phase21-external-probes.js';
+
+export {
+  PHASE21_PRODUCTION_FLAG_BASELINE,
+  planPhase21ProductionFlagBaseline,
+  runPhase21ProductionFlagBaseline,
+} from './phase21-production-flag-baseline.js';
+export type {
+  Phase21ProductionFlagBaselineMode,
+  Phase21ProductionFlagBaselinePlanRow,
+  Phase21ProductionFlagBaselineResult,
+  Phase21ProductionBaselineFlagKey,
+} from './phase21-production-flag-baseline.js';
+
+export {
+  planPhase21MainnetRegistryBootstrap,
+  runPhase21MainnetRegistryBootstrap,
+} from './phase21-mainnet-registry-bootstrap.js';
+export type {
+  Phase21MainnetRegistryBootstrapInput,
+  Phase21MainnetRegistryBootstrapMode,
+  Phase21MainnetRegistryBootstrapResult,
+  Phase21MainnetRegistryPlanItem,
+} from './phase21-mainnet-registry-bootstrap.js';
 
 export {
   realPayoutNetworkFromPhase10,

@@ -105,6 +105,7 @@ function baseConfig(input: {
   userId: string;
   enabled?: boolean;
   deploymentEnv?: Phase21ControlledAvailableProvisionRuntimeConfig['deploymentEnv'];
+  operationalCeremonyEnabled?: boolean;
   networkCode?: string;
   assetSymbol?: string;
   maxAmountAtomic?: string;
@@ -115,6 +116,7 @@ function baseConfig(input: {
   return {
     enabled: input.enabled ?? true,
     deploymentEnv: input.deploymentEnv ?? 'test',
+    operationalCeremonyEnabled: input.operationalCeremonyEnabled ?? false,
     withdrawalNetworkCode: input.networkCode ?? 'TON_MAINNET',
     withdrawalAssetSymbol: input.assetSymbol ?? 'USDT',
     allowedUserId: input.userId,
@@ -191,14 +193,51 @@ describePhase21('phase21 mainnet controlled available provision', () => {
     ).rejects.toMatchObject({ code: 'VALIDATION', details: { reason: 'PROVISION_DISABLED' } });
   });
 
-  it('2 wrong environment → reject', async () => {
+  it('2 production without ceremony gate → reject', async () => {
     await expect(
       provisionPhase21ControlledAvailable(
         pool,
         baseConfig({ adminUserId, userId, deploymentEnv: 'production' }),
         { operationId: randomUUID(), userId, amountAtomic: '1000', reason: 'test' },
       ),
-    ).rejects.toMatchObject({ code: 'VALIDATION', details: { reason: 'INVALID_DEPLOYMENT_ENV' } });
+    ).rejects.toMatchObject({
+      code: 'VALIDATION',
+      details: { reason: 'OPERATIONAL_CEREMONY_GATE_REQUIRED' },
+    });
+  });
+
+  it('2b staging → reject STAGING_PROVISION_FORBIDDEN', async () => {
+    await expect(
+      provisionPhase21ControlledAvailable(
+        pool,
+        baseConfig({ adminUserId, userId, deploymentEnv: 'staging' }),
+        { operationId: randomUUID(), userId, amountAtomic: '1000', reason: 'test' },
+      ),
+    ).rejects.toMatchObject({
+      code: 'VALIDATION',
+      details: { reason: 'STAGING_PROVISION_FORBIDDEN' },
+    });
+  });
+
+  it('2c production + ceremony + matching disposable DB identity → accept', async () => {
+    const dbName = await pool.query<{ name: string }>(`SELECT current_database() AS name`);
+    const currentDb = dbName.rows[0]?.name;
+    expect(currentDb).toBeTruthy();
+    expect(currentDb).not.toBe('alex_rewards');
+
+    const result = await provisionPhase21ControlledAvailable(
+      pool,
+      baseConfig({
+        adminUserId,
+        userId,
+        deploymentEnv: 'production',
+        operationalCeremonyEnabled: true,
+        requiredDatabaseName: currentDb!,
+      }),
+      { operationId: randomUUID(), userId, amountAtomic: '1000', reason: 'operational-mode-sim' },
+    );
+    expect(result.created).toBe(true);
+    expect(result.amountAtomic).toBe('1000');
   });
 
   it('3 testnet network reject', async () => {

@@ -340,3 +340,8 @@ pnpm phase21:preflight
 - Controlled Available provision CLI must remain disabled; do not mutate operational DB
 - Canonical runtime remains `b9dd700`; Phase21 not deployed
 - Ceremony / GRAM naming / provisioning docs under `docs/PHASE_21_*`
+
+## Phase 21 Step 3A
+
+Do not run operational ceremony, PRODUCTION flag baseline apply, or Mainnet registry apply from Step 3A engineering.
+Preflight READY_FOR_OWNER_PROVISIONING_CEREMONY requires Step 3A source corrections PASS; live payout remains blocked.

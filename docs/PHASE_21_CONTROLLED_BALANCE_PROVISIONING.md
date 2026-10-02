@@ -35,3 +35,12 @@ Provide a controlled Mainnet Available credit path for micro-launch campaign use
 4. Not live-payout ready by itself.
 
 See `packages/ledger/src/phase21-mainnet-controlled-available-assets.ts` and `docs/PHASE_21_PROVISIONING_CEREMONY_PREFLIGHT.md`.
+
+
+## Step 3A env modes (P21-S3A-001)
+
+- Test/local: provision may run with PHASE21_OPERATIONAL_CEREMONY_ENABLED=false (still requires enabled + disposable DB safety).
+- Staging: always forbidden (STAGING_PROVISION_FORBIDDEN).
+- Production operational ceremony: requires enabled AND PHASE21_OPERATIONAL_CEREMONY_ENABLED=true AND non-empty required database name matching current_database().
+- Operational DB name may be targeted only on the production ceremony path; test tooling still refuses accidental lex_rewards connection.
+- Step 3A does not execute provision against operational Postgres.

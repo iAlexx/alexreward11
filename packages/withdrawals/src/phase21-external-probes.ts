@@ -3,6 +3,7 @@
  *
  * Live Mainnet RPC probes run ONLY when PHASE21_EXTERNAL_PROBE_LIVE=1 and provider URLs
  * are configured. Unit tests must not require live RPC (mock these runners).
+ * Bare HTTP 200 is never treated as Mainnet identity proof.
  */
 import { PHASE21_FORBIDDEN_JETTON_PLACEHOLDERS } from './phase21-config.js';
 
@@ -30,8 +31,92 @@ export interface Phase21ExternalProbeProvider {
   readonly url: string | null;
 }
 
+export interface Phase21ProbeProvenance {
+  readonly providerKind: string;
+  readonly providerHost: string;
+  readonly networkIdentity: string | null;
+  readonly observedAt: string;
+  readonly resource: string;
+  readonly verificationMethod: string;
+  readonly ok: boolean;
+}
+
+export interface MainnetIdentityProbeAdapter {
+  probe(input: { providerKind: string; providerUrl: string }): Promise<{
+    ok: boolean;
+    networkGlobalId: number | null;
+    message: string;
+    providerHost: string;
+  }>;
+}
+
+export interface UsdtJettonMetadataProbeAdapter {
+  probe(input: {
+    providerKind: string;
+    providerUrl: string;
+    jettonMaster: string;
+  }): Promise<{
+    ok: boolean;
+    symbol: string | null;
+    decimals: number | null;
+    message: string;
+    providerHost: string;
+  }>;
+}
+
+export interface JettonWalletDerivationProbeAdapter {
+  probe(input: {
+    providerKind: string;
+    providerUrl: string;
+    jettonMaster: string;
+    ownerAddress: string;
+  }): Promise<{
+    ok: boolean;
+    jettonWalletAddress: string | null;
+    message: string;
+    providerHost: string;
+  }>;
+}
+
+export interface Phase21TwoProviderVerificationResult {
+  readonly ok: boolean;
+  readonly code: string;
+  readonly message: string;
+  readonly independence: Phase21ProviderIndependenceValidation;
+  readonly primary: Phase21ProbeProvenance | null;
+  readonly secondary: Phase21ProbeProvenance | null;
+  readonly notes: readonly string[];
+}
+
 function nonEmpty(value: string | null | undefined): boolean {
   return typeof value === 'string' && value.trim() !== '';
+}
+
+/**
+ * Strip credentials and query/fragment; return hostname only.
+ * Returns empty string when URL cannot be parsed.
+ */
+export function normalizeProviderHost(url: string): string {
+  const trimmed = url.trim();
+  if (trimmed.length === 0) return '';
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.hostname.toLowerCase();
+  } catch {
+    // Tolerate host-only inputs without scheme for independence checks.
+    try {
+      const parsed = new URL(`https://${trimmed}`);
+      return parsed.hostname.toLowerCase();
+    } catch {
+      return '';
+    }
+  }
+}
+
+function hostAliases(a: string, b: string): boolean {
+  if (a.length === 0 || b.length === 0) return false;
+  if (a === b) return true;
+  return a.endsWith(`.${b}`) || b.endsWith(`.${a}`);
 }
 
 export function validateMainnetJettonMasterAddress(
@@ -69,6 +154,10 @@ export function validateMainnetJettonMasterAddress(
   };
 }
 
+/**
+ * Require different vendor kind AND different normalized hostname.
+ * Same kind fails even with different URLs. Hostname aliases fail.
+ */
 export function validateProviderIndependence(
   primary: Phase21ExternalProbeProvider,
   secondary: Phase21ExternalProbeProvider,
@@ -87,13 +176,29 @@ export function validateProviderIndependence(
       message: 'Secondary provider kind and URL required before independence check',
     };
   }
-  const sameKind = primary.kind!.trim().toLowerCase() === secondary.kind!.trim().toLowerCase();
-  const sameUrl = primary.url!.trim() === secondary.url!.trim();
-  if (sameKind && sameUrl) {
+  const kindA = primary.kind!.trim().toLowerCase();
+  const kindB = secondary.kind!.trim().toLowerCase();
+  if (kindA === kindB) {
     return {
       ok: false,
       code: 'PROVIDERS_NOT_INDEPENDENT',
-      message: 'Secondary provider must differ from primary (kind or URL)',
+      message: 'Secondary provider must use a different vendor kind than primary',
+    };
+  }
+  const hostA = normalizeProviderHost(primary.url!);
+  const hostB = normalizeProviderHost(secondary.url!);
+  if (hostA.length === 0 || hostB.length === 0) {
+    return {
+      ok: false,
+      code: 'PROVIDER_HOST_UNPARSEABLE',
+      message: 'Provider URL hostname could not be normalized',
+    };
+  }
+  if (hostA === hostB || hostAliases(hostA, hostB)) {
+    return {
+      ok: false,
+      code: 'PROVIDERS_NOT_INDEPENDENT',
+      message: 'Secondary provider hostname must differ and must not alias primary',
     };
   }
   return {
@@ -107,12 +212,19 @@ export interface Phase21ExternalProbeResult {
   readonly probe: string;
   readonly ok: boolean;
   readonly message: string;
+  readonly incomplete?: boolean;
+  readonly provenance?: Phase21ProbeProvenance;
 }
 
-/** Optional live read-only probe - never sends BOC / never signs. */
+/**
+ * Optional live reachability probe — never treats bare HTTP 200 as Mainnet identity.
+ * When an identity adapter is supplied, use it; otherwise return incomplete/unavailable.
+ */
 export async function runOptionalMainnetProviderReachabilityProbe(input: {
   readonly providerUrl: string;
+  readonly providerKind?: string;
   readonly fetchImpl?: typeof fetch;
+  readonly identityAdapter?: MainnetIdentityProbeAdapter;
 }): Promise<Phase21ExternalProbeResult> {
   const live = process.env.PHASE21_EXTERNAL_PROBE_LIVE === '1';
   if (!live) {
@@ -120,23 +232,304 @@ export async function runOptionalMainnetProviderReachabilityProbe(input: {
       probe: 'provider_reachability',
       ok: false,
       message: 'Live probe skipped (PHASE21_EXTERNAL_PROBE_LIVE!=1)',
+      incomplete: true,
     };
   }
+
+  if (input.identityAdapter !== undefined) {
+    const kind = input.providerKind?.trim() || 'unknown';
+    try {
+      const identity = await input.identityAdapter.probe({
+        providerKind: kind,
+        providerUrl: input.providerUrl,
+      });
+      const mainnetOk = identity.ok && identity.networkGlobalId === -239;
+      return {
+        probe: 'provider_reachability',
+        ok: mainnetOk,
+        incomplete: !mainnetOk,
+        message: mainnetOk
+          ? 'Provider Mainnet identity confirmed (-239)'
+          : `Provider identity incomplete or not Mainnet: ${identity.message}`,
+        provenance: {
+          providerKind: kind,
+          providerHost: identity.providerHost || normalizeProviderHost(input.providerUrl),
+          networkIdentity:
+            identity.networkGlobalId === null ? null : String(identity.networkGlobalId),
+          observedAt: new Date().toISOString(),
+          resource: 'network_identity',
+          verificationMethod: 'identity_adapter',
+          ok: mainnetOk,
+        },
+      };
+    } catch (error: unknown) {
+      return {
+        probe: 'provider_reachability',
+        ok: false,
+        incomplete: true,
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  // Without identity adapter: may check HTTP reachability but MUST NOT claim Mainnet identity.
   const fetchFn = input.fetchImpl ?? fetch;
   try {
     const response = await fetchFn(input.providerUrl, { method: 'GET' });
     return {
       probe: 'provider_reachability',
-      ok: response.ok,
+      ok: false,
+      incomplete: true,
       message: response.ok
-        ? 'Provider HTTP reachable'
-        : 'Provider HTTP status ' + String(response.status),
+        ? 'Provider HTTP reachable but Mainnet identity not proven (bare HTTP 200 is insufficient)'
+        : `Provider HTTP status ${String(response.status)}; Mainnet identity not proven`,
+      provenance: {
+        providerKind: input.providerKind?.trim() || 'unknown',
+        providerHost: normalizeProviderHost(input.providerUrl),
+        networkIdentity: null,
+        observedAt: new Date().toISOString(),
+        resource: 'http_reachability',
+        verificationMethod: 'http_get_no_identity',
+        ok: false,
+      },
     };
   } catch (error: unknown) {
     return {
       probe: 'provider_reachability',
       ok: false,
+      incomplete: true,
       message: error instanceof Error ? error.message : String(error),
     };
   }
+}
+
+/**
+ * Orchestrate two-provider Mainnet USDT verification. Fail closed on mismatch.
+ * Never broadcasts.
+ */
+export async function verifyMainnetUsdtWithTwoProviders(input: {
+  readonly primary: Phase21ExternalProbeProvider;
+  readonly secondary: Phase21ExternalProbeProvider;
+  readonly jettonMaster: string;
+  readonly ownerAddress?: string;
+  readonly identityAdapter: MainnetIdentityProbeAdapter;
+  readonly metadataAdapter: UsdtJettonMetadataProbeAdapter;
+  readonly walletDerivationAdapter?: JettonWalletDerivationProbeAdapter;
+}): Promise<Phase21TwoProviderVerificationResult> {
+  const observedAt = new Date().toISOString();
+  const independence = validateProviderIndependence(input.primary, input.secondary);
+  if (!independence.ok) {
+    return {
+      ok: false,
+      code: independence.code,
+      message: independence.message,
+      independence,
+      primary: null,
+      secondary: null,
+      notes: ['Fail closed: providers not independent', 'No broadcast'],
+    };
+  }
+
+  const jettonCheck = validateMainnetJettonMasterAddress(input.jettonMaster);
+  if (!jettonCheck.ok) {
+    return {
+      ok: false,
+      code: jettonCheck.code,
+      message: jettonCheck.message,
+      independence,
+      primary: null,
+      secondary: null,
+      notes: ['Fail closed: Jetton master invalid', 'No broadcast'],
+    };
+  }
+
+  const primaryKind = input.primary.kind!.trim();
+  const secondaryKind = input.secondary.kind!.trim();
+  const primaryUrl = input.primary.url!.trim();
+  const secondaryUrl = input.secondary.url!.trim();
+
+  const [idA, idB] = await Promise.all([
+    input.identityAdapter.probe({ providerKind: primaryKind, providerUrl: primaryUrl }),
+    input.identityAdapter.probe({ providerKind: secondaryKind, providerUrl: secondaryUrl }),
+  ]);
+
+  const primaryIdentityOk = idA.ok && idA.networkGlobalId === -239;
+  const secondaryIdentityOk = idB.ok && idB.networkGlobalId === -239;
+  if (!primaryIdentityOk || !secondaryIdentityOk) {
+    return {
+      ok: false,
+      code: 'MAINNET_IDENTITY_FAILED',
+      message: 'One or both providers failed Mainnet identity (-239) probe',
+      independence,
+      primary: {
+        providerKind: primaryKind,
+        providerHost: idA.providerHost || normalizeProviderHost(primaryUrl),
+        networkIdentity: idA.networkGlobalId === null ? null : String(idA.networkGlobalId),
+        observedAt,
+        resource: 'network_identity',
+        verificationMethod: 'identity_adapter',
+        ok: primaryIdentityOk,
+      },
+      secondary: {
+        providerKind: secondaryKind,
+        providerHost: idB.providerHost || normalizeProviderHost(secondaryUrl),
+        networkIdentity: idB.networkGlobalId === null ? null : String(idB.networkGlobalId),
+        observedAt,
+        resource: 'network_identity',
+        verificationMethod: 'identity_adapter',
+        ok: secondaryIdentityOk,
+      },
+      notes: [idA.message, idB.message, 'No broadcast'],
+    };
+  }
+
+  const [metaA, metaB] = await Promise.all([
+    input.metadataAdapter.probe({
+      providerKind: primaryKind,
+      providerUrl: primaryUrl,
+      jettonMaster: input.jettonMaster,
+    }),
+    input.metadataAdapter.probe({
+      providerKind: secondaryKind,
+      providerUrl: secondaryUrl,
+      jettonMaster: input.jettonMaster,
+    }),
+  ]);
+
+  const metaAOk = metaA.ok && metaA.symbol === 'USDT' && metaA.decimals === 6;
+  const metaBOk = metaB.ok && metaB.symbol === 'USDT' && metaB.decimals === 6;
+  if (!metaAOk || !metaBOk) {
+    return {
+      ok: false,
+      code: 'USDT_METADATA_MISMATCH',
+      message: 'USDT metadata must be symbol=USDT decimals=6 on both providers',
+      independence,
+      primary: {
+        providerKind: primaryKind,
+        providerHost: metaA.providerHost || normalizeProviderHost(primaryUrl),
+        networkIdentity: '-239',
+        observedAt,
+        resource: 'jetton_metadata',
+        verificationMethod: 'metadata_adapter',
+        ok: metaAOk,
+      },
+      secondary: {
+        providerKind: secondaryKind,
+        providerHost: metaB.providerHost || normalizeProviderHost(secondaryUrl),
+        networkIdentity: '-239',
+        observedAt,
+        resource: 'jetton_metadata',
+        verificationMethod: 'metadata_adapter',
+        ok: metaBOk,
+      },
+      notes: [metaA.message, metaB.message, 'No broadcast'],
+    };
+  }
+
+  if (metaA.symbol !== metaB.symbol || metaA.decimals !== metaB.decimals) {
+    return {
+      ok: false,
+      code: 'PROVIDER_METADATA_DISAGREE',
+      message: 'Primary and secondary USDT metadata disagree',
+      independence,
+      primary: {
+        providerKind: primaryKind,
+        providerHost: metaA.providerHost || normalizeProviderHost(primaryUrl),
+        networkIdentity: '-239',
+        observedAt,
+        resource: 'jetton_metadata',
+        verificationMethod: 'metadata_adapter',
+        ok: false,
+      },
+      secondary: {
+        providerKind: secondaryKind,
+        providerHost: metaB.providerHost || normalizeProviderHost(secondaryUrl),
+        networkIdentity: '-239',
+        observedAt,
+        resource: 'jetton_metadata',
+        verificationMethod: 'metadata_adapter',
+        ok: false,
+      },
+      notes: ['Fail closed on provider disagreement', 'No broadcast'],
+    };
+  }
+
+  if (
+    input.walletDerivationAdapter !== undefined &&
+    nonEmpty(input.ownerAddress)
+  ) {
+    const [wA, wB] = await Promise.all([
+      input.walletDerivationAdapter.probe({
+        providerKind: primaryKind,
+        providerUrl: primaryUrl,
+        jettonMaster: input.jettonMaster,
+        ownerAddress: input.ownerAddress!,
+      }),
+      input.walletDerivationAdapter.probe({
+        providerKind: secondaryKind,
+        providerUrl: secondaryUrl,
+        jettonMaster: input.jettonMaster,
+        ownerAddress: input.ownerAddress!,
+      }),
+    ]);
+    if (
+      !wA.ok ||
+      !wB.ok ||
+      wA.jettonWalletAddress === null ||
+      wB.jettonWalletAddress === null ||
+      wA.jettonWalletAddress !== wB.jettonWalletAddress
+    ) {
+      return {
+        ok: false,
+        code: 'JETTON_WALLET_DERIVATION_DISAGREE',
+        message: 'Jetton wallet derivation failed or disagreed across providers',
+        independence,
+        primary: {
+          providerKind: primaryKind,
+          providerHost: wA.providerHost || normalizeProviderHost(primaryUrl),
+          networkIdentity: '-239',
+          observedAt,
+          resource: 'jetton_wallet_derivation',
+          verificationMethod: 'wallet_derivation_adapter',
+          ok: false,
+        },
+        secondary: {
+          providerKind: secondaryKind,
+          providerHost: wB.providerHost || normalizeProviderHost(secondaryUrl),
+          networkIdentity: '-239',
+          observedAt,
+          resource: 'jetton_wallet_derivation',
+          verificationMethod: 'wallet_derivation_adapter',
+          ok: false,
+        },
+        notes: [wA.message, wB.message, 'No broadcast'],
+      };
+    }
+  }
+
+  return {
+    ok: true,
+    code: 'MAINNET_USDT_TWO_PROVIDER_OK',
+    message: 'Mainnet identity (-239) and USDT metadata agreed across independent providers',
+    independence,
+    primary: {
+      providerKind: primaryKind,
+      providerHost: metaA.providerHost || normalizeProviderHost(primaryUrl),
+      networkIdentity: '-239',
+      observedAt,
+      resource: 'jetton_metadata',
+      verificationMethod: 'two_provider_orchestrated',
+      ok: true,
+    },
+    secondary: {
+      providerKind: secondaryKind,
+      providerHost: metaB.providerHost || normalizeProviderHost(secondaryUrl),
+      networkIdentity: '-239',
+      observedAt,
+      resource: 'jetton_metadata',
+      verificationMethod: 'two_provider_orchestrated',
+      ok: true,
+    },
+    notes: ['Read-only verification only', 'No broadcast'],
+  };
 }

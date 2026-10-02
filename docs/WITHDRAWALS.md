@@ -335,3 +335,9 @@ Worker supports explicit PHASE21_MAINNET_ENABLED selection (default OFF). Real p
 ## Phase 21 Step 3
 
 Forward GRAM gas policy Owner-approved at 1 nanogram; attached GRAM lifecycle remains ESTIMATED (not activated). Controlled Mainnet Available provision tooling status: `SOURCE_IMPLEMENTED_OWNER_APPROVED_BUT_NOT_EXECUTED` (SUPPORT_ADJUSTMENT; ceiling 10_000_000 atomic USDT; disabled). Readiness may reach `READY_FOR_OWNER_PROVISIONING_CEREMONY`; `READY_FOR_LIVE_PAYOUT=NO`. No live Mainnet payout in Step 3.
+
+## Phase 21 Step 3A
+
+- Withdrawal request pause fail-closed for missing STAGING/PRODUCTION rows.
+- Mainnet registry bootstrap + PRODUCTION flag baseline tooling are DRY_RUN by default.
+- Fee estimator honesty: LIVE without provider => UNAVAILABLE (never relabel mock).

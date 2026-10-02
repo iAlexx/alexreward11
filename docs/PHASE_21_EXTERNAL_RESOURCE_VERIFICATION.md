@@ -17,3 +17,11 @@ HTTP reachability only when `PHASE21_EXTERNAL_PROBE_LIVE=1`. No `sendBoc`. Unit 
 - Independent primary/secondary Mainnet providers still **unconfigured**.
 - Probes do not authorize funding, unlock, unpause, or live payout.
 - Preflight may reach `READY_FOR_OWNER_PROVISIONING_CEREMONY` while these remain BLOCKED.
+
+
+## Step 3A hardening (P21-S3A-004)
+
+- Provider independence requires different vendor kind AND different normalized hostname (aliases fail).
+- Probe provenance includes providerKind, providerHost, networkIdentity, observedAt, resource, verificationMethod, ok.
+- Bare HTTP 200 is never Mainnet identity; identity adapter or incomplete/unavailable.
+- erifyMainnetUsdtWithTwoProviders fail-closed orchestration is available for Owner ceremony use (offline unit-tested with mocks).

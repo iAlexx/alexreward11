@@ -83,6 +83,14 @@ export interface Phase21ReadinessObservations {
   readonly multichainWalletHardeningReady?: boolean;
   readonly controlledProvisionToolingReady?: boolean;
   readonly offlineMainnetCeremonyToolingReady?: boolean;
+  /** Step 3A source correction observations (must PASS for ceremony readiness). */
+  readonly controlledProvisionOperationalModeReady?: boolean;
+  readonly liveFeeEstimatorHonest?: boolean;
+  readonly productionEnvCutoverPlanReady?: boolean;
+  readonly externalVerifierHardened?: boolean;
+  readonly withdrawalRequestPauseFailClosed?: boolean;
+  readonly productionFlagBaselineToolReady?: boolean;
+  readonly mainnetRegistryBootstrapReady?: boolean;
 }
 
 export interface Phase21ReadinessReport {
@@ -257,6 +265,87 @@ export function buildPhase21ReadinessReport(
     details: {
       offlineMainnetCeremonyToolingReady:
         observations.offlineMainnetCeremonyToolingReady !== false,
+    },
+  });
+
+  items.push({
+    code: 'CONTROLLED_PROVISION_OPERATIONAL_MODE',
+    status: observations.controlledProvisionOperationalModeReady === false ? 'BLOCKED' : 'PASS',
+    message:
+      observations.controlledProvisionOperationalModeReady === false
+        ? 'Controlled provision operational ceremony env modes incomplete'
+        : 'Controlled provision supports test mode and production operational ceremony gates',
+    details: {
+      controlledProvisionOperationalModeReady:
+        observations.controlledProvisionOperationalModeReady !== false,
+    },
+  });
+
+  items.push({
+    code: 'LIVE_FEE_ESTIMATOR_HONEST',
+    status: observations.liveFeeEstimatorHonest === false ? 'BLOCKED' : 'PASS',
+    message:
+      observations.liveFeeEstimatorHonest === false
+        ? 'Live fee estimator honesty incomplete (must not relabel mock as LIVE_READ_ONLY)'
+        : 'Live fee estimator honest (MOCK / LIVE_READ_ONLY / UNAVAILABLE)',
+    details: { liveFeeEstimatorHonest: observations.liveFeeEstimatorHonest !== false },
+  });
+
+  items.push({
+    code: 'PRODUCTION_ENV_CUTOVER_PLAN',
+    status: observations.productionEnvCutoverPlanReady === false ? 'BLOCKED' : 'PASS',
+    message:
+      observations.productionEnvCutoverPlanReady === false
+        ? 'Production environment cutover plan documentation incomplete'
+        : 'Production DEPLOYMENT_ENV cutover plan documented (not executed)',
+    details: {
+      productionEnvCutoverPlanReady: observations.productionEnvCutoverPlanReady !== false,
+    },
+  });
+
+  items.push({
+    code: 'EXTERNAL_VERIFIER_HARDENED',
+    status: observations.externalVerifierHardened === false ? 'BLOCKED' : 'PASS',
+    message:
+      observations.externalVerifierHardened === false
+        ? 'External Mainnet verifier hardening incomplete'
+        : 'External verifier independence + provenance hardening present',
+    details: { externalVerifierHardened: observations.externalVerifierHardened !== false },
+  });
+
+  items.push({
+    code: 'WITHDRAWAL_REQUEST_PAUSE_FAIL_CLOSED',
+    status: observations.withdrawalRequestPauseFailClosed === false ? 'BLOCKED' : 'PASS',
+    message:
+      observations.withdrawalRequestPauseFailClosed === false
+        ? 'WITHDRAWAL_REQUESTS_PAUSE missing-row fail-closed incomplete'
+        : 'WITHDRAWAL_REQUESTS_PAUSE fails closed when missing in STAGING/PRODUCTION',
+    details: {
+      withdrawalRequestPauseFailClosed: observations.withdrawalRequestPauseFailClosed !== false,
+    },
+  });
+
+  items.push({
+    code: 'PRODUCTION_FLAG_BASELINE_TOOL',
+    status: observations.productionFlagBaselineToolReady === false ? 'BLOCKED' : 'PASS',
+    message:
+      observations.productionFlagBaselineToolReady === false
+        ? 'PRODUCTION safety flag baseline tooling incomplete'
+        : 'PRODUCTION safety flag baseline tooling present (DRY_RUN default; not executed)',
+    details: {
+      productionFlagBaselineToolReady: observations.productionFlagBaselineToolReady !== false,
+    },
+  });
+
+  items.push({
+    code: 'MAINNET_REGISTRY_BOOTSTRAP',
+    status: observations.mainnetRegistryBootstrapReady === false ? 'BLOCKED' : 'PASS',
+    message:
+      observations.mainnetRegistryBootstrapReady === false
+        ? 'Mainnet registry bootstrap tooling incomplete'
+        : 'Mainnet registry bootstrap tooling present (DRY_RUN default; not executed)',
+    details: {
+      mainnetRegistryBootstrapReady: observations.mainnetRegistryBootstrapReady !== false,
     },
   });
 
@@ -751,5 +840,12 @@ export function defaultPhase21Step1Observations(): Phase21ReadinessObservations 
     multichainWalletHardeningReady: true,
     controlledProvisionToolingReady: true,
     offlineMainnetCeremonyToolingReady: true,
+    controlledProvisionOperationalModeReady: true,
+    liveFeeEstimatorHonest: true,
+    productionEnvCutoverPlanReady: true,
+    externalVerifierHardened: true,
+    withdrawalRequestPauseFailClosed: true,
+    productionFlagBaselineToolReady: true,
+    mainnetRegistryBootstrapReady: true,
   };
 }
