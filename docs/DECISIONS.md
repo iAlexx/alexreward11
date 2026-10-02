@@ -919,3 +919,14 @@ showed empty Risk/Trust/Eligibility tables (proposed versions 1/1/1). Documented
 engine mismatch: Withdrawal Engine treats missing `WITHDRAWAL_REQUESTS_PAUSE` as
 not-paused; Eligibility fails closed. Recommended separate Owner-authorized STAGING
 seed `enabled=true` + `feature_flag_versions` v1 — **not executed** in 4C.1.
+
+## Clarification — Phase 20 Step 4C.2 two-commit preflight evidence seal (2026-10-02)
+
+Preflight evidence uses a two-commit ceremony:
+
+1. **TOOLING_HEAD** — seals path hygiene, repository-relative snapshot serialization, and
+   clean-tracked-source enforcement before live discovery.
+2. **EVIDENCE_HEAD** — later commit storing the regenerated snapshot/docs.
+
+The snapshot `sourceCommit` equals TOOLING_HEAD only (never self-referential EVIDENCE_HEAD).
+Absolute personal filesystem paths and credentials must not appear in committed snapshots.

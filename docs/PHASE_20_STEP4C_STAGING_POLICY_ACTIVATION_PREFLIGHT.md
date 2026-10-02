@@ -1,16 +1,22 @@
-# Phase 20 Step 4C / 4C.1 — Staging Policy Activation Pre-Flight
+# Phase 20 Step 4C / 4C.1 / 4C.2 — Staging Policy Activation Pre-Flight
 
 **PHASE20_GATE:** HOLD  
-**Step:** 4C.1 — PREFLIGHT PATH FIX + WITHDRAWAL PAUSE SEED PLAN (no activation; no flag seed executed)  
+**Step:** 4C.2 — seal reproducible preflight evidence (two-commit ceremony; no activation)  
 **Branch:** `phase20-closed-beta`  
-**Fresh preflight source commit:** `70841608eb1fd79cf658f10559d58501a03d5c1f`  
-**Fresh snapshot timestamp:** `2026-10-02T04:06:25.626Z`  
 **Canonical artifact:** `packages/fraud/policy/phase20-closed-beta-owner-approved.json`  
 **activationAuthorized (artifact):** `false` (unchanged)  
 **Machine snapshot:** `docs/phase20-step4c-preflight-snapshot.json`  
 **Reproducible command:** `pnpm phase20:step4c:preflight` (requires `PHASE20_STAGING_PREFLIGHT_DATABASE_URL`)
 
----
+### Commit semantics (intentional, non-circular)
+
+| Role                                                      | Meaning                                                                                                                                                             |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Tooling/source commit (`sourceCommit` / TOOLING_HEAD)** | Exact clean tracked commit whose preflight tooling performed the read-only discovery. Recorded **inside** the snapshot.                                             |
+| **Evidence commit (EVIDENCE_HEAD)**                       | Later commit that stores the regenerated snapshot/docs. **Not** embedded as `sourceCommit` (would be circular). Filled in return output / DECISIONS after Commit B. |
+
+**Tooling/source commit used for fresh discovery:** _(filled after Commit A — TOOLING_HEAD)_  
+**Evidence commit storing snapshot/docs:** _(filled after Commit B — EVIDENCE_HEAD; not equal to sourceCommit)_
 
 ## Explicit non-authorizations
 
@@ -31,6 +37,16 @@ External Owner authorization governs any future execution.
 ---
 
 ## 1. Tooling reproducibility (Step 4C.1 fix)
+
+## 1a. Step 4C.2 evidence hygiene
+
+- Snapshot `pathResolution` must be **repository-relative only** (`packages/fraud`, `.`, `docs/...`).
+- Absolute Windows/home/desktop paths must never be committed.
+- Live preflight refuses dirty tracked source (`git diff --quiet` + `git diff --cached --quiet`) before discovery.
+- Unrelated untracked files are ignored and must not be deleted.
+- Two-commit ceremony: Commit A = tooling seal; Commit B = evidence only; `sourceCommit` always = TOOLING_HEAD.
+
+## 1b. Tooling reproducibility (Step 4C.1 fix)
 
 ### Bug
 

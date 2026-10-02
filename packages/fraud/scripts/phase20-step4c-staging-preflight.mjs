@@ -1,24 +1,32 @@
 /**
  * Phase 20 Step 4C — staging policy activation PREFLIGHT (read-only / dry-run).
  *
- * Default behavior: refuse to run without PHASE20_STAGING_PREFLIGHT_DATABASE_URL,
- * enforce default_transaction_read_only=on, SELECT-only discovery, write snapshot JSON.
+ * Default behavior: refuse without PHASE20_STAGING_PREFLIGHT_DATABASE_URL,
+ * require clean tracked source, enforce default_transaction_read_only=on,
+ * SELECT-only discovery, write snapshot JSON with repository-relative paths.
  *
  * This script intentionally does NOT implement activation / INSERT / UPDATE.
  * There is no PHASE20_STEP4C_ACTIVATE path in this Step.
+ *
+ * Snapshot semantics:
+ * - sourceCommit = clean tooling/source HEAD that performed discovery (TOOLING_HEAD)
+ * - evidenceCommit = later commit that stores the snapshot (not self-referential)
  */
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
 import pg from 'pg';
 
 import {
   assertPhase20Step4cPathsHealthy,
+  assertTrackedSourceClean,
   resolvePhase20Step4cPaths,
+  toCanonicalPathEvidence,
 } from './phase20-step4c-paths.mjs';
 
-const { fraudPackageRoot, repoRoot, artifactPath, snapshotPath } = resolvePhase20Step4cPaths();
-assertPhase20Step4cPathsHealthy({ fraudPackageRoot, repoRoot, artifactPath, snapshotPath });
+const absPaths = resolvePhase20Step4cPaths();
+assertPhase20Step4cPathsHealthy(absPaths);
+const { repoRoot, artifactPath, snapshotPath } = absPaths;
+const pathEvidence = toCanonicalPathEvidence(absPaths);
 
 if (process.env.PHASE20_STEP4C_ACTIVATE === '1') {
   console.error(
@@ -44,6 +52,10 @@ if (!url) {
 function digest(value) {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
+
+// Clean tracked source BEFORE discovery / snapshot write
+const { sourceCommit } = assertTrackedSourceClean(repoRoot);
+console.log('[phase20-step4c] tracked source clean; sourceCommit=', sourceCommit);
 
 const artifact = JSON.parse(readFileSync(artifactPath, 'utf8'));
 if (artifact.activationAuthorized !== false) {
@@ -132,7 +144,6 @@ try {
     SELECT code, status::text, lifecycle_state::text, production_monetary_status::text
     FROM ad_providers WHERE code = 'ADSGRAM' LIMIT 1`);
 
-  // WITHDRAWAL_REQUESTS_PAUSE STAGING presence (dependency, not mutated here)
   const wrpStaging = await client.query(`
     SELECT enabled FROM feature_flags
     WHERE flag_key = 'WITHDRAWAL_REQUESTS_PAUSE' AND environment = 'STAGING'::environment_name`);
@@ -150,11 +161,6 @@ try {
     actions: artifact.risk.actions,
   };
   const plans = { risk: plan(risk), trust: plan(trust), eligibility: plan(eligibility) };
-  const git = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, encoding: 'utf8' });
-  const sourceCommit = (git.stdout ?? '').trim();
-  if (!sourceCommit || git.status !== 0) {
-    throw new Error('failed to resolve git HEAD from repoRoot');
-  }
 
   const withdrawalRequestsPauseStaging =
     wrpStaging.rows[0] === undefined
@@ -168,13 +174,10 @@ try {
   const report = {
     preflightAt: new Date().toISOString(),
     sourceCommit,
-    pathResolution: {
-      fraudPackageRoot,
-      repoRoot,
-      artifactPath,
-      snapshotPath,
-    },
-    artifactPath: 'packages/fraud/policy/phase20-closed-beta-owner-approved.json',
+    sourceCommitSemantics:
+      'sourceCommit is the clean tooling/source HEAD that performed discovery; the evidence commit that stores this snapshot is a later SHA and must not be self-referential',
+    pathResolution: pathEvidence,
+    artifactPath: pathEvidence.artifactPath,
     activationAuthorized: false,
     readOnlyConfirmed: true,
     mutationRefused,
@@ -207,8 +210,16 @@ try {
         : 'READY_FOR_OWNER_AUTHORIZATION',
   };
 
-  writeFileSync(snapshotPath, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
-  console.log('[phase20-step4c] wrote', snapshotPath);
+  const serialized = `${JSON.stringify(report, null, 2)}\n`;
+  if (/[A-Za-z]:\\Users\\|\/Users\/|Desktop\\|Desktop\//.test(serialized)) {
+    throw new Error('refusing to write snapshot containing absolute personal filesystem paths');
+  }
+  if (/postgresql:\/\//i.test(serialized) || /Password:/i.test(serialized)) {
+    throw new Error('refusing to write snapshot containing credentials');
+  }
+
+  writeFileSync(snapshotPath, serialized, 'utf8');
+  console.log('[phase20-step4c] wrote', pathEvidence.snapshotPath);
   console.log('[phase20-step4c] sourceCommit=', sourceCommit);
   console.log('[phase20-step4c] ACTIVATION_PREFLIGHT=', report.activationPreflight);
   console.log('[phase20-step4c] plans=', JSON.stringify(report.plans));
