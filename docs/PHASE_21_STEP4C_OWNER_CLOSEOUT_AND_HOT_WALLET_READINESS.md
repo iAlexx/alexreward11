@@ -3,11 +3,11 @@
 **Date:** 2026-10-03  
 **Scope:** Source hardening only. Cursor must not run real APPLY / register / fund. `production-runtime` is not modified.
 
-## Step 4C.1 / 4C.2 status
+## Step 4C.1 / 4C.2 / 4C.3 status
 
 | Fact | Value |
 | --- | --- |
-| SOURCE_HARDENING_COMPLETE | YES (4C.1 + 4C.2: production verified-pool Owner auth, no public test-pool backdoor, mandatory confirmations, live two-provider Mainnet registry verification trust, registry post-apply verify, Hot Wallet APPLY provenance/registry/audit/tx honesty) |
+| SOURCE_HARDENING_COMPLETE | YES (4C.1 + 4C.2 + 4C.3: production verified-pool Owner auth, no public test-pool backdoor, mandatory confirmations, live two-provider Mainnet registry verification trust, registry post-apply verify, Hot Wallet APPLY provenance/registry/audit/tx honesty) |
 | OWNER_BOOTSTRAP | COMPLETE |
 | HOT_WALLET_KEY_GENERATED | YES |
 | HOT_WALLET_REGISTERED | NO |
@@ -19,7 +19,7 @@
 | READY_FOR_LIVE_PAYOUT | NO |
 | PHASE21_STATUS | IN_PROGRESS |
 
-Steps 4C.1 / 4C.2 do **not** claim Hot Wallet registered/funded, Mainnet registry applied, or live payout readiness.
+Steps 4C.1 / 4C.2 / 4C.3 do **not** claim Hot Wallet registered/funded, Mainnet registry applied, or live payout readiness.
 
 ## Canonical Owner closeout (sanitized)
 
@@ -44,7 +44,7 @@ Secrets, passphrases, TOTP seeds, and local encrypted bundle paths are never rec
 | FUNDED | NO |
 | READY_FOR_LIVE_PAYOUT | NO |
 
-## Authority model (Step 4C / 4C.1 / 4C.2)
+## Authority model (Step 4C / 4C.1 / 4C.2 / 4C.3)
 
 1. Canonical Owner seat = `admin_owner_authority.seat=1` holder + ACTIVE admin + ACTIVE unrevoked OWNER binding.
 2. `PHASE21_CEREMONY_ADMIN_USER_ID` is a **locator only** — env UUID alone cannot authorize APPLY.
@@ -79,3 +79,8 @@ Secrets, passphrases, TOTP seeds, and local encrypted bundle paths are never rec
 6. Signer provisioning / funding / live payout remain later separate Owner authorizations (`READY_FOR_LIVE_PAYOUT=NO`)
 
 Phase 21 is **not** complete after Step 4C.
+
+
+## Step 4C.3 note
+
+Closed trust-mint forgery gap: public raw-result mint removed; registry APPLY uses package-private live verify+mint with concrete HTTP adapters + hardcoded freshness (<=120s). Diagnostic verify-mainnet-external JSON is not APPLY authority.

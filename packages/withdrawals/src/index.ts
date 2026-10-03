@@ -737,11 +737,17 @@ export {
   PHASE21_MAINNET_REGISTRY_VERIFICATION_TRUST_CLASS,
   isAuthenticatedPhase21MainnetRegistryVerification,
   assertAuthenticatedPhase21MainnetRegistryVerification,
-  mintAuthenticatedPhase21MainnetRegistryVerificationFromLiveTwoProviderPass,
   Phase21MainnetRegistryVerificationError,
   type AuthenticatedPhase21MainnetRegistryVerification,
   type Phase21MainnetRegistryVerificationTrustClass,
 } from './phase21-mainnet-registry-verification-trust.js';
+
+export {
+  PHASE21_MAINNET_REGISTRY_VERIFICATION_MAX_AGE_MS,
+  PHASE21_MAINNET_REGISTRY_VERIFICATION_MAX_AGE_SECONDS,
+  assertPhase21MainnetRegistryVerificationFresh,
+} from './phase21-mainnet-registry-live-verify-mint.js';
+/** Production live verify+mint is intentionally NOT exported from package root. */
 
 export {
   verifyPhase21MainnetRegistryBootstrapReadOnly,

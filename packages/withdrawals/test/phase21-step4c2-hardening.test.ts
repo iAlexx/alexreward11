@@ -11,9 +11,12 @@ import { applyPhase21MainnetRegistryBootstrap } from '../src/phase21-mainnet-reg
 import { verifyPhase21MainnetRegistryBootstrapReadOnly } from '../src/phase21-mainnet-registry-post-apply-verify.js';
 import {
   assertAuthenticatedPhase21MainnetRegistryVerification,
-  mintAuthenticatedPhase21MainnetRegistryVerificationFromLiveTwoProviderPass,
   Phase21MainnetRegistryVerificationError,
 } from '../src/phase21-mainnet-registry-verification-trust.js';
+import {
+  assertPhase21MainnetRegistryVerificationFresh,
+  __runSimulatedLivePhase21MainnetRegistryVerificationAndMintTrustForTests,
+} from '../src/phase21-mainnet-registry-live-verify-mint.js';
 import { __phase21TestSetApplyEnv } from '../src/phase21-ceremony-apply-gates.js';
 import { __mintPhase21MainnetRegistryApplyConfirmationForTests } from '../src/phase21-ceremony-confirmations.js';
 import { mintAuthenticatedPhase21OwnerCeremonyTrustForTests } from '../src/test-only/phase21-ceremony-test-hooks.js';
@@ -146,34 +149,32 @@ describe('phase21 step4c2 mainnet registry verification hardening', () => {
     ).toThrow(Phase21MainnetRegistryVerificationError);
   });
 
-  it('raw successful verification result refused without live mint gate', () => {
-    delete process.env.PHASE21_EXTERNAL_PROBE_LIVE;
-    expect(() =>
-      mintAuthenticatedPhase21MainnetRegistryVerificationFromLiveTwoProviderPass({
-        verification: passResult(),
-        requestedJettonMaster: MASTER,
-      }),
-    ).toThrow(/LIVE_PROBE_REQUIRED|PHASE21_EXTERNAL_PROBE_LIVE/);
+  it('public package root does not export raw-result trust mint', async () => {
+    const root = await import('../src/index.js');
+    expect(
+      (root as Record<string, unknown>).mintAuthenticatedPhase21MainnetRegistryVerificationFromLiveTwoProviderPass,
+    ).toBeUndefined();
+    expect(
+      (root as Record<string, unknown>).runLivePhase21MainnetRegistryVerificationAndMintTrust,
+    ).toBeUndefined();
   });
 
-  it('incomplete / mock verification cannot mint trust', () => {
+  it('incomplete / mock live simulation cannot mint trust', async () => {
     process.env.PHASE21_EXTERNAL_PROBE_LIVE = '1';
-    expect(() =>
-      mintAuthenticatedPhase21MainnetRegistryVerificationFromLiveTwoProviderPass({
-        verification: passResult({
-          incomplete: true,
-          ok: false,
-          code: 'USDT_METADATA_INCOMPLETE',
-        }),
-        requestedJettonMaster: MASTER,
+    enableCeremonyHooks();
+    const fetchImpl = (async () =>
+      new Response(JSON.stringify({ ok: false }), {
+        status: 500,
+        headers: { 'content-type': 'application/json' },
+      })) as typeof fetch;
+    await expect(
+      __runSimulatedLivePhase21MainnetRegistryVerificationAndMintTrustForTests({
+        jettonMaster: MASTER,
+        primary: { kind: 'toncenter', url: 'https://toncenter.example/v2' },
+        secondary: { kind: 'tonapi', url: 'https://tonapi.example/v2' },
+        fetchImpl,
       }),
-    ).toThrow(/INCOMPLETE|NOT_PASS|incomplete/i);
-    expect(() =>
-      mintAuthenticatedPhase21MainnetRegistryVerificationFromLiveTwoProviderPass({
-        verification: passResult({ ok: false, code: 'MOCK' }),
-        requestedJettonMaster: MASTER,
-      }),
-    ).toThrow(/full PASS|NOT_PASS|MOCK/i);
+    ).rejects.toThrow();
   });
 
   it('same provider kind / same host refused; wrong global id refused', async () => {
@@ -232,9 +233,10 @@ describe('phase21 step4c2 mainnet registry verification hardening', () => {
     expect(badMaster.code).toMatch(/OBSERVED_JETTON_MASTER/);
   });
 
-  it('live PASS mints branded trust; APPLY requires branded verification + exact master', async () => {
+  it('test-only simulated live PASS mints branded trust; APPLY requires branded verification + exact master', async () => {
     process.env.PHASE21_EXTERNAL_PROBE_LIVE = '1';
     enableCeremonyHooks();
+    // Diagnostic verify with fake adapters remains non-authoritative for mint.
     const live = await verifyMainnetUsdtWithTwoProviders({
       primary: { kind: 'toncenter', url: 'https://toncenter.example/v2' },
       secondary: { kind: 'tonapi', url: 'https://tonapi.example/v2' },
@@ -243,14 +245,16 @@ describe('phase21 step4c2 mainnet registry verification hardening', () => {
       metadataAdapter: metadataAdapter(),
     });
     expect(live.ok).toBe(true);
-    const branded = mintAuthenticatedPhase21MainnetRegistryVerificationFromLiveTwoProviderPass({
-      verification: live,
-      requestedJettonMaster: MASTER,
+    // Authority mint for APPLY tests uses guarded test-only helper (not raw-result mint).
+    const branded = mintAuthenticatedPhase21MainnetRegistryVerificationForTests({
+      jettonMaster: MASTER,
+      simulationDatabaseName: DB,
     });
     expect(branded.networkGlobalId).toBe(-239);
     expect(branded.symbol).toBe('USDT');
     expect(branded.decimals).toBe(6);
     expect(branded.providersIndependent).toBe(true);
+    expect(() => assertPhase21MainnetRegistryVerificationFresh(branded)).not.toThrow();
 
     __phase21TestSetApplyEnv({
       DEPLOYMENT_ENV: 'production',

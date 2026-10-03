@@ -1,7 +1,7 @@
 /**
  * PACKAGE-PRIVATE mint for AuthenticatedPhase21MainnetRegistryVerification.
  * Do not re-export mint from package root. Production mint goes through
- * mintAuthenticatedPhase21MainnetRegistryVerificationFromLiveTwoProviderPass.
+ * runLivePhase21MainnetRegistryVerificationAndMintTrust (package-private live-verify-mint module).
  * Test hooks may mint under dual disposable gates only.
  */
 import type { AuthenticatedPhase21MainnetRegistryVerification } from './phase21-mainnet-registry-verification-trust.js';

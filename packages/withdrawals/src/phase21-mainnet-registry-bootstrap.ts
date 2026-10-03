@@ -30,6 +30,7 @@ import {
   assertAuthenticatedPhase21MainnetRegistryVerification,
   type AuthenticatedPhase21MainnetRegistryVerification,
 } from './phase21-mainnet-registry-verification-trust.js';
+import { assertPhase21MainnetRegistryVerificationFresh } from './phase21-mainnet-registry-live-verify-mint.js';
 
 export type Phase21MainnetRegistryBootstrapMode = 'PLAN' | 'APPLY' | 'REFUSED';
 
@@ -622,6 +623,7 @@ export async function applyPhase21MainnetRegistryBootstrap(
     assertAuthenticatedPhase21OwnerCeremonyTrust(input.ownerTrust);
     assertPhase21MainnetRegistryApplyConfirmation(input.applyConfirmation);
     assertAuthenticatedPhase21MainnetRegistryVerification(input.mainnetVerification);
+    assertPhase21MainnetRegistryVerificationFresh(input.mainnetVerification);
     if (
       !tonAddressesEqual(input.mainnetVerification.jettonMaster, input.usdtJettonMaster) ||
       !tonAddressesEqual(

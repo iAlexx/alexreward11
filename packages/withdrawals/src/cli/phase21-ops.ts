@@ -40,7 +40,10 @@ import {
   planPhase21MainnetRegistryBootstrap,
 } from '../phase21-mainnet-registry-bootstrap.js';
 import { verifyPhase21MainnetRegistryBootstrapReadOnly } from '../phase21-mainnet-registry-post-apply-verify.js';
-import { mintAuthenticatedPhase21MainnetRegistryVerificationFromLiveTwoProviderPass } from '../phase21-mainnet-registry-verification-trust.js';
+import {
+  assertPhase21MainnetRegistryVerificationFresh,
+  runLivePhase21MainnetRegistryVerificationAndMintTrust,
+} from '../phase21-mainnet-registry-live-verify-mint.js';
 import { runPhase21Preflight } from '../phase21-preflight.js';
 import {
   applyPhase21ProductionFlagBaseline,
@@ -492,43 +495,23 @@ if (command === 'mainnet-registry:apply') {
 
     let verifiedClose: (() => Promise<void>) | null = null;
     try {
-      // 1-5: live two-provider verification BEFORE Owner TTY confirmation / DB mutation
-      const adapters = createPhase21MainnetExternalAdapters({
+      // 1-5: in-process live verify+mint BEFORE Owner TTY confirmation / DB mutation.
+      // Plain Phase21TwoProviderVerificationResult is never accepted as authority.
+      const liveMint = await runLivePhase21MainnetRegistryVerificationAndMintTrust({
+        jettonMaster: master,
         primary: {
-          kind: parseProviderKind(primaryKind),
+          kind: primaryKind,
           url: primaryUrl,
           apiKey: envNonEmpty('TON_PRIMARY_PROVIDER_KEY'),
         },
         secondary: {
-          kind: parseProviderKind(secondaryKind),
+          kind: secondaryKind,
           url: secondaryUrl,
           apiKey: envNonEmpty('TON_SECONDARY_PROVIDER_KEY'),
         },
       });
-      const external = await verifyMainnetUsdtWithTwoProviders({
-        primary: { kind: primaryKind, url: primaryUrl },
-        secondary: { kind: secondaryKind, url: secondaryUrl },
-        jettonMaster: master,
-        identityAdapter: adapters.identity,
-        metadataAdapter: adapters.metadata,
-      });
-      if (!external.ok || external.incomplete === true) {
-        printJson({
-          ok: false,
-          command: 'mainnet-registry:apply',
-          refuseCode: external.code,
-          message: external.message,
-          notes: external.notes,
-          readyForLivePayout: false,
-        });
-        process.exitCode = 1;
-        return;
-      }
-      const mainnetVerification =
-        mintAuthenticatedPhase21MainnetRegistryVerificationFromLiveTwoProviderPass({
-          verification: external,
-          requestedJettonMaster: master,
-        });
+      const mainnetVerification = liveMint.trust;
+      assertPhase21MainnetRegistryVerificationFresh(mainnetVerification);
       printJson({
         ok: true,
         command: 'mainnet-registry:apply',
@@ -538,6 +521,7 @@ if (command === 'mainnet-registry:apply') {
         decimals: mainnetVerification.decimals,
         providersIndependent: mainnetVerification.providersIndependent,
         verifiedAt: mainnetVerification.verifiedAt,
+        diagnosticCode: liveMint.diagnostic.code,
         readyForLivePayout: false,
       });
 
@@ -546,6 +530,9 @@ if (command === 'mainnet-registry:apply') {
       verifiedClose = verified.close;
       const client = await verified.pool.connect();
       try {
+        // Freshness again immediately before PLAN / confirmation / mutation
+        assertPhase21MainnetRegistryVerificationFresh(mainnetVerification);
+
         // 8-9: fresh PLAN; branded master must equal PLAN/apply master
         const plan = await planPhase21MainnetRegistryBootstrap(client, {
           usdtJettonMaster: master,
@@ -574,12 +561,14 @@ if (command === 'mainnet-registry:apply') {
           notes: [
             'Fresh PLAN after live two-provider verification and Owner auth',
             'DATABASE_URL-alone not used for APPLY',
+            'verify-mainnet-external JSON is NOT reusable as APPLY authority',
           ],
           readyForLivePayout: false,
         });
 
         // 10: exact Owner TTY final phrase
         const applyConfirmation = await confirmPhase21MainnetRegistryApplyInteractive();
+        assertPhase21MainnetRegistryVerificationFresh(mainnetVerification);
         // 11: APPLY
         const result = await applyPhase21MainnetRegistryBootstrap(client, {
           usdtJettonMaster: master,

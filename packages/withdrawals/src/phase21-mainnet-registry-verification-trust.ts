@@ -1,16 +1,10 @@
 /**
  * Runtime-branded Phase 21 Mainnet registry two-provider verification trust.
  * Caller-constructed { ok: true, networkGlobalId: -239, symbol: 'USDT' } cannot authorize.
- * Mint only via mintAuthenticatedPhase21MainnetRegistryVerificationFromLiveTwoProviderPass
- * (or guarded test-only hooks).
+ * Production mint ONLY via package-private runLivePhase21MainnetRegistryVerificationAndMintTrust
+ * (CLI / ceremony path). Plain Phase21TwoProviderVerificationResult is never authority.
  */
-import { tonAddressesEqual } from '@alex-rewards/ton';
-
-import type { Phase21TwoProviderVerificationResult } from './phase21-external-probes.js';
-import {
-  authenticatedPhase21MainnetRegistryVerificationBrand,
-  mintAuthenticatedPhase21MainnetRegistryVerification,
-} from './phase21-mainnet-registry-verification-mint-internal.js';
+import { authenticatedPhase21MainnetRegistryVerificationBrand } from './phase21-mainnet-registry-verification-mint-internal.js';
 
 export const PHASE21_MAINNET_REGISTRY_VERIFICATION_TRUST_CLASS =
   'AuthenticatedPhase21MainnetRegistryVerification' as const;
@@ -73,144 +67,8 @@ export function assertAuthenticatedPhase21MainnetRegistryVerification(
   if (!isAuthenticatedPhase21MainnetRegistryVerification(value)) {
     throw new Phase21MainnetRegistryVerificationError(
       'MAINNET_REGISTRY_VERIFICATION_REQUIRED',
-      'AuthenticatedPhase21MainnetRegistryVerification required — forged/raw/env verification cannot authorize',
+      'AuthenticatedPhase21MainnetRegistryVerification required - forged/raw/env verification cannot authorize',
       {},
     );
   }
-}
-
-/**
- * Mint branded Mainnet registry verification trust from a live two-provider PASS.
- * Refuses MOCK / SKIPPED / INCOMPLETE / UNAVAILABLE / forged plain result objects.
- * Requires PHASE21_EXTERNAL_PROBE_LIVE=1 so production APPLY cannot use skipped probes.
- */
-export function mintAuthenticatedPhase21MainnetRegistryVerificationFromLiveTwoProviderPass(input: {
-  readonly verification: Phase21TwoProviderVerificationResult;
-  readonly requestedJettonMaster: string;
-}): AuthenticatedPhase21MainnetRegistryVerification {
-  if (process.env.PHASE21_EXTERNAL_PROBE_LIVE !== '1') {
-    throw new Phase21MainnetRegistryVerificationError(
-      'LIVE_PROBE_REQUIRED',
-      'Mainnet registry verification trust requires PHASE21_EXTERNAL_PROBE_LIVE=1',
-      {},
-    );
-  }
-
-  const v = input.verification;
-  if (v.incomplete === true) {
-    throw new Phase21MainnetRegistryVerificationError(
-      'INCOMPLETE_MAINNET_VERIFICATION',
-      'incomplete two-provider verification cannot mint Mainnet registry trust',
-      { code: v.code },
-    );
-  }
-  if (!v.ok || v.code !== 'MAINNET_USDT_TWO_PROVIDER_OK') {
-    throw new Phase21MainnetRegistryVerificationError(
-      'MAINNET_VERIFICATION_NOT_PASS',
-      'two-provider verification must be full PASS before minting Mainnet registry trust',
-      { code: v.code, ok: v.ok },
-    );
-  }
-  if (!v.independence.ok || v.independence.code !== 'PROVIDERS_INDEPENDENT') {
-    throw new Phase21MainnetRegistryVerificationError(
-      'PROVIDERS_NOT_INDEPENDENT',
-      'provider kind+host independence required before minting Mainnet registry trust',
-      { code: v.independence.code },
-    );
-  }
-  if (v.primary === null || v.secondary === null) {
-    throw new Phase21MainnetRegistryVerificationError(
-      'PROVIDER_PROVENANCE_MISSING',
-      'primary and secondary provider provenance required',
-      {},
-    );
-  }
-  if (v.primary.networkIdentity !== '-239' || v.secondary.networkIdentity !== '-239') {
-    throw new Phase21MainnetRegistryVerificationError(
-      'MAINNET_GLOBAL_ID_REQUIRED',
-      'both providers must prove networkGlobalId=-239',
-      {},
-    );
-  }
-  if (v.primary.ok !== true || v.secondary.ok !== true) {
-    throw new Phase21MainnetRegistryVerificationError(
-      'PROVIDER_PROVENANCE_NOT_OK',
-      'both provider provenance records must be ok=true',
-      {},
-    );
-  }
-
-  const boundMaster = (v.jettonMaster ?? '').trim();
-  const requested = input.requestedJettonMaster.trim();
-  const primaryObserved = (v.primaryObservedJettonMaster ?? '').trim();
-  const secondaryObserved = (v.secondaryObservedJettonMaster ?? '').trim();
-  if (
-    boundMaster === '' ||
-    requested === '' ||
-    primaryObserved === '' ||
-    secondaryObserved === '' ||
-    !tonAddressesEqual(boundMaster, requested) ||
-    !tonAddressesEqual(primaryObserved, requested) ||
-    !tonAddressesEqual(secondaryObserved, requested)
-  ) {
-    throw new Phase21MainnetRegistryVerificationError(
-      'EXACT_MASTER_MISMATCH',
-      'requested / bound / primary observed / secondary observed Jetton masters must be canonically equal',
-      {},
-    );
-  }
-  if (v.symbol !== 'USDT' || v.decimals !== 6 || v.networkGlobalId !== -239) {
-    throw new Phase21MainnetRegistryVerificationError(
-      'USDT_METADATA_REQUIRED',
-      'branded trust requires symbol=USDT decimals=6 networkGlobalId=-239',
-      {},
-    );
-  }
-
-  const primaryKind = v.primary.providerKind.trim();
-  const secondaryKind = v.secondary.providerKind.trim();
-  const primaryHost = v.primary.providerHost.trim();
-  const secondaryHost = v.secondary.providerHost.trim();
-  if (
-    primaryKind === '' ||
-    secondaryKind === '' ||
-    primaryHost === '' ||
-    secondaryHost === '' ||
-    primaryKind.toLowerCase() === secondaryKind.toLowerCase() ||
-    primaryHost.toLowerCase() === secondaryHost.toLowerCase()
-  ) {
-    throw new Phase21MainnetRegistryVerificationError(
-      'PROVIDER_KIND_HOST_INDEPENDENCE_REQUIRED',
-      'primary/secondary provider kind and normalized host must differ',
-      {},
-    );
-  }
-
-  const verifiedAt = (v.verifiedAt ?? v.primary.observedAt ?? '').trim();
-  if (verifiedAt === '') {
-    throw new Phase21MainnetRegistryVerificationError(
-      'VERIFIED_AT_REQUIRED',
-      'live verifiedAt timestamp required on two-provider PASS',
-      {},
-    );
-  }
-
-  return mintAuthenticatedPhase21MainnetRegistryVerification({
-    jettonMaster: requested,
-    verifiedAt,
-    primary: {
-      providerKind: primaryKind,
-      providerHost: primaryHost,
-      networkIdentity: '-239',
-      observedJettonMaster: primaryObserved,
-      verificationMethod: v.primary.verificationMethod,
-    },
-    secondary: {
-      providerKind: secondaryKind,
-      providerHost: secondaryHost,
-      networkIdentity: '-239',
-      observedJettonMaster: secondaryObserved,
-      verificationMethod: v.secondary.verificationMethod,
-    },
-  });
 }

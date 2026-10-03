@@ -163,6 +163,14 @@ Step 3C adds ceremony observations that must PASS for READY_FOR_OWNER_PROVISIONI
 - Hot Wallet APPLY: `DUAL_PROVIDER_LIVE` + independent providers + registry truth + audit post-verify + tx honesty lifecycle
 - Operational truth unchanged: `HOT_WALLET_REGISTERED=NO`, `HOT_WALLET_FUNDED=NO`, `MAINNET_REGISTRY_APPLIED=NO`, `READY_FOR_LIVE_PAYOUT=NO`, `PHASE21_STATUS=IN_PROGRESS`
 
+### Step 4C.3 (2026-10-03)
+
+- Removed public mintAuthenticatedPhase21MainnetRegistryVerificationFromLiveTwoProviderPass (plain two-provider result is never authority)
+- Package-private 
+unLivePhase21MainnetRegistryVerificationAndMintTrust mints trust only from concrete HTTP adapters in-process
+- Hardcoded Mainnet registry verification freshness window: 120 seconds
+- erify-mainnet-external remains diagnostic-only; APPLY reruns live verification
+
 ### Step 4C.2 (2026-10-03)
 
 - Removed public production test-pool registration backdoor from `@alex-rewards/auth` package root

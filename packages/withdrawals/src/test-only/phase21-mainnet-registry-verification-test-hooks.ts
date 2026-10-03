@@ -98,3 +98,8 @@ export function mintAuthenticatedPhase21MainnetRegistryVerificationForTests(inpu
     },
   });
 }
+
+
+export {
+  __runSimulatedLivePhase21MainnetRegistryVerificationAndMintTrustForTests,
+} from '../phase21-mainnet-registry-live-verify-mint.js';
