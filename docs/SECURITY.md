@@ -257,3 +257,10 @@ Production Owner bootstrap final source hardening: `mintAuthenticatedProductionB
 - Authenticated preflight is `BEGIN READ ONLY` + `ROLLBACK`, verifies `transaction_read_only=on`, and
   refuses pool/trust database or system_identifier mismatch. Offline-backup readiness is never taken from env.
 - Test-only pool injection requires `ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1` and is unreachable from the CLI.
+
+## Phase 21 Step 4B.2 - production Owner bootstrap APPLY controls
+
+- No production TOTP auto-confirm: the TOTP secret and confirmation code must come from the Owner's authenticator; they are validated before any DB access or decryption, and the orchestrator zeroizes its private secret copy.
+- Backup attestation and final APPLY confirmation are exact-phrase interactive prompts on a real TTY; env/argv/booleans cannot authorize them. Test injection requires `ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1`.
+- The decrypt/mutate path is reachable only after live Channel B, a fully READY authenticated read-only preflight and the final phrase.
+- Post-apply verification is read-only (`BEGIN READ ONLY` + `ROLLBACK`) and outputs no email or secret material.

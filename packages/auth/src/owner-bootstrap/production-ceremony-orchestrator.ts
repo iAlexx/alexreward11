@@ -9,8 +9,8 @@ import { resolve } from 'node:path';
 import type { Pool } from 'pg';
 
 import { AuthDomainError } from '../errors.js';
-import { assertPasswordPolicy, generateTotpSecretBytes } from '../admin-password.js';
-import { assertTotpCodeFormat, generateTotpCode, verifyTotpCode } from '../admin-totp.js';
+import { assertPasswordPolicy } from '../admin-password.js';
+import { assertTotpCodeFormat, verifyTotpCode } from '../admin-totp.js';
 import { bytesToHex, hexToBytes, publicKeyFromPrivateSeed } from './ed25519.js';
 import {
   buildTestGrantPayload,
@@ -53,7 +53,9 @@ export interface ProductionCeremonyOrchestratorInput {
   readonly bootstrapPassphrase: string;
   readonly password: string;
   readonly passwordConfirm: string;
+  /** Required: Owner-enrolled TOTP secret (caller keeps ownership of its own buffer). */
   readonly totpSecretBytes?: Uint8Array;
+  /** Required: live 6-digit code the Owner typed from their authenticator. */
   readonly totpConfirmCode?: string;
   /** Must be true only with CLI --apply + env gates. */
   readonly apply: boolean;
@@ -119,6 +121,49 @@ export async function orchestrateProductionOwnerBootstrapCeremony(
     throw new AuthDomainError('VALIDATION', 'password confirmation mismatch');
   }
 
+  // Production TOTP: the Owner must have enrolled the secret in an authenticator and typed a
+  // live code. This is verified BEFORE any database access, decryption or grant creation, so a
+  // wrong/missing code can never leave a partial lifecycle. Never auto-generated/auto-confirmed.
+  const totpConfirmCode = requireProductionTotpConfirmation(input);
+  const totpSecret = new Uint8Array(input.totpSecretBytes as Uint8Array);
+
+  try {
+    return await runVerifiedOrchestration(input, totpSecret, totpConfirmCode);
+  } finally {
+    zeroizeBytes(totpSecret);
+  }
+}
+
+function requireProductionTotpConfirmation(input: ProductionCeremonyOrchestratorInput): string {
+  if (input.productionTrust.trustClass !== PRODUCTION_OWNER_BOOTSTRAP_TRUST_CLASS) {
+    throw new AuthDomainError('FORBIDDEN', 'production trust class required');
+  }
+  const secret = input.totpSecretBytes;
+  if (secret === undefined || secret.byteLength === 0) {
+    throw new AuthDomainError(
+      'VALIDATION',
+      'PRODUCTION_TOTP_SECRET_REQUIRED: Owner-enrolled TOTP secret is mandatory (no auto-generation)',
+    );
+  }
+  const code = input.totpConfirmCode;
+  if (code === undefined || code.trim() === '') {
+    throw new AuthDomainError(
+      'VALIDATION',
+      'PRODUCTION_TOTP_CODE_REQUIRED: Owner-typed 6-digit TOTP code is mandatory (no auto-confirm)',
+    );
+  }
+  assertTotpCodeFormat(code);
+  if (!verifyTotpCode(secret, code)) {
+    throw new AuthDomainError('FORBIDDEN', 'TOTP confirmation failed');
+  }
+  return code.trim();
+}
+
+async function runVerifiedOrchestration(
+  input: ProductionCeremonyOrchestratorInput,
+  totpSecret: Uint8Array,
+  totpConfirmCode: string,
+): Promise<ProductionCeremonyOrchestratorResult> {
   const client = await input.pool.connect();
   try {
     const schema = await preflightProductionOwnerBootstrapSchema(client);
@@ -217,17 +262,6 @@ export async function orchestrateProductionOwnerBootstrapCeremony(
       productionTrust: input.productionTrust,
     });
 
-    const totpSecret = input.totpSecretBytes ?? generateTotpSecretBytes();
-    let totpCode = input.totpConfirmCode;
-    if (totpCode === undefined || totpCode === '') {
-      totpCode = generateTotpCode(totpSecret);
-    } else {
-      assertTotpCodeFormat(totpCode);
-      if (!verifyTotpCode(totpSecret, totpCode)) {
-        throw new AuthDomainError('FORBIDDEN', 'TOTP confirmation failed');
-      }
-    }
-
     const nonceCred = bytesToHex(randomBytes(32));
     const publicHeader = {
       v: 1 as const,
@@ -262,7 +296,7 @@ export async function orchestrateProductionOwnerBootstrapCeremony(
       intendedSubject: input.productionTrust.intendedAdminEmail,
       password: input.password,
       totpSecretBytes: totpSecret,
-      totpConfirmCode: totpCode,
+      totpConfirmCode,
       clientUnixTime: now,
       nonce32Hex: nonceCred,
       sigChannelCredB64: sigCred,

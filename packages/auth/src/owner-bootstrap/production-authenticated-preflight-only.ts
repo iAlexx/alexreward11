@@ -42,8 +42,17 @@ export async function runAuthenticatedProductionOwnerBootstrapPreflightOnly(inpu
   readonly pool: Pool;
   /** Defaults to false. Never derived from env. */
   readonly ownerKeyOfflineBackupsReady?: boolean;
+  /**
+   * Step 4B.2: the gated --apply command re-runs this same read-only evaluation as its
+   * pre-mutation gate while OWNER_PRODUCTION_BOOTSTRAP_APPLY=1. Only skips the env hygiene
+   * refusal; the evaluation is still BEGIN READ ONLY + ROLLBACK and never mutates.
+   */
+  readonly permitApplyEnvironment?: boolean;
 }): Promise<ProductionOwnerBootstrapPreflightOnlyResult> {
-  if (process.env.OWNER_PRODUCTION_BOOTSTRAP_APPLY === '1') {
+  if (
+    process.env.OWNER_PRODUCTION_BOOTSTRAP_APPLY === '1' &&
+    input.permitApplyEnvironment !== true
+  ) {
     throw new AuthDomainError(
       'FORBIDDEN',
       'OWNER_PRODUCTION_BOOTSTRAP_APPLY is enabled - authenticated preflight is read-only',

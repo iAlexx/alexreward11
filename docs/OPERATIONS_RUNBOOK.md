@@ -378,3 +378,11 @@ authenticated mode from the Owner workstation with `OWNER_PRODUCTION_BOOTSTRAP_D
 shell and `OWNER_PRODUCTION_BOOTSTRAP_APPLY` unset. Expect `OWNER_KEY_OFFLINE_BACKUPS_PENDING` until the
 offline encrypted key backups are confirmed. Digest reference: `686e3361dedc833312e8698c560b1fccdee84ff3d796cc38a8250c10dce33298`.
 See `docs/PHASE_21_STEP4B1_AUTHENTICATED_READONLY_PREFLIGHT.md`.
+
+## Phase 21 Step 4B.2 - production Owner bootstrap APPLY (Owner-manual only)
+
+- Run `--authenticated-preflight-only` first; type the backup attestation phrase when prompted. `readyForOwnerBootstrapApply=true` requires the exact phrase, CLEAN target admin, free Owner seat and ready schema.
+- `--apply` is interactive-only and stops with `APPLY_PREFLIGHT_NOT_READY` (no mutation) when any readiness field fails. Unset `OWNER_PRODUCTION_BOOTSTRAP_APPLY` immediately after the run.
+- After APPLY, run `owner-production-bootstrap verify-apply` (read-only) with the printed admin/grant/attempt ids.
+- `PARTIAL_LIFECYCLE_RECONCILIATION_REQUIRED` means mutation state is unknown: do not retry; inspect read-only and escalate to the Owner.
+- Cursor/CI must never run `--apply`. Details and the future PowerShell template: `docs/PHASE_21_STEP4B2_SAFE_OWNER_APPLY.md`.

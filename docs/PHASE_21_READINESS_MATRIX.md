@@ -129,3 +129,12 @@ Step 3C adds ceremony observations that must PASS for READY_FOR_OWNER_PROVISIONI
 - Public digest reference: `686e3361dedc833312e8698c560b1fccdee84ff3d796cc38a8250c10dce33298`
 - Step4 remains `PAUSED_OWNER_AUTHORITY_REQUIRED`
 - See `docs/PHASE_21_STEP4B1_AUTHENTICATED_READONLY_PREFLIGHT.md`
+
+### Step 4B.2 (2026-10-03)
+
+- Safe APPLY hardening source complete: no production TOTP auto-confirm; backup attestation + final APPLY phrase; strict READY gate; post-apply read-only verify (`verify-apply`)
+- `REAL_APPLY_RUN=NO` (Owner-manual only after independent review; Cursor must not execute it)
+- `READY_FOR_PRODUCTION_OWNER_BOOTSTRAP_CEREMONY=NO`
+- `REAL_OWNER_BOOTSTRAP_KEY_GENERATED=NO` (no key/seal/bundle/Channel B regenerated)
+- Step4 remains `PAUSED_OWNER_AUTHORITY_REQUIRED`
+- See `docs/PHASE_21_STEP4B2_SAFE_OWNER_APPLY.md`

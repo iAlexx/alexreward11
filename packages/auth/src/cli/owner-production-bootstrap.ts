@@ -3,6 +3,8 @@
  * Production Owner-bootstrap ceremony CLI (Phase 21 Step 4B / 4B.1).
  * run/enroll-existing require exactly one of --preflight-only (unauthenticated read-only),
  * --authenticated-preflight-only (live Owner TTY digest, read-only) or gated --apply.
+ * Step 4B.2: --apply is Owner-manual only (backup attestation, TOTP enrollment, final phrase);
+ * verify-apply is a read-only post-apply check.
  * Does NOT weaken owner-bootstrap-ceremony (isolated-only).
  * DO NOT reuse Hot Wallet keys. DO NOT accept secrets via argv/env.
  */
@@ -11,7 +13,18 @@ import { createInterface } from 'node:readline';
 import { resolve } from 'node:path';
 import { stdin as stdinFd, stdout as stdoutFd } from 'node:process';
 
+import { assertPasswordPolicy, bytesToBase32, generateTotpSecretBytes } from '../admin-password.js';
+import { assertTotpCodeFormat, buildOtpAuthUri, verifyTotpCode } from '../admin-totp.js';
+import { displaySecretOnceOnInteractiveStderr } from '../tty-secret.js';
+import { zeroizeBytes } from '../owner-bootstrap/owner-bootstrap-encrypted-key.js';
 import {
+  APPLY_PREFLIGHT_NOT_READY,
+  assertApplyPreflightReady,
+  attestOwnerOfflineBackupsInteractive,
+  confirmProductionOwnerBootstrapApplyInteractive,
+  listApplyPreflightBlockers,
+  verifyProductionOwnerBootstrapApplyReadOnly,
+  type ProductionPostApplyVerifyResult,
   type AuthenticatedProductionCeremonySession,
   assertCeremonyDirOutsideRepo,
   assertProductionProfileRequiresSystemIdentifier,
@@ -46,7 +59,7 @@ function usage(): never {
       tool: 'owner-production-bootstrap',
       trust_class: PRODUCTION_OWNER_BOOTSTRAP_TRUST_CLASS,
       message:
-        'usage: owner-production-bootstrap <preflight|generate-keypair|write-profile|write-intended-admin|hydrate-intended-admin|draft-seal|record-channel-b|validate|readiness|enroll-existing|run|verify> ...',
+        'usage: owner-production-bootstrap <preflight|generate-keypair|write-profile|write-intended-admin|hydrate-intended-admin|draft-seal|record-channel-b|validate|readiness|enroll-existing|run|verify|verify-apply> ...',
       notes: [
         'run/enroll-existing: pass exactly one of --preflight-only | --authenticated-preflight-only | --apply',
         'DB password: set OWNER_PRODUCTION_BOOTSTRAP_DB_PASSWORD in shell (never argv/chat)',
@@ -391,18 +404,72 @@ async function runPreflightOnlyCommand(argv: string[]): Promise<void> {
   }
 }
 
+const TOTP_CONFIRM_MAX_AGE_MS = 15_000;
+
+interface OwnerTotpEnrollment {
+  readonly secret: Uint8Array;
+  code: string;
+  verifiedAtMs: number;
+}
+
+async function promptAndVerifyTotpCode(secret: Uint8Array): Promise<string> {
+  const code = (
+    await readSecret('Enter current 6-digit code from your authenticator to confirm enrollment: ')
+  ).trim();
+  assertTotpCodeFormat(code);
+  if (!verifyTotpCode(secret, code)) {
+    throw new Error('TOTP_ENROLLMENT_CONFIRMATION_FAILED: code did not verify against the secret');
+  }
+  return code;
+}
+
+/** Generate a TOTP secret, show it once on interactive stderr, require a live confirm code. */
+async function enrollOwnerTotpInteractive(): Promise<OwnerTotpEnrollment> {
+  const secret = generateTotpSecretBytes();
+  try {
+    const secretBase32 = bytesToBase32(secret);
+    await displaySecretOnceOnInteractiveStderr({
+      label: `Issuer: LOOTRA\nAccount: Owner\nTOTP secret (base32) - add to your authenticator NOW:`,
+      secret: secretBase32,
+      warning:
+        'Owner TOTP enrollment. Shown once. Never paste into chat, argv, env, files, or logs.',
+    });
+    await displaySecretOnceOnInteractiveStderr({
+      label: 'Optional otpauth URI (same secret):',
+      secret: buildOtpAuthUri({ secretBase32, accountName: 'Owner', issuer: 'LOOTRA' }),
+      warning: 'Provisioning URI shown once on interactive stderr only.',
+    });
+    const code = await promptAndVerifyTotpCode(secret);
+    return { secret, code, verifiedAtMs: Date.now() };
+  } catch (error: unknown) {
+    zeroizeBytes(secret);
+    throw error;
+  }
+}
+
 async function runApplyCommand(argv: string[], command: string): Promise<void> {
-  const ceremonyDir = argValue(argv, '--ceremony-dir');
-  if (ceremonyDir === null) {
+  let orchestratorInvoked = false;
+  const failPreMutation = (refuseCode: string, message: string, extra: object = {}): void => {
     printJson({
       ok: false,
-      refuseCode: 'CEREMONY_DIR_REQUIRED',
-      message: '--ceremony-dir required for --apply',
+      command,
+      refuseCode,
+      classification: 'PRE_MUTATION_FAILURE',
+      message,
+      mutationPerformed: false,
+      forceApply: false,
+      ...extra,
     });
     process.exitCode = 1;
+  };
+
+  const ceremonyDir = argValue(argv, '--ceremony-dir');
+  if (ceremonyDir === null || ceremonyDir.trim() === '') {
+    failPreMutation('CEREMONY_DIR_REQUIRED', '--ceremony-dir required for --apply');
     return;
   }
 
+  // 1. Gates (never satisfiable by Cursor/CI; Owner-manual only).
   try {
     assertProductionCeremonyApplyGates({
       apply: true,
@@ -411,66 +478,68 @@ async function runApplyCommand(argv: string[], command: string): Promise<void> {
       ownerProductionBootstrapApply: envTrue('OWNER_PRODUCTION_BOOTSTRAP_APPLY'),
     });
   } catch (error: unknown) {
-    printJson({
-      ok: false,
-      command,
-      refuseCode: 'APPLY_GATES_REQUIRED',
-      message: error instanceof Error ? error.message : String(error),
-      required:
-        'DEPLOYMENT_ENV=production + OWNER_PRODUCTION_BOOTSTRAP_ENABLED=true + OWNER_PRODUCTION_BOOTSTRAP_APPLY=1 + --apply',
-      forceApply: false,
-    });
-    process.exitCode = 1;
+    failPreMutation(
+      'APPLY_GATES_REQUIRED',
+      error instanceof Error ? error.message : String(error),
+      {
+        required:
+          'DEPLOYMENT_ENV=production + OWNER_PRODUCTION_BOOTSTRAP_ENABLED=true + OWNER_PRODUCTION_BOOTSTRAP_APPLY=1 + --apply',
+      },
+    );
     return;
   }
 
+  // 2. Interactive TTY (stdin + stdout + stderr) before touching anything.
+  if (!process.stdin.isTTY || !process.stdout.isTTY || !process.stderr.isTTY) {
+    failPreMutation(
+      'INTERACTIVE_TTY_REQUIRED',
+      'apply requires a real interactive TTY on stdin, stdout and stderr',
+    );
+    return;
+  }
+  const profileOnlyOverrides = [
+    '--ca-file',
+    '--tls-server-name',
+    '--database',
+    '--email',
+    '--system-identifier',
+  ].filter((flag) => argv.includes(flag));
+  if (profileOnlyOverrides.length > 0) {
+    failPreMutation(
+      'PROFILE_ONLY_PARAMETER',
+      `CA / tls_server_name / database / system_identifier / intended admin come from the ceremony dir only; remove: ${profileOnlyOverrides.join(', ')}`,
+    );
+    return;
+  }
   const proxyHost = argValue(argv, '--proxy-host') ?? process.env.RAILWAY_TCP_PROXY_DOMAIN ?? '';
   if (proxyHost.trim() === '') {
-    printJson({
-      ok: false,
-      refuseCode: 'PROXY_HOST_REQUIRED',
-      message: 'pass --proxy-host or set RAILWAY_TCP_PROXY_DOMAIN',
-    });
-    process.exitCode = 1;
-    return;
-  }
-
-  let proxyPort: number;
-  let dbUser: string;
-  let dbPassword: string;
-  let connectionString: string;
-  try {
-    proxyPort = parsePort(argValue(argv, '--proxy-port'), 'RAILWAY_TCP_PROXY_PORT');
-    dbUser = resolveDbUser(argv);
-    dbPassword = resolveDbPassword();
-    connectionString = await buildProductionConnectionString({
-      proxyHost,
-      proxyPort,
-      database:
-        argValue(argv, '--database') ??
-        process.env.PGDATABASE ??
-        process.env.OWNER_PRODUCTION_BOOTSTRAP_DB_NAME ??
-        'railway',
-      user: dbUser,
-      password: dbPassword,
-    });
-  } catch (error: unknown) {
-    printJson({
-      ok: false,
-      refuseCode: 'APPLY_PARAMS_INVALID',
-      message: error instanceof Error ? error.message : String(error),
-    });
-    process.exitCode = 1;
+    failPreMutation('PROXY_HOST_REQUIRED', 'pass --proxy-host or set RAILWAY_TCP_PROXY_DOMAIN');
     return;
   }
 
   let session: AuthenticatedProductionCeremonySession | null = null;
+  let totp: OwnerTotpEnrollment | null = null;
   try {
+    // 3. Ceremony dir, public key, encrypted bundle path/ciphertext (NOT decrypted here).
     const pub = loadProductionPublicKey(ceremonyDir);
+    const profile = loadProductionEndpointProfile(ceremonyDir);
     const encryptedBundle = loadEncryptedOwnerBootstrapKeyBundle(
       findEncryptedKeyBundlePath(ceremonyDir),
     );
 
+    // 4. Connection string with numeric public dial IP.
+    const proxyPort = parsePort(argValue(argv, '--proxy-port'), 'RAILWAY_TCP_PROXY_PORT');
+    const dbUser = resolveDbUser(argv);
+    const dbPassword = resolveDbPassword();
+    const connectionString = await buildProductionConnectionString({
+      proxyHost,
+      proxyPort,
+      database: profile.expected_database_name,
+      user: dbUser,
+      password: dbPassword,
+    });
+
+    // 5. Live Channel B authentication (Owner types the offline bundle digest).
     session = await authenticateProductionCeremonyFromOwnerTty({
       ceremonyDir,
       connectionString,
@@ -479,12 +548,62 @@ async function runApplyCommand(argv: string[], command: string): Promise<void> {
         readLine('Type production bundle digest from offline/witnessed media (64 hex): '),
     });
 
+    // 6. Owner types the offline-backup attestation phrase (no env/argv/boolean shortcut).
+    await attestOwnerOfflineBackupsInteractive();
+
+    // 7. Authenticated read-only preflight with attestation.
+    const preflight = await runAuthenticatedProductionOwnerBootstrapPreflightOnly({
+      productionTrust: session.productionTrust,
+      pool: session.verifiedPool.pool,
+      ownerKeyOfflineBackupsReady: true,
+      permitApplyEnvironment: true,
+    });
+
+    // 8. Strict READY gate - otherwise STOP with zero mutation.
+    try {
+      assertApplyPreflightReady(preflight);
+    } catch {
+      failPreMutation(
+        APPLY_PREFLIGHT_NOT_READY,
+        'authenticated preflight is not READY - apply stopped before any mutation',
+        {
+          blockers: listApplyPreflightBlockers(preflight),
+          preflightRefuseCode: preflight.refuseCode,
+          operationalDbMutation: false,
+        },
+      );
+      return;
+    }
+
+    // 9. Owner TOTP enrollment: secret shown once, Owner types a live code, verified locally.
+    totp = await enrollOwnerTotpInteractive();
+
+    // 10. Secrets (never echoed, never argv/env).
     const bootstrapPassphrase = await readSecret(
       'Owner bootstrap passphrase (encrypted key, not echoed): ',
     );
     const password = await readSecret('New Owner admin password (not echoed): ');
     const passwordConfirm = await readSecret('Confirm Owner admin password: ');
 
+    // 11. Password policy before any mutation.
+    assertPasswordPolicy(password);
+    if (password !== passwordConfirm) {
+      throw new Error('PASSWORD_CONFIRMATION_MISMATCH');
+    }
+
+    // 12. Final point-of-no-return confirmation.
+    await confirmProductionOwnerBootstrapApplyInteractive();
+
+    // A confirm code that went stale while the Owner typed secrets would fail inside the
+    // lifecycle after the grant is minted; re-request a fresh live code while still pre-mutation.
+    if (Date.now() - totp.verifiedAtMs > TOTP_CONFIRM_MAX_AGE_MS) {
+      process.stdout.write('TOTP confirmation code is stale - enter a fresh code.\n');
+      totp.code = await promptAndVerifyTotpCode(totp.secret);
+      totp.verifiedAtMs = Date.now();
+    }
+
+    // 13. Only now does the orchestrator decrypt the Owner key and mutate.
+    orchestratorInvoked = true;
     const result = await orchestrateProductionOwnerBootstrapCeremony({
       pool: session.verifiedPool.pool,
       productionTrust: session.productionTrust,
@@ -492,14 +611,30 @@ async function runApplyCommand(argv: string[], command: string): Promise<void> {
       bootstrapPassphrase,
       password,
       passwordConfirm,
+      totpSecretBytes: totp.secret,
+      totpConfirmCode: totp.code,
       apply: true,
       deploymentEnvIsProduction: true,
       ownerProductionBootstrapEnabled: true,
       ownerProductionBootstrapApply: true,
     });
 
+    // 14. Post-apply read-only verification.
+    let verify: ProductionPostApplyVerifyResult | null = null;
+    let verifyError: string | null = null;
+    try {
+      verify = await verifyProductionOwnerBootstrapApplyReadOnly(session.verifiedPool.pool, {
+        adminUserId: result.adminUserId,
+        grantId: result.grantId,
+        attemptId: result.attemptId,
+      });
+    } catch (error: unknown) {
+      verifyError = error instanceof Error ? error.message : String(error);
+    }
+
+    // 15. Sanitized output only.
     printJson({
-      ok: true,
+      ok: verify?.ok === true,
       command,
       trust_class: PRODUCTION_OWNER_BOOTSTRAP_TRUST_CLASS,
       applied: true,
@@ -508,15 +643,104 @@ async function runApplyCommand(argv: string[], command: string): Promise<void> {
       emailMasked: maskEmail(result.email),
       grantId: result.grantId,
       attemptId: result.attemptId,
+      postApplyVerify: verify,
+      postApplyVerifyError: verifyError,
+      ...(verify?.ok === true
+        ? {}
+        : { refuseCode: 'POST_APPLY_VERIFY_FAILED', nextStep: 'run read-only verify-apply' }),
     });
+    if (verify?.ok !== true) process.exitCode = 1;
   } catch (error: unknown) {
-    printJson({
-      ok: false,
-      command,
-      refuseCode: 'APPLY_FAILED',
-      message: error instanceof Error ? error.message : String(error),
-    });
+    const message = error instanceof Error ? error.message : String(error);
+    if (!orchestratorInvoked) {
+      failPreMutation('APPLY_FAILED', message);
+    } else {
+      printJson({
+        ok: false,
+        command,
+        refuseCode: 'PARTIAL_LIFECYCLE_RECONCILIATION_REQUIRED',
+        classification: 'PARTIAL_LIFECYCLE_RECONCILIATION_REQUIRED',
+        message,
+        mutationPerformed: 'UNKNOWN',
+        rollbackClaimed: false,
+        retryGuidance:
+          'DO NOT retry blindly. Run authenticated-preflight-only (read-only) and inspect state with the Owner before any further action.',
+        forceApply: false,
+      });
+      process.exitCode = 1;
+    }
+  } finally {
+    if (totp !== null) zeroizeBytes(totp.secret);
+    await session?.close();
+  }
+}
+
+async function runVerifyApplyCommand(argv: string[], command: string): Promise<void> {
+  const fail = (refuseCode: string, message: string): void => {
+    printJson({ ok: false, command, refuseCode, message, operationalDbMutation: false });
     process.exitCode = 1;
+  };
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    fail('INTERACTIVE_TTY_REQUIRED', 'verify-apply authenticates via live Owner TTY');
+    return;
+  }
+  const ceremonyDir = argValue(argv, '--ceremony-dir');
+  const adminUserId = argValue(argv, '--admin-user-id');
+  const grantId = argValue(argv, '--grant-id');
+  const attemptId = argValue(argv, '--attempt-id');
+  if (
+    ceremonyDir === null ||
+    adminUserId === null ||
+    grantId === null ||
+    attemptId === null
+  ) {
+    fail('VERIFY_APPLY_PARAMS_REQUIRED', '--ceremony-dir --admin-user-id --grant-id --attempt-id required');
+    return;
+  }
+  const proxyHost = argValue(argv, '--proxy-host') ?? process.env.RAILWAY_TCP_PROXY_DOMAIN ?? '';
+  if (proxyHost.trim() === '') {
+    fail('PROXY_HOST_REQUIRED', 'pass --proxy-host or set RAILWAY_TCP_PROXY_DOMAIN');
+    return;
+  }
+
+  let session: AuthenticatedProductionCeremonySession | null = null;
+  try {
+    const proxyPort = parsePort(argValue(argv, '--proxy-port'), 'RAILWAY_TCP_PROXY_PORT');
+    const dbUser = resolveDbUser(argv);
+    const dbPassword = resolveDbPassword();
+    const pub = loadProductionPublicKey(ceremonyDir);
+    const profile = loadProductionEndpointProfile(ceremonyDir);
+    const connectionString = await buildProductionConnectionString({
+      proxyHost,
+      proxyPort,
+      database: profile.expected_database_name,
+      user: dbUser,
+      password: dbPassword,
+    });
+    session = await authenticateProductionCeremonyFromOwnerTty({
+      ceremonyDir,
+      connectionString,
+      pinnedPublicKeyRawHex: pub.public_key_raw_hex,
+      readOfflineBundleDigestHex: () =>
+        readLine('Type production bundle digest from offline/witnessed media (64 hex): '),
+    });
+    const verify = await verifyProductionOwnerBootstrapApplyReadOnly(session.verifiedPool.pool, {
+      adminUserId,
+      grantId,
+      attemptId,
+    });
+    printJson({
+      ok: verify.ok,
+      command,
+      mode: 'verify-apply',
+      trust_class: PRODUCTION_OWNER_BOOTSTRAP_TRUST_CLASS,
+      operationalDbMutation: false,
+      intendedAdminEmailMasked: maskEmail(session.productionTrust.intendedAdminEmail),
+      result: verify,
+    });
+    if (!verify.ok) process.exitCode = 1;
+  } catch (error: unknown) {
+    fail('VERIFY_APPLY_FAILED', error instanceof Error ? error.message : String(error));
   } finally {
     await session?.close();
   }
@@ -595,16 +819,25 @@ async function runAuthenticatedPreflightOnlyCommand(argv: string[], command: str
         readLine('Type production bundle digest from offline/witnessed media (64 hex): '),
     });
 
+    // A wrong/empty phrase never hard-fails the read-only report: backups stay "pending".
+    let ownerKeyOfflineBackupsReady = false;
+    try {
+      ownerKeyOfflineBackupsReady = await attestOwnerOfflineBackupsInteractive();
+    } catch {
+      ownerKeyOfflineBackupsReady = false;
+    }
+
     const result = await runAuthenticatedProductionOwnerBootstrapPreflightOnly({
       productionTrust: session.productionTrust,
       pool: session.verifiedPool.pool,
-      ownerKeyOfflineBackupsReady: false,
+      ownerKeyOfflineBackupsReady,
     });
     printJson({
       ok: result.refuseCode === null,
       command,
       mode: 'authenticated-preflight-only',
       authenticated: true,
+      ownerKeyBackupAttestation: ownerKeyOfflineBackupsReady ? 'ATTESTED' : 'NOT_ATTESTED',
       trust_class: PRODUCTION_OWNER_BOOTSTRAP_TRUST_CLASS,
       forceApply: false,
       applyDefault: false,
@@ -932,6 +1165,11 @@ async function main(): Promise<void> {
 
   if (command === 'hydrate-intended-admin') {
     await runHydrateIntendedAdminCommand(argv);
+    return;
+  }
+
+  if (command === 'verify-apply') {
+    await runVerifyApplyCommand(argv, command);
     return;
   }
 

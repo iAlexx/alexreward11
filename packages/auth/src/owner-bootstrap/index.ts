@@ -231,6 +231,23 @@ export {
   type ProductionCeremonyOrchestratorResult,
 } from './production-ceremony-orchestrator.js';
 export {
+  OWNER_OFFLINE_BACKUP_ATTESTATION_PHRASE,
+  OWNER_APPLY_CONFIRMATION_PHRASE,
+  attestOwnerOfflineBackupsInteractive,
+  confirmProductionOwnerBootstrapApplyInteractive,
+  type InteractivePhraseInput,
+} from './production-apply-confirmations.js';
+export {
+  APPLY_PREFLIGHT_NOT_READY,
+  assertApplyPreflightReady,
+  listApplyPreflightBlockers,
+} from './production-apply-readiness.js';
+export {
+  verifyProductionOwnerBootstrapApplyReadOnly,
+  type ProductionPostApplyVerifyInput,
+  type ProductionPostApplyVerifyResult,
+} from './production-post-apply-verify.js';
+export {
   preflightProductionOwnerBootstrapSchema,
   assertProductionOwnerBootstrapSchemaReady,
   REQUIRED_PRODUCTION_OWNER_BOOTSTRAP_MIGRATIONS,

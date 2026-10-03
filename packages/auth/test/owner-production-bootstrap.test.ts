@@ -42,6 +42,17 @@ import {
   runAuthenticatedProductionOwnerBootstrapPreflightOnly,
   hydrateIntendedExistingAdminBindingFromDatabase,
   loadProductionPublicKey,
+  OWNER_OFFLINE_BACKUP_ATTESTATION_PHRASE,
+  OWNER_APPLY_CONFIRMATION_PHRASE,
+  attestOwnerOfflineBackupsInteractive,
+  confirmProductionOwnerBootstrapApplyInteractive,
+  APPLY_PREFLIGHT_NOT_READY,
+  assertApplyPreflightReady,
+  listApplyPreflightBlockers,
+  verifyProductionOwnerBootstrapApplyReadOnly,
+  generateTotpSecretBytes,
+  generateTotpCode,
+  type ProductionOwnerBootstrapPreflightOnlyResult,
 } from '../src/owner-bootstrap/index.js';
 import { generateEd25519KeyPair, bytesToHex } from '../src/owner-bootstrap/ed25519.js';
 import { fingerprintPublicKey } from '../src/owner-bootstrap/grant.js';
@@ -576,6 +587,9 @@ describe.skipIf(databaseUrl === '')(
       const encName = readdirSync(dir).find((f) => f.endsWith('.enc'))!;
       const encBundle = JSON.parse(readFileSync(join(dir, encName), 'utf8'));
 
+      const totpSecret = generateTotpSecretBytes();
+      const totpConfirmCode = generateTotpCode(totpSecret);
+      const callerSecretBefore = Buffer.from(totpSecret).toString('hex');
       const result = await orchestrateProductionOwnerBootstrapCeremony({
         pool: sim.pool,
         productionTrust,
@@ -583,11 +597,15 @@ describe.skipIf(databaseUrl === '')(
         bootstrapPassphrase: PASSPHRASE,
         password: 'Disposable-Owner-Password-12',
         passwordConfirm: 'Disposable-Owner-Password-12',
+        totpSecretBytes: totpSecret,
+        totpConfirmCode,
         apply: true,
         deploymentEnvIsProduction: true,
         ownerProductionBootstrapEnabled: true,
         ownerProductionBootstrapApply: true,
       });
+      // The orchestrator zeroizes only its own copy; the caller's buffer is untouched.
+      expect(Buffer.from(totpSecret).toString('hex')).toBe(callerSecretBefore);
 
       expect(result.applied).toBe(true);
       expect(result.adminUserId).toBe(ADMIN_ID);
@@ -634,6 +652,64 @@ describe.skipIf(databaseUrl === '')(
       );
       expect(Number(audit.rows[0]?.c)).toBeGreaterThanOrEqual(1);
 
+      // Post-apply verification: read-only, sanitized, ok after a successful apply.
+      const seen: string[] = [];
+      const holder = sim.pool as unknown as { connect: (...args: unknown[]) => Promise<unknown> };
+      const origConnect = holder.connect.bind(sim.pool);
+      holder.connect = async (...connectArgs: unknown[]) => {
+        if (connectArgs.length > 0) return origConnect(...connectArgs);
+        const client = (await origConnect()) as {
+          query: (...args: unknown[]) => Promise<unknown>;
+        };
+        const oq = client.query.bind(client);
+        client.query = (...args: unknown[]) => {
+          const first = args[0];
+          seen.push(typeof first === 'string' ? first : String((first as { text?: string }).text));
+          return oq(...args);
+        };
+        return client;
+      };
+      let verified: Awaited<ReturnType<typeof verifyProductionOwnerBootstrapApplyReadOnly>>;
+      let wrongAttempt: Awaited<ReturnType<typeof verifyProductionOwnerBootstrapApplyReadOnly>>;
+      try {
+        verified = await verifyProductionOwnerBootstrapApplyReadOnly(sim.pool, {
+          adminUserId: result.adminUserId,
+          grantId: result.grantId,
+          attemptId: result.attemptId,
+        });
+        wrongAttempt = await verifyProductionOwnerBootstrapApplyReadOnly(sim.pool, {
+          adminUserId: result.adminUserId,
+          grantId: result.grantId,
+          attemptId: 'ffffffff-0000-4000-8000-00000000ffff',
+        });
+      } finally {
+        holder.connect = origConnect;
+      }
+      expect(seen[0]).toBe('BEGIN READ ONLY');
+      expect(seen[1]).toMatch(/SHOW transaction_read_only/);
+      expect(seen.some((s) => /^\s*(INSERT|UPDATE|DELETE|COMMIT)\b/i.test(s))).toBe(false);
+      expect(verified.ok).toBe(true);
+      expect(verified.failures).toEqual([]);
+      expect(verified.operationalDbMutation).toBe(false);
+      expect(verified.readOnlyTransaction).toBe(true);
+      expect(verified.activeOwnerBindingCount).toBe(1);
+      expect(verified.activePasswordCredentialCount).toBe(1);
+      expect(verified.activeTotpCredentialCount).toBe(1);
+      expect(verified.grantStatus).toBe('CONSUMED');
+      expect(verified.attemptStatus).toBe('CONSUMED');
+      expect(JSON.stringify(verified)).not.toContain(ADMIN_EMAIL);
+      expect(wrongAttempt.ok).toBe(false);
+      expect(wrongAttempt.failures).toContain('ATTEMPT_NOT_CONSUMED');
+      expect(wrongAttempt.failures).toContain('ENROLLMENT_AUDIT_MISSING');
+      await expect(
+        verifyProductionOwnerBootstrapApplyReadOnly(sim.pool, {
+          adminUserId: 'not-a-uuid',
+          grantId: result.grantId,
+          attemptId: result.attemptId,
+        }),
+      ).rejects.toThrow(/UUID/);
+
+      const secondSecret = generateTotpSecretBytes();
       await expect(
         orchestrateProductionOwnerBootstrapCeremony({
           pool: sim.pool,
@@ -642,12 +718,150 @@ describe.skipIf(databaseUrl === '')(
           bootstrapPassphrase: 'wrong-passphrase-xxxxx',
           password: 'Disposable-Owner-Password-12',
           passwordConfirm: 'Disposable-Owner-Password-12',
+          totpSecretBytes: secondSecret,
+          totpConfirmCode: generateTotpCode(secondSecret),
           apply: true,
           deploymentEnvIsProduction: true,
           ownerProductionBootstrapEnabled: true,
           ownerProductionBootstrapApply: true,
         }),
       ).rejects.toThrow();
+
+      // Pool still usable after orchestration, and closes cleanly.
+      const ping = await sim.pool.query(`SELECT 1 AS ok`);
+      expect(ping.rows[0]?.ok).toBe(1);
+      await sim.pool.end();
+      expect((sim.pool as unknown as { ended: boolean }).ended).toBe(true);
+      } finally {
+        if (simPool) await simPool.pool.end().catch(() => undefined);
+        delete process.env.ALEX_OWNER_BOOTSTRAP_DISPOSABLE_PRODUCTION_SIM;
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }, 180_000);
+
+    it('wrong TOTP confirm code throws before ANY mutation (seat null, no credentials, no grant)', async () => {
+      enableTestTemp();
+      process.env.ALEX_OWNER_BOOTSTRAP_DISPOSABLE_PRODUCTION_SIM = '1';
+      try {
+        await resetIsolatedBootstrapSchema(databaseUrl);
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        if (/ECONNREFUSED|connect/i.test(msg)) {
+          console.warn('skipping wrong-TOTP test - test DB unavailable:', msg);
+          return;
+        }
+        throw error;
+      }
+      const dir = mkdtempSync(join(tmpdir(), 'p21-s4b2-badtotp-'));
+      const dbName = dbNameFromUrl(databaseUrl);
+      let simPool: Awaited<ReturnType<typeof createDisposableProductionSimPool>> | null = null;
+      try {
+        generateProductionBootstrapKeypairFiles({
+          ceremonyDir: dir,
+          keyId: 'owner-boot-badtotp',
+          phase21ProductionOwnerBootstrap: true,
+          requireInteractiveTty: false,
+          passphrase: PASSPHRASE,
+          passphraseConfirm: PASSPHRASE,
+          repoRootHint: repoRoot,
+          testFastKdf: true,
+        });
+        simPool = await createDisposableProductionSimPool({
+          connectionString: databaseUrl,
+          profileId: 'prod-sim-profile',
+          expectedDatabaseName: dbName,
+        });
+        const sim = simPool;
+        await sim.pool.query(
+          `INSERT INTO admin_users (id, email, display_name, status)
+           VALUES ($1::uuid, $2, 'Target Admin', 'ACTIVE')`,
+          [ADMIN_ID, ADMIN_EMAIL],
+        );
+        const rec = JSON.parse(readFileSync(join(dir, 'bootstrap-public.json'), 'utf8')) as {
+          public_key_raw_hex: string;
+          key_id: string;
+          public_key_sha256_hex: string;
+        };
+        const { hexToBytes } = await import('../src/owner-bootstrap/ed25519.js');
+        const trust = createBootstrapTrustMaterial(
+          sim,
+          new Map([[rec.key_id, hexToBytes(rec.public_key_raw_hex)]]),
+        );
+        const bundle = {
+          v: 1 as const,
+          purpose: 'FIRST_OWNER_ENROLLMENT' as const,
+          deployment_env: 'production' as const,
+          ceremony_id: 'd44d44d4-0000-4000-8000-000000000045',
+          seal_content_digest_hex: 'ab'.repeat(32),
+          endpoint_profile_id: 'prod-sim-profile',
+          endpoint_profile_digest_hex: 'cd'.repeat(32),
+          bootstrap_key_id: rec.key_id,
+          bootstrap_public_key_sha256_hex: rec.public_key_sha256_hex,
+          enrollment_mode: 'CLAIM_EXISTING_ADMIN' as const,
+          intended_admin_user_id: ADMIN_ID,
+          intended_admin_email: ADMIN_EMAIL,
+          witness_model: 'HUMAN_ATTESTED' as const,
+          witness_cryptographic_identity_proven: false as const,
+          witness_count: 1,
+        };
+        const productionTrust = mintAuthenticatedProductionBootstrapTrustForTests({
+          trust,
+          bundle,
+          bundleDigestHex: digestProductionCeremonyBundleV1(bundle),
+        });
+        const encName = readdirSync(dir).find((f) => f.endsWith('.enc'))!;
+        const encBundle = JSON.parse(readFileSync(join(dir, encName), 'utf8'));
+
+        const totpSecret = generateTotpSecretBytes();
+        const goodCode = generateTotpCode(totpSecret);
+        const wrongCode = goodCode === '000000' ? '111111' : '000000';
+        const base = {
+          pool: sim.pool,
+          productionTrust,
+          encryptedKeyBundle: encBundle,
+          bootstrapPassphrase: PASSPHRASE,
+          password: 'Disposable-Owner-Password-12',
+          passwordConfirm: 'Disposable-Owner-Password-12',
+          apply: true,
+          deploymentEnvIsProduction: true,
+          ownerProductionBootstrapEnabled: true,
+          ownerProductionBootstrapApply: true,
+        };
+
+        await expect(
+          orchestrateProductionOwnerBootstrapCeremony({
+            ...base,
+            totpSecretBytes: totpSecret,
+            totpConfirmCode: wrongCode,
+          }),
+        ).rejects.toThrow(/TOTP confirmation failed/);
+        await expect(
+          orchestrateProductionOwnerBootstrapCeremony({ ...base, totpConfirmCode: goodCode }),
+        ).rejects.toThrow(/PRODUCTION_TOTP_SECRET_REQUIRED/);
+        await expect(
+          orchestrateProductionOwnerBootstrapCeremony({ ...base, totpSecretBytes: totpSecret }),
+        ).rejects.toThrow(/PRODUCTION_TOTP_CODE_REQUIRED/);
+
+        const seat = await sim.pool.query(
+          `SELECT holder_admin_user_id::text AS h FROM admin_owner_authority WHERE seat = 1`,
+        );
+        expect(seat.rows[0]?.h ?? null).toBeNull();
+        const creds = await sim.pool.query(
+          `SELECT count(*)::int AS c FROM admin_credentials WHERE admin_user_id = $1::uuid`,
+          [ADMIN_ID],
+        );
+        expect(Number(creds.rows[0]?.c)).toBe(0);
+        const bindings = await sim.pool.query(
+          `SELECT count(*)::int AS c FROM admin_role_bindings WHERE admin_user_id = $1::uuid`,
+          [ADMIN_ID],
+        );
+        expect(Number(bindings.rows[0]?.c)).toBe(0);
+        const grants = await sim.pool.query(`SELECT count(*)::int AS c FROM owner_bootstrap_grants`);
+        expect(Number(grants.rows[0]?.c)).toBe(0);
+        const attempts = await sim.pool.query(
+          `SELECT count(*)::int AS c FROM owner_bootstrap_attempts`,
+        );
+        expect(Number(attempts.rows[0]?.c)).toBe(0);
       } finally {
         if (simPool) await simPool.pool.end().catch(() => undefined);
         delete process.env.ALEX_OWNER_BOOTSTRAP_DISPOSABLE_PRODUCTION_SIM;
@@ -960,10 +1174,10 @@ describe('phase21 step4b1 authenticated read-only preflight (no DB)', () => {
     expect(src).toMatch(/--authenticated-preflight-only/);
     expect(src).toMatch(/hydrate-intended-admin/);
     expect(src).toMatch(/runAuthenticatedProductionOwnerBootstrapPreflightOnly/);
-    expect(src).toMatch(/ownerKeyOfflineBackupsReady: false/);
+    expect(src).toMatch(/ownerKeyOfflineBackupsReady = await attestOwnerOfflineBackupsInteractive\(\)/);
     expect(src).not.toMatch(/trustAuthenticated/);
     expect(src.match(/await session\?\.close\(\)/g)?.length).toBeGreaterThanOrEqual(2);
-    expect(src.match(/authenticateProductionCeremonyFromOwnerTty\(\{/g)?.length).toBe(2);
+    expect(src.match(/authenticateProductionCeremonyFromOwnerTty\(\{/g)?.length).toBe(3);
     expect(src).toMatch(/pool: session\.verifiedPool\.pool/);
     expect(src).toMatch(/MUTUALLY_EXCLUSIVE_MODES/);
     expect(src).toMatch(/PROFILE_ONLY_PARAMETER/);
@@ -1225,3 +1439,337 @@ describe.skipIf(databaseUrl === '')(
     }, 120_000);
   },
 );
+
+describe('phase21 step4b2 safe apply hardening (no DB)', () => {
+  const readSrc = (rel: string) => readFileSync(new URL(rel, import.meta.url), 'utf8');
+  const savedHooks = process.env.ALEX_OWNER_BOOTSTRAP_TEST_HOOKS;
+  const savedArgv = [...process.argv];
+
+  afterEach(() => {
+    if (savedHooks === undefined) delete process.env.ALEX_OWNER_BOOTSTRAP_TEST_HOOKS;
+    else process.env.ALEX_OWNER_BOOTSTRAP_TEST_HOOKS = savedHooks;
+    delete process.env.OWNER_OFFLINE_BACKUPS_ATTESTED;
+    delete process.env.OWNER_OFFLINE_BACKUP_ATTESTATION;
+    process.argv = [...savedArgv];
+  });
+
+  function withNonTty<T>(fn: () => Promise<T>): Promise<T> {
+    const stdinDesc = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY');
+    Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+    return fn().finally(() => {
+      if (stdinDesc) Object.defineProperty(process.stdin, 'isTTY', stdinDesc);
+      else delete (process.stdin as { isTTY?: boolean }).isTTY;
+    });
+  }
+
+  it('backup attestation: env/argv/boolean cannot authorize; non-TTY fails', async () => {
+    enableTestTemp();
+    process.env.OWNER_OFFLINE_BACKUPS_ATTESTED = '1';
+    process.env.OWNER_OFFLINE_BACKUP_ATTESTATION = OWNER_OFFLINE_BACKUP_ATTESTATION_PHRASE;
+    process.argv = [...process.argv, '--attest-backups', OWNER_OFFLINE_BACKUP_ATTESTATION_PHRASE];
+    await withNonTty(async () => {
+      await expect(attestOwnerOfflineBackupsInteractive()).rejects.toThrow(
+        /OWNER_BACKUP_ATTESTATION_FAILED.*INTERACTIVE_TTY_REQUIRED/,
+      );
+      await expect(attestOwnerOfflineBackupsInteractive({})).rejects.toThrow(/TTY/);
+    });
+    // Booleans / unknown fields are simply not part of the API.
+    await withNonTty(async () => {
+      await expect(
+        attestOwnerOfflineBackupsInteractive({ attested: true } as never),
+      ).rejects.toThrow(/TTY/);
+    });
+  });
+
+  it('backup attestation: injection needs TEST_HOOKS; wrong phrase fails; exact phrase passes', async () => {
+    enableTestTemp();
+    const exact = async () => OWNER_OFFLINE_BACKUP_ATTESTATION_PHRASE;
+    // TTY-required (default) still fails closed in a non-TTY test runner even with a reader.
+    await withNonTty(async () => {
+      await expect(attestOwnerOfflineBackupsInteractive({ readPhrase: exact })).rejects.toThrow(
+        /TTY/,
+      );
+    });
+    // requireInteractiveTty=false without a reader is refused.
+    await expect(
+      attestOwnerOfflineBackupsInteractive({ requireInteractiveTty: false }),
+    ).rejects.toThrow(/injected reader/);
+    // Wrong / empty / case-changed phrase fails.
+    for (const bad of [
+      '',
+      'yes',
+      'true',
+      OWNER_OFFLINE_BACKUP_ATTESTATION_PHRASE.toLowerCase(),
+      `${OWNER_OFFLINE_BACKUP_ATTESTATION_PHRASE}X`,
+      OWNER_APPLY_CONFIRMATION_PHRASE,
+    ]) {
+      await expect(
+        attestOwnerOfflineBackupsInteractive({
+          requireInteractiveTty: false,
+          readPhrase: async () => bad,
+        }),
+      ).rejects.toThrow(/OWNER_BACKUP_ATTESTATION_FAILED/);
+    }
+    // Exact phrase (trimmed) succeeds with TEST_HOOKS + injected reader.
+    await expect(
+      attestOwnerOfflineBackupsInteractive({
+        requireInteractiveTty: false,
+        readPhrase: async () => `  ${OWNER_OFFLINE_BACKUP_ATTESTATION_PHRASE}\n`,
+      }),
+    ).resolves.toBe(true);
+    // Without TEST_HOOKS no injection is honoured at all.
+    delete process.env.ALEX_OWNER_BOOTSTRAP_TEST_HOOKS;
+    await expect(
+      attestOwnerOfflineBackupsInteractive({ requireInteractiveTty: false, readPhrase: exact }),
+    ).rejects.toThrow(/TEST_HOOKS/);
+    await expect(attestOwnerOfflineBackupsInteractive({ readPhrase: exact })).rejects.toThrow(
+      /TEST_HOOKS/,
+    );
+  });
+
+  it('final APPLY confirmation phrase: same TTY rules, exact phrase only', async () => {
+    enableTestTemp();
+    expect(OWNER_APPLY_CONFIRMATION_PHRASE).toBe('APPLY_LOOTRA_PRODUCTION_OWNER_BOOTSTRAP');
+    expect(OWNER_OFFLINE_BACKUP_ATTESTATION_PHRASE).toBe(
+      'I_HAVE_TWO_SHA256_VERIFIED_OFFLINE_OWNER_KEY_BACKUPS',
+    );
+    await withNonTty(async () => {
+      await expect(confirmProductionOwnerBootstrapApplyInteractive()).rejects.toThrow(
+        /APPLY_CONFIRMATION_FAILED.*INTERACTIVE_TTY_REQUIRED/,
+      );
+    });
+    for (const bad of ['', 'APPLY', 'apply_lootra_production_owner_bootstrap', 'yes']) {
+      await expect(
+        confirmProductionOwnerBootstrapApplyInteractive({
+          requireInteractiveTty: false,
+          readPhrase: async () => bad,
+        }),
+      ).rejects.toThrow(/APPLY_CONFIRMATION_FAILED/);
+    }
+    await expect(
+      confirmProductionOwnerBootstrapApplyInteractive({
+        requireInteractiveTty: false,
+        readPhrase: async () => OWNER_OFFLINE_BACKUP_ATTESTATION_PHRASE,
+      }),
+    ).rejects.toThrow(/APPLY_CONFIRMATION_FAILED/);
+    await expect(
+      confirmProductionOwnerBootstrapApplyInteractive({
+        requireInteractiveTty: false,
+        readPhrase: async () => ` ${OWNER_APPLY_CONFIRMATION_PHRASE} `,
+      }),
+    ).resolves.toBe(true);
+    delete process.env.ALEX_OWNER_BOOTSTRAP_TEST_HOOKS;
+    await expect(
+      confirmProductionOwnerBootstrapApplyInteractive({
+        requireInteractiveTty: false,
+        readPhrase: async () => OWNER_APPLY_CONFIRMATION_PHRASE,
+      }),
+    ).rejects.toThrow(/TEST_HOOKS/);
+  });
+
+  function readyPreflight(): ProductionOwnerBootstrapPreflightOnlyResult {
+    return {
+      trustClass: PRODUCTION_OWNER_BOOTSTRAP_TRUST_CLASS,
+      mode: 'preflight-only',
+      operationalDbMutation: false,
+      trustAuthenticated: true,
+      tlsEndpointVerified: true,
+      schemaReady: true,
+      ownerSeatReady: true,
+      targetAdminReady: true,
+      targetAdminSecurityState: 'CLEAN',
+      ownerKeyBackupsReady: true,
+      readyForOwnerBootstrapApply: true,
+      refuseCode: null,
+      dialIp: '203.0.113.10',
+      tlsServerName: 'postgres.example.internal',
+      operationalDatabaseName: 'railway',
+      operationalSystemIdentifier: '1',
+      requiredMigrationsPresent: [],
+      requiredMigrationsMissing: [],
+      ownerSeatStatus: null,
+      ownerBindingHistoryCount: 0,
+      activeOwnerBindingCount: 0,
+      ownerRoleStatus: 'ACTIVE',
+      targetExistingAdminId: ADMIN_ID,
+      targetExistingAdminStatus: 'ACTIVE',
+      authCounts: null,
+      authenticatedBundleDigestHex: 'ab'.repeat(32),
+      authenticatedKeyId: 'k',
+      notes: [],
+    } as unknown as ProductionOwnerBootstrapPreflightOnlyResult;
+  }
+
+  it('assertApplyPreflightReady: only a fully READY preflight passes; every blocker refuses', () => {
+    expect(() => assertApplyPreflightReady(readyPreflight())).not.toThrow();
+    expect(listApplyPreflightBlockers(readyPreflight())).toEqual([]);
+    const mutations: Array<[string, Record<string, unknown>]> = [
+      ['trustAuthenticated', { trustAuthenticated: false }],
+      ['tlsEndpointVerified', { tlsEndpointVerified: false }],
+      ['schemaReady', { schemaReady: false }],
+      ['ownerSeatReady', { ownerSeatReady: false }],
+      ['targetAdminReady', { targetAdminReady: false }],
+      ['targetAdminSecurityState', { targetAdminSecurityState: 'REQUIRES_OWNER_REVIEW' }],
+      ['targetAdminSecurityState', { targetAdminSecurityState: 'UNKNOWN' }],
+      ['ownerKeyBackupsReady', { ownerKeyBackupsReady: false }],
+      ['readyForOwnerBootstrapApply', { readyForOwnerBootstrapApply: false }],
+      ['refuseCode', { refuseCode: 'OWNER_KEY_OFFLINE_BACKUPS_PENDING' }],
+      ['operationalDbMutation', { operationalDbMutation: true }],
+    ];
+    for (const [blocker, patch] of mutations) {
+      const r = { ...readyPreflight(), ...patch } as ProductionOwnerBootstrapPreflightOnlyResult;
+      expect(listApplyPreflightBlockers(r)).toContain(blocker);
+      expect(() => assertApplyPreflightReady(r)).toThrow(new RegExp(APPLY_PREFLIGHT_NOT_READY));
+    }
+  });
+
+  it('CLI --apply order: gates, TTY, auth, attest, preflight, READY gate, TOTP, secrets, policy, confirm, orchestrate, verify', () => {
+    const src = readSrc('../src/cli/owner-production-bootstrap.ts');
+    const start = src.indexOf('async function runApplyCommand');
+    const end = src.indexOf('async function runVerifyApplyCommand');
+    expect(start).toBeGreaterThan(0);
+    const apply = src.slice(start, end);
+    const order = [
+      'assertProductionCeremonyApplyGates(',
+      'process.stdin.isTTY',
+      'loadEncryptedOwnerBootstrapKeyBundle(',
+      'buildProductionConnectionString(',
+      'authenticateProductionCeremonyFromOwnerTty(',
+      'attestOwnerOfflineBackupsInteractive()',
+      'runAuthenticatedProductionOwnerBootstrapPreflightOnly(',
+      'assertApplyPreflightReady(',
+      'enrollOwnerTotpInteractive()',
+      "readSecret(\n      'Owner bootstrap passphrase",
+      'assertPasswordPolicy(password)',
+      'confirmProductionOwnerBootstrapApplyInteractive()',
+      'orchestrateProductionOwnerBootstrapCeremony(',
+      'verifyProductionOwnerBootstrapApplyReadOnly(',
+    ];
+    let last = -1;
+    for (const needle of order) {
+      const at = apply.indexOf(needle);
+      expect(at, `missing ${needle}`).toBeGreaterThan(-1);
+      expect(at, `out of order: ${needle}`).toBeGreaterThan(last);
+      last = at;
+    }
+    // The orchestrator (the only decrypt/mutate path) is invoked exactly once, after the READY gate.
+    expect(apply.match(/orchestrateProductionOwnerBootstrapCeremony\(\{/g)?.length).toBe(1);
+    expect(apply).toMatch(/failPreMutation\(\s*APPLY_PREFLIGHT_NOT_READY/);
+    expect(apply).toMatch(/ownerKeyOfflineBackupsReady: true/);
+    expect(apply).toMatch(/PRE_MUTATION_FAILURE/);
+    expect(apply).toMatch(/PARTIAL_LIFECYCLE_RECONCILIATION_REQUIRED/);
+    expect(apply).toMatch(/rollbackClaimed: false/);
+    expect(apply).toMatch(/zeroizeBytes\(totp\.secret\)/);
+    expect(apply).toMatch(/await session\?\.close\(\)/);
+    // Human TOTP UX: secret shown once, Owner types a live code.
+    expect(src).toMatch(/Enter current 6-digit code/);
+    expect(src).toMatch(/Issuer: LOOTRA/);
+    expect(src).toMatch(/displaySecretOnceOnInteractiveStderr/);
+    expect(src).toMatch(/verifyTotpCode\(secret, code\)/);
+    // No auto-confirm in the CLI, no secrets from env/argv, no maskless email output.
+    expect(src).not.toMatch(/generateTotpCode/);
+    expect(apply).not.toMatch(/email:\s*result\.email/);
+    expect(src).toMatch(/verify-apply/);
+    expect(src).toMatch(/emailMasked: maskEmail\(result\.email\)/);
+  });
+
+  it('orchestrator source has no TOTP auto-generation or auto-confirm', () => {
+    const src = readSrc('../src/owner-bootstrap/production-ceremony-orchestrator.ts');
+    expect(src).not.toMatch(/generateTotpCode/);
+    expect(src).not.toMatch(/generateTotpSecretBytes/);
+    expect(src).toMatch(/PRODUCTION_TOTP_SECRET_REQUIRED/);
+    expect(src).toMatch(/PRODUCTION_TOTP_CODE_REQUIRED/);
+    expect(src).toMatch(/verifyTotpCode\(secret, code\)/);
+    expect(src).toMatch(/zeroizeBytes\(totpSecret\)/);
+    // TOTP is validated before the pool is ever used.
+    expect(src.indexOf('requireProductionTotpConfirmation(input)')).toBeLessThan(
+      src.indexOf('input.pool.connect()'),
+    );
+  });
+
+  it('orchestrator: missing/empty secret, missing code and wrong code throw before touching the pool', async () => {
+    enableTestTemp();
+    const productionTrust = mintFakeBrandedTrust();
+    let poolTouched = false;
+    const pool = {
+      connect: async () => {
+        poolTouched = true;
+        throw new Error('POOL_TOUCHED');
+      },
+    } as unknown as Pool;
+    const base = {
+      pool,
+      productionTrust,
+      encryptedKeyBundle: {} as never,
+      bootstrapPassphrase: PASSPHRASE,
+      password: 'Disposable-Owner-Password-12',
+      passwordConfirm: 'Disposable-Owner-Password-12',
+      apply: true,
+      deploymentEnvIsProduction: true,
+      ownerProductionBootstrapEnabled: true,
+      ownerProductionBootstrapApply: true,
+    };
+    const secret = generateTotpSecretBytes();
+    const good = generateTotpCode(secret);
+    const wrong = good === '000000' ? '111111' : '000000';
+
+    await expect(orchestrateProductionOwnerBootstrapCeremony(base)).rejects.toThrow(
+      /PRODUCTION_TOTP_SECRET_REQUIRED/,
+    );
+    await expect(
+      orchestrateProductionOwnerBootstrapCeremony({ ...base, totpConfirmCode: good }),
+    ).rejects.toThrow(/PRODUCTION_TOTP_SECRET_REQUIRED/);
+    await expect(
+      orchestrateProductionOwnerBootstrapCeremony({
+        ...base,
+        totpSecretBytes: new Uint8Array(0),
+        totpConfirmCode: good,
+      }),
+    ).rejects.toThrow(/PRODUCTION_TOTP_SECRET_REQUIRED/);
+    await expect(
+      orchestrateProductionOwnerBootstrapCeremony({ ...base, totpSecretBytes: secret }),
+    ).rejects.toThrow(/PRODUCTION_TOTP_CODE_REQUIRED/);
+    await expect(
+      orchestrateProductionOwnerBootstrapCeremony({
+        ...base,
+        totpSecretBytes: secret,
+        totpConfirmCode: '',
+      }),
+    ).rejects.toThrow(/PRODUCTION_TOTP_CODE_REQUIRED/);
+    await expect(
+      orchestrateProductionOwnerBootstrapCeremony({
+        ...base,
+        totpSecretBytes: secret,
+        totpConfirmCode: '12ab56',
+      }),
+    ).rejects.toThrow(/6 digits/);
+    await expect(
+      orchestrateProductionOwnerBootstrapCeremony({
+        ...base,
+        totpSecretBytes: secret,
+        totpConfirmCode: wrong,
+      }),
+    ).rejects.toThrow(/TOTP confirmation failed/);
+    // Disposable simulation flags do NOT re-enable auto-confirm.
+    process.env.ALEX_OWNER_BOOTSTRAP_DISPOSABLE_PRODUCTION_SIM = '1';
+    try {
+      await expect(orchestrateProductionOwnerBootstrapCeremony(base)).rejects.toThrow(
+        /PRODUCTION_TOTP_SECRET_REQUIRED/,
+      );
+    } finally {
+      delete process.env.ALEX_OWNER_BOOTSTRAP_DISPOSABLE_PRODUCTION_SIM;
+    }
+    expect(poolTouched).toBe(false);
+  });
+
+  it('post-apply verify is wired read-only (source) and exported', () => {
+    const src = readSrc('../src/owner-bootstrap/production-post-apply-verify.ts');
+    expect(src).toMatch(/BEGIN READ ONLY/);
+    expect(src).toMatch(/SHOW transaction_read_only/);
+    expect(src).toMatch(/ROLLBACK/);
+    expect(src).not.toMatch(/\b(INSERT|UPDATE|DELETE|COMMIT)\b/);
+    expect(AuthPackage).toHaveProperty('verifyProductionOwnerBootstrapApplyReadOnly');
+    expect(AuthPackage).toHaveProperty('attestOwnerOfflineBackupsInteractive');
+    expect(AuthPackage).toHaveProperty('confirmProductionOwnerBootstrapApplyInteractive');
+  });
+});

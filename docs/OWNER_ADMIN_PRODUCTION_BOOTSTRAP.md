@@ -84,3 +84,11 @@ Phase21 payout Hot Wallet fingerprint must never be used as Owner bootstrap / se
 - `authenticateProductionCeremonyFromOwnerTty` returns a scoped session; callers `close()` in `finally`.
 - `hydrate-intended-admin` writes the canonical admin email into the binding file (masked output only).
 - See `docs/PHASE_21_STEP4B1_AUTHENTICATED_READONLY_PREFLIGHT.md`.
+
+## Step 4B.2 - safe APPLY hardening (2026-10-03)
+
+- Production TOTP is Owner-enrolled: the orchestrator requires `totpSecretBytes` + a live `totpConfirmCode` and never auto-generates or auto-confirms.
+- `--apply` order: gates, TTY, ceremony dir/connection, live Channel B, backup attestation phrase `I_HAVE_TWO_SHA256_VERIFIED_OFFLINE_OWNER_KEY_BACKUPS`, authenticated read-only preflight, strict READY gate (`APPLY_PREFLIGHT_NOT_READY` stops with zero mutation), TOTP enrollment (Issuer LOOTRA, Account Owner, secret shown once on stderr, Owner types current code), passphrase/password, password policy, final phrase `APPLY_LOOTRA_PRODUCTION_OWNER_BOOTSTRAP`, then decrypt + lifecycle, then read-only `verify-apply` checks.
+- Failures are classified `PRE_MUTATION_FAILURE` or `PARTIAL_LIFECYCLE_RECONCILIATION_REQUIRED` (no rollback claimed; do not retry blindly).
+- Real APPLY is Owner-manual only after independent review; Cursor must not execute it.
+- See `docs/PHASE_21_STEP4B2_SAFE_OWNER_APPLY.md`.
