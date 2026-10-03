@@ -1,5 +1,5 @@
 /**
- * Phase 21 Step 4A.2 — honest production Owner-bootstrap readiness reporting.
+ * Phase 21 Step 4B — honest production Owner-bootstrap readiness reporting.
  */
 import { missingProductionTrustResources } from './production-ceremony-gate.js';
 import { PRODUCTION_OWNER_BOOTSTRAP_TRUST_CLASS } from './production-trust-class.js';
@@ -35,7 +35,7 @@ export interface ProductionOwnerBootstrapReadinessReport {
 }
 
 /**
- * Source readiness is YES only when Step4A.2 capabilities are present in code.
+ * Source readiness is YES only when Step4B capabilities are present in code.
  * Real-world ceremony resources / endpoint / schema are tracked separately.
  */
 export function buildProductionOwnerBootstrapReadinessReport(input?: {
@@ -114,7 +114,8 @@ export function buildProductionOwnerBootstrapReadinessReport(input?: {
     witnessModel: 'HUMAN_ATTESTED',
     witnessCryptographicIdentityProven: false,
     notes: [
-      'Step4A.2 source hardening — mint private; Owner key Argon2id+XChaCha20; schema/0028 fixed; orchestrator refuse-apply',
+      'Step4B operational CLI enablement — owner-production-bootstrap run/enroll-existing supports --preflight-only (read-only) and gated --apply',
+      'Mint private; Owner key Argon2id+XChaCha20; schema/0028 fixed; orchestrator wired behind multi-gate apply',
       'Channel B file is documentary only; operational auth is live Owner TTY',
       'Witness model is HUMAN_ATTESTED (not cryptographic identity proof)',
       'Hot Wallet key must never be reused as Owner bootstrap key',

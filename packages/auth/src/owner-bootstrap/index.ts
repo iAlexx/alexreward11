@@ -160,6 +160,7 @@ export {
   type ProductionOwnerBootstrapTrustClass,
 } from './production-trust-class.js';
 export {
+  inspectExistingAdminAuthMaterial,
   preflightClaimExistingAdmin,
   assertClaimExistingAdminEligible,
   type ClaimExistingAdminPreflightResult,
@@ -238,6 +239,14 @@ export {
   buildProductionOwnerBootstrapReadinessReport,
   type ProductionOwnerBootstrapReadinessReport,
 } from './production-owner-bootstrap-readiness.js';
+export {
+  resolvePublicProxyDialIps,
+  discoverProductionTrustedEndpoint,
+  runProductionOwnerBootstrapPreflightOnly,
+  type ProductionTrustedEndpointDiscoveryInput,
+  type ProductionTrustedEndpointDiscoveryResult,
+  type ProductionOwnerBootstrapPreflightOnlyResult,
+} from './production-preflight-only.js';
 export {
   buildProductionOwnerBootstrapPoolConfig,
   createProductionOwnerBootstrapPool,

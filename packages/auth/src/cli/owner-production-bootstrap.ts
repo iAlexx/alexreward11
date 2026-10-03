@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 /**
- * Production Owner-bootstrap ceremony CLI (Phase 21 Step 4A.2).
- * Default: read-only / dry validation. Mutation requires multi-gate --apply.
+ * Production Owner-bootstrap ceremony CLI (Phase 21 Step 4B).
+ * run/enroll-existing require --preflight-only (read-only) or gated --apply (mutually exclusive).
  * Does NOT weaken owner-bootstrap-ceremony (isolated-only).
  * DO NOT reuse Hot Wallet keys. DO NOT accept secrets via argv/env.
  */
+import { readFileSync, readdirSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { resolve } from 'node:path';
 import { stdin as stdinFd, stdout as stdoutFd } from 'node:process';
@@ -12,11 +13,20 @@ import { stdin as stdinFd, stdout as stdoutFd } from 'node:process';
 import {
   assertCeremonyDirOutsideRepo,
   assertProductionProfileRequiresSystemIdentifier,
+  authenticateProductionCeremonyFromOwnerTty,
   buildProductionOwnerBootstrapReadinessReport,
+  createProductionOwnerBootstrapPool,
   draftProductionCeremonySeal,
   generateProductionBootstrapKeypairFiles,
+  loadEncryptedOwnerBootstrapKeyBundle,
+  loadIntendedExistingAdminBinding,
+  loadProductionEndpointProfile,
+  loadProductionPublicKey,
   missingProductionTrustResources,
+  orchestrateProductionOwnerBootstrapCeremony,
   recordProductionChannelBDigest,
+  resolvePublicProxyDialIps,
+  runProductionOwnerBootstrapPreflightOnly,
   writeIntendedExistingAdminBinding,
   writeProductionEndpointProfile,
   validateProductionCeremonyBundleStructurally,
@@ -34,7 +44,8 @@ function usage(): never {
       message:
         'usage: owner-production-bootstrap <preflight|generate-keypair|write-profile|write-intended-admin|draft-seal|record-channel-b|validate|readiness|enroll-existing|run|verify> ...',
       notes: [
-        'run/enroll-existing mutation is gated; Step4A.2 refuses operational apply',
+        'run/enroll-existing: pass --preflight-only (read-only DB) OR gated --apply (mutually exclusive)',
+        'DB password: set OWNER_PRODUCTION_BOOTSTRAP_DB_PASSWORD in shell (never argv/chat)',
         'Hot Wallet keys must never be reused',
         'secrets: interactive TTY only (never --password/--totp/--bootstrap-passphrase)',
       ],
@@ -164,6 +175,361 @@ async function readSecret(prompt: string): Promise<string> {
 
 function printJson(value: unknown): void {
   console.log(JSON.stringify(value, null, 2));
+}
+
+function maskEmail(email: string | null | undefined): string | null {
+  if (email === null || email === undefined || email.trim() === '') return null;
+  const at = email.indexOf('@');
+  if (at <= 0) return '***';
+  const local = email.slice(0, at);
+  const domain = email.slice(at + 1);
+  const maskedLocal = local.length <= 1 ? '*' : `${local[0]}***`;
+  return `${maskedLocal}@${domain}`;
+}
+
+function parsePort(value: string | null, envName: string): number {
+  const raw = value ?? process.env[envName] ?? '';
+  const port = Number.parseInt(raw, 10);
+  if (!Number.isFinite(port) || port <= 0 || port > 65535) {
+    throw new Error(`invalid port — pass --proxy-port or set ${envName}`);
+  }
+  return port;
+}
+
+function resolveDbPassword(): string {
+  const password =
+    process.env.OWNER_PRODUCTION_BOOTSTRAP_DB_PASSWORD ??
+    process.env.OWNER_BOOTSTRAP_DATABASE_PASSWORD ??
+    process.env.PGPASSWORD ??
+    '';
+  if (password.trim() === '') {
+    throw new Error(
+      'OWNER_PRODUCTION_BOOTSTRAP_DB_PASSWORD must be set in your shell for preflight/apply (never argv or chat)',
+    );
+  }
+  return password;
+}
+
+function resolveDbUser(argv: string[]): string {
+  const fromArg = argValue(argv, '--user');
+  const user = fromArg ?? process.env.PGUSER ?? process.env.OWNER_PRODUCTION_BOOTSTRAP_DB_USER ?? '';
+  if (user.trim() === '') {
+    throw new Error('DB user required — pass --user or set PGUSER in shell');
+  }
+  return user.trim();
+}
+
+async function buildProductionConnectionString(input: {
+  readonly proxyHost: string;
+  readonly proxyPort: number;
+  readonly database: string;
+  readonly user: string;
+  readonly password: string;
+}): Promise<string> {
+  const dialIps = await resolvePublicProxyDialIps(input.proxyHost);
+  const dialIp = dialIps[0];
+  if (dialIp === undefined) {
+    throw new Error('no public dial IP resolved for proxy host');
+  }
+  const userEnc = encodeURIComponent(input.user);
+  const passEnc = encodeURIComponent(input.password);
+  return `postgresql://${userEnc}:${passEnc}@${dialIp}:${input.proxyPort}/${encodeURIComponent(input.database)}`;
+}
+
+function loadCaPemFromFile(caFile: string): string {
+  return readFileSync(resolve(caFile), 'utf8');
+}
+
+function findEncryptedKeyBundlePath(ceremonyDir: string): string {
+  const dir = resolve(ceremonyDir);
+  const enc = readdirSync(dir).find((f) => f.endsWith('.enc'));
+  if (enc === undefined) {
+    throw new Error('encrypted Owner bootstrap key bundle (.enc) not found in ceremony dir');
+  }
+  return resolve(dir, enc);
+}
+
+async function runPreflightOnlyCommand(argv: string[]): Promise<void> {
+  if (envTrue('OWNER_PRODUCTION_BOOTSTRAP_APPLY')) {
+    printJson({
+      ok: false,
+      refuseCode: 'OWNER_PRODUCTION_BOOTSTRAP_APPLY_SET',
+      message:
+        'OWNER_PRODUCTION_BOOTSTRAP_APPLY is enabled — unset before read-only preflight in Step4B',
+    });
+    process.exitCode = 1;
+    return;
+  }
+
+  const proxyHost = argValue(argv, '--proxy-host') ?? process.env.RAILWAY_TCP_PROXY_DOMAIN ?? '';
+  if (proxyHost.trim() === '') {
+    printJson({
+      ok: false,
+      refuseCode: 'PROXY_HOST_REQUIRED',
+      message: 'pass --proxy-host or set RAILWAY_TCP_PROXY_DOMAIN',
+    });
+    process.exitCode = 1;
+    return;
+  }
+
+  let proxyPort: number;
+  let dbUser: string;
+  let dbPassword: string;
+  try {
+    proxyPort = parsePort(argValue(argv, '--proxy-port'), 'RAILWAY_TCP_PROXY_PORT');
+    dbUser = resolveDbUser(argv);
+    dbPassword = resolveDbPassword();
+  } catch (error: unknown) {
+    printJson({
+      ok: false,
+      refuseCode: 'PREFLIGHT_PARAMS_INVALID',
+      message: error instanceof Error ? error.message : String(error),
+    });
+    process.exitCode = 1;
+    return;
+  }
+
+  const database =
+    argValue(argv, '--database') ??
+    process.env.PGDATABASE ??
+    process.env.OWNER_PRODUCTION_BOOTSTRAP_DB_NAME ??
+    'railway';
+  const tlsServerName =
+    argValue(argv, '--tls-server-name') ??
+    process.env.OWNER_PRODUCTION_BOOTSTRAP_TLS_SERVER_NAME ??
+    'postgres.railway.internal';
+  const adminUserId =
+    argValue(argv, '--admin-user-id') ?? 'a11a11a1-0000-4000-8000-000000000011';
+  const caFile = argValue(argv, '--ca-file');
+  if (caFile === null || caFile.trim() === '') {
+    printJson({
+      ok: false,
+      refuseCode: 'CA_FILE_REQUIRED',
+      message: 'pass --ca-file pointing to Owner-approved root.crt outside repo',
+    });
+    process.exitCode = 1;
+    return;
+  }
+
+  let caPem: string;
+  try {
+    caPem = loadCaPemFromFile(caFile);
+  } catch (error: unknown) {
+    printJson({
+      ok: false,
+      refuseCode: 'CA_FILE_UNREADABLE',
+      message: error instanceof Error ? error.message : String(error),
+    });
+    process.exitCode = 1;
+    return;
+  }
+
+  let expectedSystemIdentifier: string | undefined;
+  const ceremonyDir = argValue(argv, '--ceremony-dir');
+  if (ceremonyDir !== null) {
+    try {
+      const profile = loadProductionEndpointProfile(ceremonyDir);
+      expectedSystemIdentifier = profile.expected_system_identifier ?? undefined;
+    } catch {
+      // ceremony profile optional for endpoint-only preflight
+    }
+  }
+
+  let intendedAdminEmail: string | undefined;
+  if (ceremonyDir !== null) {
+    try {
+      intendedAdminEmail = loadIntendedExistingAdminBinding(ceremonyDir).intended_admin_email;
+    } catch {
+      // optional
+    }
+  }
+
+  const trustAuthenticated = false;
+  const ownerKeyOfflineBackupsReady = false;
+
+  try {
+    const result = await runProductionOwnerBootstrapPreflightOnly({
+      endpoint: {
+        proxyHostname: proxyHost,
+        proxyPort,
+        databaseName: database,
+        user: dbUser,
+        password: dbPassword,
+        caPem,
+        tlsServerName,
+        ...(expectedSystemIdentifier !== undefined
+          ? { expectedSystemIdentifier }
+          : {}),
+      },
+      intendedAdminUserId: adminUserId,
+      ...(intendedAdminEmail !== undefined ? { intendedAdminEmail } : {}),
+      trustAuthenticated,
+      ownerKeyOfflineBackupsReady,
+    });
+    printJson({
+      ok: result.refuseCode === null,
+      command: 'preflight-only',
+      trust_class: PRODUCTION_OWNER_BOOTSTRAP_TRUST_CLASS,
+      forceApply: false,
+      applyDefault: false,
+      operationalDbMutation: false,
+      intendedAdminEmailMasked: maskEmail(intendedAdminEmail ?? null),
+      result,
+    });
+    if (result.refuseCode !== null) process.exitCode = 1;
+  } catch (error: unknown) {
+    printJson({
+      ok: false,
+      command: 'preflight-only',
+      refuseCode: 'PREFLIGHT_FAILED',
+      message: error instanceof Error ? error.message : String(error),
+    });
+    process.exitCode = 1;
+  }
+}
+
+async function runApplyCommand(argv: string[], command: string): Promise<void> {
+  const ceremonyDir = argValue(argv, '--ceremony-dir');
+  if (ceremonyDir === null) {
+    printJson({
+      ok: false,
+      refuseCode: 'CEREMONY_DIR_REQUIRED',
+      message: '--ceremony-dir required for --apply',
+    });
+    process.exitCode = 1;
+    return;
+  }
+
+  try {
+    assertProductionCeremonyApplyGates({
+      apply: true,
+      deploymentEnvIsProduction: process.env.DEPLOYMENT_ENV === 'production',
+      ownerProductionBootstrapEnabled: envTrue('OWNER_PRODUCTION_BOOTSTRAP_ENABLED'),
+      ownerProductionBootstrapApply: envTrue('OWNER_PRODUCTION_BOOTSTRAP_APPLY'),
+    });
+  } catch (error: unknown) {
+    printJson({
+      ok: false,
+      command,
+      refuseCode: 'APPLY_GATES_REQUIRED',
+      message: error instanceof Error ? error.message : String(error),
+      required:
+        'DEPLOYMENT_ENV=production + OWNER_PRODUCTION_BOOTSTRAP_ENABLED=true + OWNER_PRODUCTION_BOOTSTRAP_APPLY=1 + --apply',
+      forceApply: false,
+    });
+    process.exitCode = 1;
+    return;
+  }
+
+  const proxyHost = argValue(argv, '--proxy-host') ?? process.env.RAILWAY_TCP_PROXY_DOMAIN ?? '';
+  if (proxyHost.trim() === '') {
+    printJson({
+      ok: false,
+      refuseCode: 'PROXY_HOST_REQUIRED',
+      message: 'pass --proxy-host or set RAILWAY_TCP_PROXY_DOMAIN',
+    });
+    process.exitCode = 1;
+    return;
+  }
+
+  let proxyPort: number;
+  let dbUser: string;
+  let dbPassword: string;
+  let connectionString: string;
+  try {
+    proxyPort = parsePort(argValue(argv, '--proxy-port'), 'RAILWAY_TCP_PROXY_PORT');
+    dbUser = resolveDbUser(argv);
+    dbPassword = resolveDbPassword();
+    connectionString = await buildProductionConnectionString({
+      proxyHost,
+      proxyPort,
+      database:
+        argValue(argv, '--database') ??
+        process.env.PGDATABASE ??
+        process.env.OWNER_PRODUCTION_BOOTSTRAP_DB_NAME ??
+        'railway',
+      user: dbUser,
+      password: dbPassword,
+    });
+  } catch (error: unknown) {
+    printJson({
+      ok: false,
+      refuseCode: 'APPLY_PARAMS_INVALID',
+      message: error instanceof Error ? error.message : String(error),
+    });
+    process.exitCode = 1;
+    return;
+  }
+
+  const pub = loadProductionPublicKey(ceremonyDir);
+  const profile = loadProductionEndpointProfile(ceremonyDir);
+  const encryptedBundle = loadEncryptedOwnerBootstrapKeyBundle(findEncryptedKeyBundlePath(ceremonyDir));
+
+  const productionTrust = await authenticateProductionCeremonyFromOwnerTty({
+    ceremonyDir,
+    connectionString,
+    pinnedPublicKeyRawHex: pub.public_key_raw_hex,
+    readOfflineBundleDigestHex: () =>
+      readLine('Type production bundle digest from offline/witnessed media (64 hex): '),
+  });
+
+  const bootstrap = await createProductionOwnerBootstrapPool({
+    connectionString,
+    profile: {
+      profileId: profile.profile_id,
+      deploymentEnv: 'production',
+      expectedDatabaseName: profile.expected_database_name,
+      expectedSystemIdentifier: profile.expected_system_identifier!,
+      tls: {
+        mode: 'verify_full',
+        caPem: profile.tls.ca_pem,
+        tlsServerName: profile.tls.tls_server_name!,
+      },
+    },
+  });
+
+  try {
+    const bootstrapPassphrase = await readSecret(
+      'Owner bootstrap passphrase (encrypted key, not echoed): ',
+    );
+    const password = await readSecret('New Owner admin password (not echoed): ');
+    const passwordConfirm = await readSecret('Confirm Owner admin password: ');
+
+    const result = await orchestrateProductionOwnerBootstrapCeremony({
+      pool: bootstrap.pool,
+      productionTrust,
+      encryptedKeyBundle: encryptedBundle,
+      bootstrapPassphrase,
+      password,
+      passwordConfirm,
+      apply: true,
+      deploymentEnvIsProduction: true,
+      ownerProductionBootstrapEnabled: true,
+      ownerProductionBootstrapApply: true,
+    });
+
+    printJson({
+      ok: true,
+      command,
+      trust_class: PRODUCTION_OWNER_BOOTSTRAP_TRUST_CLASS,
+      applied: true,
+      forceApply: false,
+      adminUserId: result.adminUserId,
+      emailMasked: maskEmail(result.email),
+      grantId: result.grantId,
+      attemptId: result.attemptId,
+    });
+  } catch (error: unknown) {
+    printJson({
+      ok: false,
+      command,
+      refuseCode: 'APPLY_FAILED',
+      message: error instanceof Error ? error.message : String(error),
+    });
+    process.exitCode = 1;
+  } finally {
+    await bootstrap.pool.end().catch(() => undefined);
+  }
 }
 
 async function main(): Promise<void> {
@@ -361,38 +727,38 @@ async function main(): Promise<void> {
 
   if (command === 'enroll-existing' || command === 'run') {
     const applyFlag = hasFlag(argv, '--apply');
-    const gatesOk =
-      applyFlag &&
-      process.env.DEPLOYMENT_ENV === 'production' &&
-      envTrue('OWNER_PRODUCTION_BOOTSTRAP_ENABLED') &&
-      envTrue('OWNER_PRODUCTION_BOOTSTRAP_APPLY');
-    try {
-      if (gatesOk) {
-        assertProductionCeremonyApplyGates({
-          apply: true,
-          deploymentEnvIsProduction: true,
-          ownerProductionBootstrapEnabled: true,
-          ownerProductionBootstrapApply: true,
-        });
-      }
-    } catch {
-      // fall through to refuse messaging
+    const preflightFlag = hasFlag(argv, '--preflight-only');
+    if (applyFlag && preflightFlag) {
+      printJson({
+        ok: false,
+        command,
+        refuseCode: 'MUTUALLY_EXCLUSIVE_MODES',
+        message: 'pass either --preflight-only OR --apply, not both',
+      });
+      process.exitCode = 1;
+      return;
     }
-    printJson({
-      ok: false,
-      command,
-      refuseCode: gatesOk ? 'STEP4A2_SOURCE_ONLY_REFUSES_APPLY' : 'APPLY_GATES_REQUIRED',
-      message: gatesOk
-        ? 'Step4A.2 implements operator orchestrator source path but refuses operational apply — no real Owner ceremony'
-        : 'Requires DEPLOYMENT_ENV=production + OWNER_PRODUCTION_BOOTSTRAP_ENABLED=true + OWNER_PRODUCTION_BOOTSTRAP_APPLY=1 + --apply',
-      trust_class: PRODUCTION_OWNER_BOOTSTRAP_TRUST_CLASS,
-      forceApply: false,
-      applyDefault: false,
-      applied: false,
-      orchestrator: 'orchestrateProductionOwnerBootstrapCeremony',
-      secrets: 'interactive_TTY_only',
-    });
-    process.exitCode = 1;
+    if (!applyFlag && !preflightFlag) {
+      printJson({
+        ok: false,
+        command,
+        refuseCode: 'MODE_REQUIRED',
+        message:
+          'run/enroll-existing require --preflight-only (read-only) or --apply (gated mutation)',
+        trust_class: PRODUCTION_OWNER_BOOTSTRAP_TRUST_CLASS,
+        forceApply: false,
+        applyDefault: false,
+        orchestrator: 'orchestrateProductionOwnerBootstrapCeremony',
+        preflight: 'runProductionOwnerBootstrapPreflightOnly',
+      });
+      process.exitCode = 1;
+      return;
+    }
+    if (preflightFlag) {
+      await runPreflightOnlyCommand(argv);
+      return;
+    }
+    await runApplyCommand(argv, command);
     return;
   }
 

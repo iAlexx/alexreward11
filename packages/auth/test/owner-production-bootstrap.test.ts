@@ -1,5 +1,5 @@
 /**
- * Phase 21 Step 4A.2 — production Owner bootstrap hardening tests.
+ * Phase 21 Step 4B — production Owner bootstrap hardening tests.
  * Disposable keys/DB only. Never generates real Owner material.
  */
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -34,6 +34,7 @@ import {
   REQUIRED_PRODUCTION_OWNER_BOOTSTRAP_MIGRATIONS,
   assertProductionCeremonyApplyGates,
   orchestrateProductionOwnerBootstrapCeremony,
+  resolvePublicProxyDialIps,
   createBootstrapTrustMaterial,
   WITNESS_MODEL,
 } from '../src/owner-bootstrap/index.js';
@@ -115,7 +116,7 @@ function prepCeremonyDir(dir: string, repoRoot: string) {
   });
 }
 
-describe('phase21 step4a.2 production owner bootstrap hardening', () => {
+describe('phase21 step4b production owner bootstrap hardening', () => {
   const dirs: string[] = [];
   afterEach(() => {
     for (const d of dirs.splice(0)) {
@@ -394,15 +395,17 @@ describe('phase21 step4a.2 production owner bootstrap hardening', () => {
     expect(failed.refuseCode).toBe('EXISTING_ADMIN_SECURITY_STATE_UNKNOWN');
   });
 
-  it('CLI run/enroll-existing refuse apply; secrets forbidden', () => {
+  it('CLI run/enroll-existing: preflight-only + gated apply wired; secrets forbidden', () => {
     const src = readFileSync(
       new URL('../src/cli/owner-production-bootstrap.ts', import.meta.url),
       'utf8',
     );
-    expect(src).toMatch(/STEP4A2_SOURCE_ONLY_REFUSES_APPLY|APPLY_GATES_REQUIRED/);
+    expect(src).toMatch(/--preflight-only/);
+    expect(src).toMatch(/runProductionOwnerBootstrapPreflightOnly/);
+    expect(src).toMatch(/orchestrateProductionOwnerBootstrapCeremony/);
+    expect(src).not.toMatch(/STEP4A2_SOURCE_ONLY_REFUSES_APPLY/);
     expect(src).toMatch(/OWNER_PRODUCTION_BOOTSTRAP_APPLY/);
     expect(src).toMatch(/command === 'run'/);
-    expect(src).toMatch(/orchestrateProductionOwnerBootstrapCeremony/);
     expect(src).not.toMatch(/forceApply\s*=\s*true/);
     expect(src).toMatch(/SECRET_ARGV_FORBIDDEN|SECRET_ENV_FORBIDDEN/);
     expect(src).toMatch(/--bootstrap-passphrase/);
@@ -414,6 +417,15 @@ describe('phase21 step4a.2 production owner bootstrap hardening', () => {
         ownerProductionBootstrapApply: true,
       }),
     ).toThrow(/APPLY_GATES/);
+  });
+
+  it('resolvePublicProxyDialIps rejects private loopback and 10.x', async () => {
+    await expect(resolvePublicProxyDialIps('127.0.0.1')).rejects.toThrow(
+      /private|loopback|link-local/i,
+    );
+    await expect(resolvePublicProxyDialIps('10.0.0.1')).rejects.toThrow(
+      /private|loopback|link-local/i,
+    );
   });
 
   it('test-only mint creates branded trust; spread copy is not branded', () => {
@@ -478,7 +490,7 @@ const databaseUrl =
 requireSecurityGateDatabaseUrl(databaseUrl, 'owner-production-bootstrap');
 
 describe.skipIf(databaseUrl === '')(
-  'phase21 step4a.2 disposable production CLAIM lifecycle',
+  'phase21 step4b disposable production CLAIM lifecycle',
   () => {
     it('full disposable ceremony: encrypted key → CLAIM_EXISTING_ADMIN', async () => {
       enableTestTemp();
@@ -570,7 +582,6 @@ describe.skipIf(databaseUrl === '')(
         deploymentEnvIsProduction: true,
         ownerProductionBootstrapEnabled: true,
         ownerProductionBootstrapApply: true,
-        step4a2RefuseApply: false,
       });
 
       expect(result.applied).toBe(true);
@@ -630,7 +641,6 @@ describe.skipIf(databaseUrl === '')(
           deploymentEnvIsProduction: true,
           ownerProductionBootstrapEnabled: true,
           ownerProductionBootstrapApply: true,
-          step4a2RefuseApply: false,
         }),
       ).rejects.toThrow();
       } finally {

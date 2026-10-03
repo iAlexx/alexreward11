@@ -1,7 +1,7 @@
 /**
- * Production Owner-bootstrap ceremony orchestrator (Phase 21 Step 4A.2).
+ * Production Owner-bootstrap ceremony orchestrator (Phase 21 Step 4B).
  * Owner-workstation only. Decrypts encrypted bootstrap key in memory for signing,
- * then zeroizes. Never accepts secrets via env/argv. Apply default is refuse.
+ * then zeroizes. Never accepts secrets via env/argv. Apply requires multi-gate --apply.
  */
 import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
@@ -60,11 +60,6 @@ export interface ProductionCeremonyOrchestratorInput {
   readonly deploymentEnvIsProduction: boolean;
   readonly ownerProductionBootstrapEnabled: boolean;
   readonly ownerProductionBootstrapApply: boolean;
-  /**
-   * Step4A.2 hard refuse even when gates pass (source-only).
-   * Disposable tests may set false only under ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1.
-   */
-  readonly step4a2RefuseApply?: boolean;
   readonly subjectDisplay?: string;
 }
 
@@ -114,23 +109,6 @@ export async function orchestrateProductionOwnerBootstrapCeremony(
     ownerProductionBootstrapEnabled: input.ownerProductionBootstrapEnabled,
     ownerProductionBootstrapApply: input.ownerProductionBootstrapApply,
   });
-
-  const refuseStep4a2 = input.step4a2RefuseApply !== false;
-  if (refuseStep4a2) {
-    throw new AuthDomainError(
-      'FORBIDDEN',
-      'STEP4A2_SOURCE_ONLY_REFUSES_APPLY — operator orchestrator implemented; real ceremony not authorized in Step4A.2',
-    );
-  }
-  if (
-    input.step4a2RefuseApply === false &&
-    process.env.ALEX_OWNER_BOOTSTRAP_TEST_HOOKS !== '1'
-  ) {
-    throw new AuthDomainError(
-      'FORBIDDEN',
-      'step4a2RefuseApply=false only allowed with ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1',
-    );
-  }
 
   if (process.env.PASSWORD || process.env.TOTP || process.env.OWNER_BOOTSTRAP_PASSPHRASE) {
     throw new AuthDomainError('FORBIDDEN', 'secrets via env forbidden');

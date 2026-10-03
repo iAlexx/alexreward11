@@ -57,7 +57,7 @@ const ZERO_AUTH: ClaimExistingAdminAuthCounts = {
   openAdminActionTokenCount: 0,
 };
 
-async function inspectExistingAdminAuthMaterial(
+export async function inspectExistingAdminAuthMaterial(
   client: PoolClient,
   adminUserId: string,
 ): Promise<{ ok: true; counts: ClaimExistingAdminAuthCounts } | { ok: false; refuseCode: string }> {
