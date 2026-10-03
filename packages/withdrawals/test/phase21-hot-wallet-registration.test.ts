@@ -6,7 +6,10 @@ import {
 } from '../src/phase21-hot-wallet-registration.js';
 import { __phase21TestSetApplyEnv } from '../src/phase21-ceremony-apply-gates.js';
 import { mintAuthenticatedPhase21OwnerCeremonyTrustForTests } from '../src/test-only/phase21-ceremony-test-hooks.js';
-import { __mintPhase21HotWalletBackupAttestationForTests } from '../src/phase21-ceremony-confirmations.js';
+import {
+  __mintPhase21HotWalletBackupAttestationForTests,
+  __mintPhase21HotWalletRegisterConfirmationForTests,
+} from '../src/phase21-ceremony-confirmations.js';
 import { buildPhase21HotWalletIdentityProofDocument } from '../src/phase21-hot-wallet-identity-proof.js';
 
 const FAKE_ADDR = 'EQD0vdSA_NedR9uvbgN9EikRX-suesDxGeFg69XQMavfLqIw';
@@ -30,6 +33,34 @@ function derivation(payout = FAKE_ADDR, owner = FAKE_ADDR, master = FAKE_ADDR) {
     method: 'DUAL_PROVIDER_LIVE' as const,
     ownerAddress: owner,
     jettonMaster: master,
+    verifiedAt: '2026-10-03T00:00:00.000Z',
+    primaryProviderKind: 'toncenter',
+    secondaryProviderKind: 'tonapi',
+  };
+}
+
+function assetsQuery(text: string) {
+  if (text.includes('GRAM')) {
+    return {
+      rows: [
+        {
+          id: '33333333-3333-4333-8333-333333333333',
+          contract_identity: null,
+          decimals: 9,
+          is_native: true,
+        },
+      ],
+    };
+  }
+  return {
+    rows: [
+      {
+        id: '22222222-2222-4222-8222-222222222222',
+        contract_identity: FAKE_ADDR,
+        decimals: 6,
+        is_native: false,
+      },
+    ],
   };
 }
 
@@ -83,14 +114,7 @@ describe('phase21 hot wallet registration', () => {
           return { rows: [{ id: '11111111-1111-4111-8111-111111111111' }] as unknown as T[] };
         }
         if (text.includes('FROM assets')) {
-          return {
-            rows: [
-              {
-                id: '22222222-2222-4222-8222-222222222222',
-                contract_identity: FAKE_ADDR,
-              },
-            ] as unknown as T[],
-          };
+          return assetsQuery(text) as unknown as { rows: T[] };
         }
         if (text.includes('FROM hot_wallets') && text.includes('COUNT')) {
           return { rows: [{ c: 0 }] as unknown as T[] };
@@ -127,6 +151,7 @@ describe('phase21 hot wallet registration', () => {
       ownerTrust: trust,
       identityProof: identityProof(),
       hotWalletBackupAttestation: __mintPhase21HotWalletBackupAttestationForTests(),
+      applyConfirmation: __mintPhase21HotWalletRegisterConfirmationForTests(),
       derivationProof: derivation(FAKE_ADDR, FAKE_ADDR, FAKE_ADDR),
     });
     expect(plan.canRegister).toBe(true);
@@ -139,14 +164,7 @@ describe('phase21 hot wallet registration', () => {
           return { rows: [{ id: '11111111-1111-4111-8111-111111111111' }] };
         }
         if (text.includes('FROM assets')) {
-          return {
-            rows: [
-              {
-                id: '22222222-2222-4222-8222-222222222222',
-                contract_identity: FAKE_ADDR,
-              },
-            ],
-          };
+          return assetsQuery(text);
         }
         if (text.includes('FROM hot_wallets') && text.includes('COUNT')) {
           return { rows: [{ c: 0 }] };
@@ -206,6 +224,7 @@ describe('phase21 hot wallet registration', () => {
       ownerTrust: trust,
       identityProof: identityProof(),
       hotWalletBackupAttestation: __mintPhase21HotWalletBackupAttestationForTests(),
+      applyConfirmation: __mintPhase21HotWalletRegisterConfirmationForTests(),
       derivationProof: derivation(FAKE_JETTON, FAKE_ADDR, FAKE_ADDR),
     });
     expect(result.applied).toBe(false);
@@ -245,6 +264,7 @@ describe('phase21 hot wallet registration', () => {
       ownerTrust: trust,
       identityProof: identityProof(),
       hotWalletBackupAttestation: __mintPhase21HotWalletBackupAttestationForTests(),
+      applyConfirmation: __mintPhase21HotWalletRegisterConfirmationForTests(),
       derivationProof: derivation(FAKE_JETTON, FAKE_ADDR, FAKE_ADDR),
     });
     expect(result.refuseCode).toBe('STAGING_APPLY_FORBIDDEN');
@@ -289,6 +309,7 @@ describe('phase21 hot wallet registration', () => {
       ownerTrust: forged,
       identityProof: identityProof(),
       hotWalletBackupAttestation: __mintPhase21HotWalletBackupAttestationForTests(),
+      applyConfirmation: __mintPhase21HotWalletRegisterConfirmationForTests(),
       derivationProof: derivation(FAKE_JETTON, FAKE_ADDR, FAKE_ADDR),
     });
     expect(result.applied).toBe(false);

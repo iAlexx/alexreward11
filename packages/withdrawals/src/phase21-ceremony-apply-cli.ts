@@ -92,9 +92,7 @@ export async function openPhase21ApplyVerifiedPool(argv: readonly string[]): Pro
 
   const locator = envNonEmpty('PHASE21_CEREMONY_ADMIN_USER_ID');
   const trust = await authenticatePhase21OwnerCeremonyFromOwnerTty({
-    pool: verified.pool,
-    expectedDatabase: verified.databaseName,
-    expectedClusterSystemIdentifier: verified.systemIdentifier,
+    verifiedPool: verified,
     ...(locator !== null ? { expectedAdminUserId: locator } : {}),
   });
 

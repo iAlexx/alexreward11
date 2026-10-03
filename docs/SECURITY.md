@@ -266,10 +266,12 @@ Production Owner bootstrap final source hardening: `mintAuthenticatedProductionB
 - Post-apply verification is read-only (`BEGIN READ ONLY` + `ROLLBACK`) and outputs no email or secret material.
 - Step 4B.2a: production CLI secrets use shared `readSecretFromTty` which resumes stdin after readline pause (Windows PowerShell exit-before-input fix). Secrets are never echoed, logged, argv, or env. Aborted TOTP enrollment secrets are not reused.
 
-## Phase 21 Owner ceremony trust (Step 4C)
+## Phase 21 Owner ceremony trust (Step 4C / 4C.1)
 
 - Env UUID (`PHASE21_CEREMONY_ADMIN_USER_ID`) is **not** APPLY authority; it is an optional locator that must match the canonical `admin_owner_authority` seat holder.
-- APPLY requires WeakSet-branded `AuthenticatedPhase21OwnerCeremonyTrust` minted after live Owner TTY password + TOTP verification against the verified production pool identity.
-- Forged `{ authenticated: true }` / `trustClass` strings cannot authorize.
-- Confirmation phrases and Hot Wallet backup attestations are also WeakSet-branded; booleans/env shortcuts refuse.
+- APPLY requires WeakSet-branded `AuthenticatedPhase21OwnerCeremonyTrust` minted after live Owner TTY password + TOTP on a `Phase21CeremonyVerifiedPool`.
+- Production credential verification is `verifyProductionOwnerPasswordAndTotpOnVerifiedBootstrapPool` (WeakMap production `verify_full` pool). Generic `assertOwnerAdminAuthDatabaseWritable` remains test-DB-only and continues to refuse operational DB names.
+- Forged `{ authenticated: true }` / `trustClass` strings / forged verified-pool objects cannot authorize.
+- Confirmation phrases and Hot Wallet backup attestations are WeakSet-branded and **required** on production APPLY APIs; booleans/env shortcuts refuse.
 - Auth anti-replay mutations are distinct from Phase21 business mutations.
+- Hot Wallet APPLY refuses `OWNER_SUPPLIED_EVIDENCE`, same-provider provenance, and incomplete provider evidence; mutation failures never claim rollback unless ROLLBACK confirmed.

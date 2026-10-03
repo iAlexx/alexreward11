@@ -71,8 +71,8 @@ export interface Phase21ProductionFlagBaselineApplyInput {
   readonly reason: string;
   /** Branded Owner ceremony trust — sole APPLY authority. */
   readonly ownerTrust: AuthenticatedPhase21OwnerCeremonyTrust;
-  /** Optional branded tool confirmation (CLI requires it). */
-  readonly applyConfirmation?: Phase21ProductionFlagsApplyConfirmation;
+  /** Required branded tool confirmation (exact TTY phrase / test mint). */
+  readonly applyConfirmation: Phase21ProductionFlagsApplyConfirmation;
 }
 
 /** Advisory lock class for production flag baseline APPLY serialization. */
@@ -204,9 +204,7 @@ export async function applyPhase21ProductionFlagBaseline(
 
   try {
     assertAuthenticatedPhase21OwnerCeremonyTrust(input.ownerTrust);
-    if (input.applyConfirmation !== undefined) {
-      assertPhase21ProductionFlagsApplyConfirmation(input.applyConfirmation);
-    }
+    assertPhase21ProductionFlagsApplyConfirmation(input.applyConfirmation);
     await assertOwnerTrustMatchesLiveConnection(client, input.ownerTrust);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
@@ -218,7 +216,7 @@ export async function applyPhase21ProductionFlagBaseline(
       conflicts: [],
       createdCount: 0,
       notes: [`APPLY refused: ${message}`],
-      refuseCode: 'OWNER_TRUST_REQUIRED',
+      refuseCode: 'OWNER_TRUST_OR_CONFIRMATION_REQUIRED',
     };
   }
 
@@ -245,7 +243,10 @@ export async function applyPhase21ProductionFlagBaseline(
 
   const ownerAdminUserId = input.ownerTrust.adminUserId;
 
+  type TxLifecycle = 'NOT_STARTED' | 'BEGUN' | 'MUTATION_EXECUTED' | 'COMMIT_CONFIRMED';
+  let lifecycle: TxLifecycle = 'NOT_STARTED';
   await client.query('BEGIN');
+  lifecycle = 'BEGUN';
   try {
     await client.query(
       `SELECT pg_advisory_xact_lock($1::int, hashtext('phase21-production-flag-baseline'))`,
@@ -295,6 +296,7 @@ export async function applyPhase21ProductionFlagBaseline(
         reason,
         changedByAdminId: ownerAdminUserId,
       });
+      lifecycle = 'MUTATION_EXECUTED';
       createdCount += 1;
     }
 
@@ -317,7 +319,25 @@ export async function applyPhase21ProductionFlagBaseline(
       };
     }
 
-    await client.query('COMMIT');
+    try {
+      await client.query('COMMIT');
+      lifecycle = 'COMMIT_CONFIRMED';
+    } catch (commitError: unknown) {
+      const message = commitError instanceof Error ? commitError.message : String(commitError);
+      return {
+        mode: 'REFUSED',
+        applyAuthorized: true,
+        applied: false,
+        rows: verified,
+        conflicts: [],
+        createdCount,
+        notes: [
+          `REGISTRATION_RECONCILIATION_REQUIRED — COMMIT failed after possible mutation; do not claim rollback: ${message}`,
+          'DO_NOT_RETRY until reconciled',
+        ],
+        refuseCode: 'REGISTRATION_RECONCILIATION_REQUIRED',
+      };
+    }
     return {
       mode: 'APPLY',
       applyAuthorized: true,
@@ -333,12 +353,41 @@ export async function applyPhase21ProductionFlagBaseline(
       ],
     };
   } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    let rollbackConfirmed = false;
     try {
       await client.query('ROLLBACK');
+      rollbackConfirmed = true;
     } catch {
-      // ignore rollback errors
+      rollbackConfirmed = false;
     }
-    const message = error instanceof Error ? error.message : String(error);
+    if (lifecycle === 'MUTATION_EXECUTED' && !rollbackConfirmed) {
+      return {
+        mode: 'REFUSED',
+        applyAuthorized: true,
+        applied: false,
+        rows: [],
+        conflicts: [],
+        createdCount: 0,
+        notes: [
+          `REGISTRATION_RECONCILIATION_REQUIRED — ROLLBACK failed after mutation; mutationState=UNKNOWN: ${message}`,
+          'DO_NOT_RETRY until reconciled',
+        ],
+        refuseCode: 'REGISTRATION_RECONCILIATION_REQUIRED',
+      };
+    }
+    if (lifecycle === 'MUTATION_EXECUTED' && rollbackConfirmed) {
+      return {
+        mode: 'REFUSED',
+        applyAuthorized: true,
+        applied: false,
+        rows: [],
+        conflicts: [],
+        createdCount: 0,
+        notes: [`TRANSACTION_ABORTED_CONFIRMED after mutation: ${message}`],
+        refuseCode: 'TRANSACTION_ABORTED_CONFIRMED',
+      };
+    }
     return {
       mode: 'REFUSED',
       applyAuthorized: true,
@@ -346,8 +395,12 @@ export async function applyPhase21ProductionFlagBaseline(
       rows: [],
       conflicts: [],
       createdCount: 0,
-      notes: [`APPLY aborted and rolled back: ${message}`],
-      refuseCode: 'APPLY_EXCEPTION',
+      notes: [
+        rollbackConfirmed
+          ? `PRE_MUTATION_FAILURE — APPLY aborted and rolled back: ${message}`
+          : `PRE_MUTATION_FAILURE — APPLY aborted; ROLLBACK not confirmed: ${message}`,
+      ],
+      refuseCode: rollbackConfirmed ? 'PRE_MUTATION_FAILURE' : 'APPLY_EXCEPTION',
     };
   }
 }

@@ -155,3 +155,11 @@ Step 3C adds ceremony observations that must PASS for READY_FOR_OWNER_PROVISIONI
 - Phase 21 is **not** complete after Step 4C
 - See `docs/PHASE_21_STEP4C_OWNER_CLOSEOUT_AND_HOT_WALLET_READINESS.md`
 
+### Step 4C.1 (2026-10-03)
+
+- `SOURCE_HARDENING_COMPLETE=YES` for 4C.1 corrections only (no live APPLY/register/fund)
+- Production Owner auth: verified-pool-only password+TOTP path; generic Owner auth operational deny preserved
+- Mandatory branded confirmations on flags / registry / Hot Wallet APPLY
+- Hot Wallet APPLY: `DUAL_PROVIDER_LIVE` + independent providers + registry truth + audit post-verify + tx honesty lifecycle
+- Operational truth unchanged: `HOT_WALLET_REGISTERED=NO`, `HOT_WALLET_FUNDED=NO`, `MAINNET_REGISTRY_APPLIED=NO`, `READY_FOR_LIVE_PAYOUT=NO`, `PHASE21_STATUS=IN_PROGRESS`
+

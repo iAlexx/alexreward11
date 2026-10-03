@@ -53,11 +53,25 @@ describe('phase21 hot wallet derivation proof CLI binding', () => {
           return { rows: [{ id: '11111111-1111-4111-8111-111111111111' }] };
         }
         if (text.includes('FROM assets')) {
+          if (text.includes('GRAM')) {
+            return {
+              rows: [
+                {
+                  id: '33333333-3333-4333-8333-333333333333',
+                  contract_identity: null,
+                  decimals: 9,
+                  is_native: true,
+                },
+              ],
+            };
+          }
           return {
             rows: [
               {
                 id: '22222222-2222-4222-8222-222222222222',
                 contract_identity: OTHER_JETTON,
+                decimals: 6,
+                is_native: false,
               },
             ],
           };
@@ -105,6 +119,8 @@ describe('phase21 hot wallet derivation proof CLI binding', () => {
         verifiedAt: '2026-10-02T00:00:00.000Z',
         ownerAddress: FAKE_ADDR,
         jettonMaster: OTHER_JETTON,
+        primaryProviderKind: 'toncenter',
+        secondaryProviderKind: 'tonapi',
       },
     });
     expect(

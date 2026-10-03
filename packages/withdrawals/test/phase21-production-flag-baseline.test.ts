@@ -8,6 +8,7 @@ import {
   type Phase21ProductionFlagBaselineClient,
 } from '../src/phase21-production-flag-baseline.js';
 import { __phase21TestSetApplyEnv } from '../src/phase21-ceremony-apply-gates.js';
+import { __mintPhase21ProductionFlagsApplyConfirmationForTests } from '../src/phase21-ceremony-confirmations.js';
 import { mintAuthenticatedPhase21OwnerCeremonyTrustForTests } from '../src/test-only/phase21-ceremony-test-hooks.js';
 
 function mockClient(store: Map<string, boolean>): Phase21ProductionFlagBaselineClient {
@@ -101,6 +102,7 @@ describe('phase21 production flag baseline', () => {
         currentDatabase: 'alex_rewards_phase20_test',
         systemIdentifier: '1',
       }),
+      applyConfirmation: __mintPhase21ProductionFlagsApplyConfirmationForTests(),
     });
     expect(result.applied).toBe(false);
     expect(result.mode).toBe('REFUSED');
@@ -134,6 +136,7 @@ describe('phase21 production flag baseline', () => {
         currentDatabase: 'alex_rewards_phase20_test',
         systemIdentifier: '1',
       }),
+      applyConfirmation: __mintPhase21ProductionFlagsApplyConfirmationForTests(),
     });
     expect(result.applied).toBe(false);
     expect(result.refuseCode).toBe('STAGING_APPLY_FORBIDDEN');

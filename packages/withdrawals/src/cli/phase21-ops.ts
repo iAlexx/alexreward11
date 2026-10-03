@@ -763,7 +763,11 @@ if (command === 'mainnet-registry:apply') {
 if (command === 'hot-wallet:plan') {
     const url = envNonEmpty('DATABASE_URL');
     const derivationResolved = resolvePhase21HotWalletDerivationProofFromEnv();
-    if (derivationResolved.refuseCode !== undefined) {
+    // PLAN may surface incomplete ENV provenance as blockers; hard-refuse only structural failures.
+    if (
+      derivationResolved.refuseCode !== undefined &&
+      derivationResolved.refuseCode !== 'DERIVATION_PROOF_ENV_PROVENANCE_INCOMPLETE'
+    ) {
       printJson({
         ok: false,
         command: 'hot-wallet:plan',
@@ -968,6 +972,7 @@ if (command === 'hot-wallet:plan') {
             payoutJettonWalletAddress,
             friendlyAddress: envNonEmpty('PHASE21_HOT_WALLET_FRIENDLY_ADDRESS'),
             hotWalletId: result.hotWalletId,
+            adminUserId: trust.adminUserId,
           });
         }
         printJson({

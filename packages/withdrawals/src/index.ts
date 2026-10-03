@@ -727,6 +727,7 @@ export {
 } from './phase21-mainnet-registry-bootstrap.js';
 export type {
   Phase21MainnetRegistryBootstrapInput,
+  Phase21MainnetRegistryBootstrapApplyInput,
   Phase21MainnetRegistryBootstrapMode,
   Phase21MainnetRegistryBootstrapResult,
   Phase21MainnetRegistryPlanItem,

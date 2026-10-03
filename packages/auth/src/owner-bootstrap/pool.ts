@@ -342,6 +342,100 @@ export async function createOwnerBootstrapPool(input: {
 }
 
 /**
+ * Require a WeakMap-registered production verify_full bootstrap pool.
+ * Used by production Owner ceremony factor verification (Phase 21 Step 4C.1).
+ * Does not weaken assertOwnerAdminAuthDatabaseWritable (test-DB gate).
+ */
+export function requireVerifiedProductionOwnerBootstrapPool(pool: Pool): OwnerBootstrapPool {
+  const verified = verifiedBootstrapByPool.get(pool);
+  if (verified === undefined) {
+    throw new AuthDomainError(
+      'FORBIDDEN',
+      'pool is not a createOwnerBootstrapPool / createProductionOwnerBootstrapPool verified bootstrap pool',
+    );
+  }
+  if (verified.profile.deploymentEnv !== 'production') {
+    throw new AuthDomainError(
+      'FORBIDDEN',
+      'production Owner ceremony auth requires verified profile.deploymentEnv=production',
+    );
+  }
+  if (verified.profile.tls.mode !== 'verify_full') {
+    throw new AuthDomainError(
+      'FORBIDDEN',
+      'production Owner ceremony auth requires verified profile.tls.mode=verify_full',
+    );
+  }
+  const expectedSid = verified.profile.expectedSystemIdentifier?.trim() ?? '';
+  if (expectedSid === '') {
+    throw new AuthDomainError(
+      'FORBIDDEN',
+      'production Owner ceremony auth requires non-empty expectedSystemIdentifier on verified profile',
+    );
+  }
+  return verified;
+}
+
+/**
+ * Test-only: register a synthetic production verify_full OwnerBootstrapPool into the
+ * same WeakMap used by createProductionOwnerBootstrapPool.
+ * Requires ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1. Never for real production endpoints.
+ */
+export function registerVerifiedProductionOwnerBootstrapPoolForTests(input: {
+  readonly pool: Pool;
+  readonly databaseName: string;
+  readonly systemIdentifier: string;
+  readonly tlsServerName?: string;
+}): OwnerBootstrapPool {
+  if (process.env.ALEX_OWNER_BOOTSTRAP_TEST_HOOKS !== '1') {
+    throw new AuthDomainError(
+      'FORBIDDEN',
+      'registerVerifiedProductionOwnerBootstrapPoolForTests requires ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1',
+    );
+  }
+  const databaseName = input.databaseName.trim();
+  const systemIdentifier = input.systemIdentifier.trim();
+  if (databaseName === '' || systemIdentifier === '') {
+    throw new AuthDomainError(
+      'VALIDATION',
+      'registerVerifiedProductionOwnerBootstrapPoolForTests requires databaseName and systemIdentifier',
+    );
+  }
+  if (databaseName === 'alex_rewards') {
+    throw new AuthDomainError('FORBIDDEN', 'refuse operational alex_rewards for test registration');
+  }
+  const tlsServerName = (input.tlsServerName ?? 'test-production.local').trim();
+  const profile: BootstrapEndpointProfile = {
+    profileId: 'test-production-verify-full-sim',
+    deploymentEnv: 'production',
+    expectedDatabaseName: databaseName,
+    expectedSystemIdentifier: systemIdentifier,
+    tls: {
+      mode: 'verify_full',
+      caPem: '-----BEGIN CERTIFICATE-----\nTEST_ONLY_NOT_A_REAL_CA\n-----END CERTIFICATE-----\n',
+      tlsServerName,
+    },
+  };
+  const connectionFacts: BootstrapConnectionFacts = {
+    hostname: '127.0.0.1',
+    sslEnabled: true,
+    currentDatabase: databaseName,
+    clusterSystemIdentifier: systemIdentifier,
+    serverAddr: '127.0.0.1',
+    sslInUse: true,
+  };
+  const result: OwnerBootstrapPool = {
+    pool: input.pool,
+    connectionFacts,
+    hostname: '127.0.0.1',
+    database: databaseName,
+    profile,
+  };
+  verifiedBootstrapByPool.set(input.pool, result);
+  return result;
+}
+
+/**
  * Build trust material bound to a verified OwnerBootstrapPool.
  * connectionFacts / endpointProfile are the pool's own objects (reference identity).
  */

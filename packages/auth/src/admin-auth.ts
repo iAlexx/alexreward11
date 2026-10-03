@@ -39,6 +39,10 @@ import {
   generateAdminSessionToken,
   hashAdminSessionToken,
 } from './admin-session-token.js';
+import {
+  requireVerifiedProductionOwnerBootstrapPool,
+  type OwnerBootstrapPool,
+} from './owner-bootstrap/pool.js';
 
 type Db = Pool | PoolClient;
 
@@ -320,6 +324,196 @@ export async function assertOwnerAdminAuthDatabaseWritable(
     clusterSystemIdentifier,
     redactedClusterId: redactClusterId(clusterSystemIdentifier),
   };
+}
+
+/**
+ * Production Owner ceremony DB gate (Phase 21 Step 4C.1).
+ * Does NOT call assertOwnerAuthOperationalDefaultDeny.
+ * Does NOT require isApprovedDestructiveTestDatabaseName.
+ * Requires a WeakMap-bound production verify_full OwnerBootstrapPool identity.
+ */
+export async function assertOwnerAdminAuthDatabaseWritableForProductionCeremony(
+  db: Db,
+  gate: OwnerAdminAuthDatabaseGate,
+  verified: OwnerBootstrapPool,
+): Promise<{
+  readonly currentDatabase: string;
+  readonly redactedTarget: string;
+  readonly clusterSystemIdentifier: string;
+  readonly redactedClusterId: string;
+}> {
+  const bound = requireVerifiedProductionOwnerBootstrapPool(verified.pool);
+  if (bound !== verified) {
+    throw new AuthDomainError(
+      'FORBIDDEN',
+      'verified OwnerBootstrapPool object is not the WeakMap-registered instance for this pool',
+    );
+  }
+  if (verified.profile.deploymentEnv !== 'production') {
+    throw new AuthDomainError(
+      'FORBIDDEN',
+      'production ceremony auth requires verified.profile.deploymentEnv=production',
+    );
+  }
+  const deploymentEnv = (process.env.DEPLOYMENT_ENV ?? '').trim().toLowerCase();
+  const testHooks = process.env.ALEX_OWNER_BOOTSTRAP_TEST_HOOKS === '1';
+  if (deploymentEnv !== 'production' && !testHooks) {
+    throw new AuthDomainError(
+      'FORBIDDEN',
+      'production ceremony auth requires DEPLOYMENT_ENV=production (or ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1 for simulation)',
+    );
+  }
+
+  const expected = gate.expectedDatabase.trim();
+  if (expected === '') {
+    throw new AuthDomainError(
+      'VALIDATION',
+      'expectedDatabase is required for production ceremony auth',
+    );
+  }
+  const expectedCluster = (gate.expectedClusterSystemIdentifier ?? '').trim();
+  if (expectedCluster === '') {
+    throw new AuthDomainError(
+      'VALIDATION',
+      'expectedClusterSystemIdentifier is required for production ceremony auth',
+    );
+  }
+
+  const result = await db.query<{ current_database: string }>(`SELECT current_database()`);
+  const current = result.rows[0]?.current_database ?? '';
+  if (current === '') {
+    throw new AuthDomainError('INTERNAL', 'current_database() unavailable');
+  }
+  if (
+    current !== expected ||
+    current !== verified.database ||
+    current !== verified.connectionFacts.currentDatabase
+  ) {
+    throw new AuthDomainError(
+      'FORBIDDEN',
+      'database identity mismatch: connected database does not match production ceremony gate/verified pool',
+      {
+        details: {
+          expectedRedacted: redactDatabaseName(expected),
+          currentRedacted: redactDatabaseName(current),
+          verifiedRedacted: redactDatabaseName(verified.database),
+        },
+      },
+    );
+  }
+
+  const clusterSystemIdentifier = await readClusterSystemIdentifier(db);
+  const profileSid = verified.profile.expectedSystemIdentifier?.trim() ?? '';
+  if (
+    clusterSystemIdentifier !== expectedCluster ||
+    clusterSystemIdentifier !== verified.connectionFacts.clusterSystemIdentifier ||
+    clusterSystemIdentifier !== profileSid ||
+    profileSid === ''
+  ) {
+    throw new AuthDomainError('FORBIDDEN', 'production ceremony cluster identity mismatch', {
+      details: {
+        expectedClusterRedacted: redactClusterId(expectedCluster),
+        observedClusterRedacted: redactClusterId(clusterSystemIdentifier),
+      },
+    });
+  }
+
+  return {
+    currentDatabase: current,
+    redactedTarget: redactDatabaseName(current),
+    clusterSystemIdentifier,
+    redactedClusterId: redactClusterId(clusterSystemIdentifier),
+  };
+}
+
+/**
+ * Password+TOTP verification for production Owner ceremony on a verified bootstrap pool.
+ * Same credential / throttle / lockout / zeroize semantics as verifyOwnerAdminPasswordAndTotp,
+ * but uses assertOwnerAdminAuthDatabaseWritableForProductionCeremony (not the test-DB gate).
+ */
+export async function verifyProductionOwnerPasswordAndTotpOnVerifiedBootstrapPool(
+  pool: Pool,
+  input: {
+    readonly adminUserId: string;
+    readonly password: string;
+    readonly totpCode: string;
+    readonly expectedDatabase: string;
+    readonly expectedClusterSystemIdentifier: string;
+    readonly evaluationTimeMs?: number;
+  },
+): Promise<void> {
+  const verified = requireVerifiedProductionOwnerBootstrapPool(pool);
+  if (!isPool(pool)) {
+    throw new AuthDomainError(
+      'VALIDATION',
+      'production ceremony auth requires a pg.Pool',
+    );
+  }
+  const prep = await withPoolOwnedReadOnlyTransaction(pool, async (client) => {
+    await assertOwnerAdminAuthDatabaseWritableForProductionCeremony(
+      client,
+      {
+        expectedDatabase: input.expectedDatabase,
+        expectedClusterSystemIdentifier: input.expectedClusterSystemIdentifier,
+      },
+      verified,
+    );
+    await requireActiveOwner(client, input.adminUserId, { forUpdate: false });
+    const material = await loadPasswordTotpMaterial(client, input.adminUserId);
+    return { material };
+  });
+
+  const factors =
+    prep.material !== null
+      ? await evaluatePasswordTotpFactors(
+          prep.material,
+          input.password,
+          input.totpCode,
+          input.evaluationTimeMs,
+        )
+      : ({ ok: false } as const);
+
+  try {
+    await withPoolOwnedOwnerAuthTransaction(pool, async (client) => {
+      await assertOwnerAdminAuthDatabaseWritableForProductionCeremony(
+        client,
+        {
+          expectedDatabase: input.expectedDatabase,
+          expectedClusterSystemIdentifier: input.expectedClusterSystemIdentifier,
+        },
+        verified,
+      );
+      await requireActiveOwner(client, input.adminUserId, { forUpdate: true });
+      await lockThrottleForUpdate(client, input.adminUserId);
+      await assertNotLocked(client, input.adminUserId);
+      if (!factors.ok) {
+        await recordAuthFailure(client, input.adminUserId);
+        return {
+          status: 'auth_rejected' as const,
+          adminUserId: input.adminUserId,
+          error: new AuthDomainError('UNAUTHENTICATED', 'invalid credentials'),
+        };
+      }
+      const finalized = await finalizePreVerifiedPasswordTotp(
+        client,
+        input.adminUserId,
+        factors,
+        input.totpCode,
+        input.evaluationTimeMs,
+      );
+      if (!finalized) {
+        await recordAuthFailure(client, input.adminUserId);
+        return {
+          status: 'auth_rejected' as const,
+          adminUserId: input.adminUserId,
+          error: new AuthDomainError('UNAUTHENTICATED', 'invalid credentials'),
+        };
+      }
+      return { status: 'ok' as const, value: undefined };
+    });
+  } finally {
+    if (factors.ok) factors.totpSecret.fill(0);
+  }
 }
 
 async function requireActiveOwner(

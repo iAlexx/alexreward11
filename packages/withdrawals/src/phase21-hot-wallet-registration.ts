@@ -28,6 +28,7 @@ import {
   assertIdentityProofMatchesRegistrationInput,
   type Phase21HotWalletIdentityProof,
 } from './phase21-hot-wallet-identity-proof.js';
+import type { Phase21MainnetProviderKind } from './phase21-mainnet-adapters.js';
 import { resolveCanonicalPhase21OwnerSeat } from './phase21-owner-ceremony-auth.js';
 import {
   assertAuthenticatedPhase21OwnerCeremonyTrust,
@@ -36,15 +37,36 @@ import {
 
 export type Phase21HotWalletRegistrationMode = 'PLAN' | 'APPLY' | 'REFUSED';
 
+export type Phase21HotWalletTxLifecycle =
+  | 'NOT_STARTED'
+  | 'BEGUN'
+  | 'MUTATION_EXECUTED'
+  | 'COMMIT_CONFIRMED';
+
+const SUPPORTED_PROVIDER_KINDS = new Set<string>(['toncenter', 'tonapi']);
+
 export interface Phase21HotWalletDerivationProof {
   readonly primaryJettonWalletAddress: string;
   readonly secondaryJettonWalletAddress: string;
+  /** APPLY requires DUAL_PROVIDER_LIVE; PLAN may surface OWNER_SUPPLIED as blocker. */
   readonly method: 'DUAL_PROVIDER_LIVE' | 'OWNER_SUPPLIED_EVIDENCE';
   readonly verifiedAt?: string;
   readonly ownerAddress: string;
   readonly jettonMaster: string;
   readonly primaryProviderKind?: string;
   readonly secondaryProviderKind?: string;
+}
+
+/** Provenance-complete proof required for production Hot Wallet APPLY. */
+export interface Phase21HotWalletDerivationProofForApply {
+  readonly primaryJettonWalletAddress: string;
+  readonly secondaryJettonWalletAddress: string;
+  readonly method: 'DUAL_PROVIDER_LIVE';
+  readonly verifiedAt: string;
+  readonly ownerAddress: string;
+  readonly jettonMaster: string;
+  readonly primaryProviderKind: Phase21MainnetProviderKind | string;
+  readonly secondaryProviderKind: Phase21MainnetProviderKind | string;
 }
 
 export interface Phase21HotWalletRegistrationInput {
@@ -60,11 +82,11 @@ export interface Phase21HotWalletRegistrationInput {
   readonly identityProof: Phase21HotWalletIdentityProof;
   /** Branded offline backup attestation. */
   readonly hotWalletBackupAttestation: Phase21HotWalletBackupAttestation;
-  /** Dual-provider or Owner-supplied derivation proof. */
+  /** Dual-provider derivation proof (OWNER_SUPPLIED refused on APPLY). */
   readonly derivationProof: Phase21HotWalletDerivationProof;
-  /** Optional branded tool confirmation (required by CLI apply path). */
-  readonly applyConfirmation?: Phase21HotWalletRegisterConfirmation;
-  /** Optional expected USDT jetton master (defaults to DB contract_identity). */
+  /** Required branded tool confirmation. */
+  readonly applyConfirmation: Phase21HotWalletRegisterConfirmation;
+  /** Optional expected USDT jetton master (must match DB when provided). */
   readonly expectedJettonMaster?: string | null;
 }
 
@@ -91,6 +113,63 @@ export interface Phase21HotWalletRegistrationResult {
   readonly hotWalletId: string | null;
   readonly notes: readonly string[];
   readonly refuseCode?: string;
+  readonly mutationState?: Phase21HotWalletTxLifecycle | 'UNKNOWN';
+}
+
+function normalizeProviderKind(value: string | undefined | null): string | null {
+  if (value === undefined || value === null) return null;
+  const trimmed = value.trim().toLowerCase();
+  return trimmed === '' ? null : trimmed;
+}
+
+function evaluateDualProviderProvenance(proof: Phase21HotWalletDerivationProof): {
+  readonly ok: boolean;
+  readonly note: string;
+  readonly details: Readonly<Record<string, unknown>>;
+} {
+  if (proof.method !== 'DUAL_PROVIDER_LIVE') {
+    return {
+      ok: false,
+      note: 'BLOCKED: production Hot Wallet APPLY requires method=DUAL_PROVIDER_LIVE (OWNER_SUPPLIED_EVIDENCE refused)',
+      details: { method: proof.method },
+    };
+  }
+  const verifiedAt = typeof proof.verifiedAt === 'string' ? proof.verifiedAt.trim() : '';
+  if (verifiedAt === '') {
+    return {
+      ok: false,
+      note: 'BLOCKED: derivation proof verifiedAt required for APPLY readiness',
+      details: {},
+    };
+  }
+  const primary = normalizeProviderKind(proof.primaryProviderKind);
+  const secondary = normalizeProviderKind(proof.secondaryProviderKind);
+  if (primary === null || secondary === null) {
+    return {
+      ok: false,
+      note: 'BLOCKED: primaryProviderKind and secondaryProviderKind required for APPLY readiness',
+      details: { primaryProviderKind: primary, secondaryProviderKind: secondary },
+    };
+  }
+  if (!SUPPORTED_PROVIDER_KINDS.has(primary) || !SUPPORTED_PROVIDER_KINDS.has(secondary)) {
+    return {
+      ok: false,
+      note: 'BLOCKED: provider kinds must be supported (toncenter|tonapi)',
+      details: { primaryProviderKind: primary, secondaryProviderKind: secondary },
+    };
+  }
+  if (primary === secondary) {
+    return {
+      ok: false,
+      note: 'BLOCKED: providers must be independent (different kinds)',
+      details: { primaryProviderKind: primary, secondaryProviderKind: secondary },
+    };
+  }
+  return {
+    ok: true,
+    note: 'DUAL_PROVIDER_LIVE provenance complete',
+    details: { primaryProviderKind: primary, secondaryProviderKind: secondary, verifiedAt },
+  };
 }
 
 export interface Phase21HotWalletRegistrationClient {
@@ -155,8 +234,14 @@ export async function planPhase21HotWalletRegistration(
   let usdtAssetId: string | null = null;
   let usdtContractIdentity: string | null = null;
   if (networkId !== null) {
-    const usdt = await client.query<{ id: string; contract_identity: string | null }>(
-      `SELECT id, contract_identity FROM assets
+    const usdt = await client.query<{
+      id: string;
+      contract_identity: string | null;
+      decimals: number;
+      is_native: boolean;
+    }>(
+      `SELECT id, contract_identity, decimals, is_native
+       FROM assets
        WHERE network_id = $1::uuid AND symbol = 'USDT' LIMIT 1`,
       [networkId],
     );
@@ -169,13 +254,92 @@ export async function planPhase21HotWalletRegistration(
         note: 'Mainnet USDT asset missing; run mainnet-registry apply first',
       });
     } else {
-      usdtAssetId = row.id;
-      usdtContractIdentity = row.contract_identity;
+      const decimalsOk = Number(row.decimals) === 6;
+      const nativeOk = row.is_native === false;
+      const identityOk =
+        typeof row.contract_identity === 'string' && row.contract_identity.trim() !== '';
+      let expectedMasterOk = true;
+      if (
+        input !== undefined &&
+        input !== null &&
+        input.expectedJettonMaster !== undefined &&
+        input.expectedJettonMaster !== null &&
+        input.expectedJettonMaster.trim() !== '' &&
+        identityOk
+      ) {
+        expectedMasterOk = tonAddressesEqual(row.contract_identity!, input.expectedJettonMaster);
+      }
+      if (!decimalsOk || !nativeOk || !identityOk || !expectedMasterOk) {
+        items.push({
+          check: 'assets:USDT',
+          status: 'INVALID',
+          details: {
+            assetId: row.id,
+            decimals: row.decimals,
+            isNative: row.is_native,
+            contractIdentity: row.contract_identity,
+          },
+          note: !decimalsOk
+            ? 'BLOCKED: USDT decimals must be 6'
+            : !nativeOk
+              ? 'BLOCKED: USDT must be is_native=false'
+              : !identityOk
+                ? 'BLOCKED: USDT contract_identity must be non-null'
+                : 'BLOCKED: USDT contract_identity must match expectedJettonMaster',
+        });
+      } else {
+        usdtAssetId = row.id;
+        usdtContractIdentity = row.contract_identity;
+        items.push({
+          check: 'assets:USDT',
+          status: 'OK',
+          details: {
+            assetId: row.id,
+            decimals: 6,
+            isNative: false,
+            contractIdentity: row.contract_identity,
+          },
+          note: 'Mainnet USDT canonical (decimals=6, non-native, contract_identity set)',
+        });
+      }
+    }
+
+    const gram = await client.query<{
+      id: string;
+      contract_identity: string | null;
+      decimals: number;
+      is_native: boolean;
+    }>(
+      `SELECT id, contract_identity, decimals, is_native
+       FROM assets
+       WHERE network_id = $1::uuid AND symbol = 'GRAM' LIMIT 1`,
+      [networkId],
+    );
+    const gramRow = gram.rows[0];
+    if (gramRow === undefined) {
       items.push({
-        check: 'assets:USDT',
-        status: 'OK',
-        details: { assetId: row.id, contractIdentity: row.contract_identity },
-        note: 'Mainnet USDT present',
+        check: 'assets:GRAM',
+        status: 'MISSING',
+        details: {},
+        note: 'Mainnet GRAM asset missing; run mainnet-registry apply first',
+      });
+    } else {
+      const gramOk =
+        Number(gramRow.decimals) === 9 &&
+        gramRow.is_native === true &&
+        gramRow.contract_identity === null;
+      items.push({
+        check: 'assets:GRAM',
+        status: gramOk ? 'OK' : 'INVALID',
+        details: {
+          assetId: gramRow.id,
+          decimals: gramRow.decimals,
+          isNative: gramRow.is_native,
+          contractIdentity: gramRow.contract_identity,
+        },
+        note: gramOk
+          ? 'Mainnet GRAM canonical (decimals=9, native, contract_identity NULL)'
+          : 'BLOCKED: GRAM must be decimals=9, is_native=true, contract_identity NULL',
       });
     }
   }
@@ -298,10 +462,11 @@ export async function planPhase21HotWalletRegistration(
         check: 'jetton_wallet_derivation_proof',
         status: 'MISSING',
         details: {},
-        note: 'BLOCKED: dual-provider derivation proof or Owner-supplied evidence required',
+        note: 'BLOCKED: DUAL_PROVIDER_LIVE derivation proof required',
       });
       inputsOk = false;
     } else {
+      const provenance = evaluateDualProviderProvenance(proof);
       const primaryOk = tonAddressesEqual(proof.primaryJettonWalletAddress, payoutJetton);
       const secondaryOk = tonAddressesEqual(proof.secondaryJettonWalletAddress, payoutJetton);
       const agree = tonAddressesEqual(
@@ -312,7 +477,15 @@ export async function planPhase21HotWalletRegistration(
         typeof proof.ownerAddress === 'string' &&
         proof.ownerAddress.trim() !== '' &&
         tonAddressesEqual(proof.ownerAddress, address);
-      if (!ownerOk) {
+      if (!provenance.ok) {
+        items.push({
+          check: 'jetton_wallet_derivation_proof',
+          status: 'INVALID',
+          details: provenance.details,
+          note: provenance.note,
+        });
+        inputsOk = false;
+      } else if (!ownerOk) {
         items.push({
           check: 'jetton_wallet_derivation_proof',
           status: 'INVALID',
@@ -369,8 +542,9 @@ export async function planPhase21HotWalletRegistration(
             method: proof.method,
             ownerAddress: proof.ownerAddress,
             jettonMaster: proof.jettonMaster,
+            ...provenance.details,
           },
-          note: 'derivation proof matches Owner-supplied payout jetton + USDT master provenance',
+          note: 'DUAL_PROVIDER_LIVE proof matches payout jetton + USDT master + independent providers',
         });
       }
     }
@@ -501,8 +675,10 @@ export async function applyPhase21HotWalletRegistration(
   try {
     assertAuthenticatedPhase21OwnerCeremonyTrust(input.ownerTrust);
     assertPhase21HotWalletBackupAttestation(input.hotWalletBackupAttestation);
-    if (input.applyConfirmation !== undefined) {
-      assertPhase21HotWalletRegisterConfirmation(input.applyConfirmation);
+    assertPhase21HotWalletRegisterConfirmation(input.applyConfirmation);
+    const provenance = evaluateDualProviderProvenance(input.derivationProof);
+    if (!provenance.ok) {
+      throw new Error(provenance.note);
     }
     assertIdentityProofMatchesRegistrationInput(input.identityProof, {
       address: input.address,
@@ -549,8 +725,9 @@ export async function applyPhase21HotWalletRegistration(
     };
   }
 
-  let committed = false;
+  let lifecycle: Phase21HotWalletTxLifecycle = 'NOT_STARTED';
   await client.query('BEGIN');
+  lifecycle = 'BEGUN';
   try {
     await client.query(
       `SELECT pg_advisory_xact_lock($1::int, hashtext('phase21-hot-wallet-register'))`,
@@ -569,6 +746,7 @@ export async function applyPhase21HotWalletRegistration(
         hotWalletId: null,
         notes: ['canonical Owner seat holder does not match Owner ceremony trust'],
         refuseCode: 'OWNER_SEAT_TRUST_MISMATCH',
+        mutationState: 'BEGUN',
       };
     }
 
@@ -583,6 +761,7 @@ export async function applyPhase21HotWalletRegistration(
         hotWalletId: null,
         notes: ['Register refused by live plan checks; transaction rolled back'],
         refuseCode: 'PLAN_NOT_READY',
+        mutationState: 'BEGUN',
       };
     }
 
@@ -617,6 +796,7 @@ export async function applyPhase21HotWalletRegistration(
     if (hotWalletId === undefined) {
       throw new Error('hot_wallets INSERT failed');
     }
+    lifecycle = 'MUTATION_EXECUTED';
 
     await client.query(
       `INSERT INTO audit_logs (
@@ -645,7 +825,7 @@ export async function applyPhase21HotWalletRegistration(
 
     try {
       await client.query('COMMIT');
-      committed = true;
+      lifecycle = 'COMMIT_CONFIRMED';
     } catch (commitError: unknown) {
       const planAfter = await planPhase21HotWalletRegistration(client, input).catch(() => ({
         items: [],
@@ -664,8 +844,11 @@ export async function applyPhase21HotWalletRegistration(
           `REGISTRATION_RECONCILIATION_REQUIRED — COMMIT failed after mutation; do not claim rollback: ${
             commitError instanceof Error ? commitError.message : String(commitError)
           }`,
+          'DO_NOT_RETRY until reconciled',
+          'mutationState=UNKNOWN',
         ],
         refuseCode: 'REGISTRATION_RECONCILIATION_REQUIRED',
+        mutationState: 'UNKNOWN',
       };
     }
 
@@ -680,14 +863,16 @@ export async function applyPhase21HotWalletRegistration(
         'signer_reference stored as fingerprint only (no seed)',
         'READY_FOR_LIVE_PAYOUT remains false until later Owner gates',
       ],
+      mutationState: 'COMMIT_CONFIRMED',
     };
   } catch (error: unknown) {
-    if (!committed) {
-      try {
-        await client.query('ROLLBACK');
-      } catch {
-        // ignore
-      }
+    const message = error instanceof Error ? error.message : String(error);
+    let rollbackConfirmed = false;
+    try {
+      await client.query('ROLLBACK');
+      rollbackConfirmed = true;
+    } catch {
+      rollbackConfirmed = false;
     }
     const plan = await planPhase21HotWalletRegistration(client, input).catch(() => ({
       items: [],
@@ -696,6 +881,33 @@ export async function applyPhase21HotWalletRegistration(
       usdtAssetId: null,
       notes: ['plan unavailable after failure'],
     }));
+    if (lifecycle === 'MUTATION_EXECUTED' && !rollbackConfirmed) {
+      return {
+        mode: 'REFUSED',
+        applyAuthorized: true,
+        applied: false,
+        plan,
+        hotWalletId: null,
+        notes: [
+          `REGISTRATION_RECONCILIATION_REQUIRED — ROLLBACK failed after mutation; mutationState=UNKNOWN: ${message}`,
+          'DO_NOT_RETRY until reconciled',
+        ],
+        refuseCode: 'REGISTRATION_RECONCILIATION_REQUIRED',
+        mutationState: 'UNKNOWN',
+      };
+    }
+    if (lifecycle === 'MUTATION_EXECUTED' && rollbackConfirmed) {
+      return {
+        mode: 'REFUSED',
+        applyAuthorized: true,
+        applied: false,
+        plan,
+        hotWalletId: null,
+        notes: [`TRANSACTION_ABORTED_CONFIRMED after mutation: ${message}`],
+        refuseCode: 'TRANSACTION_ABORTED_CONFIRMED',
+        mutationState: 'MUTATION_EXECUTED',
+      };
+    }
     return {
       mode: 'REFUSED',
       applyAuthorized: true,
@@ -703,11 +915,12 @@ export async function applyPhase21HotWalletRegistration(
       plan,
       hotWalletId: null,
       notes: [
-        `PRE_MUTATION_FAILURE — APPLY aborted before durable commit: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
+        rollbackConfirmed
+          ? `PRE_MUTATION_FAILURE — APPLY aborted and rolled back: ${message}`
+          : `PRE_MUTATION_FAILURE — APPLY aborted; ROLLBACK not confirmed: ${message}`,
       ],
       refuseCode: 'PRE_MUTATION_FAILURE',
+      mutationState: lifecycle,
     };
   }
 }

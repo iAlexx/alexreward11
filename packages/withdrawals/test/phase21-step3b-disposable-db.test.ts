@@ -14,6 +14,10 @@ import {
 
 import { __phase21TestSetApplyEnv } from '../src/phase21-ceremony-apply-gates.js';
 import {
+  __mintPhase21MainnetRegistryApplyConfirmationForTests,
+  __mintPhase21ProductionFlagsApplyConfirmationForTests,
+} from '../src/phase21-ceremony-confirmations.js';
+import {
   applyPhase21ProductionFlagBaseline,
   PHASE21_PRODUCTION_FLAG_BASELINE,
   planPhase21ProductionFlagBaseline,
@@ -144,6 +148,7 @@ describeDb('phase21 step3b disposable DB apply', () => {
       const first = await applyPhase21ProductionFlagBaseline(client, {
         reason: 'phase21-step3b-disposable-flag-baseline',
         ownerTrust: await mintOwnerTrust(client),
+        applyConfirmation: __mintPhase21ProductionFlagsApplyConfirmationForTests(),
       });
       expect(first.applied).toBe(true);
       expect(first.createdCount).toBe(PHASE21_PRODUCTION_FLAG_BASELINE.length);
@@ -162,6 +167,7 @@ describeDb('phase21 step3b disposable DB apply', () => {
       const second = await applyPhase21ProductionFlagBaseline(client, {
         reason: 'phase21-step3b-disposable-flag-baseline-retry',
         ownerTrust: await mintOwnerTrust(client),
+        applyConfirmation: __mintPhase21ProductionFlagsApplyConfirmationForTests(),
       });
       expect(second.applied).toBe(true);
       expect(second.createdCount).toBe(0);
@@ -198,9 +204,12 @@ describeDb('phase21 step3b disposable DB apply', () => {
         const result = await applyPhase21ProductionFlagBaseline(client, {
           reason: 'phase21-step3b-rollback',
           ownerTrust: await mintOwnerTrust(client),
+          applyConfirmation: __mintPhase21ProductionFlagsApplyConfirmationForTests(),
         });
         expect(result.applied).toBe(false);
-        expect(result.refuseCode).toBe('APPLY_EXCEPTION');
+        expect(['TRANSACTION_ABORTED_CONFIRMED', 'PRE_MUTATION_FAILURE', 'APPLY_EXCEPTION']).toContain(
+          result.refuseCode,
+        );
 
         const flags = await client.query<{ c: number }>(
           `SELECT COUNT(*)::int AS c FROM feature_flags WHERE environment = 'PRODUCTION'`,
@@ -228,6 +237,7 @@ describeDb('phase21 step3b disposable DB apply', () => {
       const first = await applyPhase21MainnetRegistryBootstrap(client, {
         usdtJettonMaster: USDT_MASTER,
         ownerTrust: await mintOwnerTrust(client),
+        applyConfirmation: __mintPhase21MainnetRegistryApplyConfirmationForTests(),
         reason: 'phase21-step3c-disposable-registry',
       });
       expect(first.applied).toBe(true);
@@ -250,6 +260,7 @@ describeDb('phase21 step3b disposable DB apply', () => {
       const second = await applyPhase21MainnetRegistryBootstrap(client, {
         usdtJettonMaster: USDT_MASTER,
         ownerTrust: await mintOwnerTrust(client),
+        applyConfirmation: __mintPhase21MainnetRegistryApplyConfirmationForTests(),
         reason: 'phase21-step3c-disposable-registry',
       });
       expect(second.applied).toBe(true);

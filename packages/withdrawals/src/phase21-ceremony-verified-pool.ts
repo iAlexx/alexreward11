@@ -156,3 +156,22 @@ export async function assertOwnerTrustMatchesLiveConnection(
     );
   }
 }
+
+/**
+ * Test-only branding for Phase21CeremonyVerifiedPool.
+ * Requires ALEX_PHASE21_CEREMONY_TEST_HOOKS=1.
+ */
+export function __brandPhase21CeremonyVerifiedPoolForTests(
+  value: Phase21CeremonyVerifiedPool,
+): Phase21CeremonyVerifiedPool {
+  if (process.env.ALEX_PHASE21_CEREMONY_TEST_HOOKS !== '1') {
+    throw new Phase21CeremonyVerifiedPoolError(
+      'TEST_HOOKS_REQUIRED',
+      '__brandPhase21CeremonyVerifiedPoolForTests requires ALEX_PHASE21_CEREMONY_TEST_HOOKS=1',
+      {},
+    );
+  }
+  verifiedPoolBrand.add(value);
+  return value;
+}
+

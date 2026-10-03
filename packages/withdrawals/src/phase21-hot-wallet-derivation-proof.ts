@@ -195,6 +195,31 @@ export function resolvePhase21HotWalletDerivationProofFromEnv(): {
     };
   }
 
+  // ENV without complete provider provenance is not APPLY-ready (PLAN may still surface blockers).
+  if (
+    primaryProviderKind === null ||
+    secondaryProviderKind === null ||
+    verifiedAt === undefined ||
+    verifiedAt.trim() === ''
+  ) {
+    return {
+      proof: {
+        primaryJettonWalletAddress: primary,
+        secondaryJettonWalletAddress: secondary,
+        method: 'DUAL_PROVIDER_LIVE',
+        ownerAddress,
+        jettonMaster,
+        ...(verifiedAt !== undefined ? { verifiedAt } : {}),
+        ...(primaryProviderKind !== null ? { primaryProviderKind } : {}),
+        ...(secondaryProviderKind !== null ? { secondaryProviderKind } : {}),
+      },
+      source: 'ENV',
+      refuseCode: 'DERIVATION_PROOF_ENV_PROVENANCE_INCOMPLETE',
+      message:
+        'ENV derivation proof lacks provider kinds / verifiedAt — not APPLY-ready; prefer PHASE21_HOT_WALLET_DERIVATION_PROOF_FILE',
+    };
+  }
+
   return {
     proof: {
       primaryJettonWalletAddress: primary,
@@ -202,9 +227,9 @@ export function resolvePhase21HotWalletDerivationProofFromEnv(): {
       method: 'DUAL_PROVIDER_LIVE',
       ownerAddress,
       jettonMaster,
-      ...(verifiedAt !== undefined ? { verifiedAt } : {}),
-      ...(primaryProviderKind !== null ? { primaryProviderKind } : {}),
-      ...(secondaryProviderKind !== null ? { secondaryProviderKind } : {}),
+      verifiedAt,
+      primaryProviderKind,
+      secondaryProviderKind,
     },
     source: 'ENV',
   };

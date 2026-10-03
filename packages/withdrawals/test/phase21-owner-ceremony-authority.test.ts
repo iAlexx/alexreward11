@@ -120,17 +120,22 @@ describe('phase21 owner ceremony authority', () => {
     );
   });
 
-  it('authenticate refuses non-pool / injected secrets without hooks', async () => {
+  it('authenticate refuses non-verified-pool / injected secrets without hooks', async () => {
     snap();
     delete process.env.ALEX_PHASE21_CEREMONY_TEST_HOOKS;
     await expect(
       authenticatePhase21OwnerCeremonyFromOwnerTty({
-        pool: { connect: async () => ({ release() {} }) } as never,
-        expectedDatabase: 'db',
-        expectedClusterSystemIdentifier: '1',
+        verifiedPool: {
+          brand: 'Phase21CeremonyVerifiedPool',
+          pool: { connect: async () => ({ release() {} }) },
+          databaseName: 'db',
+          systemIdentifier: '1',
+          tlsServerName: 'x',
+          close: async () => undefined,
+        } as never,
         injectedSecrets: { password: 'x', totpCode: '123456' },
       }),
-    ).rejects.toMatchObject({ code: 'TEST_HOOKS_REQUIRED' });
+    ).rejects.toMatchObject({ code: 'CEREMONY_VERIFIED_POOL_REQUIRED' });
   });
 
   it('branded backup attestation required; forged boolean refuses', () => {

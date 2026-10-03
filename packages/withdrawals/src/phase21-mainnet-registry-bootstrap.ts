@@ -32,10 +32,16 @@ export interface Phase21MainnetRegistryBootstrapInput {
   readonly networkDisplayName?: string;
   readonly usdtDisplayName?: string;
   readonly gramDisplayName?: string;
-  /** Required for APPLY — branded Owner ceremony trust. */
+  /** Required for APPLY — branded Owner ceremony trust. PLAN may omit. */
   readonly ownerTrust?: AuthenticatedPhase21OwnerCeremonyTrust;
-  readonly applyConfirmation?: Phase21MainnetRegistryApplyConfirmation;
   readonly reason?: string | null;
+}
+
+/** APPLY-only input: branded Owner trust + branded confirmation are both required. */
+export interface Phase21MainnetRegistryBootstrapApplyInput
+  extends Phase21MainnetRegistryBootstrapInput {
+  readonly ownerTrust: AuthenticatedPhase21OwnerCeremonyTrust;
+  readonly applyConfirmation: Phase21MainnetRegistryApplyConfirmation;
 }
 
 export interface Phase21MainnetRegistryPlanItem {
@@ -586,7 +592,7 @@ async function applyCreatesInTxn(
  */
 export async function applyPhase21MainnetRegistryBootstrap(
   client: PoolClient,
-  input: Phase21MainnetRegistryBootstrapInput,
+  input: Phase21MainnetRegistryBootstrapApplyInput,
 ): Promise<Phase21MainnetRegistryBootstrapResult> {
   try {
     assertUsdtMaster(input.usdtJettonMaster);
@@ -602,23 +608,9 @@ export async function applyPhase21MainnetRegistryBootstrap(
     };
   }
 
-  if (input.ownerTrust === undefined) {
-    return {
-      mode: 'REFUSED',
-      applyAuthorized: false,
-      applied: false,
-      items: [],
-      conflicts: [],
-      notes: ['APPLY refused: branded ownerTrust required'],
-      refuseCode: 'OWNER_TRUST_REQUIRED',
-    };
-  }
-
   try {
     assertAuthenticatedPhase21OwnerCeremonyTrust(input.ownerTrust);
-    if (input.applyConfirmation !== undefined) {
-      assertPhase21MainnetRegistryApplyConfirmation(input.applyConfirmation);
-    }
+    assertPhase21MainnetRegistryApplyConfirmation(input.applyConfirmation);
     await assertOwnerTrustMatchesLiveConnection(client, input.ownerTrust);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
@@ -629,7 +621,7 @@ export async function applyPhase21MainnetRegistryBootstrap(
       items: [],
       conflicts: [],
       notes: [`APPLY refused: ${message}`],
-      refuseCode: 'OWNER_TRUST_REQUIRED',
+      refuseCode: 'OWNER_TRUST_OR_CONFIRMATION_REQUIRED',
     };
   }
 
@@ -653,7 +645,10 @@ export async function applyPhase21MainnetRegistryBootstrap(
     };
   }
 
+  type TxLifecycle = 'NOT_STARTED' | 'BEGUN' | 'MUTATION_EXECUTED' | 'COMMIT_CONFIRMED';
+  let lifecycle: TxLifecycle = 'NOT_STARTED';
   await client.query('BEGIN');
+  lifecycle = 'BEGUN';
   try {
     await client.query(
       `SELECT pg_advisory_xact_lock($1::int, hashtext('phase21-mainnet-registry-bootstrap'))`,
@@ -679,6 +674,7 @@ export async function applyPhase21MainnetRegistryBootstrap(
     }
 
     await applyCreatesInTxn(client, input, planned);
+    lifecycle = 'MUTATION_EXECUTED';
 
     const seat = await resolveCanonicalPhase21OwnerSeat(client, input.ownerTrust!.adminUserId);
     if (seat.adminUserId !== input.ownerTrust!.adminUserId) {
@@ -712,7 +708,7 @@ export async function applyPhase21MainnetRegistryBootstrap(
         items: verified,
         conflicts: incomplete.filter((i) => i.action === 'CONFLICT'),
         notes: [
-          'Post-apply re-assert failed ? transaction rolled back',
+          'Post-apply re-assert failed — transaction rolled back',
           ...incomplete.map((i) => `${i.resource}:${i.action}`),
         ],
         refuseCode: 'POST_APPLY_VERIFY_FAILED',
@@ -766,7 +762,24 @@ export async function applyPhase21MainnetRegistryBootstrap(
       ],
     );
 
-    await client.query('COMMIT');
+    try {
+      await client.query('COMMIT');
+      lifecycle = 'COMMIT_CONFIRMED';
+    } catch (commitError: unknown) {
+      const message = commitError instanceof Error ? commitError.message : String(commitError);
+      return {
+        mode: 'REFUSED',
+        applyAuthorized: true,
+        applied: false,
+        items: verified,
+        conflicts: [],
+        notes: [
+          `REGISTRATION_RECONCILIATION_REQUIRED — COMMIT failed after mutation; do not claim rollback: ${message}`,
+          'DO_NOT_RETRY until reconciled',
+        ],
+        refuseCode: 'REGISTRATION_RECONCILIATION_REQUIRED',
+      };
+    }
     return {
       mode: 'APPLY',
       applyAuthorized: true,
@@ -782,20 +795,51 @@ export async function applyPhase21MainnetRegistryBootstrap(
       ],
     };
   } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    let rollbackConfirmed = false;
     try {
       await client.query('ROLLBACK');
+      rollbackConfirmed = true;
     } catch {
-      // ignore
+      rollbackConfirmed = false;
     }
-    const message = error instanceof Error ? error.message : String(error);
+    if (lifecycle === 'MUTATION_EXECUTED' && !rollbackConfirmed) {
+      return {
+        mode: 'REFUSED',
+        applyAuthorized: true,
+        applied: false,
+        items: [],
+        conflicts: [],
+        notes: [
+          `REGISTRATION_RECONCILIATION_REQUIRED — ROLLBACK failed after mutation; mutationState=UNKNOWN: ${message}`,
+          'DO_NOT_RETRY until reconciled',
+        ],
+        refuseCode: 'REGISTRATION_RECONCILIATION_REQUIRED',
+      };
+    }
+    if (lifecycle === 'MUTATION_EXECUTED' && rollbackConfirmed) {
+      return {
+        mode: 'REFUSED',
+        applyAuthorized: true,
+        applied: false,
+        items: [],
+        conflicts: [],
+        notes: [`TRANSACTION_ABORTED_CONFIRMED after mutation: ${message}`],
+        refuseCode: 'TRANSACTION_ABORTED_CONFIRMED',
+      };
+    }
     return {
       mode: 'REFUSED',
       applyAuthorized: true,
       applied: false,
       items: [],
       conflicts: [],
-      notes: [`APPLY aborted and rolled back: ${message}`],
-      refuseCode: 'APPLY_EXCEPTION',
+      notes: [
+        rollbackConfirmed
+          ? `PRE_MUTATION_FAILURE — APPLY aborted and rolled back: ${message}`
+          : `PRE_MUTATION_FAILURE — APPLY aborted; ROLLBACK not confirmed: ${message}`,
+      ],
+      refuseCode: rollbackConfirmed ? 'PRE_MUTATION_FAILURE' : 'APPLY_EXCEPTION',
     };
   }
 }

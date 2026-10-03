@@ -25,6 +25,8 @@ export type Phase21HotWalletPostRegisterExpected = {
   readonly payoutJettonWalletAddress: string;
   readonly friendlyAddress?: string | null;
   readonly hotWalletId?: string | null;
+  /** Authenticated Owner admin_user_id for intended registration audit. */
+  readonly adminUserId: string;
 };
 
 export type Phase21HotWalletPostRegisterVerifyResult = {
@@ -41,6 +43,8 @@ export type Phase21HotWalletPostRegisterVerifyResult = {
   readonly payoutJettonWalletAddress: string;
   readonly readyForLivePayout: false;
   readonly sanitized: true;
+  readonly auditPresent: true;
+  readonly auditCount: number;
 };
 
 export async function verifyPhase21HotWalletRegistrationReadOnly(
@@ -156,6 +160,33 @@ export async function verifyPhase21HotWalletRegistrationReadOnly(
       }
     }
 
+    const adminUserId = expected.adminUserId.trim();
+    if (adminUserId === '') {
+      throw new Phase21HotWalletPostRegisterVerifyError(
+        'ADMIN_USER_ID_REQUIRED',
+        'adminUserId required to verify registration audit',
+        {},
+      );
+    }
+
+    const audit = await client.query<{ c: number }>(
+      `SELECT COUNT(*)::int AS c
+       FROM audit_logs
+       WHERE action_type = 'phase21.hot_wallet.register'
+         AND resource_type = 'hot_wallet'
+         AND resource_id = $1::uuid
+         AND admin_user_id = $2::uuid`,
+      [row.id, adminUserId],
+    );
+    const auditCount = audit.rows[0]?.c ?? 0;
+    if (auditCount < 1) {
+      throw new Phase21HotWalletPostRegisterVerifyError(
+        'REGISTRATION_AUDIT_MISSING',
+        'intended phase21.hot_wallet.register audit_logs row missing',
+        { auditCount },
+      );
+    }
+
     return {
       ok: true,
       readOnly: true,
@@ -170,6 +201,8 @@ export async function verifyPhase21HotWalletRegistrationReadOnly(
       payoutJettonWalletAddress: row.payout_jetton_wallet_address,
       readyForLivePayout: false,
       sanitized: true,
+      auditPresent: true,
+      auditCount,
     };
   } finally {
     await client.query('ROLLBACK');

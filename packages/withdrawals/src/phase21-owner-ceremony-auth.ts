@@ -6,17 +6,23 @@
  *
  * Auth anti-replay / throttle may mutate auth tables; that is distinct from Phase21
  * business mutation (flag baseline / registry / hot-wallet register).
+ *
+ * Production path requires Phase21CeremonyVerifiedPool + production verify_full
+ * WeakMap-bound bootstrap pool (verifyProductionOwnerPasswordAndTotpOnVerifiedBootstrapPool).
  */
-import type { Pool, PoolClient } from 'pg';
+import type { PoolClient } from 'pg';
 
 import {
   assertInteractiveSecretTerminals,
-  isPool,
   readSecretFromTty,
-  verifyOwnerAdminPasswordAndTotp,
+  verifyProductionOwnerPasswordAndTotpOnVerifiedBootstrapPool,
 } from '@alex-rewards/auth';
 
 import type { Phase21CeremonyOwnerAdminClient } from './phase21-ceremony-owner-admin.js';
+import {
+  assertPhase21CeremonyVerifiedPool,
+  type Phase21CeremonyVerifiedPool,
+} from './phase21-ceremony-verified-pool.js';
 import type { AuthenticatedPhase21OwnerCeremonyTrust } from './phase21-owner-ceremony-trust.js';
 import { Phase21OwnerCeremonyTrustError } from './phase21-owner-ceremony-trust.js';
 import { mintAuthenticatedPhase21OwnerCeremonyTrust } from './phase21-owner-ceremony-trust-mint-internal.js';
@@ -127,10 +133,8 @@ export async function resolveCanonicalPhase21OwnerSeat(
 }
 
 export interface AuthenticatePhase21OwnerCeremonyFromOwnerTtyInput {
-  /** Must be a pg Pool — auth anti-replay mutates auth-state (not Phase21 business mutation). */
-  readonly pool: Pool;
-  readonly expectedDatabase: string;
-  readonly expectedClusterSystemIdentifier: string;
+  /** Runtime-branded verified production pool (DATABASE_URL alone forbidden). */
+  readonly verifiedPool: Phase21CeremonyVerifiedPool;
   /**
    * Optional locator from PHASE21_CEREMONY_ADMIN_USER_ID only.
    * Env UUID alone is NOT authority; must match seat holder when provided.
@@ -148,14 +152,19 @@ export interface AuthenticatePhase21OwnerCeremonyFromOwnerTtyInput {
 
 /**
  * Authenticate Owner on interactive TTY (password + TOTP) and mint branded ceremony trust.
+ * Uses production verified-pool-only credential verification (not generic test-DB gate).
  */
 export async function authenticatePhase21OwnerCeremonyFromOwnerTty(
   input: AuthenticatePhase21OwnerCeremonyFromOwnerTtyInput,
 ): Promise<AuthenticatedPhase21OwnerCeremonyTrust> {
-  if (!isPool(input.pool)) {
+  try {
+    assertPhase21CeremonyVerifiedPool(input.verifiedPool);
+  } catch (error: unknown) {
     throw new Phase21OwnerCeremonyAuthError(
-      'OWNER_AUTH_POOL_REQUIRED',
-      'authenticatePhase21OwnerCeremonyFromOwnerTty requires a writable pg Pool (auth anti-replay)',
+      'CEREMONY_VERIFIED_POOL_REQUIRED',
+      error instanceof Error
+        ? error.message
+        : 'Phase21CeremonyVerifiedPool required for Owner ceremony auth',
       {},
     );
   }
@@ -181,7 +190,7 @@ export async function authenticatePhase21OwnerCeremonyFromOwnerTty(
     }
   }
 
-  const client: PoolClient = await input.pool.connect();
+  const client: PoolClient = await input.verifiedPool.pool.connect();
   let adminUserId: string;
   try {
     const seat = await resolveCanonicalPhase21OwnerSeat(client, input.expectedAdminUserId);
@@ -201,18 +210,18 @@ export async function authenticatePhase21OwnerCeremonyFromOwnerTty(
       totpCode = await readSecretFromTty('Owner TOTP code (TTY, not echoed): ');
     }
 
-    await verifyOwnerAdminPasswordAndTotp(input.pool, {
+    await verifyProductionOwnerPasswordAndTotpOnVerifiedBootstrapPool(input.verifiedPool.pool, {
       adminUserId,
       password,
       totpCode,
-      expectedDatabase: input.expectedDatabase,
-      expectedClusterSystemIdentifier: input.expectedClusterSystemIdentifier,
+      expectedDatabase: input.verifiedPool.databaseName,
+      expectedClusterSystemIdentifier: input.verifiedPool.systemIdentifier,
     });
 
     return mintAuthenticatedPhase21OwnerCeremonyTrust({
       adminUserId,
-      currentDatabase: input.expectedDatabase,
-      systemIdentifier: input.expectedClusterSystemIdentifier,
+      currentDatabase: input.verifiedPool.databaseName,
+      systemIdentifier: input.verifiedPool.systemIdentifier,
     });
   } finally {
     password = '';
