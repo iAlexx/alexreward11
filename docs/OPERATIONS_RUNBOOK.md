@@ -386,3 +386,4 @@ See `docs/PHASE_21_STEP4B1_AUTHENTICATED_READONLY_PREFLIGHT.md`.
 - After APPLY, run `owner-production-bootstrap verify-apply` (read-only) with the printed admin/grant/attempt ids.
 - `PARTIAL_LIFECYCLE_RECONCILIATION_REQUIRED` means mutation state is unknown: do not retry; inspect read-only and escalate to the Owner.
 - Cursor/CI must never run `--apply`. Details and the future PowerShell template: `docs/PHASE_21_STEP4B2_SAFE_OWNER_APPLY.md`.
+- Step 4B.2a: production CLI secret prompts use shared `readSecretFromTty` (stdin.resume after readline). If a prior APPLY aborted at the TOTP code prompt on Windows, delete the abandoned authenticator entry and start a fresh APPLY (new TOTP secret each run).

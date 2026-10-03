@@ -264,3 +264,4 @@ Production Owner bootstrap final source hardening: `mintAuthenticatedProductionB
 - Backup attestation and final APPLY confirmation are exact-phrase interactive prompts on a real TTY; env/argv/booleans cannot authorize them. Test injection requires `ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1`.
 - The decrypt/mutate path is reachable only after live Channel B, a fully READY authenticated read-only preflight and the final phrase.
 - Post-apply verification is read-only (`BEGIN READ ONLY` + `ROLLBACK`) and outputs no email or secret material.
+- Step 4B.2a: production CLI secrets use shared `readSecretFromTty` which resumes stdin after readline pause (Windows PowerShell exit-before-input fix). Secrets are never echoed, logged, argv, or env. Aborted TOTP enrollment secrets are not reused.

@@ -133,6 +133,7 @@ Step 3C adds ceremony observations that must PASS for READY_FOR_OWNER_PROVISIONI
 ### Step 4B.2 (2026-10-03)
 
 - Safe APPLY hardening source complete: no production TOTP auto-confirm; backup attestation + final APPLY phrase; strict READY gate; post-apply read-only verify (`verify-apply`)
+- Step 4B.2a: Windows secret-input pause fixed (`readSecretFromTty` + stdin.resume); aborted TOTP not reused
 - `REAL_APPLY_RUN=NO` (Owner-manual only after independent review; Cursor must not execute it)
 - `READY_FOR_PRODUCTION_OWNER_BOOTSTRAP_CEREMONY=NO`
 - `REAL_OWNER_BOOTSTRAP_KEY_GENERATED=NO` (no key/seal/bundle/Channel B regenerated)

@@ -9,13 +9,15 @@
  * DO NOT reuse Hot Wallet keys. DO NOT accept secrets via argv/env.
  */
 import { readFileSync, readdirSync } from 'node:fs';
-import { createInterface } from 'node:readline';
 import { resolve } from 'node:path';
-import { stdin as stdinFd, stdout as stdoutFd } from 'node:process';
 
 import { assertPasswordPolicy, bytesToBase32, generateTotpSecretBytes } from '../admin-password.js';
 import { assertTotpCodeFormat, buildOtpAuthUri, verifyTotpCode } from '../admin-totp.js';
-import { displaySecretOnceOnInteractiveStderr } from '../tty-secret.js';
+import {
+  displaySecretOnceOnInteractiveStderr,
+  readLineFromTty,
+  readSecretFromTty,
+} from '../tty-secret.js';
 import { zeroizeBytes } from '../owner-bootstrap/owner-bootstrap-encrypted-key.js';
 import {
   APPLY_PREFLIGHT_NOT_READY,
@@ -126,68 +128,9 @@ function assertNoSecretArgv(argv: string[]): void {
 }
 
 async function readLine(prompt: string): Promise<string> {
-  if (!process.stdin.isTTY) {
-    throw new Error('INTERACTIVE_TTY_REQUIRED');
-  }
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  const answer = await new Promise<string>((resolvePromise) => {
-    rl.question(prompt, (v) => {
-      rl.close();
-      resolvePromise(v);
-    });
-  });
-  return answer.trim();
-}
-
-async function readSecret(prompt: string): Promise<string> {
-  if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    throw new Error('INTERACTIVE_TTY_REQUIRED');
-  }
-  // Best-effort no-echo on POSIX; Windows may still echo — never log the value.
-  const stdin = stdinFd;
-  const wasRaw = stdin.isRaw;
-  try {
-    if (typeof stdin.setRawMode === 'function') {
-      stdin.setRawMode(true);
-    }
-  } catch {
-    // ignore
-  }
-  process.stdout.write(prompt);
-  let value = '';
-  await new Promise<void>((resolvePromise, reject) => {
-    const onData = (chunk: Buffer) => {
-      const s = chunk.toString('utf8');
-      for (const ch of s) {
-        if (ch === '\n' || ch === '\r') {
-          stdin.off('data', onData);
-          process.stdout.write('\n');
-          resolvePromise();
-          return;
-        }
-        if (ch === '\u0003') {
-          stdin.off('data', onData);
-          reject(new Error('interrupted'));
-          return;
-        }
-        if (ch === '\u007f' || ch === '\b') {
-          value = value.slice(0, -1);
-          continue;
-        }
-        value += ch;
-      }
-    };
-    stdin.on('data', onData);
-  });
-  try {
-    if (typeof stdin.setRawMode === 'function') {
-      stdin.setRawMode(wasRaw ?? false);
-    }
-  } catch {
-    // ignore
-  }
-  void stdoutFd;
-  return value;
+  // Shared TTY line reader — closing it pauses stdin; subsequent secrets use
+  // readSecretFromTty() which explicitly resumes (Windows PowerShell fix).
+  return (await readLineFromTty(prompt)).trim();
 }
 
 function printJson(value: unknown): void {
@@ -414,7 +357,9 @@ interface OwnerTotpEnrollment {
 
 async function promptAndVerifyTotpCode(secret: Uint8Array): Promise<string> {
   const code = (
-    await readSecret('Enter current 6-digit code from your authenticator to confirm enrollment: ')
+    await readSecretFromTty(
+      'Enter current 6-digit code from your authenticator to confirm enrollment: ',
+    )
   ).trim();
   assertTotpCodeFormat(code);
   if (!verifyTotpCode(secret, code)) {
@@ -579,11 +524,11 @@ async function runApplyCommand(argv: string[], command: string): Promise<void> {
     totp = await enrollOwnerTotpInteractive();
 
     // 10. Secrets (never echoed, never argv/env).
-    const bootstrapPassphrase = await readSecret(
+    const bootstrapPassphrase = await readSecretFromTty(
       'Owner bootstrap passphrase (encrypted key, not echoed): ',
     );
-    const password = await readSecret('New Owner admin password (not echoed): ');
-    const passwordConfirm = await readSecret('Confirm Owner admin password: ');
+    const password = await readSecretFromTty('New Owner admin password (not echoed): ');
+    const passwordConfirm = await readSecretFromTty('Confirm Owner admin password: ');
 
     // 11. Password policy before any mutation.
     assertPasswordPolicy(password);
@@ -964,8 +909,10 @@ async function main(): Promise<void> {
       return;
     }
     assertCeremonyDirOutsideRepo(ceremonyDir, repoRoot);
-    const passphrase = await readSecret('Owner bootstrap passphrase (min 16, not echoed): ');
-    const passphraseConfirm = await readSecret('Confirm passphrase: ');
+    const passphrase = await readSecretFromTty(
+      'Owner bootstrap passphrase (min 16, not echoed): ',
+    );
+    const passphraseConfirm = await readSecretFromTty('Confirm passphrase: ');
     const pub = generateProductionBootstrapKeypairFiles({
       ceremonyDir,
       keyId,

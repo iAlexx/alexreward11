@@ -134,6 +134,9 @@ export {
 export {
   assertInteractiveSecretTerminals,
   displaySecretOnceOnInteractiveStderr,
+  prepareStdinForSecretRead,
+  readLineFromTty,
+  readSecretFromStdinStream,
   readSecretFromTty,
 } from './tty-secret.js';
 export { issueAccessToken, verifyAccessToken, type AccessTokenClaims } from './access-token.js';

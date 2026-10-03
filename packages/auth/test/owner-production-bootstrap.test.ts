@@ -1639,7 +1639,7 @@ describe('phase21 step4b2 safe apply hardening (no DB)', () => {
       'runAuthenticatedProductionOwnerBootstrapPreflightOnly(',
       'assertApplyPreflightReady(',
       'enrollOwnerTotpInteractive()',
-      "readSecret(\n      'Owner bootstrap passphrase",
+      "readSecretFromTty(\n      'Owner bootstrap passphrase",
       'assertPasswordPolicy(password)',
       'confirmProductionOwnerBootstrapApplyInteractive()',
       'orchestrateProductionOwnerBootstrapCeremony(',

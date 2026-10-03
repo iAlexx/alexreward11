@@ -91,4 +91,5 @@ Phase21 payout Hot Wallet fingerprint must never be used as Owner bootstrap / se
 - `--apply` order: gates, TTY, ceremony dir/connection, live Channel B, backup attestation phrase `I_HAVE_TWO_SHA256_VERIFIED_OFFLINE_OWNER_KEY_BACKUPS`, authenticated read-only preflight, strict READY gate (`APPLY_PREFLIGHT_NOT_READY` stops with zero mutation), TOTP enrollment (Issuer LOOTRA, Account Owner, secret shown once on stderr, Owner types current code), passphrase/password, password policy, final phrase `APPLY_LOOTRA_PRODUCTION_OWNER_BOOTSTRAP`, then decrypt + lifecycle, then read-only `verify-apply` checks.
 - Failures are classified `PRE_MUTATION_FAILURE` or `PARTIAL_LIFECYCLE_RECONCILIATION_REQUIRED` (no rollback claimed; do not retry blindly).
 - Real APPLY is Owner-manual only after independent review; Cursor must not execute it.
+- Step 4B.2a: CLI secret input uses shared `readSecretFromTty` (stdin.resume after readline). If APPLY aborted at the TOTP code prompt, delete the abandoned authenticator entry and start fresh (new TOTP each run).
 - See `docs/PHASE_21_STEP4B2_SAFE_OWNER_APPLY.md`.

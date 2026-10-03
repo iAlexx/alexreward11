@@ -5,6 +5,23 @@ Status: SOURCE + DISPOSABLE-DB TESTS ONLY. No real `--apply` was run. Cursor/CI 
 regenerate or decrypt the real Owner key, and never mutate the operational database. A real APPLY is an
 Owner-manual action performed only after independent review of this step.
 
+## Step 4B.2a — Windows interactive secret input fix
+
+Observed on real Windows PowerShell: after Channel B + backup attestation + authenticated
+preflight + one-time TOTP display, the CLI printed the TOTP confirmation prompt and the Node
+process exited before any secret was entered (Owner typed the code at the `PS>` prompt). Root
+cause: the production CLI had a local `readSecret` that attached `stdin.on('data')` without
+`stdin.resume()`. Closing a prior `readline` Interface pauses stdin; on Windows that left no
+active handle, so Node exited with the Promise still unresolved. No APPLY confirmation, passphrase,
+password, or orchestrator mutation occurred.
+
+Fix: remove the local duplicate reader; all production CLI secrets use shared `readSecretFromTty()`
+(`packages/auth/src/tty-secret.ts`), which calls `prepareStdinForSecretRead()` → `stdin.resume()`,
+sets raw mode, attaches one listener, and always removes the listener + restores raw mode in
+`finally` (including Ctrl+C). Regression: `test/tty-secret.test.ts` (readline pause → resume → CR
+complete). Each APPLY still calls `generateTotpSecretBytes()` fresh; an aborted enrollment secret
+must never be reused (delete the abandoned authenticator entry).
+
 ## What changed
 
 1. **Production TOTP has no auto-confirm.** `orchestrateProductionOwnerBootstrapCeremony` now REQUIRES
