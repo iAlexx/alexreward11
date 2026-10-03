@@ -15,9 +15,15 @@ import {
   type Phase21CeremonyApplyGateClient,
 } from './phase21-ceremony-apply-gates.js';
 import {
-  Phase21CeremonyOwnerAdminError,
-  resolvePhase21CeremonyOwnerAdmin,
-} from './phase21-ceremony-owner-admin.js';
+  assertPhase21MainnetRegistryApplyConfirmation,
+  type Phase21MainnetRegistryApplyConfirmation,
+} from './phase21-ceremony-confirmations.js';
+import { assertOwnerTrustMatchesLiveConnection } from './phase21-ceremony-verified-pool.js';
+import { resolveCanonicalPhase21OwnerSeat } from './phase21-owner-ceremony-auth.js';
+import {
+  assertAuthenticatedPhase21OwnerCeremonyTrust,
+  type AuthenticatedPhase21OwnerCeremonyTrust,
+} from './phase21-owner-ceremony-trust.js';
 
 export type Phase21MainnetRegistryBootstrapMode = 'PLAN' | 'APPLY' | 'REFUSED';
 
@@ -26,8 +32,9 @@ export interface Phase21MainnetRegistryBootstrapInput {
   readonly networkDisplayName?: string;
   readonly usdtDisplayName?: string;
   readonly gramDisplayName?: string;
-  /** Required for APPLY — ACTIVE OWNER admin. */
-  readonly changedByAdminId?: string | null;
+  /** Required for APPLY — branded Owner ceremony trust. */
+  readonly ownerTrust?: AuthenticatedPhase21OwnerCeremonyTrust;
+  readonly applyConfirmation?: Phase21MainnetRegistryApplyConfirmation;
   readonly reason?: string | null;
 }
 
@@ -595,14 +602,25 @@ export async function applyPhase21MainnetRegistryBootstrap(
     };
   }
 
+  if (input.ownerTrust === undefined) {
+    return {
+      mode: 'REFUSED',
+      applyAuthorized: false,
+      applied: false,
+      items: [],
+      conflicts: [],
+      notes: ['APPLY refused: branded ownerTrust required'],
+      refuseCode: 'OWNER_TRUST_REQUIRED',
+    };
+  }
+
   try {
-    await assertPhase21CeremonyApplyGates(
-      client as Phase21CeremonyApplyGateClient,
-      'PHASE21_MAINNET_REGISTRY_BOOTSTRAP_APPLY',
-    );
+    assertAuthenticatedPhase21OwnerCeremonyTrust(input.ownerTrust);
+    if (input.applyConfirmation !== undefined) {
+      assertPhase21MainnetRegistryApplyConfirmation(input.applyConfirmation);
+    }
+    await assertOwnerTrustMatchesLiveConnection(client, input.ownerTrust);
   } catch (error: unknown) {
-    const code =
-      error instanceof Phase21CeremonyApplyGateError ? error.code : 'APPLY_GATE_FAILED';
     const message = error instanceof Error ? error.message : String(error);
     return {
       mode: 'REFUSED',
@@ -611,15 +629,18 @@ export async function applyPhase21MainnetRegistryBootstrap(
       items: [],
       conflicts: [],
       notes: [`APPLY refused: ${message}`],
-      refuseCode: code,
+      refuseCode: 'OWNER_TRUST_REQUIRED',
     };
   }
 
   try {
-    await resolvePhase21CeremonyOwnerAdmin(client, input.changedByAdminId);
+    await assertPhase21CeremonyApplyGates(
+      client as Phase21CeremonyApplyGateClient,
+      'PHASE21_MAINNET_REGISTRY_BOOTSTRAP_APPLY',
+    );
   } catch (error: unknown) {
     const code =
-      error instanceof Phase21CeremonyOwnerAdminError ? error.code : 'OWNER_ADMIN_REQUIRED';
+      error instanceof Phase21CeremonyApplyGateError ? error.code : 'APPLY_GATE_FAILED';
     const message = error instanceof Error ? error.message : String(error);
     return {
       mode: 'REFUSED',
@@ -659,7 +680,20 @@ export async function applyPhase21MainnetRegistryBootstrap(
 
     await applyCreatesInTxn(client, input, planned);
 
-    const owner = await resolvePhase21CeremonyOwnerAdmin(client, input.changedByAdminId);
+    const seat = await resolveCanonicalPhase21OwnerSeat(client, input.ownerTrust!.adminUserId);
+    if (seat.adminUserId !== input.ownerTrust!.adminUserId) {
+      await client.query('ROLLBACK');
+      return {
+        mode: 'REFUSED',
+        applyAuthorized: false,
+        applied: false,
+        items: planned,
+        conflicts: [],
+        notes: ['canonical Owner seat holder does not match Owner ceremony trust'],
+        refuseCode: 'OWNER_SEAT_TRUST_MISMATCH',
+      };
+    }
+    const owner = { adminUserId: input.ownerTrust!.adminUserId };
     const reason =
       (input.reason ?? '').trim() || 'Phase 21 Mainnet registry bootstrap ceremony';
 

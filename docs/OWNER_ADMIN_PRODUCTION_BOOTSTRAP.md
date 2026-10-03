@@ -93,3 +93,12 @@ Phase21 payout Hot Wallet fingerprint must never be used as Owner bootstrap / se
 - Real APPLY is Owner-manual only after independent review; Cursor must not execute it.
 - Step 4B.2a: CLI secret input uses shared `readSecretFromTty` (stdin.resume after readline). If APPLY aborted at the TOTP code prompt, delete the abandoned authenticator entry and start fresh (new TOTP each run).
 - See `docs/PHASE_21_STEP4B2_SAFE_OWNER_APPLY.md`.
+
+## Phase 21 Step 4C closeout (sanitized)
+
+- `PRODUCTION_OWNER_BOOTSTRAP=COMPLETE`
+- `OWNER_ADMIN_USER_ID=a11a11a1-0000-4000-8000-000000000011`
+- `OWNER_GRANT_ID=e075fc33-ee46-4848-ac84-53c509adc96f`
+- `OWNER_ATTEMPT_ID=ccd4b016-6dd8-43a8-a536-ee341d2fad7e`
+- Subsequent Phase 21 APPLY tools require branded Owner ceremony trust (TTY password+TOTP); `PHASE21_CEREMONY_ADMIN_USER_ID` is a locator only.
+- See `docs/PHASE_21_STEP4C_OWNER_CLOSEOUT_AND_HOT_WALLET_READINESS.md`.

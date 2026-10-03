@@ -44,7 +44,6 @@ describe('phase21 Step3C plan gates (source + unit)', () => {
       signerReference: 'fp-test',
       payoutJettonWalletAddress: 'EQD0vdSA_NedR9uvbgN9EikRX-suesDxGeFg69XQMavfLqIw',
       reason: 'test',
-      changedByAdminId: '11111111-1111-4111-8111-111111111111',
     });
     expect(plan.canRegister).toBe(false);
     expect(

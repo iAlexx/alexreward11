@@ -19,6 +19,17 @@ import {
   applyPhase21HotWalletRegistration,
   planPhase21HotWalletRegistration,
 } from '../phase21-hot-wallet-registration.js';
+import { openPhase21ApplyVerifiedPool } from '../phase21-ceremony-apply-cli.js';
+import {
+  attestPhase21HotWalletOfflineBackupsInteractive,
+  confirmPhase21HotWalletRegisterInteractive,
+  confirmPhase21MainnetRegistryApplyInteractive,
+  confirmPhase21ProductionFlagsApplyInteractive,
+} from '../phase21-ceremony-confirmations.js';
+import {
+  readPhase21HotWalletIdentityProofFile,
+} from '../phase21-hot-wallet-identity-proof.js';
+import { verifyPhase21HotWalletRegistrationReadOnly } from '../phase21-hot-wallet-post-register-verify.js';
 import {
   buildPhase21HotWalletDerivationProofDocument,
   resolvePhase21HotWalletDerivationProofFromEnv,
@@ -53,6 +64,7 @@ const COMMANDS = new Set([
   'estimate-mainnet-fee',
   'hot-wallet:plan',
   'hot-wallet:register',
+  'hot-wallet:verify-identity',
 ]);
 
 function usage(): never {
@@ -60,7 +72,7 @@ function usage(): never {
     JSON.stringify({
       ok: false,
       message:
-        'usage: phase21-ops <readiness|preflight|production-flags:plan|production-flags:template|production-flags:apply|mainnet-registry:plan|mainnet-registry:template|mainnet-registry:apply|verify-mainnet-external|estimate-mainnet-fee|hot-wallet:plan|hot-wallet:register> [--apply]',
+        'usage: phase21-ops <readiness|preflight|production-flags:plan|production-flags:template|production-flags:apply|mainnet-registry:plan|mainnet-registry:template|mainnet-registry:apply|verify-mainnet-external|estimate-mainnet-fee|hot-wallet:plan|hot-wallet:register|hot-wallet:verify-identity> [--apply]',
     }),
   );
   process.exit(2);
@@ -298,7 +310,7 @@ async function main(): Promise<void> {
           rows,
           current_database: live.currentDatabase,
           required_database: live.requiredDatabase,
-          notes: ['Read-only PLAN; APPLY requires --apply + env gates'],
+          notes: ['Read-only PLAN via DATABASE_URL; APPLY uses verified ceremony pool + Owner TTY auth'],
           readyForLivePayout: false,
         });
       } finally {
@@ -321,32 +333,45 @@ if (command === 'production-flags:apply') {
       process.exitCode = 1;
       return;
     }
-    await withDatabaseUrl(async (pool) => {
-      const client = await pool.connect();
+    let verifiedClose: (() => Promise<void>) | null = null;
+    try {
+      const { verified, trust } = await openPhase21ApplyVerifiedPool(argv);
+      verifiedClose = verified.close;
+      const client = await verified.pool.connect();
       try {
-        const adminId = envNonEmpty('PHASE21_CEREMONY_ADMIN_USER_ID');
-        if (adminId === null) {
-          printJson({
-            ok: false,
-            command: 'production-flags:apply',
-            refuseCode: 'OWNER_ADMIN_REQUIRED',
-            message: 'PHASE21_CEREMONY_ADMIN_USER_ID required (SYSTEM/null forbidden)',
-          });
-          process.exitCode = 1;
-          return;
-        }
+        const plan = await planPhase21ProductionFlagBaseline(client);
+        printJson({
+          ok: true,
+          command: 'production-flags:apply',
+          mode: 'FRESH_PLAN',
+          plan,
+          notes: ['Fresh PLAN before confirmation; DATABASE_URL-alone not used for APPLY'],
+          readyForLivePayout: false,
+        });
+        const applyConfirmation = await confirmPhase21ProductionFlagsApplyInteractive();
         const result = await applyPhase21ProductionFlagBaseline(client, {
           reason:
             envNonEmpty('PHASE21_PRODUCTION_FLAG_BASELINE_REASON') ??
             'Phase 21 PRODUCTION safety flag baseline ceremony',
-          changedByAdminId: adminId,
+          ownerTrust: trust,
+          applyConfirmation,
         });
-        printJson({ ok: result.applied, command: 'production-flags:apply', result });
+        printJson({ ok: result.applied, command: 'production-flags:apply', result, readyForLivePayout: false });
         if (!result.applied) process.exitCode = 1;
       } finally {
         client.release();
       }
-    });
+    } catch (error: unknown) {
+      printJson({
+        ok: false,
+        command: 'production-flags:apply',
+        message: error instanceof Error ? error.message : String(error),
+        readyForLivePayout: false,
+      });
+      process.exitCode = 1;
+    } finally {
+      if (verifiedClose !== null) await verifiedClose();
+    }
     return;
   }
 
@@ -404,7 +429,7 @@ if (command === 'production-flags:apply') {
           items,
           current_database: live.currentDatabase,
           required_database: live.requiredDatabase,
-          notes: ['Read-only PLAN; APPLY requires --apply + env gates'],
+          notes: ['Read-only PLAN via DATABASE_URL; APPLY uses verified ceremony pool + Owner TTY auth'],
           readyForLivePayout: false,
         });
       } finally {
@@ -438,33 +463,46 @@ if (command === 'mainnet-registry:apply') {
       process.exitCode = 1;
       return;
     }
-    await withDatabaseUrl(async (pool) => {
-      const client = await pool.connect();
+    let verifiedClose: (() => Promise<void>) | null = null;
+    try {
+      const { verified, trust } = await openPhase21ApplyVerifiedPool(argv);
+      verifiedClose = verified.close;
+      const client = await verified.pool.connect();
       try {
-        const adminId = envNonEmpty('PHASE21_CEREMONY_ADMIN_USER_ID');
-        if (adminId === null) {
-          printJson({
-            ok: false,
-            command: 'mainnet-registry:apply',
-            refuseCode: 'OWNER_ADMIN_REQUIRED',
-            message: 'PHASE21_CEREMONY_ADMIN_USER_ID required (SYSTEM/null forbidden)',
-          });
-          process.exitCode = 1;
-          return;
-        }
+        const plan = await planPhase21MainnetRegistryBootstrap(client, { usdtJettonMaster: master });
+        printJson({
+          ok: true,
+          command: 'mainnet-registry:apply',
+          mode: 'FRESH_PLAN',
+          items: plan,
+          notes: ['Fresh PLAN before confirmation; DATABASE_URL-alone not used for APPLY'],
+          readyForLivePayout: false,
+        });
+        const applyConfirmation = await confirmPhase21MainnetRegistryApplyInteractive();
         const result = await applyPhase21MainnetRegistryBootstrap(client, {
           usdtJettonMaster: master,
-          changedByAdminId: adminId,
+          ownerTrust: trust,
+          applyConfirmation,
           reason:
             envNonEmpty('PHASE21_MAINNET_REGISTRY_REASON') ??
             'Phase 21 Mainnet registry bootstrap ceremony',
         });
-        printJson({ ok: result.applied, command: 'mainnet-registry:apply', result });
+        printJson({ ok: result.applied, command: 'mainnet-registry:apply', result, readyForLivePayout: false });
         if (!result.applied) process.exitCode = 1;
       } finally {
         client.release();
       }
-    });
+    } catch (error: unknown) {
+      printJson({
+        ok: false,
+        command: 'mainnet-registry:apply',
+        message: error instanceof Error ? error.message : String(error),
+        readyForLivePayout: false,
+      });
+      process.exitCode = 1;
+    } finally {
+      if (verifiedClose !== null) await verifiedClose();
+    }
     return;
   }
 
@@ -743,7 +781,6 @@ if (command === 'hot-wallet:plan') {
       friendlyAddress: string | null;
       label: string | null;
       reason: string;
-      changedByAdminId: string | null;
       derivationProof: NonNullable<typeof derivationResolved.proof>;
     }> = {
       ...(envNonEmpty('PHASE21_HOT_WALLET_ADDRESS')
@@ -762,7 +799,6 @@ if (command === 'hot-wallet:plan') {
       ...(envNonEmpty('PHASE21_HOT_WALLET_REASON')
         ? { reason: envNonEmpty('PHASE21_HOT_WALLET_REASON')! }
         : {}),
-      changedByAdminId: envNonEmpty('PHASE21_CEREMONY_ADMIN_USER_ID'),
       ...(derivationResolved.proof !== null
         ? { derivationProof: derivationResolved.proof }
         : {}),
@@ -820,6 +856,20 @@ if (command === 'hot-wallet:plan') {
     return;
   }
 
+  if (command === 'hot-wallet:verify-identity') {
+    // Cryptographic decrypt lives in apps/signer to avoid withdrawals↔signing cycles.
+    printJson({
+      ok: false,
+      command: 'hot-wallet:verify-identity',
+      refuseCode: 'USE_SIGNER_CLI',
+      message:
+        'Use: pnpm --filter @alex-rewards/signer run phase21:hot-wallet:verify-identity (PHASE21_HOT_WALLET_BUNDLE_PATH + optional PHASE21_HOT_WALLET_IDENTITY_PROOF_OUT)',
+      readyForLivePayout: false,
+    });
+    process.exitCode = 1;
+    return;
+  }
+
   if (command === 'hot-wallet:register') {
     if (!hasApplyArg(argv)) {
       printJson({
@@ -835,18 +885,20 @@ if (command === 'hot-wallet:plan') {
     const signerReference = envNonEmpty('PHASE21_HOT_WALLET_SIGNER_REFERENCE');
     const payoutJettonWalletAddress = envNonEmpty('PHASE21_HOT_WALLET_PAYOUT_JETTON_WALLET');
     const reason = envNonEmpty('PHASE21_HOT_WALLET_REASON');
+    const identityProofPath = envNonEmpty('PHASE21_HOT_WALLET_IDENTITY_PROOF_FILE');
     if (
       address === null ||
       signerReference === null ||
       payoutJettonWalletAddress === null ||
-      reason === null
+      reason === null ||
+      identityProofPath === null
     ) {
       printJson({
         ok: false,
         command: 'hot-wallet:register',
         refuseCode: 'OWNER_INPUTS_REQUIRED',
         message:
-          'Requires PHASE21_HOT_WALLET_ADDRESS, PHASE21_HOT_WALLET_SIGNER_REFERENCE, PHASE21_HOT_WALLET_PAYOUT_JETTON_WALLET, PHASE21_HOT_WALLET_REASON',
+          'Requires PHASE21_HOT_WALLET_ADDRESS, PHASE21_HOT_WALLET_SIGNER_REFERENCE, PHASE21_HOT_WALLET_PAYOUT_JETTON_WALLET, PHASE21_HOT_WALLET_REASON, PHASE21_HOT_WALLET_IDENTITY_PROOF_FILE',
       });
       process.exitCode = 1;
       return;
@@ -867,20 +919,34 @@ if (command === 'hot-wallet:plan') {
     }
     const derivationProof = derivationResolved.proof;
     const derivationProofSource = derivationResolved.source;
-    await withDatabaseUrl(async (pool) => {
-      const client = await pool.connect();
+    const identityProof = readPhase21HotWalletIdentityProofFile(identityProofPath);
+    let verifiedClose: (() => Promise<void>) | null = null;
+    try {
+      const { verified, trust } = await openPhase21ApplyVerifiedPool(argv);
+      verifiedClose = verified.close;
+      const client = await verified.pool.connect();
       try {
-        const adminId = envNonEmpty('PHASE21_CEREMONY_ADMIN_USER_ID');
-        if (adminId === null) {
-          printJson({
-            ok: false,
-            command: 'hot-wallet:register',
-            refuseCode: 'OWNER_ADMIN_REQUIRED',
-            message: 'PHASE21_CEREMONY_ADMIN_USER_ID required (SYSTEM/null forbidden)',
-          });
-          process.exitCode = 1;
-          return;
-        }
+        const plan = await planPhase21HotWalletRegistration(client, {
+          address,
+          signerReference,
+          payoutJettonWalletAddress,
+          reason,
+          friendlyAddress: envNonEmpty('PHASE21_HOT_WALLET_FRIENDLY_ADDRESS'),
+          label: envNonEmpty('PHASE21_HOT_WALLET_LABEL'),
+          ownerTrust: trust,
+          identityProof,
+          derivationProof,
+        });
+        printJson({
+          ok: true,
+          command: 'hot-wallet:register',
+          mode: 'FRESH_PLAN',
+          plan,
+          notes: ['Fresh PLAN before attestation/confirmation'],
+          readyForLivePayout: false,
+        });
+        const hotWalletBackupAttestation = await attestPhase21HotWalletOfflineBackupsInteractive();
+        const applyConfirmation = await confirmPhase21HotWalletRegisterInteractive();
         const result = await applyPhase21HotWalletRegistration(client, {
           address,
           signerReference,
@@ -888,21 +954,46 @@ if (command === 'hot-wallet:plan') {
           reason,
           friendlyAddress: envNonEmpty('PHASE21_HOT_WALLET_FRIENDLY_ADDRESS'),
           label: envNonEmpty('PHASE21_HOT_WALLET_LABEL'),
-          changedByAdminId: adminId,
+          ownerTrust: trust,
+          identityProof,
+          hotWalletBackupAttestation,
+          applyConfirmation,
           derivationProof,
         });
+        let postRegister = null;
+        if (result.applied && result.hotWalletId !== null) {
+          postRegister = await verifyPhase21HotWalletRegistrationReadOnly(client, {
+            address,
+            signerReference,
+            payoutJettonWalletAddress,
+            friendlyAddress: envNonEmpty('PHASE21_HOT_WALLET_FRIENDLY_ADDRESS'),
+            hotWalletId: result.hotWalletId,
+          });
+        }
         printJson({
           ok: result.applied,
           command: 'hot-wallet:register',
           result,
+          postRegister,
           derivationProofSource,
           derivationProofMethod: derivationProof.method,
+          readyForLivePayout: false,
         });
         if (!result.applied) process.exitCode = 1;
       } finally {
         client.release();
       }
-    });
+    } catch (error: unknown) {
+      printJson({
+        ok: false,
+        command: 'hot-wallet:register',
+        message: error instanceof Error ? error.message : String(error),
+        readyForLivePayout: false,
+      });
+      process.exitCode = 1;
+    } finally {
+      if (verifiedClose !== null) await verifiedClose();
+    }
     return;
   }
 

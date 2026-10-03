@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   PHASE21_PRODUCTION_FLAG_BASELINE,
@@ -8,6 +8,7 @@ import {
   type Phase21ProductionFlagBaselineClient,
 } from '../src/phase21-production-flag-baseline.js';
 import { __phase21TestSetApplyEnv } from '../src/phase21-ceremony-apply-gates.js';
+import { mintAuthenticatedPhase21OwnerCeremonyTrustForTests } from '../src/test-only/phase21-ceremony-test-hooks.js';
 
 function mockClient(store: Map<string, boolean>): Phase21ProductionFlagBaselineClient {
   return {
@@ -26,11 +27,16 @@ function mockClient(store: Map<string, boolean>): Phase21ProductionFlagBaselineC
 }
 
 describe('phase21 production flag baseline', () => {
+  beforeEach(() => {
+    process.env.ALEX_PHASE21_CEREMONY_TEST_HOOKS = '1';
+  });
   const envKeys = [
     'DEPLOYMENT_ENV',
     'PHASE21_OPERATIONAL_CEREMONY_ENABLED',
     'PHASE21_PRODUCTION_FLAG_BASELINE_APPLY',
     'PHASE21_CEREMONY_REQUIRED_DATABASE_NAME',
+    'PHASE21_CEREMONY_REQUIRED_SYSTEM_IDENTIFIER',
+    'ALEX_PHASE21_CEREMONY_TEST_HOOKS',
   ] as const;
   const prev: Record<string, string | undefined> = {};
 
@@ -81,13 +87,20 @@ describe('phase21 production flag baseline', () => {
         if (text.includes('current_database')) {
           return { rows: [{ name: 'alex_rewards_phase20_test' }] };
         }
+        if (text.includes('pg_control_system')) {
+          return { rows: [{ sid: '1' }] };
+        }
         return { rows: [] };
       },
     };
 
     const result = await applyPhase21ProductionFlagBaseline(fakeClient as never, {
       reason: 'test',
-      changedByAdminId: '11111111-1111-4111-8111-111111111111',
+      ownerTrust: mintAuthenticatedPhase21OwnerCeremonyTrustForTests({
+        adminUserId: '11111111-1111-4111-8111-111111111111',
+        currentDatabase: 'alex_rewards_phase20_test',
+        systemIdentifier: '1',
+      }),
     });
     expect(result.applied).toBe(false);
     expect(result.mode).toBe('REFUSED');
@@ -101,18 +114,26 @@ describe('phase21 production flag baseline', () => {
       PHASE21_OPERATIONAL_CEREMONY_ENABLED: 'true',
       PHASE21_PRODUCTION_FLAG_BASELINE_APPLY: '1',
       PHASE21_CEREMONY_REQUIRED_DATABASE_NAME: 'alex_rewards_phase20_test',
+      PHASE21_CEREMONY_REQUIRED_SYSTEM_IDENTIFIER: '1',
     });
     const fakeClient = {
       async query(text: string) {
         if (text.includes('current_database')) {
           return { rows: [{ name: 'alex_rewards_phase20_test' }] };
         }
+        if (text.includes('pg_control_system')) {
+          return { rows: [{ sid: '1' }] };
+        }
         return { rows: [] };
       },
     };
     const result = await applyPhase21ProductionFlagBaseline(fakeClient as never, {
       reason: 'test',
-      changedByAdminId: '11111111-1111-4111-8111-111111111111',
+      ownerTrust: mintAuthenticatedPhase21OwnerCeremonyTrustForTests({
+        adminUserId: '11111111-1111-4111-8111-111111111111',
+        currentDatabase: 'alex_rewards_phase20_test',
+        systemIdentifier: '1',
+      }),
     });
     expect(result.applied).toBe(false);
     expect(result.refuseCode).toBe('STAGING_APPLY_FORBIDDEN');

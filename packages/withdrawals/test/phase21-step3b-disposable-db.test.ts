@@ -18,6 +18,7 @@ import {
   PHASE21_PRODUCTION_FLAG_BASELINE,
   planPhase21ProductionFlagBaseline,
 } from '../src/phase21-production-flag-baseline.js';
+import { mintAuthenticatedPhase21OwnerCeremonyTrustForTests } from '../src/test-only/phase21-ceremony-test-hooks.js';
 import {
   applyPhase21MainnetRegistryBootstrap,
   planPhase21MainnetRegistryBootstrap,
@@ -114,6 +115,18 @@ describeDb('phase21 step3b disposable DB apply', () => {
     await pool.query(`DELETE FROM networks WHERE code = 'TON_MAINNET'`);
   });
 
+  async function mintOwnerTrust(client: { query: (text: string, params?: unknown[]) => Promise<{ rows: Array<{ sid?: string; name?: string }> }> }) {
+    const sid = await client.query(`SELECT system_identifier::text AS sid FROM pg_control_system()`);
+    const db = await client.query(`SELECT current_database() AS name`);
+    process.env.PHASE21_CEREMONY_REQUIRED_SYSTEM_IDENTIFIER = String(sid.rows[0]?.sid ?? '');
+    process.env.ALEX_PHASE21_CEREMONY_TEST_HOOKS = '1';
+    return mintAuthenticatedPhase21OwnerCeremonyTrustForTests({
+      adminUserId: ownerAdminId,
+      currentDatabase: String(db.rows[0]?.name ?? ''),
+      systemIdentifier: String(sid.rows[0]?.sid ?? ''),
+    });
+  }
+
   function setProductionGates(tool: 'flags' | 'registry'): void {
     __phase21TestSetApplyEnv({
       DEPLOYMENT_ENV: 'production',
@@ -130,7 +143,7 @@ describeDb('phase21 step3b disposable DB apply', () => {
     try {
       const first = await applyPhase21ProductionFlagBaseline(client, {
         reason: 'phase21-step3b-disposable-flag-baseline',
-        changedByAdminId: ownerAdminId,
+        ownerTrust: await mintOwnerTrust(client),
       });
       expect(first.applied).toBe(true);
       expect(first.createdCount).toBe(PHASE21_PRODUCTION_FLAG_BASELINE.length);
@@ -148,7 +161,7 @@ describeDb('phase21 step3b disposable DB apply', () => {
 
       const second = await applyPhase21ProductionFlagBaseline(client, {
         reason: 'phase21-step3b-disposable-flag-baseline-retry',
-        changedByAdminId: ownerAdminId,
+        ownerTrust: await mintOwnerTrust(client),
       });
       expect(second.applied).toBe(true);
       expect(second.createdCount).toBe(0);
@@ -184,7 +197,7 @@ describeDb('phase21 step3b disposable DB apply', () => {
       try {
         const result = await applyPhase21ProductionFlagBaseline(client, {
           reason: 'phase21-step3b-rollback',
-          changedByAdminId: ownerAdminId,
+          ownerTrust: await mintOwnerTrust(client),
         });
         expect(result.applied).toBe(false);
         expect(result.refuseCode).toBe('APPLY_EXCEPTION');
@@ -214,7 +227,7 @@ describeDb('phase21 step3b disposable DB apply', () => {
 
       const first = await applyPhase21MainnetRegistryBootstrap(client, {
         usdtJettonMaster: USDT_MASTER,
-        changedByAdminId: ownerAdminId,
+        ownerTrust: await mintOwnerTrust(client),
         reason: 'phase21-step3c-disposable-registry',
       });
       expect(first.applied).toBe(true);
@@ -236,7 +249,7 @@ describeDb('phase21 step3b disposable DB apply', () => {
 
       const second = await applyPhase21MainnetRegistryBootstrap(client, {
         usdtJettonMaster: USDT_MASTER,
-        changedByAdminId: ownerAdminId,
+        ownerTrust: await mintOwnerTrust(client),
         reason: 'phase21-step3c-disposable-registry',
       });
       expect(second.applied).toBe(true);

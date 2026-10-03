@@ -7,11 +7,15 @@
  *   - PHASE21_OPERATIONAL_CEREMONY_ENABLED=true
  *   - tool-specific APPLY=1 env
  *   - PHASE21_CEREMONY_REQUIRED_DATABASE_NAME matches current_database()
+ *   - PHASE21_CEREMONY_REQUIRED_SYSTEM_IDENTIFIER matches pg_control_system()
  *
  * Never accept a forceApply argument. Tests set process.env (and restore).
  */
 export const PHASE21_CEREMONY_REQUIRED_DATABASE_NAME_ENV =
   'PHASE21_CEREMONY_REQUIRED_DATABASE_NAME' as const;
+
+export const PHASE21_CEREMONY_REQUIRED_SYSTEM_IDENTIFIER_ENV =
+  'PHASE21_CEREMONY_REQUIRED_SYSTEM_IDENTIFIER' as const;
 
 export const PHASE21_OPERATIONAL_CEREMONY_ENABLED_ENV =
   'PHASE21_OPERATIONAL_CEREMONY_ENABLED' as const;
@@ -32,6 +36,7 @@ export interface Phase21CeremonyApplyGateResult {
   readonly ok: true;
   readonly deploymentEnv: 'production';
   readonly databaseName: string;
+  readonly systemIdentifier: string;
   readonly toolApplyEnv: Phase21CeremonyApplyTool;
 }
 
@@ -119,10 +124,39 @@ export async function assertPhase21CeremonyApplyGates(
     );
   }
 
+  const requiredSid = readEnv(PHASE21_CEREMONY_REQUIRED_SYSTEM_IDENTIFIER_ENV);
+  if (requiredSid.length === 0) {
+    throw new Phase21CeremonyApplyGateError(
+      'REQUIRED_SYSTEM_IDENTIFIER_MISSING',
+      'Phase 21 ceremony APPLY requires PHASE21_CEREMONY_REQUIRED_SYSTEM_IDENTIFIER',
+      {},
+    );
+  }
+
+  const sidResult = await client.query<{ sid: string }>(
+    `SELECT system_identifier::text AS sid FROM pg_control_system()`,
+  );
+  const currentSid = sidResult.rows[0]?.sid;
+  if (currentSid === undefined || currentSid.trim() === '') {
+    throw new Phase21CeremonyApplyGateError(
+      'SYSTEM_IDENTIFIER_UNAVAILABLE',
+      'pg_control_system() returned no system_identifier',
+      {},
+    );
+  }
+  if (currentSid !== requiredSid) {
+    throw new Phase21CeremonyApplyGateError(
+      'SYSTEM_IDENTIFIER_MISMATCH',
+      'cluster system_identifier does not match PHASE21_CEREMONY_REQUIRED_SYSTEM_IDENTIFIER',
+      { required: requiredSid, current: currentSid },
+    );
+  }
+
   return {
     ok: true,
     deploymentEnv: 'production',
     databaseName: current,
+    systemIdentifier: currentSid,
     toolApplyEnv,
   };
 }

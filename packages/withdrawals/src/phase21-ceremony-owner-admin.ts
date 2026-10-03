@@ -1,6 +1,10 @@
 /**
- * Resolve ACTIVE admin_users + ACTIVE unrevoked OWNER role binding for Phase 21 ceremony APPLY.
- * SYSTEM / null actors are refused for production ceremony.
+ * Resolve ACTIVE admin_users + ACTIVE unrevoked OWNER role binding.
+ *
+ * This is a locator / binding check only — NOT authentication and NOT APPLY authority.
+ * APPLY must use branded AuthenticatedPhase21OwnerCeremonyTrust from Owner TTY auth.
+ * Prefer resolveCanonicalPhase21OwnerSeat + authenticatePhase21OwnerCeremonyFromOwnerTty.
+ * SYSTEM / null actors are refused.
  */
 export class Phase21CeremonyOwnerAdminError extends Error {
   readonly code: string;
@@ -38,8 +42,8 @@ function assertUuid(value: string, field: string): string {
 }
 
 /**
- * Verify ACTIVE admin_users row + ACTIVE unrevoked OWNER role binding.
- * Refuse null / empty / SYSTEM actor path for production ceremony.
+ * Locator/binding check only. Env UUID alone is NOT APPLY authority.
+ * Prefer branded Owner ceremony trust on APPLY paths.
  */
 export async function resolvePhase21CeremonyOwnerAdmin(
   client: Phase21CeremonyOwnerAdminClient,

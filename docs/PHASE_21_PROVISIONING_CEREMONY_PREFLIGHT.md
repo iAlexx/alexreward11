@@ -79,3 +79,7 @@ Owner authority still required. Production bootstrap source corrected; endpoint 
 ## Step 4A.2
 
 Owner authority still required. Source hardening complete (`SOURCE_READY=YES`); schema/endpoint/trust-resources/ceremony remain NO. Do not enable TCP Proxy; tunnel is discovery-only. No real Owner key generated. See `docs/PHASE_21_STEP4A2_FINAL_OWNER_BOOTSTRAP_HARDENING.md`.
+
+## Step 4C pointer
+
+Owner bootstrap closeout and Hot Wallet readiness source hardening: `docs/PHASE_21_STEP4C_OWNER_CLOSEOUT_AND_HOT_WALLET_READINESS.md`. READY_FOR_LIVE_PAYOUT remains NO.

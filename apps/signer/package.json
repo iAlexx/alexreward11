@@ -11,9 +11,11 @@
     "lint": "eslint src test",
     "test": "vitest run",
     "keygen": "tsx src/cli/generate-hot-wallet-key.ts",
-    "local-unlock": "tsx src/cli/local-unlock.ts"
+    "local-unlock": "tsx src/cli/local-unlock.ts",
+    "phase21:hot-wallet:verify-identity": "node dist/cli/phase21-hot-wallet-verify-identity.js"
   },
   "dependencies": {
+    "@alex-rewards/auth": "workspace:*",
     "@alex-rewards/config": "workspace:*",
     "@alex-rewards/contracts": "workspace:*",
     "@alex-rewards/db": "workspace:*",

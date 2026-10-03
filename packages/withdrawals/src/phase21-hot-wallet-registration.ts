@@ -2,11 +2,14 @@
  * Phase 21 Hot Wallet registration tooling (Mainnet).
  *
  * PLAN: read-only checks (network/USDT exist, validate inputs if provided).
- * REGISTER/APPLY: ceremony gates + advisory lock + refuse duplicate ACTIVE payout wallet.
+ * REGISTER/APPLY: branded Owner trust + identity proof + backup attestation +
+ * ceremony gates + advisory lock + refuse duplicate ACTIVE payout wallet.
  * Default DRY_RUN / no apply without gates.
- * DO NOT invent addresses ? Owner-supplied inputs required for register.
+ * DO NOT invent addresses — Owner-supplied inputs required for register.
  */
 import type { PoolClient } from 'pg';
+
+import { tonAddressesEqual } from '@alex-rewards/ton';
 
 import {
   assertPhase21CeremonyApplyGates,
@@ -14,11 +17,22 @@ import {
   type Phase21CeremonyApplyGateClient,
 } from './phase21-ceremony-apply-gates.js';
 import {
-  Phase21CeremonyOwnerAdminError,
-  resolvePhase21CeremonyOwnerAdmin,
-} from './phase21-ceremony-owner-admin.js';
-import { tonAddressesEqual } from '@alex-rewards/ton';
+  assertPhase21HotWalletBackupAttestation,
+  assertPhase21HotWalletRegisterConfirmation,
+  type Phase21HotWalletBackupAttestation,
+  type Phase21HotWalletRegisterConfirmation,
+} from './phase21-ceremony-confirmations.js';
+import { assertOwnerTrustMatchesLiveConnection } from './phase21-ceremony-verified-pool.js';
 import { PHASE21_WALLET_VERSION } from './phase21-config.js';
+import {
+  assertIdentityProofMatchesRegistrationInput,
+  type Phase21HotWalletIdentityProof,
+} from './phase21-hot-wallet-identity-proof.js';
+import { resolveCanonicalPhase21OwnerSeat } from './phase21-owner-ceremony-auth.js';
+import {
+  assertAuthenticatedPhase21OwnerCeremonyTrust,
+  type AuthenticatedPhase21OwnerCeremonyTrust,
+} from './phase21-owner-ceremony-trust.js';
 
 export type Phase21HotWalletRegistrationMode = 'PLAN' | 'APPLY' | 'REFUSED';
 
@@ -27,6 +41,10 @@ export interface Phase21HotWalletDerivationProof {
   readonly secondaryJettonWalletAddress: string;
   readonly method: 'DUAL_PROVIDER_LIVE' | 'OWNER_SUPPLIED_EVIDENCE';
   readonly verifiedAt?: string;
+  readonly ownerAddress: string;
+  readonly jettonMaster: string;
+  readonly primaryProviderKind?: string;
+  readonly secondaryProviderKind?: string;
 }
 
 export interface Phase21HotWalletRegistrationInput {
@@ -36,15 +54,23 @@ export interface Phase21HotWalletRegistrationInput {
   readonly payoutJettonWalletAddress: string;
   readonly label?: string | null;
   readonly reason: string;
-  /** Required ACTIVE OWNER admin for APPLY — SYSTEM/null forbidden on APPLY. */
-  readonly changedByAdminId: string | null;
-  /** Dual-provider or Owner-supplied derivation proof required for APPLY / plan READY. */
-  readonly derivationProof?: Phase21HotWalletDerivationProof | null;
+  /** Branded Owner ceremony trust — sole APPLY authority (env UUID is not). */
+  readonly ownerTrust: AuthenticatedPhase21OwnerCeremonyTrust;
+  /** Offline identity proof from encrypted bundle (sanitized). */
+  readonly identityProof: Phase21HotWalletIdentityProof;
+  /** Branded offline backup attestation. */
+  readonly hotWalletBackupAttestation: Phase21HotWalletBackupAttestation;
+  /** Dual-provider or Owner-supplied derivation proof. */
+  readonly derivationProof: Phase21HotWalletDerivationProof;
+  /** Optional branded tool confirmation (required by CLI apply path). */
+  readonly applyConfirmation?: Phase21HotWalletRegisterConfirmation;
+  /** Optional expected USDT jetton master (defaults to DB contract_identity). */
+  readonly expectedJettonMaster?: string | null;
 }
 
 export interface Phase21HotWalletPlanItem {
   readonly check: string;
-  readonly status: 'OK' | 'MISSING' | 'INVALID' | 'CONFLICT' | 'READY';
+  readonly status: 'OK' | 'MISSING' | 'INVALID' | 'CONFLICT' | 'READY' | 'OWNER_ATTESTATION_REQUIRED';
   readonly details: Readonly<Record<string, unknown>>;
   readonly note: string;
 }
@@ -80,7 +106,6 @@ export const PHASE21_HOT_WALLET_REGISTER_LOCK_KEY1 = 21000304;
 const FORBIDDEN = ['TESTNET', 'LOCAL', 'PLACEHOLDER'] as const;
 const AUDIT_ACTION = 'phase21.hot_wallet.register';
 
-/** Minimal TON address shape (raw or friendly). */
 function looksLikeTonAddress(value: string): boolean {
   if (/^(-1|0):[0-9a-fA-F]{64}$/.test(value)) return true;
   if (/^(E|U)Q[A-Za-z0-9_-]{46}$/.test(value)) return true;
@@ -128,6 +153,7 @@ export async function planPhase21HotWalletRegistration(
   }
 
   let usdtAssetId: string | null = null;
+  let usdtContractIdentity: string | null = null;
   if (networkId !== null) {
     const usdt = await client.query<{ id: string; contract_identity: string | null }>(
       `SELECT id, contract_identity FROM assets
@@ -144,6 +170,7 @@ export async function planPhase21HotWalletRegistration(
       });
     } else {
       usdtAssetId = row.id;
+      usdtContractIdentity = row.contract_identity;
       items.push({
         check: 'assets:USDT',
         status: 'OK',
@@ -170,7 +197,7 @@ export async function planPhase21HotWalletRegistration(
       networkId,
       usdtAssetId,
       notes: [
-        'PLAN only ? no addresses invented',
+        'PLAN only — no addresses invented',
         'walletVersion fixed to v5R1; signer_type FALLBACK_ENCRYPTED',
       ],
     };
@@ -203,7 +230,7 @@ export async function planPhase21HotWalletRegistration(
     items.push({
       check: 'signerReference',
       status: 'OK',
-      details: { signerReferenceFingerprint: signerReference.slice(0, 16) + '?' },
+      details: { signerReferenceFingerprint: signerReference.slice(0, 16) + '…' },
       note: 'signer fingerprint provided (value not echoed fully)',
     });
 
@@ -228,6 +255,43 @@ export async function planPhase21HotWalletRegistration(
       });
     }
 
+    const identityProof = input.identityProof ?? null;
+    if (identityProof === null) {
+      items.push({
+        check: 'hot_wallet_identity_proof',
+        status: 'MISSING',
+        details: {},
+        note: 'BLOCKED: sanitized identity proof from encrypted bundle required',
+      });
+      inputsOk = false;
+    } else {
+      try {
+        assertIdentityProofMatchesRegistrationInput(identityProof, {
+          address,
+          signerReference,
+          friendlyAddress: input.friendlyAddress ?? null,
+        });
+        items.push({
+          check: 'hot_wallet_identity_proof',
+          status: 'OK',
+          details: {
+            networkGlobalId: identityProof.networkGlobalId,
+            walletVersion: identityProof.walletVersion,
+            fingerprintPrefix: identityProof.publicKeyFingerprintSha256.slice(0, 16) + '…',
+          },
+          note: 'identity proof matches address/fingerprint/version/network',
+        });
+      } catch (error: unknown) {
+        items.push({
+          check: 'hot_wallet_identity_proof',
+          status: 'INVALID',
+          details: {},
+          note: error instanceof Error ? error.message : String(error),
+        });
+        inputsOk = false;
+      }
+    }
+
     const proof = input.derivationProof ?? null;
     if (proof === null) {
       items.push({
@@ -244,7 +308,19 @@ export async function planPhase21HotWalletRegistration(
         proof.primaryJettonWalletAddress,
         proof.secondaryJettonWalletAddress,
       );
-      if (!primaryOk || !secondaryOk || !agree) {
+      const ownerOk =
+        typeof proof.ownerAddress === 'string' &&
+        proof.ownerAddress.trim() !== '' &&
+        tonAddressesEqual(proof.ownerAddress, address);
+      if (!ownerOk) {
+        items.push({
+          check: 'jetton_wallet_derivation_proof',
+          status: 'INVALID',
+          details: { ownerAddress: proof.ownerAddress ?? null },
+          note: 'BLOCKED: derivation proof ownerAddress must equal registration address',
+        });
+        inputsOk = false;
+      } else if (!primaryOk || !secondaryOk || !agree) {
         items.push({
           check: 'jetton_wallet_derivation_proof',
           status: 'INVALID',
@@ -256,13 +332,75 @@ export async function planPhase21HotWalletRegistration(
           note: 'BLOCKED: Owner payoutJettonWalletAddress must match both providers derivation',
         });
         inputsOk = false;
+      } else if (
+        typeof proof.jettonMaster !== 'string' ||
+        proof.jettonMaster.trim() === '' ||
+        usdtContractIdentity === null ||
+        !tonAddressesEqual(proof.jettonMaster, usdtContractIdentity)
+      ) {
+        items.push({
+          check: 'jetton_wallet_derivation_proof',
+          status: 'INVALID',
+          details: {
+            jettonMaster: proof.jettonMaster ?? null,
+            dbUsdtContractIdentity: usdtContractIdentity,
+          },
+          note: 'BLOCKED: derivation jettonMaster must match DB USDT contract_identity',
+        });
+        inputsOk = false;
+      } else if (
+        input.expectedJettonMaster !== undefined &&
+        input.expectedJettonMaster !== null &&
+        input.expectedJettonMaster.trim() !== '' &&
+        !tonAddressesEqual(proof.jettonMaster, input.expectedJettonMaster)
+      ) {
+        items.push({
+          check: 'jetton_wallet_derivation_proof',
+          status: 'INVALID',
+          details: {},
+          note: 'BLOCKED: derivation jettonMaster must match expectedJettonMaster',
+        });
+        inputsOk = false;
       } else {
         items.push({
           check: 'jetton_wallet_derivation_proof',
           status: 'OK',
-          details: { method: proof.method },
-          note: 'derivation proof matches Owner-supplied payout jetton wallet',
+          details: {
+            method: proof.method,
+            ownerAddress: proof.ownerAddress,
+            jettonMaster: proof.jettonMaster,
+          },
+          note: 'derivation proof matches Owner-supplied payout jetton + USDT master provenance',
         });
+      }
+    }
+
+    const backup = input.hotWalletBackupAttestation ?? null;
+    if (backup === null) {
+      items.push({
+        check: 'hot_wallet_backup_attestation',
+        status: 'OWNER_ATTESTATION_REQUIRED',
+        details: {},
+        note: 'OWNER_ATTESTATION_REQUIRED: two SHA-256-verified offline Hot Wallet backups',
+      });
+      inputsOk = false;
+    } else {
+      try {
+        assertPhase21HotWalletBackupAttestation(backup);
+        items.push({
+          check: 'hot_wallet_backup_attestation',
+          status: 'OK',
+          details: { attestedAt: backup.attestedAt },
+          note: 'branded offline backup attestation present',
+        });
+      } catch {
+        items.push({
+          check: 'hot_wallet_backup_attestation',
+          status: 'OWNER_ATTESTATION_REQUIRED',
+          details: {},
+          note: 'OWNER_ATTESTATION_REQUIRED: forged boolean/object cannot authorize backups',
+        });
+        inputsOk = false;
       }
     }
 
@@ -329,7 +467,7 @@ export async function planPhase21HotWalletRegistration(
     inputsOk &&
     networkId !== null &&
     usdtAssetId !== null &&
-    items.every((i) => i.status === 'OK');
+    items.every((i) => i.status === 'OK' || i.status === 'READY');
 
   if (canRegister) {
     items.push({
@@ -339,7 +477,7 @@ export async function planPhase21HotWalletRegistration(
         walletVersion: PHASE21_WALLET_VERSION,
         signerType: 'FALLBACK_ENCRYPTED',
       },
-      note: 'inputs valid; APPLY still requires ceremony gates',
+      note: 'inputs valid; APPLY still requires ceremony gates + branded Owner trust',
     });
   }
 
@@ -351,6 +489,7 @@ export async function planPhase21HotWalletRegistration(
     notes: [
       'PLAN only unless applyPhase21HotWalletRegistration is called with gates',
       'Addresses must be Owner-supplied',
+      'Env UUID alone is not APPLY authority',
     ],
   };
 }
@@ -359,6 +498,37 @@ export async function applyPhase21HotWalletRegistration(
   client: PoolClient,
   input: Phase21HotWalletRegistrationInput,
 ): Promise<Phase21HotWalletRegistrationResult> {
+  try {
+    assertAuthenticatedPhase21OwnerCeremonyTrust(input.ownerTrust);
+    assertPhase21HotWalletBackupAttestation(input.hotWalletBackupAttestation);
+    if (input.applyConfirmation !== undefined) {
+      assertPhase21HotWalletRegisterConfirmation(input.applyConfirmation);
+    }
+    assertIdentityProofMatchesRegistrationInput(input.identityProof, {
+      address: input.address,
+      signerReference: input.signerReference,
+      friendlyAddress: input.friendlyAddress ?? null,
+    });
+    await assertOwnerTrustMatchesLiveConnection(client, input.ownerTrust);
+  } catch (error: unknown) {
+    const plan = await planPhase21HotWalletRegistration(client, input).catch(() => ({
+      items: [],
+      canRegister: false,
+      networkId: null,
+      usdtAssetId: null,
+      notes: ['plan unavailable'],
+    }));
+    return {
+      mode: 'REFUSED',
+      applyAuthorized: false,
+      applied: false,
+      plan,
+      hotWalletId: null,
+      notes: [error instanceof Error ? error.message : String(error)],
+      refuseCode: 'OWNER_TRUST_OR_PROOF_REQUIRED',
+    };
+  }
+
   try {
     await assertPhase21CeremonyApplyGates(
       client as Phase21CeremonyApplyGateClient,
@@ -379,32 +549,28 @@ export async function applyPhase21HotWalletRegistration(
     };
   }
 
-  let ownerAdminUserId: string;
-  try {
-    const owner = await resolvePhase21CeremonyOwnerAdmin(client, input.changedByAdminId);
-    ownerAdminUserId = owner.adminUserId;
-  } catch (error: unknown) {
-    const code =
-      error instanceof Phase21CeremonyOwnerAdminError ? error.code : 'OWNER_ADMIN_REQUIRED';
-    const plan = await planPhase21HotWalletRegistration(client, input);
-    return {
-      mode: 'REFUSED',
-      applyAuthorized: false,
-      applied: false,
-      plan,
-      hotWalletId: null,
-      notes: [error instanceof Error ? error.message : String(error)],
-      refuseCode: code,
-    };
-  }
-
-
+  let committed = false;
   await client.query('BEGIN');
   try {
     await client.query(
       `SELECT pg_advisory_xact_lock($1::int, hashtext('phase21-hot-wallet-register'))`,
       [PHASE21_HOT_WALLET_REGISTER_LOCK_KEY1],
     );
+
+    const seat = await resolveCanonicalPhase21OwnerSeat(client, input.ownerTrust.adminUserId);
+    if (seat.adminUserId !== input.ownerTrust.adminUserId) {
+      await client.query('ROLLBACK');
+      const plan = await planPhase21HotWalletRegistration(client, input);
+      return {
+        mode: 'REFUSED',
+        applyAuthorized: false,
+        applied: false,
+        plan,
+        hotWalletId: null,
+        notes: ['canonical Owner seat holder does not match Owner ceremony trust'],
+        refuseCode: 'OWNER_SEAT_TRUST_MISMATCH',
+      };
+    }
 
     const plan = await planPhase21HotWalletRegistration(client, input);
     if (!plan.canRegister || plan.networkId === null) {
@@ -452,7 +618,6 @@ export async function applyPhase21HotWalletRegistration(
       throw new Error('hot_wallets INSERT failed');
     }
 
-    const actorType = 'ADMIN';
     await client.query(
       `INSERT INTO audit_logs (
          admin_user_id, actor_type, action_type, resource_type, resource_id,
@@ -462,8 +627,8 @@ export async function applyPhase21HotWalletRegistration(
          $5::jsonb, $6, 'SYSTEM'::actor_source
        )`,
       [
-        ownerAdminUserId,
-        actorType,
+        input.ownerTrust.adminUserId,
+        'ADMIN',
         AUDIT_ACTION,
         hotWalletId,
         JSON.stringify({
@@ -472,12 +637,38 @@ export async function applyPhase21HotWalletRegistration(
           signerType: 'FALLBACK_ENCRYPTED',
           address,
           payoutJettonWalletAddress: payoutJetton,
+          identityFingerprintPrefix: input.identityProof.publicKeyFingerprintSha256.slice(0, 16),
         }),
         reason,
       ],
     );
 
-    await client.query('COMMIT');
+    try {
+      await client.query('COMMIT');
+      committed = true;
+    } catch (commitError: unknown) {
+      const planAfter = await planPhase21HotWalletRegistration(client, input).catch(() => ({
+        items: [],
+        canRegister: false,
+        networkId: null,
+        usdtAssetId: null,
+        notes: ['plan unavailable after commit ambiguity'],
+      }));
+      return {
+        mode: 'REFUSED',
+        applyAuthorized: true,
+        applied: false,
+        plan: planAfter,
+        hotWalletId,
+        notes: [
+          `REGISTRATION_RECONCILIATION_REQUIRED — COMMIT failed after mutation; do not claim rollback: ${
+            commitError instanceof Error ? commitError.message : String(commitError)
+          }`,
+        ],
+        refuseCode: 'REGISTRATION_RECONCILIATION_REQUIRED',
+      };
+    }
+
     return {
       mode: 'APPLY',
       applyAuthorized: true,
@@ -491,17 +682,19 @@ export async function applyPhase21HotWalletRegistration(
       ],
     };
   } catch (error: unknown) {
-    try {
-      await client.query('ROLLBACK');
-    } catch {
-      // ignore
+    if (!committed) {
+      try {
+        await client.query('ROLLBACK');
+      } catch {
+        // ignore
+      }
     }
     const plan = await planPhase21HotWalletRegistration(client, input).catch(() => ({
       items: [],
       canRegister: false,
       networkId: null,
       usdtAssetId: null,
-      notes: ['plan unavailable after rollback'],
+      notes: ['plan unavailable after failure'],
     }));
     return {
       mode: 'REFUSED',
@@ -510,11 +703,11 @@ export async function applyPhase21HotWalletRegistration(
       plan,
       hotWalletId: null,
       notes: [
-        `APPLY aborted and rolled back: ${
+        `PRE_MUTATION_FAILURE — APPLY aborted before durable commit: ${
           error instanceof Error ? error.message : String(error)
         }`,
       ],
-      refuseCode: 'APPLY_EXCEPTION',
+      refuseCode: 'PRE_MUTATION_FAILURE',
     };
   }
 }

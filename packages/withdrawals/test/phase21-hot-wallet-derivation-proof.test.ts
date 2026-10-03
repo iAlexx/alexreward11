@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -23,6 +23,8 @@ const envKeys = [
   'PHASE21_HOT_WALLET_DERIVATION_SECONDARY',
   'PHASE21_HOT_WALLET_DERIVATION_METHOD',
   'PHASE21_HOT_WALLET_DERIVATION_VERIFIED_AT',
+  'PHASE21_HOT_WALLET_DERIVATION_OWNER',
+  'PHASE21_HOT_WALLET_DERIVATION_JETTON_MASTER',
 ] as const;
 
 describe('phase21 hot wallet derivation proof CLI binding', () => {
@@ -81,31 +83,36 @@ describe('phase21 hot wallet derivation proof CLI binding', () => {
     expect(src).toMatch(/DERIVATION_PROOF_REQUIRED/);
   });
 
-  it('missing proof => BLOCKED; valid dual-provider proof => READY', async () => {
+  it('missing proof => BLOCKED; derivation OK without identity/backup still not READY', async () => {
     const client = mockClient();
     const blocked = await planPhase21HotWalletRegistration(client as never, {
       address: FAKE_ADDR,
       signerReference: 'fp-test',
       payoutJettonWalletAddress: FAKE_JETTON,
       reason: 'test',
-      changedByAdminId: '11111111-1111-4111-8111-111111111111',
     });
     expect(blocked.canRegister).toBe(false);
 
-    const ready = await planPhase21HotWalletRegistration(client as never, {
+    const withDerivation = await planPhase21HotWalletRegistration(client as never, {
       address: FAKE_ADDR,
       signerReference: 'fp-test',
       payoutJettonWalletAddress: FAKE_JETTON,
       reason: 'test',
-      changedByAdminId: '11111111-1111-4111-8111-111111111111',
       derivationProof: {
         primaryJettonWalletAddress: FAKE_JETTON,
         secondaryJettonWalletAddress: FAKE_JETTON,
         method: 'DUAL_PROVIDER_LIVE',
         verifiedAt: '2026-10-02T00:00:00.000Z',
+        ownerAddress: FAKE_ADDR,
+        jettonMaster: OTHER_JETTON,
       },
     });
-    expect(ready.canRegister).toBe(true);
+    expect(
+      withDerivation.items.some(
+        (i) => i.check === 'jetton_wallet_derivation_proof' && i.status === 'OK',
+      ),
+    ).toBe(true);
+    expect(withDerivation.canRegister).toBe(false);
   });
 
   it('primary != secondary => BLOCKED; proof wallet != payout => BLOCKED', async () => {
@@ -115,11 +122,12 @@ describe('phase21 hot wallet derivation proof CLI binding', () => {
       signerReference: 'fp-test',
       payoutJettonWalletAddress: FAKE_JETTON,
       reason: 'test',
-      changedByAdminId: '11111111-1111-4111-8111-111111111111',
       derivationProof: {
         primaryJettonWalletAddress: FAKE_JETTON,
         secondaryJettonWalletAddress: OTHER_JETTON,
         method: 'DUAL_PROVIDER_LIVE',
+        ownerAddress: FAKE_ADDR,
+        jettonMaster: OTHER_JETTON,
       },
     });
     expect(disagree.canRegister).toBe(false);
@@ -129,17 +137,18 @@ describe('phase21 hot wallet derivation proof CLI binding', () => {
       signerReference: 'fp-test',
       payoutJettonWalletAddress: FAKE_JETTON,
       reason: 'test',
-      changedByAdminId: '11111111-1111-4111-8111-111111111111',
       derivationProof: {
         primaryJettonWalletAddress: OTHER_JETTON,
         secondaryJettonWalletAddress: OTHER_JETTON,
         method: 'DUAL_PROVIDER_LIVE',
+        ownerAddress: FAKE_ADDR,
+        jettonMaster: OTHER_JETTON,
       },
     });
     expect(mismatch.canRegister).toBe(false);
   });
 
-  it('resolveFromEnv loads file proof and refuses OWNER_SUPPLIED_EVIDENCE method', () => {
+  it('resolveFromEnv preserves FILE provenance and refuses incomplete ENV', () => {
     snap();
     tmpDir = mkdtempSync(path.join(tmpdir(), 'p21-derivation-'));
     const proofPath = path.join(tmpDir, 'proof.json');
@@ -157,24 +166,32 @@ describe('phase21 hot wallet derivation proof CLI binding', () => {
     expect(fromFile.source).toBe('FILE');
     expect(fromFile.proof?.method).toBe('DUAL_PROVIDER_LIVE');
     expect(fromFile.proof?.primaryJettonWalletAddress).toBe(FAKE_JETTON);
+    expect(fromFile.proof?.ownerAddress).toBe(FAKE_ADDR);
+    expect(fromFile.proof?.jettonMaster).toBe(OTHER_JETTON);
 
     delete process.env.PHASE21_HOT_WALLET_DERIVATION_PROOF_FILE;
     process.env.PHASE21_HOT_WALLET_DERIVATION_PRIMARY = FAKE_JETTON;
     process.env.PHASE21_HOT_WALLET_DERIVATION_SECONDARY = FAKE_JETTON;
+    process.env.PHASE21_HOT_WALLET_DERIVATION_METHOD = 'DUAL_PROVIDER_LIVE';
+    const incomplete = resolvePhase21HotWalletDerivationProofFromEnv();
+    expect(incomplete.proof).toBeNull();
+    expect(incomplete.refuseCode).toBe('DERIVATION_PROOF_ENV_INCOMPLETE');
+
+    process.env.PHASE21_HOT_WALLET_DERIVATION_OWNER = FAKE_ADDR;
+    process.env.PHASE21_HOT_WALLET_DERIVATION_JETTON_MASTER = OTHER_JETTON;
     process.env.PHASE21_HOT_WALLET_DERIVATION_METHOD = 'OWNER_SUPPLIED_EVIDENCE';
     const refused = resolvePhase21HotWalletDerivationProofFromEnv();
     expect(refused.proof).toBeNull();
     expect(refused.refuseCode).toBe('DERIVATION_PROOF_METHOD_REFUSED');
   });
 
-  it('register CLI path refuses missing proof (source assertion)', () => {
+  it('register CLI path requires ownerTrust/identity/backup attestation', () => {
     const src = readFileSync(path.resolve(here, '../src/cli/phase21-ops.ts'), 'utf8');
-    // Register must not call apply without derivationProof
     const registerBlock = src.slice(src.indexOf("command === 'hot-wallet:register'"));
     expect(registerBlock).toMatch(/derivationProof[,\s]/);
-    expect(registerBlock).toMatch(/const derivationProof = derivationResolved\.proof/);
-    expect(registerBlock).not.toMatch(
-      /applyPhase21HotWalletRegistration\(client,\s*\{[^}]*changedByAdminId:\s*adminId,\s*\}\)/s,
-    );
+    expect(registerBlock).toMatch(/ownerTrust/);
+    expect(registerBlock).toMatch(/identityProof/);
+    expect(registerBlock).toMatch(/hotWalletBackupAttestation/);
+    expect(registerBlock).not.toMatch(/changedByAdminId/);
   });
 });

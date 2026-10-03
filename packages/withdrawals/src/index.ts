@@ -791,3 +791,67 @@ export {
   parsePhase21ProvisioningEvidence,
   type Phase21ProvisioningEvidence,
 } from './phase21-provisioning-evidence.js';
+
+export {
+  PHASE21_OWNER_CEREMONY_TRUST_CLASS,
+  isAuthenticatedPhase21OwnerCeremonyTrust,
+  assertAuthenticatedPhase21OwnerCeremonyTrust,
+  Phase21OwnerCeremonyTrustError,
+  type AuthenticatedPhase21OwnerCeremonyTrust,
+  type Phase21OwnerCeremonyTrustClass,
+} from './phase21-owner-ceremony-trust.js';
+export {
+  resolveCanonicalPhase21OwnerSeat,
+  authenticatePhase21OwnerCeremonyFromOwnerTty,
+  Phase21OwnerCeremonyAuthError,
+} from './phase21-owner-ceremony-auth.js';
+export {
+  PHASE21_PRODUCTION_FLAGS_APPLY_PHRASE,
+  PHASE21_MAINNET_REGISTRY_APPLY_PHRASE,
+  PHASE21_HOT_WALLET_REGISTER_PHRASE,
+  PHASE21_HOT_WALLET_BACKUP_ATTESTATION_PHRASE,
+  confirmPhase21ProductionFlagsApplyInteractive,
+  confirmPhase21MainnetRegistryApplyInteractive,
+  confirmPhase21HotWalletRegisterInteractive,
+  attestPhase21HotWalletOfflineBackupsInteractive,
+  assertPhase21ProductionFlagsApplyConfirmation,
+  assertPhase21MainnetRegistryApplyConfirmation,
+  assertPhase21HotWalletRegisterConfirmation,
+  assertPhase21HotWalletBackupAttestation,
+  isPhase21ProductionFlagsApplyConfirmation,
+  isPhase21MainnetRegistryApplyConfirmation,
+  isPhase21HotWalletRegisterConfirmation,
+  isPhase21HotWalletBackupAttestation,
+  Phase21CeremonyConfirmationError,
+  type Phase21InteractivePhraseInput,
+  type Phase21ProductionFlagsApplyConfirmation,
+  type Phase21MainnetRegistryApplyConfirmation,
+  type Phase21HotWalletRegisterConfirmation,
+  type Phase21HotWalletBackupAttestation,
+} from './phase21-ceremony-confirmations.js';
+export {
+  createPhase21CeremonyVerifiedPool,
+  assertPhase21CeremonyVerifiedPool,
+  assertOwnerTrustMatchesLiveConnection,
+  loadPhase21CeremonyEndpointProfile,
+  Phase21CeremonyVerifiedPoolError,
+  type Phase21CeremonyVerifiedPool,
+} from './phase21-ceremony-verified-pool.js';
+export {
+  PHASE21_CEREMONY_REQUIRED_SYSTEM_IDENTIFIER_ENV,
+} from './phase21-ceremony-apply-gates.js';
+export {
+  PHASE21_HOT_WALLET_IDENTITY_PROOF_SCHEMA,
+  readPhase21HotWalletIdentityProofFile,
+  writePhase21HotWalletIdentityProofFile,
+  buildPhase21HotWalletIdentityProofDocument,
+  assertIdentityProofMatchesRegistrationInput,
+  Phase21HotWalletIdentityProofError,
+  type Phase21HotWalletIdentityProof,
+} from './phase21-hot-wallet-identity-proof.js';
+export {
+  verifyPhase21HotWalletRegistrationReadOnly,
+  Phase21HotWalletPostRegisterVerifyError,
+  type Phase21HotWalletPostRegisterExpected,
+  type Phase21HotWalletPostRegisterVerifyResult,
+} from './phase21-hot-wallet-post-register-verify.js';

@@ -13,9 +13,15 @@ import {
   type Phase21CeremonyApplyGateClient,
 } from './phase21-ceremony-apply-gates.js';
 import {
-  Phase21CeremonyOwnerAdminError,
-  resolvePhase21CeremonyOwnerAdmin,
-} from './phase21-ceremony-owner-admin.js';
+  assertPhase21ProductionFlagsApplyConfirmation,
+  type Phase21ProductionFlagsApplyConfirmation,
+} from './phase21-ceremony-confirmations.js';
+import { assertOwnerTrustMatchesLiveConnection } from './phase21-ceremony-verified-pool.js';
+import {
+  assertAuthenticatedPhase21OwnerCeremonyTrust,
+  type AuthenticatedPhase21OwnerCeremonyTrust,
+} from './phase21-owner-ceremony-trust.js';
+import { resolveCanonicalPhase21OwnerSeat } from './phase21-owner-ceremony-auth.js';
 
 export type Phase21ProductionFlagBaselineMode = 'PLAN' | 'APPLY' | 'REFUSED';
 
@@ -63,8 +69,10 @@ export interface Phase21ProductionFlagBaselineClient {
 
 export interface Phase21ProductionFlagBaselineApplyInput {
   readonly reason: string;
-  /** Required ACTIVE OWNER admin — SYSTEM/null forbidden for production ceremony. */
-  readonly changedByAdminId: string;
+  /** Branded Owner ceremony trust — sole APPLY authority. */
+  readonly ownerTrust: AuthenticatedPhase21OwnerCeremonyTrust;
+  /** Optional branded tool confirmation (CLI requires it). */
+  readonly applyConfirmation?: Phase21ProductionFlagsApplyConfirmation;
 }
 
 /** Advisory lock class for production flag baseline APPLY serialization. */
@@ -195,6 +203,26 @@ export async function applyPhase21ProductionFlagBaseline(
   }
 
   try {
+    assertAuthenticatedPhase21OwnerCeremonyTrust(input.ownerTrust);
+    if (input.applyConfirmation !== undefined) {
+      assertPhase21ProductionFlagsApplyConfirmation(input.applyConfirmation);
+    }
+    await assertOwnerTrustMatchesLiveConnection(client, input.ownerTrust);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      mode: 'REFUSED',
+      applyAuthorized: false,
+      applied: false,
+      rows: [],
+      conflicts: [],
+      createdCount: 0,
+      notes: [`APPLY refused: ${message}`],
+      refuseCode: 'OWNER_TRUST_REQUIRED',
+    };
+  }
+
+  try {
     await assertPhase21CeremonyApplyGates(
       client as Phase21CeremonyApplyGateClient,
       'PHASE21_PRODUCTION_FLAG_BASELINE_APPLY',
@@ -215,25 +243,7 @@ export async function applyPhase21ProductionFlagBaseline(
     };
   }
 
-  let ownerAdminUserId: string;
-  try {
-    const owner = await resolvePhase21CeremonyOwnerAdmin(client, input.changedByAdminId);
-    ownerAdminUserId = owner.adminUserId;
-  } catch (error: unknown) {
-    const code =
-      error instanceof Phase21CeremonyOwnerAdminError ? error.code : 'OWNER_ADMIN_REQUIRED';
-    const message = error instanceof Error ? error.message : String(error);
-    return {
-      mode: 'REFUSED',
-      applyAuthorized: false,
-      applied: false,
-      rows: [],
-      conflicts: [],
-      createdCount: 0,
-      notes: [`APPLY refused: ${message}`],
-      refuseCode: code,
-    };
-  }
+  const ownerAdminUserId = input.ownerTrust.adminUserId;
 
   await client.query('BEGIN');
   try {
@@ -241,6 +251,21 @@ export async function applyPhase21ProductionFlagBaseline(
       `SELECT pg_advisory_xact_lock($1::int, hashtext('phase21-production-flag-baseline'))`,
       [PHASE21_PRODUCTION_FLAG_BASELINE_LOCK_KEY1],
     );
+
+    const seat = await resolveCanonicalPhase21OwnerSeat(client, ownerAdminUserId);
+    if (seat.adminUserId !== ownerAdminUserId) {
+      await client.query('ROLLBACK');
+      return {
+        mode: 'REFUSED',
+        applyAuthorized: false,
+        applied: false,
+        rows: [],
+        conflicts: [],
+        createdCount: 0,
+        notes: ['canonical Owner seat holder does not match Owner ceremony trust'],
+        refuseCode: 'OWNER_SEAT_TRUST_MISMATCH',
+      };
+    }
 
     const planned = await planPhase21ProductionFlagBaseline(client);
     const conflicts = planned.filter((r) => r.action === 'CONFLICT');

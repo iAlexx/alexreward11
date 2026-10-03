@@ -36,7 +36,7 @@ FORWARD_GRAM_ATOMIC=1 (Owner-approved)
 | M05 | Independent primary/secondary providers | Unconfigured | TON_PRIMARY_* / TON_SECONDARY_* | BLOCKED |
 | M06 | Production signer service | Dedicated controlled host not deployed | ceremony + hosting decision | NOT_PROVISIONED |
 | M07 | Signer self_hosted_encrypted + LOCKED boot | Policy ready; service absent | signing + config Phase21 path | BLOCKED |
-| M08 | Hot Wallet registered/funded | Not created | Ceremony doc | BLOCKED |
+| M08 | Hot Wallet registered/funded | Generated offline; NOT registered/funded | Step 4C closeout + ceremony doc | BLOCKED |
 | M09 | Initial exposure 5-10 USDT + GRAM gas | Not funded | assessPhase21InitialFundingExposure | BLOCKED |
 | M10 | Real chain enable | false operationally | WITHDRAWAL_REAL_CHAIN_ENABLED | BLOCKED (safe-off) |
 | M11 | Fake chain disabled | Default false | config | READY (safe) |
@@ -139,3 +139,19 @@ Step 3C adds ceremony observations that must PASS for READY_FOR_OWNER_PROVISIONI
 - `REAL_OWNER_BOOTSTRAP_KEY_GENERATED=NO` (no key/seal/bundle/Channel B regenerated)
 - Step4 remains `PAUSED_OWNER_AUTHORITY_REQUIRED`
 - See `docs/PHASE_21_STEP4B2_SAFE_OWNER_APPLY.md`
+
+### Step 4C (2026-10-03)
+
+- Owner production bootstrap **COMPLETE** (sanitized closeout IDs only; no secrets)
+  - `OWNER_ADMIN_USER_ID=a11a11a1-0000-4000-8000-000000000011`
+  - `OWNER_GRANT_ID=e075fc33-ee46-4848-ac84-53c509adc96f`
+  - `OWNER_ATTEMPT_ID=ccd4b016-6dd8-43a8-a536-ee341d2fad7e`
+- Hot Wallet **GENERATED** offline; **NOT registered**, **NOT funded**
+  - Friendly `EQD4NWgFbqCOIGQL9k0SDIP8onQH9cj_MxDcBr3N7DYLy8Lf`
+  - Fingerprint `e3e47c32acaed8912c4515618987d66d2c0ddc6d65c46cf16e293c7598e64093`
+  - Bundle SHA-256 `A0CD6CD1B871EA7664A4F66BB56CCB3794DA551C5D0E920ECDA2E188061E5C43`
+- Source hardening: branded Owner ceremony trust (TTY password+TOTP), WeakSet confirmations, verified APPLY pool, identity proof tooling
+- `READY_FOR_LIVE_PAYOUT=NO`
+- Phase 21 is **not** complete after Step 4C
+- See `docs/PHASE_21_STEP4C_OWNER_CLOSEOUT_AND_HOT_WALLET_READINESS.md`
+

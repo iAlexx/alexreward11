@@ -12,6 +12,7 @@ describe('phase21 ceremony apply gates', () => {
     'PHASE21_OPERATIONAL_CEREMONY_ENABLED',
     'PHASE21_PRODUCTION_FLAG_BASELINE_APPLY',
     'PHASE21_CEREMONY_REQUIRED_DATABASE_NAME',
+    'PHASE21_CEREMONY_REQUIRED_SYSTEM_IDENTIFIER',
   ] as const;
   const prev: Record<string, string | undefined> = {};
 
@@ -26,6 +27,17 @@ describe('phase21 ceremony apply gates', () => {
     for (const k of keys) prev[k] = process.env[k];
   }
 
+  function client(db = 'alex_rewards_phase20_test', sid = '1') {
+    return {
+      async query<T extends Record<string, unknown> = Record<string, unknown>>(text: string) {
+        if (text.includes('pg_control_system')) {
+          return { rows: [{ sid }] as unknown as T[] };
+        }
+        return { rows: [{ name: db }] as unknown as T[] };
+      },
+    };
+  }
+
   it('refuses staging APPLY', async () => {
     snapshot();
     __phase21TestSetApplyEnv({
@@ -33,30 +45,22 @@ describe('phase21 ceremony apply gates', () => {
       PHASE21_OPERATIONAL_CEREMONY_ENABLED: 'true',
       PHASE21_PRODUCTION_FLAG_BASELINE_APPLY: '1',
       PHASE21_CEREMONY_REQUIRED_DATABASE_NAME: 'alex_rewards_phase20_test',
+      PHASE21_CEREMONY_REQUIRED_SYSTEM_IDENTIFIER: '1',
     });
-    const client = {
-      async query<T extends Record<string, unknown> = Record<string, unknown>>() {
-        return { rows: [{ name: 'alex_rewards_phase20_test' }] as unknown as T[] };
-      },
-    };
     await expect(
-      assertPhase21CeremonyApplyGates(client, 'PHASE21_PRODUCTION_FLAG_BASELINE_APPLY'),
+      assertPhase21CeremonyApplyGates(client(), 'PHASE21_PRODUCTION_FLAG_BASELINE_APPLY'),
     ).rejects.toMatchObject({ code: 'STAGING_APPLY_FORBIDDEN' });
   });
 
-  it('refuses missing ceremony / apply / db name / mismatch', async () => {
+  it('refuses missing ceremony / apply / db name / system id / mismatch', async () => {
     snapshot();
     delete process.env.DEPLOYMENT_ENV;
     delete process.env.PHASE21_OPERATIONAL_CEREMONY_ENABLED;
     delete process.env.PHASE21_PRODUCTION_FLAG_BASELINE_APPLY;
     delete process.env.PHASE21_CEREMONY_REQUIRED_DATABASE_NAME;
-    const client = {
-      async query<T extends Record<string, unknown> = Record<string, unknown>>() {
-        return { rows: [{ name: 'alex_rewards_phase20_test' }] as unknown as T[] };
-      },
-    };
+    delete process.env.PHASE21_CEREMONY_REQUIRED_SYSTEM_IDENTIFIER;
     await expect(
-      assertPhase21CeremonyApplyGates(client, 'PHASE21_PRODUCTION_FLAG_BASELINE_APPLY'),
+      assertPhase21CeremonyApplyGates(client(), 'PHASE21_PRODUCTION_FLAG_BASELINE_APPLY'),
     ).rejects.toBeInstanceOf(Phase21CeremonyApplyGateError);
 
     __phase21TestSetApplyEnv({
@@ -64,30 +68,39 @@ describe('phase21 ceremony apply gates', () => {
       PHASE21_OPERATIONAL_CEREMONY_ENABLED: 'true',
       PHASE21_PRODUCTION_FLAG_BASELINE_APPLY: '1',
       PHASE21_CEREMONY_REQUIRED_DATABASE_NAME: 'other_db',
+      PHASE21_CEREMONY_REQUIRED_SYSTEM_IDENTIFIER: '1',
     });
     await expect(
-      assertPhase21CeremonyApplyGates(client, 'PHASE21_PRODUCTION_FLAG_BASELINE_APPLY'),
+      assertPhase21CeremonyApplyGates(client(), 'PHASE21_PRODUCTION_FLAG_BASELINE_APPLY'),
     ).rejects.toMatchObject({ code: 'DATABASE_IDENTITY_MISMATCH' });
+
+    __phase21TestSetApplyEnv({
+      DEPLOYMENT_ENV: 'production',
+      PHASE21_OPERATIONAL_CEREMONY_ENABLED: 'true',
+      PHASE21_PRODUCTION_FLAG_BASELINE_APPLY: '1',
+      PHASE21_CEREMONY_REQUIRED_DATABASE_NAME: 'alex_rewards_phase20_test',
+      PHASE21_CEREMONY_REQUIRED_SYSTEM_IDENTIFIER: '2',
+    });
+    await expect(
+      assertPhase21CeremonyApplyGates(client(), 'PHASE21_PRODUCTION_FLAG_BASELINE_APPLY'),
+    ).rejects.toMatchObject({ code: 'SYSTEM_IDENTIFIER_MISMATCH' });
   });
 
-  it('accepts production gates with matching DB name', async () => {
+  it('accepts production gates with matching DB name + system identifier', async () => {
     snapshot();
     __phase21TestSetApplyEnv({
       DEPLOYMENT_ENV: 'production',
       PHASE21_OPERATIONAL_CEREMONY_ENABLED: 'true',
       PHASE21_PRODUCTION_FLAG_BASELINE_APPLY: '1',
       PHASE21_CEREMONY_REQUIRED_DATABASE_NAME: 'alex_rewards_phase20_test',
+      PHASE21_CEREMONY_REQUIRED_SYSTEM_IDENTIFIER: '1',
     });
-    const client = {
-      async query<T extends Record<string, unknown> = Record<string, unknown>>() {
-        return { rows: [{ name: 'alex_rewards_phase20_test' }] as unknown as T[] };
-      },
-    };
     const ok = await assertPhase21CeremonyApplyGates(
-      client,
+      client(),
       'PHASE21_PRODUCTION_FLAG_BASELINE_APPLY',
     );
     expect(ok.deploymentEnv).toBe('production');
     expect(ok.databaseName).toBe('alex_rewards_phase20_test');
+    expect(ok.systemIdentifier).toBe('1');
   });
 });

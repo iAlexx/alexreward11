@@ -133,6 +133,10 @@ export function resolvePhase21HotWalletDerivationProofFromEnv(): {
           secondaryJettonWalletAddress: doc.secondaryJettonWalletAddress,
           method: 'DUAL_PROVIDER_LIVE',
           verifiedAt: doc.verifiedAt,
+          ownerAddress: doc.ownerAddress,
+          jettonMaster: doc.jettonMaster,
+          primaryProviderKind: doc.primaryProviderKind,
+          secondaryProviderKind: doc.secondaryProviderKind,
         },
         source: 'FILE',
       };
@@ -149,19 +153,35 @@ export function resolvePhase21HotWalletDerivationProofFromEnv(): {
   const primary = envNonEmpty('PHASE21_HOT_WALLET_DERIVATION_PRIMARY');
   const secondary = envNonEmpty('PHASE21_HOT_WALLET_DERIVATION_SECONDARY');
   const method = envNonEmpty('PHASE21_HOT_WALLET_DERIVATION_METHOD');
+  const ownerAddress = envNonEmpty('PHASE21_HOT_WALLET_DERIVATION_OWNER');
+  const jettonMaster = envNonEmpty('PHASE21_HOT_WALLET_DERIVATION_JETTON_MASTER');
   const verifiedAt = envNonEmpty('PHASE21_HOT_WALLET_DERIVATION_VERIFIED_AT') ?? undefined;
+  const primaryProviderKind = envNonEmpty('PHASE21_HOT_WALLET_DERIVATION_PRIMARY_PROVIDER');
+  const secondaryProviderKind = envNonEmpty('PHASE21_HOT_WALLET_DERIVATION_SECONDARY_PROVIDER');
 
-  if (primary === null && secondary === null && method === null) {
+  if (
+    primary === null &&
+    secondary === null &&
+    method === null &&
+    ownerAddress === null &&
+    jettonMaster === null
+  ) {
     return { proof: null, source: 'MISSING' };
   }
 
-  if (primary === null || secondary === null || method === null) {
+  if (
+    primary === null ||
+    secondary === null ||
+    method === null ||
+    ownerAddress === null ||
+    jettonMaster === null
+  ) {
     return {
       proof: null,
       source: 'ENV',
       refuseCode: 'DERIVATION_PROOF_ENV_INCOMPLETE',
       message:
-        'PHASE21_HOT_WALLET_DERIVATION_PRIMARY, _SECONDARY, and _METHOD are all required together',
+        'PHASE21_HOT_WALLET_DERIVATION_PRIMARY, _SECONDARY, _METHOD, _OWNER, and _JETTON_MASTER are all required together',
     };
   }
 
@@ -180,7 +200,11 @@ export function resolvePhase21HotWalletDerivationProofFromEnv(): {
       primaryJettonWalletAddress: primary,
       secondaryJettonWalletAddress: secondary,
       method: 'DUAL_PROVIDER_LIVE',
+      ownerAddress,
+      jettonMaster,
       ...(verifiedAt !== undefined ? { verifiedAt } : {}),
+      ...(primaryProviderKind !== null ? { primaryProviderKind } : {}),
+      ...(secondaryProviderKind !== null ? { secondaryProviderKind } : {}),
     },
     source: 'ENV',
   };

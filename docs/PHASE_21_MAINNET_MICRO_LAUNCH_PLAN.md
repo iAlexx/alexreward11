@@ -122,3 +122,7 @@ Owner-approved design facts documented (no live payout):
 New docs: GRAM naming, multichain wallet, controlled balance provisioning, production runtime deployment manifest, provisioning ceremony preflight.
 
 Readiness/preflight: may reach `READY_FOR_OWNER_PROVISIONING_CEREMONY` / `MAINNET_SOURCE_READY`; never `READY_FOR_LIVE_PAYOUT`.
+
+## Step 4C status pointer
+
+Owner bootstrap COMPLETE (sanitized). Hot Wallet generated but not registered/funded. See `docs/PHASE_21_STEP4C_OWNER_CLOSEOUT_AND_HOT_WALLET_READINESS.md`. Phase 21 remains incomplete; READY_FOR_LIVE_PAYOUT=NO.

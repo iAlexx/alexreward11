@@ -118,3 +118,7 @@ on 127.0.0.1 via `OWNER_ADMIN_AUTH_DATABASE_URL`). Covers: attestation/confirmat
 CLI ordering and source constraints, orchestrator TOTP requirements (missing/empty/wrong => no pool access),
 disposable full lifecycle with explicit TOTP (PASSWORD=1, TOTP=1), wrong TOTP leaves seat empty and zero
 credentials/bindings/grants/attempts, post-apply verify (read-only trace, negative case), pool close.
+
+## Step 4C note (2026-10-03)
+
+Owner APPLY for production Owner bootstrap was completed manually offline. Canonical sanitized closeout and Hot Wallet readiness source hardening are recorded in `docs/PHASE_21_STEP4C_OWNER_CLOSEOUT_AND_HOT_WALLET_READINESS.md`. Cursor must not re-run APPLY/register/fund.

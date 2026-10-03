@@ -357,6 +357,9 @@ importers:
 
   apps/signer:
     dependencies:
+      '@alex-rewards/auth':
+        specifier: workspace:*
+        version: link:../../packages/auth
       '@alex-rewards/config':
         specifier: workspace:*
         version: link:../../packages/config

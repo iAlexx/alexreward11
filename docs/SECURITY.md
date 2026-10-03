@@ -265,3 +265,11 @@ Production Owner bootstrap final source hardening: `mintAuthenticatedProductionB
 - The decrypt/mutate path is reachable only after live Channel B, a fully READY authenticated read-only preflight and the final phrase.
 - Post-apply verification is read-only (`BEGIN READ ONLY` + `ROLLBACK`) and outputs no email or secret material.
 - Step 4B.2a: production CLI secrets use shared `readSecretFromTty` which resumes stdin after readline pause (Windows PowerShell exit-before-input fix). Secrets are never echoed, logged, argv, or env. Aborted TOTP enrollment secrets are not reused.
+
+## Phase 21 Owner ceremony trust (Step 4C)
+
+- Env UUID (`PHASE21_CEREMONY_ADMIN_USER_ID`) is **not** APPLY authority; it is an optional locator that must match the canonical `admin_owner_authority` seat holder.
+- APPLY requires WeakSet-branded `AuthenticatedPhase21OwnerCeremonyTrust` minted after live Owner TTY password + TOTP verification against the verified production pool identity.
+- Forged `{ authenticated: true }` / `trustClass` strings cannot authorize.
+- Confirmation phrases and Hot Wallet backup attestations are also WeakSet-branded; booleans/env shortcuts refuse.
+- Auth anti-replay mutations are distinct from Phase21 business mutations.

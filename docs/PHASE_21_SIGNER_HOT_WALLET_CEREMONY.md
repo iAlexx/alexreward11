@@ -1,8 +1,8 @@
 # Phase 21 - Signer / Hot Wallet Ceremony (later Owner steps)
 
 **PRODUCTION_SIGNER_SERVICE:** `NOT_PROVISIONED`
-**PRODUCTION_HOT_WALLET_STATUS:** `NOT_CREATED`
-**REAL_PRODUCTION_KEY_GENERATED:** `NO` (Step 3 / 3A forbids generation/execution)
+**PRODUCTION_HOT_WALLET_STATUS:** `GENERATED_NOT_REGISTERED`
+**REAL_PRODUCTION_KEY_GENERATED:** `YES` (offline; REGISTERED=NO; FUNDED=NO; READY_FOR_LIVE_PAYOUT=NO)
 **SIGNER_HOSTING:** `DEDICATED_CONTROLLED_HOST`
 **CEREMONY_EXECUTED:** `NO`
 
@@ -146,3 +146,11 @@ See `docs/PHASE_21_SIGNER_HOSTING_DECISION.md`, `docs/PHASE_21_PROVISIONING_CERE
 
 Hot Wallet register PLAN/APPLY require dual-provider (or Owner-supplied) derivation proof matching payoutJettonWalletAddress. APPLY requires ACTIVE OWNER admin; SYSTEM actor forbidden.
 
+## Step 4C public identity (no local bundle path)
+
+- Friendly: `EQD4NWgFbqCOIGQL9k0SDIP8onQH9cj_MxDcBr3N7DYLy8Lf`
+- Raw: `0:f83568056ea08e20640bf64d120c83fca27407f5c8ff3310dc06bdcdec360bcb`
+- Fingerprint: `e3e47c32acaed8912c4515618987d66d2c0ddc6d65c46cf16e293c7598e64093`
+- Encrypted bundle SHA-256: `A0CD6CD1B871EA7664A4F66BB56CCB3794DA551C5D0E920ECDA2E188061E5C43`
+- REGISTERED=NO; FUNDED=NO; no local bundle path recorded in docs
+- Identity proof tooling: `pnpm phase21:hot-wallet:verify-identity`
