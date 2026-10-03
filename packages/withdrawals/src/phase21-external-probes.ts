@@ -95,6 +95,15 @@ export interface Phase21TwoProviderVerificationResult {
   readonly primaryJettonWalletAddress?: string | null;
   readonly secondaryJettonWalletAddress?: string | null;
   readonly derivedJettonWalletsAgree?: boolean;
+  /** Bound on full PASS only — used to mint branded Mainnet registry verification trust. */
+  readonly networkCode?: 'TON_MAINNET';
+  readonly networkGlobalId?: -239;
+  readonly jettonMaster?: string;
+  readonly primaryObservedJettonMaster?: string | null;
+  readonly secondaryObservedJettonMaster?: string | null;
+  readonly symbol?: 'USDT';
+  readonly decimals?: 6;
+  readonly verifiedAt?: string;
   readonly notes: readonly string[];
 }
 
@@ -620,6 +629,14 @@ export async function verifyMainnetUsdtWithTwoProviders(input: {
       primaryJettonWalletAddress: wA.jettonWalletAddress,
       secondaryJettonWalletAddress: wB.jettonWalletAddress,
       derivedJettonWalletsAgree: true,
+      networkCode: 'TON_MAINNET',
+      networkGlobalId: -239,
+      jettonMaster: input.jettonMaster.trim(),
+      primaryObservedJettonMaster: observedA,
+      secondaryObservedJettonMaster: observedB,
+      symbol: 'USDT',
+      decimals: 6,
+      verifiedAt: observedAt,
       notes: ['Read-only verification only', 'No broadcast', 'DUAL_PROVIDER_LIVE derivation ready'],
     };
   }
@@ -649,6 +666,14 @@ export async function verifyMainnetUsdtWithTwoProviders(input: {
     },
     primaryJettonWalletAddress: null,
     secondaryJettonWalletAddress: null,
+    networkCode: 'TON_MAINNET',
+    networkGlobalId: -239,
+    jettonMaster: input.jettonMaster.trim(),
+    primaryObservedJettonMaster: observedA,
+    secondaryObservedJettonMaster: observedB,
+    symbol: 'USDT',
+    decimals: 6,
+    verifiedAt: observedAt,
     notes: [
       'Read-only verification only',
       'No broadcast',

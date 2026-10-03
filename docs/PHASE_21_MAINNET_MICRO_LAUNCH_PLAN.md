@@ -125,4 +125,4 @@ Readiness/preflight: may reach `READY_FOR_OWNER_PROVISIONING_CEREMONY` / `MAINNE
 
 ## Step 4C status pointer
 
-Owner bootstrap COMPLETE (sanitized). Hot Wallet generated but not registered/funded. See `docs/PHASE_21_STEP4C_OWNER_CLOSEOUT_AND_HOT_WALLET_READINESS.md`. Phase 21 remains incomplete; READY_FOR_LIVE_PAYOUT=NO.
+Owner bootstrap COMPLETE (sanitized). Hot Wallet generated but not registered/funded. Steps 4C.1/4C.2 source hardening complete (production verified-pool Owner auth without public test backdoor; Mainnet registry APPLY requires live two-provider branded verification + read-only post-apply verify). See `docs/PHASE_21_STEP4C_OWNER_CLOSEOUT_AND_HOT_WALLET_READINESS.md`. Phase 21 remains incomplete; READY_FOR_LIVE_PAYOUT=NO.

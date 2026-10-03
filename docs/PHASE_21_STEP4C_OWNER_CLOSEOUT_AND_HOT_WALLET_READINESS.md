@@ -3,22 +3,23 @@
 **Date:** 2026-10-03  
 **Scope:** Source hardening only. Cursor must not run real APPLY / register / fund. `production-runtime` is not modified.
 
-## Step 4C.1 status
+## Step 4C.1 / 4C.2 status
 
 | Fact | Value |
 | --- | --- |
-| SOURCE_HARDENING_COMPLETE | YES (Step 4C.1 corrections: production verified-pool Owner auth, mandatory confirmations, Hot Wallet APPLY provenance/registry/audit/tx honesty) |
+| SOURCE_HARDENING_COMPLETE | YES (4C.1 + 4C.2: production verified-pool Owner auth, no public test-pool backdoor, mandatory confirmations, live two-provider Mainnet registry verification trust, registry post-apply verify, Hot Wallet APPLY provenance/registry/audit/tx honesty) |
 | OWNER_BOOTSTRAP | COMPLETE |
 | HOT_WALLET_KEY_GENERATED | YES |
 | HOT_WALLET_REGISTERED | NO |
 | HOT_WALLET_FUNDED | NO |
+| HOT_WALLET_OFFLINE_BACKUPS_READY | NO |
 | MAINNET_REGISTRY_APPLIED | NO |
 | SIGNER_PRODUCTION_HOST_PROVISIONED | NO |
 | REAL_PAYOUT | NO |
 | READY_FOR_LIVE_PAYOUT | NO |
 | PHASE21_STATUS | IN_PROGRESS |
 
-Step 4C.1 does **not** claim Hot Wallet registered/funded, Mainnet registry applied, or live payout readiness.
+Steps 4C.1 / 4C.2 do **not** claim Hot Wallet registered/funded, Mainnet registry applied, or live payout readiness.
 
 ## Canonical Owner closeout (sanitized)
 
@@ -43,20 +44,22 @@ Secrets, passphrases, TOTP seeds, and local encrypted bundle paths are never rec
 | FUNDED | NO |
 | READY_FOR_LIVE_PAYOUT | NO |
 
-## Authority model (Step 4C / 4C.1)
+## Authority model (Step 4C / 4C.1 / 4C.2)
 
 1. Canonical Owner seat = `admin_owner_authority.seat=1` holder + ACTIVE admin + ACTIVE unrevoked OWNER binding.
 2. `PHASE21_CEREMONY_ADMIN_USER_ID` is a **locator only** — env UUID alone cannot authorize APPLY.
 3. APPLY requires branded `AuthenticatedPhase21OwnerCeremonyTrust` minted only after Owner TTY password+TOTP via `authenticatePhase21OwnerCeremonyFromOwnerTty({ verifiedPool })`.
 4. Production credential verification uses `verifyProductionOwnerPasswordAndTotpOnVerifiedBootstrapPool` on a WeakMap-bound production `verify_full` bootstrap pool. Generic `verifyOwnerAdminPasswordAndTotp` / `assertOwnerAdminAuthDatabaseWritable` remain test-DB-only and continue to refuse operational names.
-5. Auth anti-replay may mutate auth tables; that is distinct from Phase21 business mutation.
-6. Tool confirmations / Hot Wallet backup attestations are WeakSet-branded objects; forged booleans cannot authorize. Flag / registry / Hot Wallet APPLY **require** branded confirmations (not optional).
-7. APPLY uses a ceremony endpoint profile + verified TLS pool (`createPhase21CeremonyVerifiedPool`). `DATABASE_URL` alone is forbidden for APPLY. PLAN may still use `DATABASE_URL` (read-only).
-8. APPLY gates require both `PHASE21_CEREMONY_REQUIRED_DATABASE_NAME` and `PHASE21_CEREMONY_REQUIRED_SYSTEM_IDENTIFIER`.
-9. Hot Wallet APPLY requires `DUAL_PROVIDER_LIVE` with independent provider kinds + `verifiedAt`; OWNER_SUPPLIED_EVIDENCE refused. Prefer derivation proof FILE for APPLY readiness.
-10. Hot Wallet PLAN verifies canonical registry truth (TON_MAINNET; USDT decimals=6 non-native non-null master; GRAM decimals=9 native null identity).
-11. Post-register verify is read-only and requires the intended `phase21.hot_wallet.register` audit row.
-12. Mutation catch paths track `NOT_STARTED | BEGUN | MUTATION_EXECUTED | COMMIT_CONFIRMED` and never claim rollback unless ROLLBACK succeeded.
+5. Verified-pool test registration is **not** exported from `@alex-rewards/auth` package root; test-only module requires `NODE_ENV=test` + dual disposable gates + approved isolated DB names.
+6. Auth anti-replay may mutate auth tables; that is distinct from Phase21 business mutation.
+7. Tool confirmations / Hot Wallet backup attestations are WeakSet-branded objects; forged booleans cannot authorize. Flag / registry / Hot Wallet APPLY **require** branded confirmations (not optional).
+8. Mainnet registry APPLY requires branded `AuthenticatedPhase21MainnetRegistryVerification` minted only after live two-provider PASS (`PHASE21_EXTERNAL_PROBE_LIVE=1`). Mock/skipped/incomplete/forged objects refuse. Exact master must bind through verification → PLAN → APPLY → DB.
+9. APPLY uses a ceremony endpoint profile + verified TLS pool (`createPhase21CeremonyVerifiedPool`). `DATABASE_URL` alone is forbidden for APPLY. PLAN may still use `DATABASE_URL` (read-only).
+10. APPLY gates require both `PHASE21_CEREMONY_REQUIRED_DATABASE_NAME` and `PHASE21_CEREMONY_REQUIRED_SYSTEM_IDENTIFIER`.
+11. Hot Wallet APPLY requires `DUAL_PROVIDER_LIVE` with independent provider kinds + `verifiedAt`; OWNER_SUPPLIED_EVIDENCE refused. Prefer derivation proof FILE for APPLY readiness.
+12. Hot Wallet PLAN verifies canonical registry truth (TON_MAINNET; USDT decimals=6 non-native non-null master; GRAM decimals=9 native null identity).
+13. Post-registry and post-register verifies are read-only and require the intended audit rows.
+14. Mutation catch paths track `NOT_STARTED | BEGUN | MUTATION_EXECUTED | COMMIT_CONFIRMED` and never claim rollback unless ROLLBACK succeeded.
 
 ## Hot Wallet readiness path (not executed here)
 
@@ -69,9 +72,10 @@ Secrets, passphrases, TOTP seeds, and local encrypted bundle paths are never rec
 ## Operational order (summary)
 
 1. Owner bootstrap COMPLETE (closeout recorded above)
-2. Production flag baseline / Mainnet registry APPLY only via verified pool + branded trust (if not already applied offline by Owner)
-3. Hot Wallet identity proof + derivation proof
-4. Hot Wallet register (still leaves READY_FOR_LIVE_PAYOUT=NO)
-5. Funding / live payout enablement remain blocked
+2. Hot Wallet offline backups later
+3. Live two-provider Mainnet verification → branded Mainnet verification trust
+4. Root-bound operational DB → Owner password+TOTP → fresh registry PLAN → exact confirmation → registry APPLY → read-only registry verify
+5. Hot Wallet identity + derivation proofs → PLAN → separate Owner authorization → register → post-register verify
+6. Signer provisioning / funding / live payout remain later separate Owner authorizations (`READY_FOR_LIVE_PAYOUT=NO`)
 
 Phase 21 is **not** complete after Step 4C.

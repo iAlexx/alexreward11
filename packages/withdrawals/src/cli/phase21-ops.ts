@@ -8,7 +8,7 @@
  */
 import { Pool } from 'pg';
 
-import { ToncenterMainnetFeeProvider } from '@alex-rewards/ton';
+import { ToncenterMainnetFeeProvider, tonAddressesEqual } from '@alex-rewards/ton';
 
 import {
   buildPhase21PayoutConfig,
@@ -39,6 +39,8 @@ import {
   applyPhase21MainnetRegistryBootstrap,
   planPhase21MainnetRegistryBootstrap,
 } from '../phase21-mainnet-registry-bootstrap.js';
+import { verifyPhase21MainnetRegistryBootstrapReadOnly } from '../phase21-mainnet-registry-post-apply-verify.js';
+import { mintAuthenticatedPhase21MainnetRegistryVerificationFromLiveTwoProviderPass } from '../phase21-mainnet-registry-verification-trust.js';
 import { runPhase21Preflight } from '../phase21-preflight.js';
 import {
   applyPhase21ProductionFlagBaseline,
@@ -453,42 +455,163 @@ if (command === 'mainnet-registry:apply') {
       return;
     }
     const master = envNonEmpty('TON_MAINNET_USDT_JETTON_MASTER');
-    if (master === null) {
+    const primaryKind = envNonEmpty('TON_PRIMARY_PROVIDER_KIND');
+    const primaryUrl = envNonEmpty('TON_PRIMARY_PROVIDER_URL');
+    const secondaryKind = envNonEmpty('TON_SECONDARY_PROVIDER_KIND');
+    const secondaryUrl = envNonEmpty('TON_SECONDARY_PROVIDER_URL');
+    if (
+      master === null ||
+      primaryKind === null ||
+      primaryUrl === null ||
+      secondaryKind === null ||
+      secondaryUrl === null
+    ) {
       printJson({
         ok: false,
         command: 'mainnet-registry:apply',
-        refuseCode: 'USDT_MASTER_REQUIRED',
-        message: 'TON_MAINNET_USDT_JETTON_MASTER required for APPLY',
+        refuseCode: 'PROVIDER_CONFIG_REQUIRED',
+        message:
+          'Requires TON_MAINNET_USDT_JETTON_MASTER and TON_PRIMARY/SECONDARY_PROVIDER_KIND/URL before Owner auth',
+        readyForLivePayout: false,
       });
       process.exitCode = 1;
       return;
     }
+    if (process.env.PHASE21_EXTERNAL_PROBE_LIVE !== '1') {
+      printJson({
+        ok: false,
+        command: 'mainnet-registry:apply',
+        refuseCode: 'LIVE_PROBE_REQUIRED',
+        message:
+          'PHASE21_EXTERNAL_PROBE_LIVE=1 required — mock/skipped/incomplete verification cannot authorize registry APPLY',
+        readyForLivePayout: false,
+      });
+      process.exitCode = 1;
+      return;
+    }
+
     let verifiedClose: (() => Promise<void>) | null = null;
     try {
+      // 1-5: live two-provider verification BEFORE Owner TTY confirmation / DB mutation
+      const adapters = createPhase21MainnetExternalAdapters({
+        primary: {
+          kind: parseProviderKind(primaryKind),
+          url: primaryUrl,
+          apiKey: envNonEmpty('TON_PRIMARY_PROVIDER_KEY'),
+        },
+        secondary: {
+          kind: parseProviderKind(secondaryKind),
+          url: secondaryUrl,
+          apiKey: envNonEmpty('TON_SECONDARY_PROVIDER_KEY'),
+        },
+      });
+      const external = await verifyMainnetUsdtWithTwoProviders({
+        primary: { kind: primaryKind, url: primaryUrl },
+        secondary: { kind: secondaryKind, url: secondaryUrl },
+        jettonMaster: master,
+        identityAdapter: adapters.identity,
+        metadataAdapter: adapters.metadata,
+      });
+      if (!external.ok || external.incomplete === true) {
+        printJson({
+          ok: false,
+          command: 'mainnet-registry:apply',
+          refuseCode: external.code,
+          message: external.message,
+          notes: external.notes,
+          readyForLivePayout: false,
+        });
+        process.exitCode = 1;
+        return;
+      }
+      const mainnetVerification =
+        mintAuthenticatedPhase21MainnetRegistryVerificationFromLiveTwoProviderPass({
+          verification: external,
+          requestedJettonMaster: master,
+        });
+      printJson({
+        ok: true,
+        command: 'mainnet-registry:apply',
+        mode: 'LIVE_TWO_PROVIDER_VERIFIED',
+        networkGlobalId: mainnetVerification.networkGlobalId,
+        symbol: mainnetVerification.symbol,
+        decimals: mainnetVerification.decimals,
+        providersIndependent: mainnetVerification.providersIndependent,
+        verifiedAt: mainnetVerification.verifiedAt,
+        readyForLivePayout: false,
+      });
+
+      // 6-7: root-bound verify-full pool + Owner password+TOTP
       const { verified, trust } = await openPhase21ApplyVerifiedPool(argv);
       verifiedClose = verified.close;
       const client = await verified.pool.connect();
       try {
-        const plan = await planPhase21MainnetRegistryBootstrap(client, { usdtJettonMaster: master });
+        // 8-9: fresh PLAN; branded master must equal PLAN/apply master
+        const plan = await planPhase21MainnetRegistryBootstrap(client, {
+          usdtJettonMaster: master,
+        });
+        const planMasterOk = plan.every((item) => {
+          const detailsMaster = item.details['usdtJettonMaster'] ?? item.details['contractIdentity'];
+          if (typeof detailsMaster !== 'string' || detailsMaster.trim() === '') return true;
+          return tonAddressesEqual(detailsMaster, master);
+        });
+        if (!planMasterOk || !tonAddressesEqual(mainnetVerification.jettonMaster, master)) {
+          printJson({
+            ok: false,
+            command: 'mainnet-registry:apply',
+            refuseCode: 'REGISTRY_VERIFIED_MASTER_MISMATCH',
+            message: 'Branded verification master must equal registry PLAN/APPLY master',
+            readyForLivePayout: false,
+          });
+          process.exitCode = 1;
+          return;
+        }
         printJson({
           ok: true,
           command: 'mainnet-registry:apply',
           mode: 'FRESH_PLAN',
           items: plan,
-          notes: ['Fresh PLAN before confirmation; DATABASE_URL-alone not used for APPLY'],
+          notes: [
+            'Fresh PLAN after live two-provider verification and Owner auth',
+            'DATABASE_URL-alone not used for APPLY',
+          ],
           readyForLivePayout: false,
         });
+
+        // 10: exact Owner TTY final phrase
         const applyConfirmation = await confirmPhase21MainnetRegistryApplyInteractive();
+        // 11: APPLY
         const result = await applyPhase21MainnetRegistryBootstrap(client, {
           usdtJettonMaster: master,
           ownerTrust: trust,
           applyConfirmation,
+          mainnetVerification,
           reason:
             envNonEmpty('PHASE21_MAINNET_REGISTRY_REASON') ??
             'Phase 21 Mainnet registry bootstrap ceremony',
         });
-        printJson({ ok: result.applied, command: 'mainnet-registry:apply', result, readyForLivePayout: false });
-        if (!result.applied) process.exitCode = 1;
+        if (!result.applied) {
+          printJson({
+            ok: false,
+            command: 'mainnet-registry:apply',
+            result,
+            readyForLivePayout: false,
+          });
+          process.exitCode = 1;
+          return;
+        }
+        // 12: read-only post-apply verification
+        const post = await verifyPhase21MainnetRegistryBootstrapReadOnly(client, {
+          mainnetVerification,
+          adminUserId: trust.adminUserId,
+        });
+        printJson({
+          ok: true,
+          command: 'mainnet-registry:apply',
+          result,
+          postApplyVerify: post,
+          readyForLivePayout: false,
+        });
       } finally {
         client.release();
       }

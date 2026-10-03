@@ -4,7 +4,7 @@
  */
 import type { Pool } from 'pg';
 
-import { registerVerifiedProductionOwnerBootstrapPoolForTests } from '@alex-rewards/auth';
+import { registerVerifiedProductionOwnerBootstrapPoolForTests } from '@alex-rewards/auth/test-only/verified-production-pool';
 
 import {
   __brandPhase21CeremonyVerifiedPoolForTests,
@@ -36,7 +36,8 @@ export function mintAuthenticatedPhase21OwnerCeremonyTrustForTests(input: {
 
 /**
  * Test-only branded Phase21CeremonyVerifiedPool + auth WeakMap registration.
- * Requires ALEX_PHASE21_CEREMONY_TEST_HOOKS=1 and ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1.
+ * Requires ceremony test hooks + dual Owner bootstrap disposable-production-sim gates.
+ * Approved isolated test DB names only (helper refuses railway / alex_rewards).
  */
 export function mintPhase21CeremonyVerifiedPoolForTests(input: {
   readonly pool: Pool;
@@ -45,10 +46,24 @@ export function mintPhase21CeremonyVerifiedPoolForTests(input: {
   readonly tlsServerName?: string;
 }): Phase21CeremonyVerifiedPool {
   requireTestHooks();
+  if (process.env.NODE_ENV !== 'test') {
+    throw new Phase21OwnerCeremonyTrustError(
+      'FORBIDDEN',
+      'mintPhase21CeremonyVerifiedPoolForTests requires NODE_ENV=test',
+      {},
+    );
+  }
   if (process.env.ALEX_OWNER_BOOTSTRAP_TEST_HOOKS !== '1') {
     throw new Phase21OwnerCeremonyTrustError(
       'FORBIDDEN',
       'mintPhase21CeremonyVerifiedPoolForTests requires ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1',
+      {},
+    );
+  }
+  if (process.env.ALEX_OWNER_BOOTSTRAP_DISPOSABLE_PRODUCTION_SIM !== '1') {
+    throw new Phase21OwnerCeremonyTrustError(
+      'FORBIDDEN',
+      'mintPhase21CeremonyVerifiedPoolForTests requires ALEX_OWNER_BOOTSTRAP_DISPOSABLE_PRODUCTION_SIM=1',
       {},
     );
   }

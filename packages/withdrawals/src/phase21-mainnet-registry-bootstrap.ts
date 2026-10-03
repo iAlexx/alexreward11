@@ -8,6 +8,8 @@
  */
 import type { PoolClient } from 'pg';
 
+import { tonAddressesEqual } from '@alex-rewards/ton';
+
 import { LOCKED_INITIAL_WITHDRAWAL } from './config.js';
 import {
   assertPhase21CeremonyApplyGates,
@@ -24,6 +26,10 @@ import {
   assertAuthenticatedPhase21OwnerCeremonyTrust,
   type AuthenticatedPhase21OwnerCeremonyTrust,
 } from './phase21-owner-ceremony-trust.js';
+import {
+  assertAuthenticatedPhase21MainnetRegistryVerification,
+  type AuthenticatedPhase21MainnetRegistryVerification,
+} from './phase21-mainnet-registry-verification-trust.js';
 
 export type Phase21MainnetRegistryBootstrapMode = 'PLAN' | 'APPLY' | 'REFUSED';
 
@@ -37,11 +43,15 @@ export interface Phase21MainnetRegistryBootstrapInput {
   readonly reason?: string | null;
 }
 
-/** APPLY-only input: branded Owner trust + branded confirmation are both required. */
+/**
+ * APPLY-only input: branded Owner trust + branded confirmation +
+ * branded live two-provider Mainnet verification are all required.
+ */
 export interface Phase21MainnetRegistryBootstrapApplyInput
   extends Phase21MainnetRegistryBootstrapInput {
   readonly ownerTrust: AuthenticatedPhase21OwnerCeremonyTrust;
   readonly applyConfirmation: Phase21MainnetRegistryApplyConfirmation;
+  readonly mainnetVerification: AuthenticatedPhase21MainnetRegistryVerification;
 }
 
 export interface Phase21MainnetRegistryPlanItem {
@@ -611,6 +621,46 @@ export async function applyPhase21MainnetRegistryBootstrap(
   try {
     assertAuthenticatedPhase21OwnerCeremonyTrust(input.ownerTrust);
     assertPhase21MainnetRegistryApplyConfirmation(input.applyConfirmation);
+    assertAuthenticatedPhase21MainnetRegistryVerification(input.mainnetVerification);
+    if (
+      !tonAddressesEqual(input.mainnetVerification.jettonMaster, input.usdtJettonMaster) ||
+      !tonAddressesEqual(
+        input.mainnetVerification.primary.observedJettonMaster,
+        input.usdtJettonMaster,
+      ) ||
+      !tonAddressesEqual(
+        input.mainnetVerification.secondary.observedJettonMaster,
+        input.usdtJettonMaster,
+      )
+    ) {
+      return {
+        mode: 'REFUSED',
+        applyAuthorized: false,
+        applied: false,
+        items: [],
+        conflicts: [],
+        notes: [
+          'APPLY refused: branded Mainnet verification master must equal registry APPLY master (canonical TON equality)',
+        ],
+        refuseCode: 'REGISTRY_VERIFIED_MASTER_MISMATCH',
+      };
+    }
+    if (
+      input.mainnetVerification.networkGlobalId !== -239 ||
+      input.mainnetVerification.symbol !== 'USDT' ||
+      input.mainnetVerification.decimals !== 6 ||
+      input.mainnetVerification.providersIndependent !== true
+    ) {
+      return {
+        mode: 'REFUSED',
+        applyAuthorized: false,
+        applied: false,
+        items: [],
+        conflicts: [],
+        notes: ['APPLY refused: branded Mainnet verification metadata incomplete'],
+        refuseCode: 'MAINNET_VERIFICATION_METADATA_INVALID',
+      };
+    }
     await assertOwnerTrustMatchesLiveConnection(client, input.ownerTrust);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
@@ -621,7 +671,7 @@ export async function applyPhase21MainnetRegistryBootstrap(
       items: [],
       conflicts: [],
       notes: [`APPLY refused: ${message}`],
-      refuseCode: 'OWNER_TRUST_OR_CONFIRMATION_REQUIRED',
+      refuseCode: 'OWNER_TRUST_OR_CONFIRMATION_OR_MAINNET_VERIFICATION_REQUIRED',
     };
   }
 

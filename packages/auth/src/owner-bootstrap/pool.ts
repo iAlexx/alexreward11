@@ -377,62 +377,46 @@ export function requireVerifiedProductionOwnerBootstrapPool(pool: Pool): OwnerBo
 }
 
 /**
- * Test-only: register a synthetic production verify_full OwnerBootstrapPool into the
- * same WeakMap used by createProductionOwnerBootstrapPool.
- * Requires ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1. Never for real production endpoints.
+ * Package-private WeakMap binder for disposable production-sim test hooks.
+ * NOT re-exported from package root / owner-bootstrap index.
+ * Callers must use owner-bootstrap/test-only/verified-production-pool-test-hooks.ts
+ * which enforces NODE_ENV=test + dual test gates + approved isolated DB names.
+ * Real production registration remains createProductionOwnerBootstrapPool only.
  */
-export function registerVerifiedProductionOwnerBootstrapPoolForTests(input: {
-  readonly pool: Pool;
-  readonly databaseName: string;
-  readonly systemIdentifier: string;
-  readonly tlsServerName?: string;
-}): OwnerBootstrapPool {
+export function __bindVerifiedProductionOwnerBootstrapPoolForTestHooks(
+  result: OwnerBootstrapPool,
+): void {
+  if (process.env.NODE_ENV !== 'test') {
+    throw new AuthDomainError(
+      'FORBIDDEN',
+      '__bindVerifiedProductionOwnerBootstrapPoolForTestHooks requires NODE_ENV=test',
+    );
+  }
   if (process.env.ALEX_OWNER_BOOTSTRAP_TEST_HOOKS !== '1') {
     throw new AuthDomainError(
       'FORBIDDEN',
-      'registerVerifiedProductionOwnerBootstrapPoolForTests requires ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1',
+      '__bindVerifiedProductionOwnerBootstrapPoolForTestHooks requires ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1',
     );
   }
-  const databaseName = input.databaseName.trim();
-  const systemIdentifier = input.systemIdentifier.trim();
-  if (databaseName === '' || systemIdentifier === '') {
+  if (process.env.ALEX_OWNER_BOOTSTRAP_DISPOSABLE_PRODUCTION_SIM !== '1') {
     throw new AuthDomainError(
-      'VALIDATION',
-      'registerVerifiedProductionOwnerBootstrapPoolForTests requires databaseName and systemIdentifier',
+      'FORBIDDEN',
+      '__bindVerifiedProductionOwnerBootstrapPoolForTestHooks requires ALEX_OWNER_BOOTSTRAP_DISPOSABLE_PRODUCTION_SIM=1',
     );
   }
-  if (databaseName === 'alex_rewards') {
-    throw new AuthDomainError('FORBIDDEN', 'refuse operational alex_rewards for test registration');
+  if (result.profile.deploymentEnv !== 'production' || result.profile.tls.mode !== 'verify_full') {
+    throw new AuthDomainError(
+      'FORBIDDEN',
+      'test binder requires production verify_full profile',
+    );
   }
-  const tlsServerName = (input.tlsServerName ?? 'test-production.local').trim();
-  const profile: BootstrapEndpointProfile = {
-    profileId: 'test-production-verify-full-sim',
-    deploymentEnv: 'production',
-    expectedDatabaseName: databaseName,
-    expectedSystemIdentifier: systemIdentifier,
-    tls: {
-      mode: 'verify_full',
-      caPem: '-----BEGIN CERTIFICATE-----\nTEST_ONLY_NOT_A_REAL_CA\n-----END CERTIFICATE-----\n',
-      tlsServerName,
-    },
-  };
-  const connectionFacts: BootstrapConnectionFacts = {
-    hostname: '127.0.0.1',
-    sslEnabled: true,
-    currentDatabase: databaseName,
-    clusterSystemIdentifier: systemIdentifier,
-    serverAddr: '127.0.0.1',
-    sslInUse: true,
-  };
-  const result: OwnerBootstrapPool = {
-    pool: input.pool,
-    connectionFacts,
-    hostname: '127.0.0.1',
-    database: databaseName,
-    profile,
-  };
-  verifiedBootstrapByPool.set(input.pool, result);
-  return result;
+  if (!isApprovedDestructiveTestDatabaseName(result.database)) {
+    throw new AuthDomainError(
+      'FORBIDDEN',
+      'test binder refuses non-approved / operational database names',
+    );
+  }
+  verifiedBootstrapByPool.set(result.pool, result);
 }
 
 /**

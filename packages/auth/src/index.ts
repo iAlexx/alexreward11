@@ -196,7 +196,6 @@ export {
   createEnrollmentChannelKeypair,
   createEphemeralCeremonyAuthority,
   createOwnerBootstrapPool,
-  registerVerifiedProductionOwnerBootstrapPoolForTests,
   requireVerifiedProductionOwnerBootstrapPool,
   digestCeremonyEndpointProfileV1,
   digestCeremonySealV1,

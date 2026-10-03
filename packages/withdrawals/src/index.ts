@@ -734,6 +734,23 @@ export type {
 } from './phase21-mainnet-registry-bootstrap.js';
 
 export {
+  PHASE21_MAINNET_REGISTRY_VERIFICATION_TRUST_CLASS,
+  isAuthenticatedPhase21MainnetRegistryVerification,
+  assertAuthenticatedPhase21MainnetRegistryVerification,
+  mintAuthenticatedPhase21MainnetRegistryVerificationFromLiveTwoProviderPass,
+  Phase21MainnetRegistryVerificationError,
+  type AuthenticatedPhase21MainnetRegistryVerification,
+  type Phase21MainnetRegistryVerificationTrustClass,
+} from './phase21-mainnet-registry-verification-trust.js';
+
+export {
+  verifyPhase21MainnetRegistryBootstrapReadOnly,
+  Phase21MainnetRegistryPostApplyVerifyError,
+  type Phase21MainnetRegistryPostApplyExpected,
+  type Phase21MainnetRegistryPostApplyVerifyResult,
+} from './phase21-mainnet-registry-post-apply-verify.js';
+
+export {
   assertPhase21CeremonyApplyGates,
   __phase21TestSetApplyEnv,
   Phase21CeremonyApplyGateError,

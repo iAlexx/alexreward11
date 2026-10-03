@@ -388,14 +388,19 @@ See `docs/PHASE_21_STEP4B1_AUTHENTICATED_READONLY_PREFLIGHT.md`.
 - Cursor/CI must never run `--apply`. Details and the future PowerShell template: `docs/PHASE_21_STEP4B2_SAFE_OWNER_APPLY.md`.
 - Step 4B.2a: production CLI secret prompts use shared `readSecretFromTty` (stdin.resume after readline). If a prior APPLY aborted at the TOTP code prompt on Windows, delete the abandoned authenticator entry and start a fresh APPLY (new TOTP secret each run).
 
-## Phase 21 Step 4C / 4C.1 operational order
+## Phase 21 Step 4C / 4C.1 / 4C.2 operational order
 
-1. Confirm Owner bootstrap COMPLETE (sanitized IDs in Step 4C closeout doc).
-2. PLAN read-only via `DATABASE_URL` as needed.
-3. APPLY (flags / Mainnet registry / Hot Wallet register) only with:
-   - ceremony endpoint profile (`--ceremony-dir` or `PHASE21_CEREMONY_ENDPOINT_PROFILE_FILE`)
-   - verified TLS pool (not `DATABASE_URL` alone)
-   - Owner TTY password+TOTP on that verified pool → branded trust (production verified-pool auth path)
-   - fresh PLAN + **required** exact confirmation phrase
-4. Hot Wallet: offline identity proof (`pnpm phase21:hot-wallet:verify-identity`), `DUAL_PROVIDER_LIVE` derivation proof FILE preferred (complete provider provenance), backup attestation, register, read-only post-register verify including audit row.
-5. Do **not** fund or enable live payout. `READY_FOR_LIVE_PAYOUT=NO`. `HOT_WALLET_REGISTERED=NO`. `MAINNET_REGISTRY_APPLIED=NO` until Owner executes those ceremonies offline.
+1. Owner Bootstrap COMPLETE (sanitized IDs in Step 4C closeout doc).
+2. Hot Wallet offline backups later (not yet).
+3. Live two-provider Mainnet verification (`PHASE21_EXTERNAL_PROBE_LIVE=1`; networkGlobalId=-239; USDT decimals=6; exact master; independent kind+host).
+4. Mint branded live Mainnet verification trust (WeakSet; forged/raw/mock/incomplete refuse).
+5. Open root-bound verify-full operational DB (ceremony endpoint profile; not `DATABASE_URL` alone).
+6. Live Owner password + TOTP auth on verified production pool → branded Owner ceremony trust.
+7. Fresh registry PLAN; branded verification master must equal PLAN/APPLY master.
+8. Exact final Owner confirmation phrase `APPLY_LOOTRA_PHASE21_MAINNET_REGISTRY`.
+9. Registry APPLY transaction.
+10. Read-only registry post-apply verify (audit + USDT/GRAM/fee/limit truth; Hot Wallet still absent).
+11. Hot Wallet identity proof + dual-provider wallet derivation proof + Hot Wallet PLAN.
+12. Separate Owner authorization for Hot Wallet register → register → post-register verify.
+13. Signer provisioning later; separate funding authorization later; separate Mainnet broadcast/payout authorization later.
+14. `READY_FOR_LIVE_PAYOUT=NO`. `HOT_WALLET_REGISTERED=NO`. `MAINNET_REGISTRY_APPLIED=NO` until Owner executes those ceremonies offline.

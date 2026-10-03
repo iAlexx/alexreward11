@@ -119,7 +119,6 @@ export {
   createOwnerBootstrapPool,
   readAuthoritativeBootstrapNowSec,
   peekIsolatedTestBootstrapClock,
-  registerVerifiedProductionOwnerBootstrapPoolForTests,
   requireVerifiedProductionOwnerBootstrapPool,
   setIsolatedTestBootstrapClock,
   type BootstrapConnectionFacts,

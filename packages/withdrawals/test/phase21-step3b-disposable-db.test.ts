@@ -23,10 +23,12 @@ import {
   planPhase21ProductionFlagBaseline,
 } from '../src/phase21-production-flag-baseline.js';
 import { mintAuthenticatedPhase21OwnerCeremonyTrustForTests } from '../src/test-only/phase21-ceremony-test-hooks.js';
+import { mintAuthenticatedPhase21MainnetRegistryVerificationForTests } from '../src/test-only/phase21-mainnet-registry-verification-test-hooks.js';
 import {
   applyPhase21MainnetRegistryBootstrap,
   planPhase21MainnetRegistryBootstrap,
 } from '../src/phase21-mainnet-registry-bootstrap.js';
+import { verifyPhase21MainnetRegistryBootstrapReadOnly } from '../src/phase21-mainnet-registry-post-apply-verify.js';
 
 const explicitUrl = process.env.PHASE4_DATABASE_URL ?? process.env.PHASE20_DATABASE_URL ?? '';
 const optedInUrl =
@@ -124,10 +126,24 @@ describeDb('phase21 step3b disposable DB apply', () => {
     const db = await client.query(`SELECT current_database() AS name`);
     process.env.PHASE21_CEREMONY_REQUIRED_SYSTEM_IDENTIFIER = String(sid.rows[0]?.sid ?? '');
     process.env.ALEX_PHASE21_CEREMONY_TEST_HOOKS = '1';
+    process.env.ALEX_OWNER_BOOTSTRAP_TEST_HOOKS = '1';
+    process.env.ALEX_OWNER_BOOTSTRAP_DISPOSABLE_PRODUCTION_SIM = '1';
+    process.env.NODE_ENV = 'test';
     return mintAuthenticatedPhase21OwnerCeremonyTrustForTests({
       adminUserId: ownerAdminId,
       currentDatabase: String(db.rows[0]?.name ?? ''),
       systemIdentifier: String(sid.rows[0]?.sid ?? ''),
+    });
+  }
+
+  function mintMainnetVerification() {
+    process.env.ALEX_PHASE21_CEREMONY_TEST_HOOKS = '1';
+    process.env.ALEX_OWNER_BOOTSTRAP_TEST_HOOKS = '1';
+    process.env.ALEX_OWNER_BOOTSTRAP_DISPOSABLE_PRODUCTION_SIM = '1';
+    process.env.NODE_ENV = 'test';
+    return mintAuthenticatedPhase21MainnetRegistryVerificationForTests({
+      jettonMaster: USDT_MASTER,
+      simulationDatabaseName: dbName,
     });
   }
 
@@ -234,10 +250,13 @@ describeDb('phase21 step3b disposable DB apply', () => {
       });
       expect(planned.filter((i) => i.action === 'CREATE').length).toBeGreaterThanOrEqual(5);
 
+      const mainnetVerification = mintMainnetVerification();
+      const ownerTrust = await mintOwnerTrust(client);
       const first = await applyPhase21MainnetRegistryBootstrap(client, {
         usdtJettonMaster: USDT_MASTER,
-        ownerTrust: await mintOwnerTrust(client),
+        ownerTrust,
         applyConfirmation: __mintPhase21MainnetRegistryApplyConfirmationForTests(),
+        mainnetVerification,
         reason: 'phase21-step3c-disposable-registry',
       });
       expect(first.applied).toBe(true);
@@ -247,6 +266,15 @@ describeDb('phase21 step3b disposable DB apply', () => {
          WHERE action_type = 'phase21.mainnet_registry.bootstrap'`,
       );
       expect(regAudits.rows[0]!.c).toBeGreaterThanOrEqual(1);
+
+      const post = await verifyPhase21MainnetRegistryBootstrapReadOnly(client, {
+        mainnetVerification,
+        adminUserId: ownerTrust.adminUserId,
+      });
+      expect(post.ok).toBe(true);
+      expect(post.readOnly).toBe(true);
+      expect(post.hotWalletRowCount).toBe(0);
+      expect(post.auditPresent).toBe(true);
 
       const verified = await planPhase21MainnetRegistryBootstrap(client, {
         usdtJettonMaster: USDT_MASTER,
@@ -261,6 +289,7 @@ describeDb('phase21 step3b disposable DB apply', () => {
         usdtJettonMaster: USDT_MASTER,
         ownerTrust: await mintOwnerTrust(client),
         applyConfirmation: __mintPhase21MainnetRegistryApplyConfirmationForTests(),
+        mainnetVerification: mintMainnetVerification(),
         reason: 'phase21-step3c-disposable-registry',
       });
       expect(second.applied).toBe(true);
