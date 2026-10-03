@@ -1073,3 +1073,7 @@ Decision: replace caller-controlled `trustClass` with runtime-branded `Authentic
 ## ADR-PHASE21-STEP4A2 — Encrypted Owner bootstrap key + private mint (2026-10-03)
 
 Decision: keep `mintAuthenticatedProductionBootstrapTrust` package-private (not exported). Store Production Owner bootstrap private key only as Argon2id + XChaCha20-Poly1305 encrypted `.enc` bundle (no plaintext `bootstrap-private-seed.hex`); passphrase interactive TTY only. Remove public `tryForgeProductionTrustFromCallerTrustClass` (test hook only). Step4A.2 is source hardening only - no real Owner key, binding, or ceremony APPLY.
+
+## ADR-PHASE21-STEP4B1 - Authenticated read-only preflight (2026-10-03)
+
+Decision: unauthenticated preflight can never report ready (no trustAuthenticated input). Readiness is reported only by `runAuthenticatedProductionOwnerBootstrapPreflightOnly` using the runtime-branded trust and its session-bound verified pool (BEGIN READ ONLY). `authenticateProductionCeremonyFromOwnerTty` returns a scoped session; callers close the pool in finally. Offline-backup readiness is never read from env. Source/test only - no real key, apply, or operational DB mutation.

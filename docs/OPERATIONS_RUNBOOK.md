@@ -369,3 +369,12 @@ Railway Postgres currently exposes internal `DATABASE_URL` only (no `DATABASE_PU
 ### Phase 21 Step 4A.2
 
 Do not enable Railway TCP Proxy for bootstrap. Tunnel remains discovery-only. Operator CLI `owner-production-bootstrap run` may orchestrate lifecycle planning; APPLY default is NO and Step4A.2 refuses real apply. Hot Wallet stays frozen (`EQD4NWgFbqCOIGQL9k0SDIP8onQH9cj_MxDcBr3N7DYLy8Lf`). Encrypted Owner key backups (>=2 offline ciphertext) and TTY passphrase are required before any future real ceremony - not executed in 4A.2. See `docs/PHASE_21_STEP4A2_FINAL_OWNER_BOOTSTRAP_HARDENING.md`.
+
+### Phase 21 Step 4B.1 - authenticated read-only preflight
+
+Mode set for `owner-production-bootstrap run`: exactly one of `--preflight-only` (unauthenticated),
+`--authenticated-preflight-only` (live Owner TTY digest; read-only), `--apply` (gated). Run the
+authenticated mode from the Owner workstation with `OWNER_PRODUCTION_BOOTSTRAP_DB_PASSWORD` set in the
+shell and `OWNER_PRODUCTION_BOOTSTRAP_APPLY` unset. Expect `OWNER_KEY_OFFLINE_BACKUPS_PENDING` until the
+offline encrypted key backups are confirmed. Digest reference: `686e3361dedc833312e8698c560b1fccdee84ff3d796cc38a8250c10dce33298`.
+See `docs/PHASE_21_STEP4B1_AUTHENTICATED_READONLY_PREFLIGHT.md`.

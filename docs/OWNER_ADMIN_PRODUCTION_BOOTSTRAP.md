@@ -75,3 +75,12 @@ Phase21 payout Hot Wallet fingerprint must never be used as Owner bootstrap / se
 - Encrypted key backups: >=2 offline ciphertext copies; key dir outside repo / not temp / not cloud sync
 - `SOURCE_READY=YES`; `SCHEMA_READY` / `ENDPOINT_TRUST_READY` / `TRUST_RESOURCES` / `READY_FOR_CEREMONY=NO`; `REAL_OWNER_BOOTSTRAP_KEY_GENERATED=NO`
 - See `docs/PHASE_21_STEP4A2_FINAL_OWNER_BOOTSTRAP_HARDENING.md`
+
+## Step 4B.1 authenticated read-only preflight
+
+- `run --authenticated-preflight-only` authenticates the production bundle digest at a live Owner TTY
+  (public digest reference `686e3361dedc833312e8698c560b1fccdee84ff3d796cc38a8250c10dce33298`) and then runs a
+  `BEGIN READ ONLY` preflight bound to the same verified pool. Unauthenticated `--preflight-only` can never be ready.
+- `authenticateProductionCeremonyFromOwnerTty` returns a scoped session; callers `close()` in `finally`.
+- `hydrate-intended-admin` writes the canonical admin email into the binding file (masked output only).
+- See `docs/PHASE_21_STEP4B1_AUTHENTICATED_READONLY_PREFLIGHT.md`.

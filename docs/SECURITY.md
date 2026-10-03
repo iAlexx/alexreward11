@@ -248,3 +248,12 @@ Production Owner bootstrap: branded trust, fail-closed session/auth inspection, 
 ### Phase 21 Step 4A.2
 
 Production Owner bootstrap final source hardening: `mintAuthenticatedProductionBootstrapTrust` not exported; forge helper test-only (`ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1`); Owner private key as Argon2id + XChaCha20-Poly1305 `.enc` (no plaintext seed); passphrase TTY-only (never env/argv/JSON/stdout); >=2 offline ciphertext backups; key dir outside repo/temp/cloud sync; APPLY default NO / Step4A.2 refuses real apply; no `forceApply`.
+
+### Phase 21 Step 4B.1
+
+- Preflight "ready" can only come from the runtime-branded `AuthenticatedProductionBootstrapTrust`
+  (live Owner TTY); the unauthenticated path cannot report ready and no boolean input grants authority.
+- Authentication returns a scoped session whose verified pool is closed by the caller (`finally`).
+- Authenticated preflight is `BEGIN READ ONLY` + `ROLLBACK`, verifies `transaction_read_only=on`, and
+  refuses pool/trust database or system_identifier mismatch. Offline-backup readiness is never taken from env.
+- Test-only pool injection requires `ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1` and is unreachable from the CLI.

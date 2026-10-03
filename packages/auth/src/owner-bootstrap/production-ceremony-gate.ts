@@ -45,9 +45,11 @@ import {
   type AuthenticatedProductionBootstrapTrust,
 } from './authenticated-production-trust.js';
 import { mintAuthenticatedProductionBootstrapTrust } from './production-trust-mint-internal.js';
+import type { BootstrapEndpointProfile } from './endpoint.js';
 import {
   createBootstrapTrustMaterial,
   createProductionOwnerBootstrapPool,
+  type OwnerBootstrapPool,
 } from './pool.js';
 import {
   generateEncryptedProductionOwnerBootstrapKey,
@@ -467,8 +469,19 @@ export function assertAuthenticatedProductionCeremony(_ceremonyDir: string): nev
 }
 
 /**
+ * Scoped result of live Owner TTY authentication. The verified pool lives only as long as
+ * the session; callers MUST call close() in a finally block.
+ */
+export interface AuthenticatedProductionCeremonySession {
+  readonly productionTrust: AuthenticatedProductionBootstrapTrust;
+  readonly verifiedPool: OwnerBootstrapPool;
+  close(): Promise<void>;
+}
+
+/**
  * Operational Layer C/D: Owner types production bundle digest from offline/witnessed media
  * into a real interactive TTY. Never accepts env/argv/file/pipe as operational authority.
+ * Returns a scoped session; the caller owns pool cleanup via session.close().
  */
 export async function authenticateProductionCeremonyFromOwnerTty(input: {
   readonly ceremonyDir: string;
@@ -480,7 +493,15 @@ export async function authenticateProductionCeremonyFromOwnerTty(input: {
    */
   readonly readOfflineBundleDigestHex: () => Promise<string>;
   readonly requireInteractiveTty?: boolean;
-}): Promise<AuthenticatedProductionBootstrapTrust> {
+  /**
+   * TEST ONLY: replaces production verify-full pool creation with a disposable simulation pool.
+   * Honored solely when ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1 and requireInteractiveTty=false.
+   */
+  readonly createPoolForTests?: (args: {
+    readonly connectionString: string;
+    readonly profile: BootstrapEndpointProfile;
+  }) => Promise<OwnerBootstrapPool>;
+}): Promise<AuthenticatedProductionCeremonySession> {
   const structural = validateProductionCeremonyBundleStructurally(input.ceremonyDir);
   const requireTty = input.requireInteractiveTty !== false;
   if (requireTty) {
@@ -511,29 +532,77 @@ export async function authenticateProductionCeremonyFromOwnerTty(input: {
   if (bytesToHex(pubBytes) !== structural.authorityPublic.public_key_raw_hex) {
     throw new AuthDomainError('FORBIDDEN', 'pinned public key bytes mismatch');
   }
-  const bootstrap = await createProductionOwnerBootstrapPool({
-    connectionString: input.connectionString,
-    profile: {
-      profileId: structural.profile.profile_id,
-      deploymentEnv: 'production',
-      expectedDatabaseName: structural.profile.expected_database_name,
-      expectedSystemIdentifier: structural.profile.expected_system_identifier!,
-      tls: {
-        mode: 'verify_full',
-        caPem: structural.profile.tls.ca_pem,
-        tlsServerName: structural.profile.tls.tls_server_name!,
-      },
+  const poolProfile: BootstrapEndpointProfile = {
+    profileId: structural.profile.profile_id,
+    deploymentEnv: 'production',
+    expectedDatabaseName: structural.profile.expected_database_name,
+    expectedSystemIdentifier: structural.profile.expected_system_identifier!,
+    tls: {
+      mode: 'verify_full',
+      caPem: structural.profile.tls.ca_pem,
+      tlsServerName: structural.profile.tls.tls_server_name,
     },
-  });
-  const trust = createBootstrapTrustMaterial(
-    bootstrap,
-    new Map([[structural.authorityPublic.key_id, pubBytes]]),
-  );
-  return mintAuthenticatedProductionBootstrapTrust({
-    trust,
-    bundle: structural.bundle,
-    bundleDigestHex: structural.bundleDigestHex,
-  });
+  };
+  const bootstrap =
+    input.createPoolForTests !== undefined
+      ? await createPoolForTestsGuarded(input.createPoolForTests, {
+          connectionString: input.connectionString,
+          profile: poolProfile,
+          requireTty,
+        })
+      : await createProductionOwnerBootstrapPool({
+          connectionString: input.connectionString,
+          profile: poolProfile,
+        });
+  try {
+    if (input.createPoolForTests !== undefined && bootstrap.profile.profileId !== poolProfile.profileId) {
+      throw new AuthDomainError(
+        'FORBIDDEN',
+        'test pool profile_id does not match ceremony endpoint profile',
+      );
+    }
+    const trust = createBootstrapTrustMaterial(
+      bootstrap,
+      new Map([[structural.authorityPublic.key_id, pubBytes]]),
+    );
+    const productionTrust = mintAuthenticatedProductionBootstrapTrust({
+      trust,
+      bundle: structural.bundle,
+      bundleDigestHex: structural.bundleDigestHex,
+    });
+    let closing: Promise<void> | null = null;
+    return {
+      productionTrust,
+      verifiedPool: bootstrap,
+      close: () => {
+        closing ??= bootstrap.pool.end().catch(() => undefined);
+        return closing;
+      },
+    };
+  } catch (error) {
+    await bootstrap.pool.end().catch(() => undefined);
+    throw error;
+  }
+}
+
+async function createPoolForTestsGuarded(
+  factory: (args: {
+    readonly connectionString: string;
+    readonly profile: BootstrapEndpointProfile;
+  }) => Promise<OwnerBootstrapPool>,
+  args: {
+    readonly connectionString: string;
+    readonly profile: BootstrapEndpointProfile;
+    readonly requireTty: boolean;
+  },
+): Promise<OwnerBootstrapPool> {
+  if (args.requireTty || process.env.ALEX_OWNER_BOOTSTRAP_TEST_HOOKS !== '1') {
+    throw new AuthDomainError(
+      'FORBIDDEN',
+      'createPoolForTests requires ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1 and requireInteractiveTty=false',
+    );
+  }
+  return factory({ connectionString: args.connectionString, profile: args.profile });
 }
 
 /** @deprecated Use validateProductionCeremonyBundleStructurally — never enrollment authority. */

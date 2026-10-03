@@ -82,3 +82,11 @@ No Owner binding/seat/credentials. No OWNER_PRODUCTION_BOOTSTRAP_APPLY=1. No --a
 ## TCP proxy exposure
 
 TCP Proxy left temporarily active for pending Owner APPLY approval after successful verify-full. If blocked long-term, delete proxy to restore private-only networking.
+
+## Step 4B.1 follow-up (2026-10-03)
+
+Source-only follow-up: authenticated read-only preflight (`--authenticated-preflight-only`),
+scoped authentication session with pool cleanup, and `hydrate-intended-admin`. No Owner key regenerated,
+no apply, no operational DB mutation. Public digest reference:
+`686e3361dedc833312e8698c560b1fccdee84ff3d796cc38a8250c10dce33298`.
+See `docs/PHASE_21_STEP4B1_AUTHENTICATED_READONLY_PREFLIGHT.md`.

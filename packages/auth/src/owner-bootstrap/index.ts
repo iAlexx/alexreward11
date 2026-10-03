@@ -191,6 +191,7 @@ export {
   draftProductionCeremonySeal,
   recordProductionChannelBDigest,
   missingProductionTrustResources,
+  type AuthenticatedProductionCeremonySession,
   type ProductionCeremonyPublicKeyRecord,
   type ProductionIntendedExistingAdminBinding,
   type ProductionChannelBRecord,
@@ -247,6 +248,12 @@ export {
   type ProductionTrustedEndpointDiscoveryResult,
   type ProductionOwnerBootstrapPreflightOnlyResult,
 } from './production-preflight-only.js';
+export { runAuthenticatedProductionOwnerBootstrapPreflightOnly } from './production-authenticated-preflight-only.js';
+export {
+  hydrateIntendedExistingAdminBindingFromDatabase,
+  maskEmailForOutput,
+  type HydrateIntendedExistingAdminResult,
+} from './production-hydrate-intended-admin.js';
 export {
   buildProductionOwnerBootstrapPoolConfig,
   createProductionOwnerBootstrapPool,

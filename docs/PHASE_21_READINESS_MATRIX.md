@@ -118,3 +118,14 @@ Step 3C adds ceremony observations that must PASS for READY_FOR_OWNER_PROVISIONI
 - Hot Wallet frozen; Railway tunnel discovery-only; no TCP Proxy
 - Step4 remains `PAUSED_OWNER_AUTHORITY_REQUIRED`
 - See `docs/PHASE_21_STEP4A2_FINAL_OWNER_BOOTSTRAP_HARDENING.md`
+
+### Step 4B.1 (2026-10-03)
+
+- Authenticated read-only preflight source complete; unauthenticated preflight can no longer report ready
+- Scoped authentication session closes the verified pool; `--apply` reuses it
+- `REAL_AUTHENTICATED_PREFLIGHT_RUN=NO` (Owner manual run pending)
+- `READY_FOR_PRODUCTION_OWNER_BOOTSTRAP_CEREMONY=NO`
+- `REAL_OWNER_BOOTSTRAP_KEY_GENERATED=NO` (no key/seal/bundle regenerated in this step)
+- Public digest reference: `686e3361dedc833312e8698c560b1fccdee84ff3d796cc38a8250c10dce33298`
+- Step4 remains `PAUSED_OWNER_AUTHORITY_REQUIRED`
+- See `docs/PHASE_21_STEP4B1_AUTHENTICATED_READONLY_PREFLIGHT.md`

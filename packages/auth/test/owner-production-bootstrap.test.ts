@@ -5,7 +5,8 @@
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { Pool } from 'pg';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import * as AuthPackage from '../src/index.js';
 import * as OwnerBootstrapPublic from '../src/owner-bootstrap/index.js';
@@ -37,6 +38,10 @@ import {
   resolvePublicProxyDialIps,
   createBootstrapTrustMaterial,
   WITNESS_MODEL,
+  authenticateProductionCeremonyFromOwnerTty,
+  runAuthenticatedProductionOwnerBootstrapPreflightOnly,
+  hydrateIntendedExistingAdminBindingFromDatabase,
+  loadProductionPublicKey,
 } from '../src/owner-bootstrap/index.js';
 import { generateEd25519KeyPair, bytesToHex } from '../src/owner-bootstrap/ed25519.js';
 import { fingerprintPublicKey } from '../src/owner-bootstrap/grant.js';
@@ -649,5 +654,574 @@ describe.skipIf(databaseUrl === '')(
         rmSync(dir, { recursive: true, force: true });
       }
     }, 180_000);
+  },
+);
+
+
+function mintFakeBrandedTrust() {
+  enableTestTemp();
+  const kp = generateEd25519KeyPair();
+  const trust = {
+    pinnedPublicKeys: new Map([['k', kp.publicKey]]),
+    endpointProfile: {
+      profileId: 'p',
+      deploymentEnv: 'production' as const,
+      expectedDatabaseName: 'railway',
+      expectedSystemIdentifier: '1',
+      tls: { mode: 'verify_full' as const, caPem: 'x', tlsServerName: 'h' },
+    },
+    connectionFacts: {
+      hostname: 'h',
+      sslEnabled: true,
+      currentDatabase: 'railway',
+      clusterSystemIdentifier: '1',
+      serverAddr: null,
+      sslInUse: true,
+    },
+  };
+  const bundle = {
+    v: 1 as const,
+    purpose: 'FIRST_OWNER_ENROLLMENT' as const,
+    deployment_env: 'production' as const,
+    ceremony_id: 'c',
+    seal_content_digest_hex: 'ab'.repeat(32),
+    endpoint_profile_id: 'p',
+    endpoint_profile_digest_hex: 'cd'.repeat(32),
+    bootstrap_key_id: 'k',
+    bootstrap_public_key_sha256_hex: fingerprintPublicKey(kp.publicKey),
+    enrollment_mode: 'CLAIM_EXISTING_ADMIN' as const,
+    intended_admin_user_id: ADMIN_ID,
+    intended_admin_email: ADMIN_EMAIL,
+    witness_model: 'HUMAN_ATTESTED' as const,
+    witness_cryptographic_identity_proven: false as const,
+    witness_count: 1,
+  };
+  return mintAuthenticatedProductionBootstrapTrustForTests({
+    trust,
+    bundle,
+    bundleDigestHex: digestProductionCeremonyBundleV1(bundle),
+  });
+}
+
+describe('phase21 step4b1 authenticated read-only preflight (no DB)', () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const d of dirs.splice(0)) {
+      rmSync(d, { recursive: true, force: true });
+    }
+  });
+
+  const readSrc = (rel: string) => readFileSync(new URL(rel, import.meta.url), 'utf8');
+
+  it('boolean and fake objects cannot authenticate the authenticated preflight', async () => {
+    await expect(
+      runAuthenticatedProductionOwnerBootstrapPreflightOnly({
+        productionTrust: true as never,
+        pool: {} as never,
+      }),
+    ).rejects.toThrow(/AuthenticatedProductionBootstrapTrust required/);
+    await expect(
+      runAuthenticatedProductionOwnerBootstrapPreflightOnly({
+        productionTrust: {
+          brand: 'AuthenticatedProductionBootstrapTrust',
+          trustClass: 'production_sealed_v1',
+        } as never,
+        pool: {} as never,
+      }),
+    ).rejects.toThrow(/AuthenticatedProductionBootstrapTrust required/);
+    const minted = mintFakeBrandedTrust();
+    await expect(
+      runAuthenticatedProductionOwnerBootstrapPreflightOnly({
+        productionTrust: { ...minted },
+        pool: {} as never,
+      }),
+    ).rejects.toThrow(/AuthenticatedProductionBootstrapTrust required/);
+  });
+
+  it('branded trust is required AND must be bound to a verified pool', async () => {
+    const minted = mintFakeBrandedTrust();
+    const unrelated = new Pool({ host: '127.0.0.1', port: 1 });
+    try {
+      await expect(
+        runAuthenticatedProductionOwnerBootstrapPreflightOnly({
+          productionTrust: minted,
+          pool: unrelated,
+        }),
+      ).rejects.toThrow(/verified bootstrap pool|production-bound/);
+    } finally {
+      await unrelated.end().catch(() => undefined);
+    }
+  });
+
+  it('tampered branded trust fields are refused', async () => {
+    const minted = mintFakeBrandedTrust();
+    const mutable = minted as unknown as { intendedAdminUserId: string };
+    const original = mutable.intendedAdminUserId;
+    mutable.intendedAdminUserId = 'ffffffff-0000-4000-8000-00000000ffff';
+    try {
+      await expect(
+        runAuthenticatedProductionOwnerBootstrapPreflightOnly({
+          productionTrust: minted,
+          pool: {} as never,
+        }),
+      ).rejects.toThrow(/tampered/);
+    } finally {
+      mutable.intendedAdminUserId = original;
+    }
+  });
+
+  it('authenticated API has no admin/email override and never calls the orchestrator', () => {
+    const src = readSrc('../src/owner-bootstrap/production-authenticated-preflight-only.ts');
+    expect(src).not.toMatch(/readonly intendedAdmin(UserId|Email)/);
+    expect(src).not.toMatch(/orchestrateProductionOwnerBootstrapCeremony/);
+    expect(src).not.toMatch(/process\.env\.[A-Z0-9_]*BACKUP/);
+    expect(src).toMatch(/BEGIN READ ONLY/);
+    expect(src).toMatch(/SHOW transaction_read_only/);
+    expect(src).toMatch(/ROLLBACK/);
+    expect(src).not.toMatch(/\b(INSERT|UPDATE|DELETE)\b\s/);
+    const unauth = readSrc('../src/owner-bootstrap/production-preflight-only.ts');
+    expect(unauth).not.toMatch(/trustAuthenticated\?\s*:/);
+    expect(unauth).toMatch(/trustAuthenticated: false,\s*readyForOwnerBootstrapApply: false/);
+  });
+
+  it('authenticate: non-TTY refused before reading digest or opening a pool', async () => {
+    enableTestTemp();
+    const dir = mkdtempSync(join(tmpdir(), 'p21-s4b1-tty-'));
+    dirs.push(dir);
+    prepCeremonyDir(dir, repoRoot);
+    const pub = loadProductionPublicKey(dir);
+    const reader = vi.fn(async () => 'ab'.repeat(32));
+    const factory = vi.fn();
+    const stdinTty = process.stdin.isTTY;
+    Object.defineProperty(process.stdin, 'isTTY', { value: false, configurable: true });
+    try {
+      await expect(
+        authenticateProductionCeremonyFromOwnerTty({
+          ceremonyDir: dir,
+          connectionString: 'postgresql://u:p@127.0.0.1:5432/x_test',
+          pinnedPublicKeyRawHex: pub.public_key_raw_hex,
+          readOfflineBundleDigestHex: reader,
+          createPoolForTests: factory,
+        }),
+      ).rejects.toThrow(/INTERACTIVE_TTY_REQUIRED/);
+    } finally {
+      Object.defineProperty(process.stdin, 'isTTY', { value: stdinTty, configurable: true });
+    }
+    expect(reader).not.toHaveBeenCalled();
+    expect(factory).not.toHaveBeenCalled();
+  });
+
+  it('createPoolForTests is refused when a real TTY is required', async () => {
+    enableTestTemp();
+    const dir = mkdtempSync(join(tmpdir(), 'p21-s4b1-ttyhook-'));
+    dirs.push(dir);
+    prepCeremonyDir(dir, repoRoot);
+    const pub = loadProductionPublicKey(dir);
+    const digest = validateProductionCeremonyBundleStructurally(dir).bundleDigestHex;
+    const factory = vi.fn();
+    const stdinTty = process.stdin.isTTY;
+    const stdoutTty = process.stdout.isTTY;
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
+    Object.defineProperty(process.stdout, 'isTTY', { value: true, configurable: true });
+    try {
+      await expect(
+        authenticateProductionCeremonyFromOwnerTty({
+          ceremonyDir: dir,
+          connectionString: 'postgresql://u:p@127.0.0.1:5432/x_test',
+          pinnedPublicKeyRawHex: pub.public_key_raw_hex,
+          readOfflineBundleDigestHex: async () => digest,
+          createPoolForTests: factory,
+        }),
+      ).rejects.toThrow(/createPoolForTests requires/);
+    } finally {
+      Object.defineProperty(process.stdin, 'isTTY', { value: stdinTty, configurable: true });
+      Object.defineProperty(process.stdout, 'isTTY', { value: stdoutTty, configurable: true });
+    }
+    expect(factory).not.toHaveBeenCalled();
+  });
+
+  it('authenticate: wrong or malformed digest fails without creating a pool', async () => {
+    enableTestTemp();
+    const dir = mkdtempSync(join(tmpdir(), 'p21-s4b1-dig-'));
+    dirs.push(dir);
+    prepCeremonyDir(dir, repoRoot);
+    const pub = loadProductionPublicKey(dir);
+    const factory = vi.fn();
+    const base = {
+      ceremonyDir: dir,
+      connectionString: 'postgresql://u:p@127.0.0.1:5432/x_test',
+      pinnedPublicKeyRawHex: pub.public_key_raw_hex,
+      requireInteractiveTty: false,
+      createPoolForTests: factory,
+    };
+    await expect(
+      authenticateProductionCeremonyFromOwnerTty({
+        ...base,
+        readOfflineBundleDigestHex: async () => 'ab'.repeat(32),
+      }),
+    ).rejects.toThrow(/does not match recomputed/);
+    await expect(
+      authenticateProductionCeremonyFromOwnerTty({
+        ...base,
+        readOfflineBundleDigestHex: async () => 'not-hex',
+      }),
+    ).rejects.toThrow(/64 lowercase hex/);
+    expect(factory).not.toHaveBeenCalled();
+  });
+
+  it('createPoolForTests is refused without TEST_HOOKS', async () => {
+    enableTestTemp();
+    const dir = mkdtempSync(join(tmpdir(), 'p21-s4b1-hook-'));
+    dirs.push(dir);
+    prepCeremonyDir(dir, repoRoot);
+    const pub = loadProductionPublicKey(dir);
+    const digest = validateProductionCeremonyBundleStructurally(dir).bundleDigestHex;
+    const factory = vi.fn();
+    delete process.env.ALEX_OWNER_BOOTSTRAP_TEST_HOOKS;
+    try {
+      await expect(
+        authenticateProductionCeremonyFromOwnerTty({
+          ceremonyDir: dir,
+          connectionString: 'postgresql://u:p@127.0.0.1:5432/x_test',
+          pinnedPublicKeyRawHex: pub.public_key_raw_hex,
+          readOfflineBundleDigestHex: async () => digest,
+          requireInteractiveTty: false,
+          createPoolForTests: factory,
+        }),
+      ).rejects.toThrow(/TEST_HOOKS/);
+    } finally {
+      enableTestTemp();
+    }
+    expect(factory).not.toHaveBeenCalled();
+  });
+
+  it('pool is closed when minting fails after pool creation', async () => {
+    enableTestTemp();
+    const dir = mkdtempSync(join(tmpdir(), 'p21-s4b1-close-'));
+    dirs.push(dir);
+    prepCeremonyDir(dir, repoRoot);
+    const pub = loadProductionPublicKey(dir);
+    const structural = validateProductionCeremonyBundleStructurally(dir);
+    const pool = new Pool({ host: '127.0.0.1', port: 1 });
+    const endSpy = vi.spyOn(pool, 'end');
+    await expect(
+      authenticateProductionCeremonyFromOwnerTty({
+        ceremonyDir: dir,
+        connectionString: 'postgresql://u:p@127.0.0.1:5432/x_test',
+        pinnedPublicKeyRawHex: pub.public_key_raw_hex,
+        readOfflineBundleDigestHex: async () => structural.bundleDigestHex,
+        requireInteractiveTty: false,
+        createPoolForTests: async ({ profile }) => ({
+          pool,
+          profile,
+          hostname: '127.0.0.1',
+          database: profile.expectedDatabaseName,
+          connectionFacts: {
+            hostname: '127.0.0.1',
+            sslEnabled: false,
+            currentDatabase: profile.expectedDatabaseName,
+            clusterSystemIdentifier: '1',
+            serverAddr: null,
+            sslInUse: false,
+          },
+        }),
+      }),
+    ).rejects.toThrow(/not registered as verified/);
+    expect(endSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('profile validation rejects extra keys (dial, created_for, credential_url_omitted)', () => {
+    for (const key of ['dial', 'created_for', 'credential_url_omitted']) {
+      expect(() => productionProfile({ [key]: 'x' })).toThrow(/unexpected ceremony profile field/);
+      expect(() => productionProfile({ [key]: true })).toThrow(/unexpected ceremony profile field/);
+    }
+    expect(() =>
+      productionProfile({
+        tls: {
+          mode: 'verify_full',
+          ca_pem: FAKE_CA,
+          tls_server_name: 'postgres.example.internal',
+          dial: '1.2.3.4',
+        },
+      }),
+    ).toThrow(/unexpected tls field/);
+    const dir = mkdtempSync(join(tmpdir(), 'p21-s4b1-prof-'));
+    dirs.push(dir);
+    expect(() =>
+      writeProductionEndpointProfile(dir, {
+        ...productionProfile(),
+        dial: '1.2.3.4',
+      } as never),
+    ).toThrow(/unexpected ceremony profile field/);
+  });
+
+  it('CLI wires authenticated preflight + hydrate with session cleanup and no spoofable inputs', () => {
+    const src = readSrc('../src/cli/owner-production-bootstrap.ts');
+    expect(src).toMatch(/--authenticated-preflight-only/);
+    expect(src).toMatch(/hydrate-intended-admin/);
+    expect(src).toMatch(/runAuthenticatedProductionOwnerBootstrapPreflightOnly/);
+    expect(src).toMatch(/ownerKeyOfflineBackupsReady: false/);
+    expect(src).not.toMatch(/trustAuthenticated/);
+    expect(src.match(/await session\?\.close\(\)/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(src.match(/authenticateProductionCeremonyFromOwnerTty\(\{/g)?.length).toBe(2);
+    expect(src).toMatch(/pool: session\.verifiedPool\.pool/);
+    expect(src).toMatch(/MUTUALLY_EXCLUSIVE_MODES/);
+    expect(src).toMatch(/PROFILE_ONLY_PARAMETER/);
+    expect(src).toMatch(/INTERACTIVE_TTY_REQUIRED/);
+  });
+});
+
+describe.skipIf(databaseUrl === '')(
+  'phase21 step4b1 authenticated read-only preflight on disposable simulation DB',
+  () => {
+    const dirs: string[] = [];
+    const sessions: Array<{ close(): Promise<void> }> = [];
+    let dbName = '';
+
+    beforeAll(async () => {
+      enableTestTemp();
+      process.env.ALEX_OWNER_BOOTSTRAP_DISPOSABLE_PRODUCTION_SIM = '1';
+      await resetIsolatedBootstrapSchema(databaseUrl);
+      dbName = dbNameFromUrl(databaseUrl);
+    }, 120_000);
+
+    afterAll(async () => {
+      for (const s of sessions.splice(0)) await s.close();
+      for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+      delete process.env.ALEX_OWNER_BOOTSTRAP_DISPOSABLE_PRODUCTION_SIM;
+    });
+
+    async function openSession(dir: string) {
+      const pub = loadProductionPublicKey(dir);
+      const structural = validateProductionCeremonyBundleStructurally(dir);
+      const session = await authenticateProductionCeremonyFromOwnerTty({
+        ceremonyDir: dir,
+        connectionString: databaseUrl,
+        pinnedPublicKeyRawHex: pub.public_key_raw_hex,
+        readOfflineBundleDigestHex: async () => structural.bundleDigestHex,
+        requireInteractiveTty: false,
+        createPoolForTests: ({ profile }) =>
+          createDisposableProductionSimPool({
+            connectionString: databaseUrl,
+            profileId: profile.profileId,
+            expectedDatabaseName: dbName,
+          }),
+      });
+      sessions.push(session);
+      return session;
+    }
+
+    async function snapshot(pool: Pool) {
+      const tables = [
+        'admin_users',
+        'admin_credentials',
+        'admin_role_bindings',
+        'admin_sessions',
+        'owner_bootstrap_grants',
+        'owner_bootstrap_attempts',
+        'audit_logs',
+      ];
+      const counts: Record<string, number> = {};
+      for (const t of tables) {
+        const r = await pool.query<{ c: number }>(`SELECT count(*)::int AS c FROM ${t}`);
+        counts[t] = Number(r.rows[0]?.c);
+      }
+      const seat = await pool.query<{ h: string | null }>(
+        `SELECT holder_admin_user_id::text AS h FROM admin_owner_authority WHERE seat = 1`,
+      );
+      return { counts, seat: seat.rows[0]?.h ?? null };
+    }
+
+    it('authenticated preflight is read-only, branded, and backups-pending by default', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'p21-s4b1-db-'));
+      dirs.push(dir);
+      prepCeremonyDir(dir, repoRoot);
+      const session = await openSession(dir);
+      const pool = session.verifiedPool.pool;
+      await pool.query(
+        `INSERT INTO admin_users (id, email, display_name, status)
+         VALUES ($1::uuid, $2, 'Target Admin', 'ACTIVE')`,
+        [ADMIN_ID, ADMIN_EMAIL],
+      );
+      expect(isAuthenticatedProductionBootstrapTrust(session.productionTrust)).toBe(true);
+
+      const seen: string[] = [];
+      const holder = pool as unknown as { connect: (...args: unknown[]) => Promise<unknown> };
+      const origConnect = holder.connect.bind(pool);
+      holder.connect = async (...connectArgs: unknown[]) => {
+        // pg-pool's own pool.query() uses the callback form - leave that untouched.
+        if (connectArgs.length > 0) return origConnect(...connectArgs);
+        const client = (await origConnect()) as {
+          query: (...args: unknown[]) => Promise<unknown>;
+        };
+        const oq = client.query.bind(client);
+        client.query = (...args: unknown[]) => {
+          const first = args[0];
+          seen.push(typeof first === 'string' ? first : String((first as { text?: string }).text));
+          return oq(...args);
+        };
+        return client;
+      };
+
+      const before = await snapshot(pool);
+      let result: Awaited<ReturnType<typeof runAuthenticatedProductionOwnerBootstrapPreflightOnly>>;
+      try {
+        result = await runAuthenticatedProductionOwnerBootstrapPreflightOnly({
+          productionTrust: session.productionTrust,
+          pool,
+        });
+      } finally {
+        holder.connect = origConnect;
+      }
+      const trace = seen.slice();
+      const after = await snapshot(pool);
+      expect(after).toEqual(before);
+
+      expect(trace[0]).toBe('BEGIN READ ONLY');
+      expect(trace[1]).toMatch(/SHOW transaction_read_only/);
+      expect(trace.at(-1)).toBe('ROLLBACK');
+      expect(trace.some((s) => /^\s*(INSERT|UPDATE|DELETE|COMMIT)\b/i.test(s))).toBe(false);
+
+      expect(result.trustAuthenticated).toBe(true);
+      expect(result.operationalDbMutation).toBe(false);
+      expect(result.schemaReady).toBe(true);
+      expect(result.ownerSeatReady).toBe(true);
+      expect(result.targetAdminReady).toBe(true);
+      expect(result.targetAdminSecurityState).toBe('CLEAN');
+      expect(result.targetExistingAdminId).toBe(ADMIN_ID);
+      expect(result.ownerKeyBackupsReady).toBe(false);
+      expect(result.readyForOwnerBootstrapApply).toBe(false);
+      expect(result.refuseCode).toBe('OWNER_KEY_OFFLINE_BACKUPS_PENDING');
+      expect(result.authenticatedBundleDigestHex).toBe(session.productionTrust.bundleDigestHex);
+      expect(result.authenticatedKeyId).toBe(session.productionTrust.keyId);
+      expect(JSON.stringify(result)).not.toContain(ADMIN_EMAIL);
+
+      const ready = await runAuthenticatedProductionOwnerBootstrapPreflightOnly({
+        productionTrust: session.productionTrust,
+        pool,
+        ownerKeyOfflineBackupsReady: true,
+      });
+      expect(ready.readyForOwnerBootstrapApply).toBe(true);
+      expect(ready.refuseCode).toBeNull();
+      expect(await snapshot(pool)).toEqual(before);
+
+      // Spoofed extra admin/email params are ignored: authority is the branded trust only.
+      const spoofed = await runAuthenticatedProductionOwnerBootstrapPreflightOnly({
+        productionTrust: session.productionTrust,
+        pool,
+        intendedAdminUserId: 'ffffffff-0000-4000-8000-00000000ffff',
+        intendedAdminEmail: 'attacker@example.local',
+      } as never);
+      expect(spoofed.targetExistingAdminId).toBe(ADMIN_ID);
+
+      await session.close();
+      expect((pool as unknown as { ended: boolean }).ended).toBe(true);
+      await session.close();
+    }, 120_000);
+
+    it('refuses pool/trust connection-fact mismatch (forged facts, foreign pool)', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'p21-s4b1-mm-'));
+      dirs.push(dir);
+      prepCeremonyDir(dir, repoRoot);
+      const session = await openSession(dir);
+      const other = await openSession(dir);
+      try {
+        await expect(
+          runAuthenticatedProductionOwnerBootstrapPreflightOnly({
+            productionTrust: session.productionTrust,
+            pool: other.verifiedPool.pool,
+          }),
+        ).rejects.toThrow(/not bound to this verified pool/);
+
+        const facts = session.verifiedPool.connectionFacts as unknown as {
+          clusterSystemIdentifier: string;
+          currentDatabase: string;
+        };
+        const sid = facts.clusterSystemIdentifier;
+        facts.clusterSystemIdentifier = '999';
+        try {
+          await expect(
+            runAuthenticatedProductionOwnerBootstrapPreflightOnly({
+              productionTrust: session.productionTrust,
+              pool: session.verifiedPool.pool,
+            }),
+          ).rejects.toThrow(/system_identifier/);
+        } finally {
+          facts.clusterSystemIdentifier = sid;
+        }
+        const db = facts.currentDatabase;
+        facts.currentDatabase = 'railway';
+        try {
+          await expect(
+            runAuthenticatedProductionOwnerBootstrapPreflightOnly({
+              productionTrust: session.productionTrust,
+              pool: session.verifiedPool.pool,
+            }),
+          ).rejects.toThrow(/database/);
+        } finally {
+          facts.currentDatabase = db;
+        }
+      } finally {
+        await session.close();
+        await other.close();
+      }
+    }, 120_000);
+
+    it('hydrate-intended-admin reads canonical email from DB without printing it', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'p21-s4b1-hyd-'));
+      dirs.push(dir);
+      const mixedEmail = 'Hydrate-Target@Example.Local';
+      const hydrateId = 'e55e55e5-0000-4000-8000-000000000055';
+      writeIntendedExistingAdminBinding(dir, {
+        enrollment_mode: 'CLAIM_EXISTING_ADMIN',
+        intended_admin_user_id: hydrateId,
+        intended_admin_email: 'placeholder@example.local',
+        note: 'locator_only_not_authority',
+      });
+      const bootstrap = await createDisposableProductionSimPool({
+        connectionString: databaseUrl,
+        profileId: 'prod-profile-v1',
+        expectedDatabaseName: dbName,
+      });
+      try {
+        await bootstrap.pool.query(
+          `INSERT INTO admin_users (id, email, display_name, status)
+           VALUES ($1::uuid, $2, 'Hydrate Target', 'ACTIVE')`,
+          [hydrateId, mixedEmail],
+        );
+        const before = await snapshot(bootstrap.pool);
+        const result = await hydrateIntendedExistingAdminBindingFromDatabase({
+          ceremonyDir: dir,
+          bootstrap,
+        });
+        expect(await snapshot(bootstrap.pool)).toEqual(before);
+        expect(result.adminUserId).toBe(hydrateId);
+        expect(result.emailMasked).toBe('h***@example.local');
+        const printed = JSON.stringify(result);
+        expect(printed.toLowerCase()).not.toContain('hydrate-target');
+        const written = JSON.parse(
+          readFileSync(join(dir, 'intended-existing-admin.json'), 'utf8'),
+        ) as { intended_admin_email: string; intended_admin_user_id: string };
+        expect(written.intended_admin_email).toBe('hydrate-target@example.local');
+        expect(written.intended_admin_user_id).toBe(hydrateId);
+        expect(result.bundleMatchesBinding).toBeNull();
+
+        await bootstrap.pool.query(`UPDATE admin_users SET status = 'LOCKED' WHERE id = $1::uuid`, [
+          hydrateId,
+        ]);
+        await expect(
+          hydrateIntendedExistingAdminBindingFromDatabase({ ceremonyDir: dir, bootstrap }),
+        ).rejects.toThrow(/TARGET_ADMIN_NOT_ACTIVE/);
+        await expect(
+          hydrateIntendedExistingAdminBindingFromDatabase({
+            ceremonyDir: dir,
+            bootstrap,
+            intendedAdminUserId: 'a77a77a7-0000-4000-8000-000000000077',
+          }),
+        ).rejects.toThrow(/TARGET_ADMIN_NOT_FOUND/);
+      } finally {
+        await bootstrap.pool.end().catch(() => undefined);
+      }
+    }, 120_000);
   },
 );

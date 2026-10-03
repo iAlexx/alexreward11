@@ -66,6 +66,10 @@ export interface ProductionOwnerBootstrapPreflightOnlyResult {
   readonly targetExistingAdminId: string | null;
   readonly targetExistingAdminStatus: string | null;
   readonly authCounts: ClaimExistingAdminAuthCounts | null;
+  /** Populated only by the authenticated read-only preflight (branded trust). */
+  readonly authenticatedBundleDigestHex: string | null;
+  readonly authenticatedKeyId: string | null;
+  readonly authenticatedEndpointProfileId: string | null;
   readonly notes: readonly string[];
 }
 
@@ -242,177 +246,228 @@ async function withReadOnlyClient<T>(
   }
 }
 
+export interface ProductionOwnerBootstrapReadOnlyEvaluationInput {
+  readonly intendedAdminUserId: string;
+  /** null => use the email stored on the admin row (unauthenticated diagnostics only). */
+  readonly intendedAdminEmail: string | null;
+  readonly trustAuthenticated: boolean;
+  readonly ownerKeyBackupsReady: boolean;
+  readonly authenticatedBinding: {
+    readonly bundleDigestHex: string;
+    readonly keyId: string;
+    readonly endpointProfileId: string;
+  } | null;
+  readonly endpoint: {
+    readonly dialIp: string | null;
+    readonly tlsServerName: string | null;
+    readonly databaseName: string;
+    readonly systemIdentifier: string;
+  };
+  readonly notes: string[];
+}
+
+/**
+ * Shared read-only evaluation. MUST be called inside BEGIN READ ONLY.
+ * Package-internal: not re-exported from the public index.
+ */
+export async function evaluateProductionOwnerBootstrapReadOnlyState(
+  client: PoolClient,
+  input: ProductionOwnerBootstrapReadOnlyEvaluationInput,
+): Promise<ProductionOwnerBootstrapPreflightOnlyResult> {
+  const notes = input.notes;
+  const schema = await preflightProductionOwnerBootstrapSchema(client);
+
+  const seat = await client.query<{
+    holder: string | null;
+    active_binding_id: string | null;
+    claimed_at: string | null;
+  }>(
+    `SELECT holder_admin_user_id::text AS holder,
+            active_binding_id::text AS active_binding_id,
+            claimed_at::text AS claimed_at
+     FROM admin_owner_authority WHERE seat = 1`,
+  );
+  const seatRow = seat.rows[0];
+  const ownerSeatVacant =
+    seatRow !== undefined &&
+    seatRow.holder === null &&
+    seatRow.active_binding_id === null &&
+    seatRow.claimed_at === null;
+
+  const role = await client.query<{ status: string }>(
+    `SELECT status::text AS status FROM admin_roles WHERE code = 'OWNER' LIMIT 1`,
+  );
+  const ownerRoleStatus = role.rows[0]?.status ?? null;
+
+  const history = await client.query<{ c: number }>(
+    `SELECT count(DISTINCT b.admin_user_id)::int AS c
+     FROM admin_role_bindings b
+     INNER JOIN admin_roles r ON r.id = b.role_id
+     WHERE r.code = 'OWNER'`,
+  );
+  const ownerBindingHistoryCount = history.rows[0]?.c ?? 0;
+  const active = await client.query<{ c: number }>(
+    `SELECT count(*)::int AS c
+     FROM admin_role_bindings b
+     INNER JOIN admin_roles r ON r.id = b.role_id
+     WHERE r.code = 'OWNER' AND b.revoked_at IS NULL`,
+  );
+  const activeOwnerBindingCount = active.rows[0]?.c ?? 0;
+
+  const admin = await client.query<{ id: string; email: string; status: string }>(
+    `SELECT id::text AS id, email, status::text AS status
+     FROM admin_users WHERE id = $1::uuid`,
+    [input.intendedAdminUserId],
+  );
+  const adminRow = admin.rows[0];
+
+  let targetAdminSecurityState: ProductionOwnerBootstrapPreflightOnlyResult['targetAdminSecurityState'] =
+    'NOT_FOUND';
+  let authCounts: ClaimExistingAdminAuthCounts | null = null;
+  let targetAdminReady = false;
+  let claimEligible = false;
+
+  if (adminRow === undefined) {
+    notes.push('target admin candidate not found');
+  } else if (adminRow.status !== 'ACTIVE') {
+    targetAdminSecurityState = 'REQUIRES_OWNER_REVIEW';
+    notes.push('target admin not ACTIVE');
+  } else {
+    const auth = await inspectExistingAdminAuthMaterial(client, adminRow.id);
+    if (!auth.ok) {
+      targetAdminSecurityState = 'UNKNOWN';
+      notes.push(auth.refuseCode);
+    } else {
+      authCounts = auth.counts;
+      const dirty =
+        auth.counts.activePasswordCount > 0 ||
+        auth.counts.activeTotpCount > 0 ||
+        auth.counts.activeWebauthnCount > 0 ||
+        auth.counts.otherActiveCredentialCount > 0 ||
+        auth.counts.unconsumedRecoveryCodeCount > 0 ||
+        auth.counts.activeSessionCount > 0 ||
+        auth.counts.openAdminActionTokenCount > 0 ||
+        auth.counts.credentialRowsTotal > 0;
+      targetAdminSecurityState = dirty ? 'REQUIRES_OWNER_REVIEW' : 'CLEAN';
+      if (!dirty) {
+        const email = (input.intendedAdminEmail ?? adminRow.email).trim();
+        const claim = await preflightClaimExistingAdmin(client, {
+          intendedAdminUserId: adminRow.id,
+          intendedAdminEmail: email,
+          lockForUpdate: false,
+        });
+        claimEligible = claim.eligible;
+        targetAdminReady = claim.eligible;
+        if (!claim.eligible) {
+          notes.push(claim.refuseCode ?? 'claim preflight refused');
+        }
+      }
+    }
+  }
+
+  const ownerSeatReady =
+    ownerSeatVacant &&
+    ownerBindingHistoryCount === 0 &&
+    activeOwnerBindingCount === 0 &&
+    ownerRoleStatus === 'ACTIVE';
+
+  const trustAuthenticated = input.trustAuthenticated;
+  const ownerKeyBackupsReady = input.ownerKeyBackupsReady;
+  const readyForOwnerBootstrapApply =
+    trustAuthenticated &&
+    schema.schemaReady &&
+    ownerSeatReady &&
+    targetAdminReady &&
+    targetAdminSecurityState === 'CLEAN' &&
+    claimEligible &&
+    ownerKeyBackupsReady;
+
+  let refuseCode: string | null = null;
+  if (!schema.schemaReady) refuseCode = schema.refuseCode ?? 'SCHEMA_NOT_READY';
+  else if (!ownerSeatReady) refuseCode = 'OWNER_SEAT_NOT_READY';
+  else if (targetAdminSecurityState !== 'CLEAN') {
+    refuseCode =
+      targetAdminSecurityState === 'UNKNOWN'
+        ? 'EXISTING_ADMIN_SECURITY_STATE_UNKNOWN'
+        : 'EXISTING_ADMIN_AUTH_STATE_REQUIRES_OWNER_REVIEW';
+  } else if (!targetAdminReady) refuseCode = 'TARGET_ADMIN_NOT_READY';
+  else if (!trustAuthenticated) refuseCode = 'TRUST_NOT_AUTHENTICATED';
+  else if (!ownerKeyBackupsReady) refuseCode = 'OWNER_KEY_OFFLINE_BACKUPS_PENDING';
+
+  return {
+    trustClass: PRODUCTION_OWNER_BOOTSTRAP_TRUST_CLASS,
+    mode: 'preflight-only',
+    operationalDbMutation: false,
+    trustAuthenticated,
+    tlsEndpointVerified: true,
+    schemaReady: schema.schemaReady,
+    ownerSeatReady,
+    targetAdminReady,
+    targetAdminSecurityState,
+    ownerKeyBackupsReady,
+    readyForOwnerBootstrapApply,
+    refuseCode,
+    dialIp: input.endpoint.dialIp,
+    tlsServerName: input.endpoint.tlsServerName,
+    operationalDatabaseName: input.endpoint.databaseName,
+    operationalSystemIdentifier: input.endpoint.systemIdentifier,
+    requiredMigrationsPresent: schema.appliedMigrationVersions,
+    requiredMigrationsMissing: schema.missingMigrations,
+    ownerSeatStatus: ownerSeatVacant ? 'VACANT' : 'HELD_OR_PARTIAL',
+    ownerBindingHistoryCount,
+    activeOwnerBindingCount,
+    ownerRoleStatus,
+    targetExistingAdminId: adminRow?.id ?? null,
+    targetExistingAdminStatus: adminRow?.status ?? null,
+    authCounts,
+    authenticatedBundleDigestHex: input.authenticatedBinding?.bundleDigestHex ?? null,
+    authenticatedKeyId: input.authenticatedBinding?.keyId ?? null,
+    authenticatedEndpointProfileId: input.authenticatedBinding?.endpointProfileId ?? null,
+    notes,
+  };
+}
+
+/**
+ * Unauthenticated read-only diagnostics. Never carries trust authority:
+ * trustAuthenticated is always false and readyForOwnerBootstrapApply is always false.
+ */
 export async function runProductionOwnerBootstrapPreflightOnly(input: {
   readonly endpoint: ProductionTrustedEndpointDiscoveryInput;
   readonly intendedAdminUserId?: string;
   readonly intendedAdminEmail?: string;
-  /** When true, Layer C/D was authenticated in this process (live Owner TTY). */
-  readonly trustAuthenticated?: boolean;
   readonly ownerKeyOfflineBackupsReady?: boolean;
 }): Promise<ProductionOwnerBootstrapPreflightOnlyResult> {
   if (process.env.OWNER_PRODUCTION_BOOTSTRAP_APPLY === '1') {
     throw new AuthDomainError(
       'FORBIDDEN',
-      'OWNER_PRODUCTION_BOOTSTRAP_APPLY is enabled — stop before DB connection in Step4B',
+      'OWNER_PRODUCTION_BOOTSTRAP_APPLY is enabled - stop before DB connection in Step4B',
     );
   }
 
   const notes: string[] = [
     'preflight-only is read-only (BEGIN READ ONLY + ROLLBACK)',
     'OPERATIONAL_DB_MUTATION=NO',
+    'unauthenticated diagnostics only - readyForOwnerBootstrapApply is always false',
   ];
 
   const discovered = await discoverProductionTrustedEndpoint(input.endpoint);
   const intendedId = (input.intendedAdminUserId ?? TARGET_ADMIN_CANDIDATE_ID).trim();
 
   return withReadOnlyClient({ ...input.endpoint, dialIp: discovered.dialIp }, async (client) => {
-    const schema = await preflightProductionOwnerBootstrapSchema(client);
-
-    const seat = await client.query<{
-      holder: string | null;
-      active_binding_id: string | null;
-      claimed_at: string | null;
-    }>(
-      `SELECT holder_admin_user_id::text AS holder,
-              active_binding_id::text AS active_binding_id,
-              claimed_at::text AS claimed_at
-       FROM admin_owner_authority WHERE seat = 1`,
-    );
-    const seatRow = seat.rows[0];
-    const ownerSeatVacant =
-      seatRow !== undefined &&
-      seatRow.holder === null &&
-      seatRow.active_binding_id === null &&
-      seatRow.claimed_at === null;
-
-    const role = await client.query<{ status: string }>(
-      `SELECT status::text AS status FROM admin_roles WHERE code = 'OWNER' LIMIT 1`,
-    );
-    const ownerRoleStatus = role.rows[0]?.status ?? null;
-
-    const history = await client.query<{ c: number }>(
-      `SELECT count(DISTINCT b.admin_user_id)::int AS c
-       FROM admin_role_bindings b
-       INNER JOIN admin_roles r ON r.id = b.role_id
-       WHERE r.code = 'OWNER'`,
-    );
-    const ownerBindingHistoryCount = history.rows[0]?.c ?? 0;
-    const active = await client.query<{ c: number }>(
-      `SELECT count(*)::int AS c
-       FROM admin_role_bindings b
-       INNER JOIN admin_roles r ON r.id = b.role_id
-       WHERE r.code = 'OWNER' AND b.revoked_at IS NULL`,
-    );
-    const activeOwnerBindingCount = active.rows[0]?.c ?? 0;
-
-    const admin = await client.query<{ id: string; email: string; status: string }>(
-      `SELECT id::text AS id, email, status::text AS status
-       FROM admin_users WHERE id = $1::uuid`,
-      [intendedId],
-    );
-    const adminRow = admin.rows[0];
-
-    let targetAdminSecurityState: ProductionOwnerBootstrapPreflightOnlyResult['targetAdminSecurityState'] =
-      'NOT_FOUND';
-    let authCounts: ClaimExistingAdminAuthCounts | null = null;
-    let targetAdminReady = false;
-    let claimEligible = false;
-
-    if (adminRow === undefined) {
-      targetAdminSecurityState = 'NOT_FOUND';
-      notes.push('target admin candidate not found');
-    } else if (adminRow.status !== 'ACTIVE') {
-      targetAdminSecurityState = 'REQUIRES_OWNER_REVIEW';
-      notes.push('target admin not ACTIVE');
-    } else {
-      const auth = await inspectExistingAdminAuthMaterial(client, adminRow.id);
-      if (!auth.ok) {
-        targetAdminSecurityState = 'UNKNOWN';
-        notes.push(auth.refuseCode);
-      } else {
-        authCounts = auth.counts;
-        const dirty =
-          auth.counts.activePasswordCount > 0 ||
-          auth.counts.activeTotpCount > 0 ||
-          auth.counts.activeWebauthnCount > 0 ||
-          auth.counts.otherActiveCredentialCount > 0 ||
-          auth.counts.unconsumedRecoveryCodeCount > 0 ||
-          auth.counts.activeSessionCount > 0 ||
-          auth.counts.openAdminActionTokenCount > 0 ||
-          auth.counts.credentialRowsTotal > 0;
-        targetAdminSecurityState = dirty ? 'REQUIRES_OWNER_REVIEW' : 'CLEAN';
-        if (!dirty) {
-          const email = (input.intendedAdminEmail ?? adminRow.email).trim();
-          const claim = await preflightClaimExistingAdmin(client, {
-            intendedAdminUserId: adminRow.id,
-            intendedAdminEmail: email,
-            lockForUpdate: false,
-          });
-          claimEligible = claim.eligible;
-          targetAdminReady = claim.eligible;
-          if (!claim.eligible) {
-            notes.push(claim.refuseCode ?? 'claim preflight refused');
-          }
-        }
-      }
-    }
-
-    const ownerSeatReady =
-      ownerSeatVacant &&
-      ownerBindingHistoryCount === 0 &&
-      activeOwnerBindingCount === 0 &&
-      ownerRoleStatus === 'ACTIVE';
-
-    const trustAuthenticated = input.trustAuthenticated === true;
-    const ownerKeyBackupsReady = input.ownerKeyOfflineBackupsReady === true;
-    const readyForOwnerBootstrapApply =
-      trustAuthenticated &&
-      schema.schemaReady &&
-      ownerSeatReady &&
-      targetAdminReady &&
-      targetAdminSecurityState === 'CLEAN' &&
-      claimEligible &&
-      ownerKeyBackupsReady;
-
-    let refuseCode: string | null = null;
-    if (!schema.schemaReady) refuseCode = schema.refuseCode ?? 'SCHEMA_NOT_READY';
-    else if (!ownerSeatReady) refuseCode = 'OWNER_SEAT_NOT_READY';
-    else if (targetAdminSecurityState !== 'CLEAN') {
-      refuseCode =
-        targetAdminSecurityState === 'UNKNOWN'
-          ? 'EXISTING_ADMIN_SECURITY_STATE_UNKNOWN'
-          : 'EXISTING_ADMIN_AUTH_STATE_REQUIRES_OWNER_REVIEW';
-    } else if (!targetAdminReady) refuseCode = 'TARGET_ADMIN_NOT_READY';
-    else if (!trustAuthenticated) refuseCode = 'TRUST_NOT_AUTHENTICATED';
-    else if (!ownerKeyBackupsReady) refuseCode = 'OWNER_KEY_OFFLINE_BACKUPS_PENDING';
-
-    return {
-      trustClass: PRODUCTION_OWNER_BOOTSTRAP_TRUST_CLASS,
-      mode: 'preflight-only',
-      operationalDbMutation: false,
-      trustAuthenticated,
-      tlsEndpointVerified: true,
-      schemaReady: schema.schemaReady,
-      ownerSeatReady,
-      targetAdminReady,
-      targetAdminSecurityState,
-      ownerKeyBackupsReady,
-      readyForOwnerBootstrapApply,
-      refuseCode,
-      dialIp: discovered.dialIp,
-      tlsServerName: discovered.tlsServerName,
-      operationalDatabaseName: discovered.databaseName,
-      operationalSystemIdentifier: discovered.systemIdentifier,
-      requiredMigrationsPresent: schema.appliedMigrationVersions,
-      requiredMigrationsMissing: schema.missingMigrations,
-      ownerSeatStatus: ownerSeatVacant ? 'VACANT' : 'HELD_OR_PARTIAL',
-      ownerBindingHistoryCount,
-      activeOwnerBindingCount,
-      ownerRoleStatus,
-      targetExistingAdminId: adminRow?.id ?? null,
-      targetExistingAdminStatus: adminRow?.status ?? null,
-      authCounts,
+    const evaluated = await evaluateProductionOwnerBootstrapReadOnlyState(client, {
+      intendedAdminUserId: intendedId,
+      intendedAdminEmail: input.intendedAdminEmail?.trim() ?? null,
+      trustAuthenticated: false,
+      ownerKeyBackupsReady: input.ownerKeyOfflineBackupsReady === true,
+      authenticatedBinding: null,
+      endpoint: {
+        dialIp: discovered.dialIp,
+        tlsServerName: discovered.tlsServerName,
+        databaseName: discovered.databaseName,
+        systemIdentifier: discovered.systemIdentifier,
+      },
       notes,
-    };
+    });
+    return { ...evaluated, trustAuthenticated: false, readyForOwnerBootstrapApply: false };
   });
 }
