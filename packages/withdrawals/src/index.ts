@@ -690,6 +690,7 @@ export {
   validateMainnetJettonMasterAddress,
   validateProviderIndependence,
   normalizeProviderHost,
+  normalizeOfficialTetherUsdMetadataSymbol,
   runOptionalMainnetProviderReachabilityProbe,
   verifyMainnetUsdtWithTwoProviders,
 } from './phase21-external-probes.js';

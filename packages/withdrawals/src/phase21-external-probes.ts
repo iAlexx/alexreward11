@@ -104,11 +104,69 @@ export interface Phase21TwoProviderVerificationResult {
   readonly symbol?: 'USDT';
   readonly decimals?: 6;
   readonly verifiedAt?: string;
+  /** Sanitized provider-observed display symbols (may be USD₮ before normalization). */
+  readonly primaryObservedSymbol?: string | null;
+  readonly secondaryObservedSymbol?: string | null;
+  readonly primaryObservedDecimals?: number | null;
+  readonly secondaryObservedDecimals?: number | null;
   readonly notes: readonly string[];
 }
 
 function nonEmpty(value: string | null | undefined): boolean {
   return typeof value === 'string' && value.trim() !== '';
+}
+
+/**
+ * Normalize official Tether USD Jetton *provider display* metadata symbols to the
+ * internal LOOTRA/Alex Rewards canonical asset code USDT.
+ *
+ * Exact allowlist only (fail closed). No fuzzy / contains / casefold matching.
+ * Recognized provider display variants:
+ * - USDT (ASCII canonical / some providers)
+ * - USD₮ (official Tether branded Tugrik-sign form)
+ * - USDt (documented Tether ASCII fallback)
+ */
+export function normalizeOfficialTetherUsdMetadataSymbol(
+  raw: string | null | undefined,
+): 'USDT' | null {
+  if (typeof raw !== 'string') return null;
+  const symbol = raw.trim();
+  if (symbol === 'USDT') return 'USDT';
+  if (symbol === 'USD₮') return 'USDT';
+  if (symbol === 'USDt') return 'USDT';
+  return null;
+}
+
+function metadataDiagnostics(metaA: {
+  readonly symbol: string | null;
+  readonly decimals: number | null;
+}, metaB: {
+  readonly symbol: string | null;
+  readonly decimals: number | null;
+}): {
+  readonly primaryObservedSymbol: string | null;
+  readonly secondaryObservedSymbol: string | null;
+  readonly primaryObservedDecimals: number | null;
+  readonly secondaryObservedDecimals: number | null;
+} {
+  return {
+    primaryObservedSymbol: metaA.symbol,
+    secondaryObservedSymbol: metaB.symbol,
+    primaryObservedDecimals: metaA.decimals,
+    secondaryObservedDecimals: metaB.decimals,
+  };
+}
+
+function isTrustworthyCanonicalUsdtMetadata(meta: {
+  readonly ok: boolean;
+  readonly symbol: string | null;
+  readonly decimals: number | null;
+}): boolean {
+  return (
+    meta.ok === true &&
+    normalizeOfficialTetherUsdMetadataSymbol(meta.symbol) === 'USDT' &&
+    meta.decimals === 6
+  );
 }
 
 /**
@@ -415,8 +473,11 @@ export async function verifyMainnetUsdtWithTwoProviders(input: {
     }),
   ]);
 
-  const metaAOk = metaA.ok && metaA.symbol === 'USDT' && metaA.decimals === 6;
-  const metaBOk = metaB.ok && metaB.symbol === 'USDT' && metaB.decimals === 6;
+  const metaAOk = isTrustworthyCanonicalUsdtMetadata(metaA);
+  const metaBOk = isTrustworthyCanonicalUsdtMetadata(metaB);
+  const observedSymbols = metadataDiagnostics(metaA, metaB);
+  const canonicalSymbolA = normalizeOfficialTetherUsdMetadataSymbol(metaA.symbol);
+  const canonicalSymbolB = normalizeOfficialTetherUsdMetadataSymbol(metaB.symbol);
 
   if (metaAOk !== metaBOk) {
     return {
@@ -424,7 +485,7 @@ export async function verifyMainnetUsdtWithTwoProviders(input: {
       incomplete: true,
       code: 'USDT_METADATA_INCOMPLETE',
       message:
-        'Only one provider returned trustworthy USDT metadata (symbol=USDT decimals=6); dual-provider gate incomplete',
+        'Only one provider returned trustworthy USDT metadata (canonical symbol=USDT decimals=6); dual-provider gate incomplete',
       independence,
       primary: {
         providerKind: primaryKind,
@@ -444,7 +505,17 @@ export async function verifyMainnetUsdtWithTwoProviders(input: {
         verificationMethod: 'metadata_adapter',
         ok: metaBOk,
       },
-      notes: [metaA.message, metaB.message, 'INCOMPLETE not PASS', 'No broadcast'],
+      ...observedSymbols,
+      notes: [
+        metaA.message,
+        metaB.message,
+        `primaryObservedSymbol=${metaA.symbol ?? 'null'}`,
+        `secondaryObservedSymbol=${metaB.symbol ?? 'null'}`,
+        `primaryObservedDecimals=${metaA.decimals === null ? 'null' : String(metaA.decimals)}`,
+        `secondaryObservedDecimals=${metaB.decimals === null ? 'null' : String(metaB.decimals)}`,
+        'INCOMPLETE not PASS',
+        'No broadcast',
+      ],
     };
   }
 
@@ -452,7 +523,8 @@ export async function verifyMainnetUsdtWithTwoProviders(input: {
     return {
       ok: false,
       code: 'USDT_METADATA_MISMATCH',
-      message: 'USDT metadata must be symbol=USDT decimals=6 on both providers',
+      message:
+        'USDT metadata must normalize to canonical symbol=USDT with decimals=6 on both providers',
       independence,
       primary: {
         providerKind: primaryKind,
@@ -472,15 +544,30 @@ export async function verifyMainnetUsdtWithTwoProviders(input: {
         verificationMethod: 'metadata_adapter',
         ok: metaBOk,
       },
-      notes: [metaA.message, metaB.message, 'No broadcast'],
+      ...observedSymbols,
+      notes: [
+        metaA.message,
+        metaB.message,
+        `primaryObservedSymbol=${metaA.symbol ?? 'null'}`,
+        `secondaryObservedSymbol=${metaB.symbol ?? 'null'}`,
+        `primaryObservedDecimals=${metaA.decimals === null ? 'null' : String(metaA.decimals)}`,
+        `secondaryObservedDecimals=${metaB.decimals === null ? 'null' : String(metaB.decimals)}`,
+        'No broadcast',
+      ],
     };
   }
 
-  if (metaA.symbol !== metaB.symbol || metaA.decimals !== metaB.decimals) {
+  // Compare *canonical* symbols so USD₮ vs USDT (or USDt) may agree after normalization.
+  if (
+    canonicalSymbolA !== 'USDT' ||
+    canonicalSymbolB !== 'USDT' ||
+    canonicalSymbolA !== canonicalSymbolB ||
+    metaA.decimals !== metaB.decimals
+  ) {
     return {
       ok: false,
       code: 'PROVIDER_METADATA_DISAGREE',
-      message: 'Primary and secondary USDT metadata disagree',
+      message: 'Primary and secondary USDT metadata disagree after canonical normalization',
       independence,
       primary: {
         providerKind: primaryKind,
@@ -500,7 +587,15 @@ export async function verifyMainnetUsdtWithTwoProviders(input: {
         verificationMethod: 'metadata_adapter',
         ok: false,
       },
-      notes: ['Fail closed on provider disagreement', 'No broadcast'],
+      ...observedSymbols,
+      notes: [
+        'Fail closed on provider disagreement',
+        `primaryObservedSymbol=${metaA.symbol ?? 'null'}`,
+        `secondaryObservedSymbol=${metaB.symbol ?? 'null'}`,
+        `primaryObservedDecimals=${metaA.decimals === null ? 'null' : String(metaA.decimals)}`,
+        `secondaryObservedDecimals=${metaB.decimals === null ? 'null' : String(metaB.decimals)}`,
+        'No broadcast',
+      ],
     };
   }
 
@@ -637,7 +732,14 @@ export async function verifyMainnetUsdtWithTwoProviders(input: {
       symbol: 'USDT',
       decimals: 6,
       verifiedAt: observedAt,
-      notes: ['Read-only verification only', 'No broadcast', 'DUAL_PROVIDER_LIVE derivation ready'],
+      ...observedSymbols,
+      notes: [
+        'Read-only verification only',
+        'No broadcast',
+        'DUAL_PROVIDER_LIVE derivation ready',
+        `primaryObservedSymbol=${metaA.symbol ?? 'null'}`,
+        `secondaryObservedSymbol=${metaB.symbol ?? 'null'}`,
+      ],
     };
   }
 
@@ -674,10 +776,13 @@ export async function verifyMainnetUsdtWithTwoProviders(input: {
     symbol: 'USDT',
     decimals: 6,
     verifiedAt: observedAt,
+    ...observedSymbols,
     notes: [
       'Read-only verification only',
       'No broadcast',
       'ownerAddress absent — Jetton wallet derivation skipped',
+      `primaryObservedSymbol=${metaA.symbol ?? 'null'}`,
+      `secondaryObservedSymbol=${metaB.symbol ?? 'null'}`,
     ],
   };
 }
