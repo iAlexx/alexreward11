@@ -8,7 +8,7 @@ RUN npm install --global pnpm@11.25.0
 
 WORKDIR /workspace
 COPY . .
-RUN --mount=type=cache,id=alex-rewards-pnpm-store,target=/pnpm/store \
+RUN --mount=type=cache,id=s/ba2a082e-6478-4f14-a0bb-f56a4ddddfaf-/pnpm/store,target=/pnpm/store \
     pnpm install --frozen-lockfile
 
 ARG NEXT_PUBLIC_API_BASE_URL=http://localhost:3002
