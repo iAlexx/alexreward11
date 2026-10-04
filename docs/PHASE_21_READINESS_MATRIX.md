@@ -23,7 +23,7 @@ WORKER_MAINNET_SOURCE_WIRING=READY
 WORKER_MAINNET_OPERATIONAL_ENABLE=OFF
 SIGNER_HOSTING=DEDICATED_CONTROLLED_HOST
 BALANCE_SOURCE=SOURCE_IMPLEMENTED_OWNER_APPROVED_BUT_NOT_EXECUTED
-ATTACHED_GRAM_LIFECYCLE=ESTIMATED
+ATTACHED_GRAM_LIFECYCLE=OWNER_APPROVED_DECISION_SOURCE_WIRING_PENDING
 FORWARD_GRAM_ATOMIC=1 (Owner-approved)
 ```
 
@@ -47,7 +47,7 @@ FORWARD_GRAM_ATOMIC=1 (Owner-approved)
 | M16 | Worker Mainnet **source** wiring | Implemented; default OFF | phase21-runtime-selection.ts, worker schema | READY (source) |
 | M16b | Worker Mainnet **operational** enable | OFF — no live Mainnet dispatch | PHASE21_MAINNET_ENABLED=false operationally | BLOCKED (safe-off) |
 | M17 | Signer hosting | Owner decision: DEDICATED_CONTROLLED_HOST | PHASE_21_SIGNER_HOSTING_DECISION.md | READY (decision) |
-| M18 | Mainnet transfer gas policy | Forward 1 nanogram Owner-approved; attached ESTIMATED | jetton-transfer-policy.ts | PARTIAL (forward READY; attached OWNER_DECISION) |
+| M18 | Mainnet transfer gas policy | Forward 1 nanogram Owner-approved; attached **0.05 GRAM / 50,000,000 nanogram Owner-approved by decision**; historical SPIKE-number source guard still needs correction/test | PHASE_21_ATTACHED_GRAM_OWNER_APPROVAL.md + jetton-transfer-policy.ts | PARTIAL (decision READY; source wiring pending) |
 | M19 | _(historical Step 2)_ Worker Mainnet wiring | Same as M16 — source READY / operational OFF | See M16 / M16b | READY (source) / BLOCKED (ops) |
 | M20 | Mainnet Jetton external verification | Tooling present; live pending | phase21-external-probes.ts | BLOCKED |
 | M21 | Signer hosting decision documented | DEDICATED_CONTROLLED_HOST | docs | READY (decision doc) |

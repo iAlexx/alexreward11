@@ -14,7 +14,7 @@ Owner-facing preflight before any later provisioning ceremony. Completing this c
 - [ ] `pnpm phase21:preflight` may show `READY_FOR_OWNER_PROVISIONING_CEREMONY` or `MAINNET_SOURCE_READY`
 - [ ] `readyForLivePayout` is **false**
 - [ ] Signer hosting locked: `DEDICATED_CONTROLLED_HOST`
-- [ ] Forward GRAM = 1 nanogram Owner-approved; attached lifecycle **ESTIMATED**
+- [x] Forward GRAM = 1 nanogram Owner-approved; attached **50,000,000 nanogram (0.05 GRAM) Owner-approved by decision**; source wiring still pending before signing
 - [ ] Controlled Available tooling documented; **not executed**
 - [ ] AdsGram gaps remain OPEN
 - [ ] Canonical runtime still `b9dd700`; Phase21 not deployed

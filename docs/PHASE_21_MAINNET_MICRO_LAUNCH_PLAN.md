@@ -126,3 +126,10 @@ Readiness/preflight: may reach `READY_FOR_OWNER_PROVISIONING_CEREMONY` / `MAINNE
 ## Step 4C status pointer
 
 Owner bootstrap COMPLETE (sanitized). Hot Wallet generated but not registered/funded. Steps 4C.1/4C.2/4C.3 source hardening complete (production verified-pool Owner auth without public test backdoor; Mainnet registry APPLY requires live two-provider branded verification + read-only post-apply verify). See `docs/PHASE_21_STEP4C_OWNER_CLOSEOUT_AND_HOT_WALLET_READINESS.md`. Phase 21 remains incomplete; READY_FOR_LIVE_PAYOUT=NO.
+
+
+## Attached GRAM Owner decision — 2026-10-04
+
+The Owner approved **50,000,000 nanogram = 0.05 GRAM** as the Phase 21 Mainnet attached amount after a live read-only Toncenter `estimateFee` run on TON Mainnet. Both the 0.19 USDT and 5.00 USDT cases returned `estimatedNetworkFeeAtomic=73334`, `candidateAttachedGramAtomic=50000000`, `forwardGramAtomic=1`, `broadcast=false`.
+
+Decision status: `OWNER_APPROVED_DECISION / SOURCE_WIRING_PENDING`. Current historical SPIKE-number guard must still be corrected/tested before Mainnet signing. This approval does **not** enable Mainnet, unlock the signer, fund the wallet, unpause payouts, or make `READY_FOR_LIVE_PAYOUT` true. See `docs/PHASE_21_ATTACHED_GRAM_OWNER_APPROVAL.md`.
