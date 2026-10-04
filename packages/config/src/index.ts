@@ -482,12 +482,17 @@ const optionalEmptyString = z.preprocess(
 
 function isTailscaleIpv4(hostname: string): boolean {
   const octets = hostname.split('.').map((part) => Number(part));
+  const first = octets[0];
+  const second = octets[1];
+
   return (
     octets.length === 4 &&
+    first !== undefined &&
+    second !== undefined &&
     octets.every((octet) => Number.isInteger(octet) && octet >= 0 && octet <= 255) &&
-    octets[0] === 100 &&
-    octets[1] >= 64 &&
-    octets[1] <= 127
+    first === 100 &&
+    second >= 64 &&
+    second <= 127
   );
 }
 
