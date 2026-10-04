@@ -41,18 +41,22 @@ cleanup_ts() {
 trap cleanup_ts EXIT
 
 i=0
-while [ "$i" -lt 80 ]; do
-  if tailscale --socket="$TS_SOCKET" status >/dev/null 2>&1; then
+while [ "$i" -lt 120 ]; do
+  if [ -S "$TS_SOCKET" ]; then
     break
   fi
   if ! kill -0 "$TS_PID" 2>/dev/null; then
     cat "$TS_LOG" >&2 || true
-    fail "tailscaled exited before becoming ready"
+    fail "tailscaled exited before creating its LocalAPI socket"
   fi
   i=$((i + 1))
   sleep 0.25
 done
-[ "$i" -lt 80 ] || fail "tailscaled control socket did not become ready"
+
+if [ "$i" -ge 120 ]; then
+  cat "$TS_LOG" >&2 || true
+  fail "tailscaled LocalAPI socket did not become ready"
+fi
 
 tailscale --socket="$TS_SOCKET" up \
   --auth-key="$TAILSCALE_AUTHKEY" \
