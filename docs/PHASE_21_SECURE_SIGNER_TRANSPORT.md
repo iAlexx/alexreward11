@@ -8,8 +8,11 @@ broadcast, production money unpause, AdsGram monetary activation, or a productio
 - Signer stays on the dedicated controlled host and binds the application to `127.0.0.1:3005`.
 - Signer joins the Tailnet as `tag:lootra-signer`.
 - Railway Worker joins as an ephemeral `tag:lootra-worker` node using a reusable ephemeral auth key.
-- Signer is exposed only inside the Tailnet with a TCP Serve mapping from Tailnet port 3005 to
-  `127.0.0.1:3005`. No public ingress is added.
+- Signer application remains bound to `127.0.0.1:3005`.
+- A route-filtering nginx proxy binds **only** to the signer's Tailscale IPv4 on port 3005.
+  It forwards only the explicitly approved health/signing routes and never forwards
+  `/v1/local-unlock` or `/v1/local-relock`.
+- No public ingress is added.
 - Tailnet access policy permits only `tag:lootra-worker` → `tag:lootra-signer` on TCP 3005.
 - The existing signer bearer token remains an additional application-layer credential.
 - The Worker uses Tailscale userspace networking because Railway does not provide `/dev/net/tun`.
@@ -39,19 +42,29 @@ sent through the Tailnet proxy.
 
 ## Signer host
 
-After deny-by-default grants are saved, expose the already-loopback-bound signer only to the Tailnet:
+Do **not** use an unrestricted TCP `tailscale serve` mapping to the signer listener. A loopback
+reverse proxy can make a remote request appear local to the signer, which would weaken the strict
+loopback boundary around `/v1/local-unlock` and `/v1/local-relock`.
 
-```sh
-tailscale serve --bg --tcp=3005 tcp://127.0.0.1:3005
-```
+Install `infra/nginx/lootra-signer-tailnet.conf` on the dedicated signer host. The proxy binds only
+to the signer's Tailscale IPv4 and exposes exactly these routes:
 
+- `GET /health`
+- `GET /health/live`
+- `GET /health/ready`
+- `GET /v1/signing-identity`
+- `POST /v1/sign-withdrawal-attempt`
+
+Every other path, including both local custody-control endpoints, is denied at the proxy boundary.
 Do not use Funnel. Do not bind the signer application itself to a public interface.
 
 ## Required pre-live checks
 
 1. Worker appears as an ephemeral node carrying only `tag:lootra-worker`.
 2. Access policy has no wildcard allow-all grant.
-3. Worker can reach `/health` and `/v1/signing-identity` through the Tailnet.
-4. Signer remains `custodyState=LOCKED` and `signingReady=false` during transport validation.
-5. Public `:3005` remains closed on the signer VM.
-6. No funding, unlock, sign-withdrawal call, TON broadcast, or money unpause occurs during this step.
+3. Tailnet proxy returns 404 for `/v1/local-unlock` and `/v1/local-relock`.
+4. Worker can reach `/health` and the signer returns its locked response for
+   `/v1/signing-identity` through the Tailnet.
+5. Signer remains `custodyState=LOCKED` and `signingReady=false` during transport validation.
+6. Public Internet `:3005` remains closed on the signer VM.
+7. No funding, unlock, sign-withdrawal call, TON broadcast, or money unpause occurs during this step.
