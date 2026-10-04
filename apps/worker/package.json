@@ -9,7 +9,8 @@
     "start": "node dist/main.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src test",
-    "test": "vitest run"
+    "test": "vitest run",
+    "start:tailscale": "sh ./scripts/start-tailscale.sh"
   },
   "dependencies": {
     "@alex-rewards/config": "workspace:*",

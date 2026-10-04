@@ -784,6 +784,59 @@ describe('environment validation', () => {
     );
   });
 
+  it('production Phase21 requires Tailscale-only signer transport', () => {
+    const productionPhase21 = {
+      DEPLOYMENT_ENV: 'production',
+      NODE_ENV: 'production',
+      LOG_LEVEL: 'info',
+      OTEL_ENABLED: 'true',
+      OTEL_EXPORTER_OTLP_ENDPOINT: 'https://otel.example.com',
+      SENTRY_DSN: 'https://public@example.ingest.sentry.io/1',
+      DATABASE_URL: 'postgresql://user:pass@db.example.com:5432/db',
+      REDIS_URL: 'rediss://redis.example.com:6379',
+      TEMPORAL_ADDRESS: 'temporal.example.com:7233',
+      TEMPORAL_TASK_QUEUE: 'alex-rewards-foundation',
+      WITHDRAWAL_QUOTE_TTL_SECONDS: '300',
+      WITHDRAWAL_RISK_POLICY_VERSION: '1',
+      WITHDRAWAL_NETWORK_CODE: 'TON_MAINNET',
+      WITHDRAWAL_ASSET_SYMBOL: 'USDT',
+      WITHDRAWAL_FAKE_CHAIN_ENABLED: 'false',
+      WITHDRAWAL_REAL_CHAIN_ENABLED: 'true',
+      PHASE21_MAINNET_ENABLED: 'true',
+      TON_MAINNET_USDT_JETTON_MASTER: 'EQD0vdSA_NedR9uvbgN9EikRX-suesDxGeFg69XQMavfLqIw',
+      TON_PRIMARY_PROVIDER_KIND: 'toncenter',
+      TON_PRIMARY_PROVIDER_URL: 'https://mainnet.example/primary',
+      TON_SECONDARY_PROVIDER_KIND: 'tonapi',
+      TON_SECONDARY_PROVIDER_URL: 'https://mainnet.example/secondary',
+      SIGNER_SERVICE_TOKEN: 'a-secure-production-token-that-is-long-enough',
+    };
+
+    expect(() =>
+      loadWorkerConfig({
+        ...productionPhase21,
+        SIGNER_BASE_URL: 'https://signer.example.com',
+        SIGNER_TRANSPORT_MODE: 'direct',
+      }),
+    ).toThrow(/SIGNER_TRANSPORT_MODE|SIGNER_BASE_URL|Tailscale/i);
+
+    expect(() =>
+      loadWorkerConfig({
+        ...productionPhase21,
+        SIGNER_BASE_URL: 'https://signer.example.com',
+        SIGNER_TRANSPORT_MODE: 'tailscale_userspace',
+      }),
+    ).toThrow(/SIGNER_BASE_URL|Tailscale/i);
+
+    const enabled = loadWorkerConfig({
+      ...productionPhase21,
+      SIGNER_BASE_URL: 'http://100.127.205.114:3005',
+      SIGNER_TRANSPORT_MODE: 'tailscale_userspace',
+    });
+
+    expect(enabled.SIGNER_TRANSPORT_MODE).toBe('tailscale_userspace');
+    expect(enabled.SIGNER_BASE_URL).toBe('http://100.127.205.114:3005');
+  });
+
   describe('WORKER_LISTEN_HOST', () => {
     const workerLocal = {
       ...common,
