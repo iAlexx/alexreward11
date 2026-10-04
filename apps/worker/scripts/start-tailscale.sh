@@ -68,6 +68,24 @@ tailscale --socket="$TS_SOCKET" up \
 tailscale --socket="$TS_SOCKET" status >/dev/null 2>&1 ||
   fail "Tailscale did not reach a usable state"
 
+[ -n "${SIGNER_BASE_URL:-}" ] || fail "SIGNER_BASE_URL is required for Tailnet signer verification"
+
+probe=0
+while [ "$probe" -lt 20 ]; do
+  if curl -fsS \
+    --max-time 3 \
+    --proxy "http://$TS_PROXY_ADDR" \
+    -o /dev/null \
+    "${SIGNER_BASE_URL%/}/health"; then
+    echo "TAILNET_SIGNER_HEALTH=PASS"
+    break
+  fi
+  probe=$((probe + 1))
+  sleep 0.5
+done
+
+[ "$probe" -lt 20 ] || fail "Tailnet signer health probe failed"
+
 unset TAILSCALE_AUTHKEY
 
 # Node 24 built-in proxy support is enabled only for HTTP. HTTPS provider calls
