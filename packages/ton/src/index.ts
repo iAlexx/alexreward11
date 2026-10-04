@@ -115,6 +115,8 @@ export {
 } from './toncenter-mainnet-readonly.js';
 export {
   TonapiMainnetReadonlyClient,
+  extractTonapiDecodedJettonWalletAddress,
+  extractTonapiStackJettonWalletAddress,
   type TonapiMainnetReadonlyConfig,
   type TonapiJettonMetadataResult,
 } from './tonapi-mainnet-readonly.js';

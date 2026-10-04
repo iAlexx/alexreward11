@@ -2,7 +2,9 @@
  * Read-only TonAPI Mainnet client for Phase 21 ceremony probes.
  * Never exposes sendBoc / broadcast.
  */
-import { toCanonicalFriendlyAddress } from './address.js';
+import { Cell } from '@ton/core';
+
+import { canonicalizeTonAddress, toCanonicalFriendlyAddress } from './address.js';
 import { TON_MAINNET_NETWORK_GLOBAL_ID } from './chain-provider.js';
 import {
   asRecord,
@@ -65,6 +67,17 @@ export class TonapiMainnetReadonlyClient {
       context,
       this.baseUrl,
     );
+  }
+
+  /** Redact provider URL material and configured Bearer API key from error surfaces. */
+  private redactError(message: string): string {
+    let out = redactProviderErrorMessage(message, this.baseUrl);
+    if (this.apiKey !== null && this.apiKey !== '') {
+      out = out.split(this.apiKey).join('[REDACTED]');
+    }
+    out = out.replace(/Bearer\s+\S+/gi, 'Bearer [REDACTED]');
+    out = out.replace(/([?&](api_key|apikey|api-key|token|key)=)[^&\s]+/gi, '$1[REDACTED]');
+    return out;
   }
 
   /**
@@ -160,10 +173,7 @@ export class TonapiMainnetReadonlyClient {
       return {
         ok: false,
         networkGlobalId: null,
-        message: redactProviderErrorMessage(
-          error instanceof Error ? error.message : String(error),
-          this.baseUrl,
-        ),
+        message: this.redactError(error instanceof Error ? error.message : String(error)),
         providerHost: this.providerHost,
         verificationMethod: 'tonapi_status_failed',
         verificationClass: 'INCOMPLETE',
@@ -229,15 +239,20 @@ export class TonapiMainnetReadonlyClient {
         decimals: null,
         observedJettonMaster: requestedCanonical,
         metadataSource: null,
-        message: redactProviderErrorMessage(
-          error instanceof Error ? error.message : String(error),
-          this.baseUrl,
-        ),
+        message: this.redactError(error instanceof Error ? error.message : String(error)),
         providerHost: this.providerHost,
       };
     }
   }
 
+  /**
+   * Deterministic Jetton wallet derivation via jetton-master get-method
+   * `get_wallet_address` (TonAPI execGetMethodForBlockchainAccount).
+   *
+   * Does NOT use indexed account balance lookup
+   * `/v2/accounts/{owner}/jettons/{master}` — that 404s for never-deployed wallets.
+   * Read-only: no send / broadcast / emulation mutation.
+   */
   async getJettonWalletAddress(
     jettonMaster: string,
     ownerAddress: string,
@@ -248,41 +263,119 @@ export class TonapiMainnetReadonlyClient {
     providerHost: string;
   }> {
     try {
-      const body = await this.get(
-        `/v2/accounts/${encodeURIComponent(ownerAddress)}/jettons/${encodeURIComponent(jettonMaster)}`,
-        'TonapiMainnet jetton wallet',
-      );
-      const record = asRecord(body, 'TonapiMainnet account jetton');
-      const wallet =
-        record.wallet_address !== null &&
-        typeof record.wallet_address === 'object' &&
-        !Array.isArray(record.wallet_address)
-          ? (record.wallet_address as Record<string, unknown>).address
-          : record.wallet_address;
-      if (typeof wallet !== 'string' || wallet.trim() === '') {
+      const master = canonicalizeTonAddress(jettonMaster);
+      const owner = canonicalizeTonAddress(ownerAddress);
+      const params = new URLSearchParams();
+      // TonAPI accepts TON addresses as get-method args (raw 0:hex form).
+      params.append('args', owner.rawAddress);
+      const path =
+        `/v2/blockchain/accounts/${encodeURIComponent(master.rawAddress)}` +
+        `/methods/get_wallet_address?${params.toString()}`;
+      const body = await this.get(path, 'TonapiMainnet get_wallet_address');
+      const record = asRecord(body, 'TonapiMainnet get_wallet_address');
+
+      if (record.success !== true) {
         return {
           ok: false,
           jettonWalletAddress: null,
-          message: 'TonAPI jetton wallet address missing',
+          message: 'TonAPI get_wallet_address execution reported success=false',
           providerHost: this.providerHost,
         };
       }
+      if (record.exit_code !== 0 && record.exit_code !== '0') {
+        return {
+          ok: false,
+          jettonWalletAddress: null,
+          message: `TonAPI get_wallet_address failed exit_code=${String(record.exit_code ?? 'missing')}`,
+          providerHost: this.providerHost,
+        };
+      }
+
+      const decodedAddress = extractTonapiDecodedJettonWalletAddress(record.decoded);
+      const stackAddress =
+        decodedAddress === null ? extractTonapiStackJettonWalletAddress(record.stack) : null;
+      const wallet = decodedAddress ?? stackAddress;
+      if (wallet === null || wallet.trim() === '') {
+        return {
+          ok: false,
+          jettonWalletAddress: null,
+          message: 'TonAPI get_wallet_address missing decoded/stack jetton wallet address',
+          providerHost: this.providerHost,
+        };
+      }
+
+      const canonicalWallet = toCanonicalFriendlyAddress(wallet);
+      if (canonicalWallet === null) {
+        return {
+          ok: false,
+          jettonWalletAddress: null,
+          message: 'TonAPI get_wallet_address returned unparseable jetton wallet address',
+          providerHost: this.providerHost,
+        };
+      }
+
       return {
         ok: true,
-        jettonWalletAddress: wallet,
-        message: 'TonAPI jetton wallet derived',
+        jettonWalletAddress: canonicalWallet,
+        message: 'TonAPI get_wallet_address derived',
         providerHost: this.providerHost,
       };
     } catch (error: unknown) {
       return {
         ok: false,
         jettonWalletAddress: null,
-        message: redactProviderErrorMessage(
-          error instanceof Error ? error.message : String(error),
-          this.baseUrl,
-        ),
+        message: this.redactError(error instanceof Error ? error.message : String(error)),
         providerHost: this.providerHost,
       };
     }
+  }
+}
+
+/** Prefer TonAPI decoded fields; never invent addresses. */
+export function extractTonapiDecodedJettonWalletAddress(decoded: unknown): string | null {
+  if (decoded === null || typeof decoded !== 'object' || Array.isArray(decoded)) return null;
+  const record = decoded as Record<string, unknown>;
+  const candidates = [record.jetton_wallet_address, record.jettonWalletAddress];
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim() !== '') {
+      return candidate.trim();
+    }
+    if (
+      candidate !== null &&
+      typeof candidate === 'object' &&
+      !Array.isArray(candidate) &&
+      typeof (candidate as Record<string, unknown>).address === 'string'
+    ) {
+      const nested = String((candidate as Record<string, unknown>).address).trim();
+      if (nested !== '') return nested;
+    }
+  }
+  return null;
+}
+
+/**
+ * Strict fallback for TonAPI MethodExecutionResult.stack when decoded is absent.
+ * Supports cell/slice BOC forms only; fails closed otherwise.
+ */
+export function extractTonapiStackJettonWalletAddress(stack: unknown): string | null {
+  if (!Array.isArray(stack) || stack.length === 0) return null;
+  const first = stack[0];
+  if (first === null || typeof first !== 'object' || Array.isArray(first)) return null;
+  const entry = first as Record<string, unknown>;
+  const type = typeof entry.type === 'string' ? entry.type.toLowerCase() : '';
+  const bocCandidate =
+    (typeof entry.cell === 'string' ? entry.cell : null) ??
+    (typeof entry.slice === 'string' ? entry.slice : null) ??
+    (typeof entry.bytes === 'string' ? entry.bytes : null) ??
+    (typeof entry.value === 'string' ? entry.value : null);
+  if (bocCandidate === null || bocCandidate.trim() === '') return null;
+  if (type !== '' && type !== 'cell' && type !== 'slice') return null;
+  try {
+    const cell = Cell.fromBase64(bocCandidate.trim());
+    const address = cell.beginParse().loadAddress();
+    if (address === null) return null;
+    return address.toString({ urlSafe: true, bounceable: true });
+  } catch {
+    return null;
   }
 }

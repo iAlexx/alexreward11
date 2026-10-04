@@ -330,4 +330,55 @@ describe('phase21 external probes (read-only)', () => {
     expect(result.code).toBe('OBSERVED_JETTON_MASTER_MISMATCH');
   });
 
+
+  it('verifyMainnetUsdtWithTwoProviders fails on Jetton wallet derivation disagreement', async () => {
+    const identityAdapter: MainnetIdentityProbeAdapter = {
+      async probe(input) {
+        return {
+          ok: true,
+          networkGlobalId: -239,
+          message: 'mainnet',
+          providerHost: normalizeProviderHost(input.providerUrl),
+        };
+      },
+    };
+    const metadataAdapter: UsdtJettonMetadataProbeAdapter = {
+      async probe() {
+        return {
+          ok: true,
+          symbol: 'USDT',
+          decimals: 6,
+          observedJettonMaster: VALID_MASTER,
+          metadataSource: 'fixture',
+          message: 'ok',
+          providerHost: 'fixture',
+        };
+      },
+    };
+    const walletDerivationAdapter: JettonWalletDerivationProbeAdapter = {
+      async probe(input) {
+        return {
+          ok: true,
+          jettonWalletAddress:
+            input.providerKind === 'toncenter'
+              ? '0:' + 'ab'.repeat(32)
+              : '0:' + 'cd'.repeat(32),
+          message: 'derived',
+          providerHost: normalizeProviderHost(input.providerUrl),
+        };
+      },
+    };
+    const result = await verifyMainnetUsdtWithTwoProviders({
+      primary: { kind: 'toncenter', url: 'https://toncenter.example' },
+      secondary: { kind: 'tonapi', url: 'https://tonapi.example' },
+      jettonMaster: VALID_MASTER,
+      ownerAddress: '0:' + '11'.repeat(32),
+      identityAdapter,
+      metadataAdapter,
+      walletDerivationAdapter,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe('JETTON_WALLET_DERIVATION_DISAGREE');
+  });
+
 });
