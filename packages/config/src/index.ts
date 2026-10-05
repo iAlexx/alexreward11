@@ -20,6 +20,7 @@ const commonSchema = z.object({
   LOG_LEVEL: logLevel.default('info'),
   OTEL_ENABLED: booleanFromString,
   OTEL_EXPORTER_OTLP_ENDPOINT: optionalUrl,
+  OTEL_EXPORTER_OTLP_HEADERS: optionalSecret,
   SENTRY_DSN: optionalUrl,
   /**
    * Explicit Railway / non-production staging-integration opt-in.
