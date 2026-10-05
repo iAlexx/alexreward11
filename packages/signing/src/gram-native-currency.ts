@@ -12,6 +12,9 @@ export const GRAM_DISPLAY_NAME = 'Gram' as const;
 export const GRAM_DECIMALS = 9 as const;
 /** 1 GRAM = 1_000_000_000 nanogram. */
 export const NANOGRAM_PER_GRAM = 1_000_000_000n;
+/** Owner-approved Phase 21 Mainnet jetton-wallet gas attachment: 0.05 GRAM. */
+export const PHASE21_OWNER_APPROVED_ATTACHED_GRAM_ATOMIC = 50_000_000n;
+/** Owner-approved Phase 21 Mainnet forward amount inside the Jetton transfer body. */
 export const PHASE21_OWNER_APPROVED_FORWARD_GRAM_ATOMIC = 1n;
 
 /** Provider / user-facing aliases that normalize to GRAM in native-currency context only. */

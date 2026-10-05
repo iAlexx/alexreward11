@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { LocalEphemeralSignPort, localSigningFixtureConfig } from '@alex-rewards/signing';
 import { Pool } from 'pg';
 
-import { isLoopback, registerSignerRoutes } from '../src/routes.js';
+import { isLoopback, registerSignerRoutes, runtimeFromEnv } from '../src/routes.js';
 
 describe('isLoopback local-unlock peer allowlist', () => {
   it('accepts only the exact loopback address forms required by the runtime', () => {
@@ -67,5 +67,26 @@ describe('Phase 9 signer HTTP boundary', () => {
     ).toBe(400);
     await server.close();
     await pool.end();
+  });
+});
+
+
+describe('Phase 21 signer runtime gas policy wiring', () => {
+  it('wires the exact Owner-approved Mainnet policy when Phase21 is enabled', () => {
+    const runtime = runtimeFromEnv({
+      DEPLOYMENT_ENV: 'production',
+      SIGNER_SPIKE_ENABLED: true,
+      SIGNER_KEY_MODE: 'self_hosted_encrypted',
+      SIGNER_NETWORK_CODE: 'TON_MAINNET',
+      SIGNER_NETWORK_GLOBAL_ID: -239,
+      SIGNER_WALLET_VERSION: 'v5R1',
+      SIGNER_WORKCHAIN: 0,
+      SIGNER_EXPECTED_ASSET_SYMBOL: 'USDT',
+      PHASE21_MAINNET_ENABLED: true,
+    });
+    expect(runtime.mainnetTransferPolicy?.attachedTonAtomic).toBe(50_000_000n);
+    expect(runtime.mainnetTransferPolicy?.forwardTonAtomic).toBe(1n);
+    expect(runtime.mainnetTransferPolicy?.attachedGramLifecycle).toBe('OWNER_APPROVED');
+    expect(runtime.mainnetTransferPolicy?.networkScope).toBe('MAINNET_OWNER_APPROVED');
   });
 });
