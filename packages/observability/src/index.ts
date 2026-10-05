@@ -16,6 +16,7 @@ export interface ObservabilityOptions {
   readonly logLevel: string;
   readonly otelEnabled: boolean;
   readonly otlpEndpoint?: string;
+  readonly otlpHeaders?: string;
   readonly sentryDsn?: string;
 }
 
@@ -48,9 +49,33 @@ const REDACT_PATHS = [
   'req.headers.cookie',
   'config.DATABASE_URL',
   'config.REDIS_URL',
+  'config.OTEL_EXPORTER_OTLP_HEADERS',
   'config.SENTRY_DSN',
   'config.SIGNER_SERVICE_TOKEN',
 ] as const;
+
+export function parseOtlpHeaders(raw: string | undefined): Record<string, string> | undefined {
+  if (raw === undefined || raw.trim() === '') return undefined;
+
+  const headers: Record<string, string> = {};
+  for (const entry of raw.split(',')) {
+    const trimmed = entry.trim();
+    if (trimmed === '') continue;
+    const separator = trimmed.indexOf('=');
+    if (separator <= 0) {
+      throw new Error('Invalid OTEL_EXPORTER_OTLP_HEADERS entry');
+    }
+
+    const key = decodeURIComponent(trimmed.slice(0, separator).trim());
+    const value = decodeURIComponent(trimmed.slice(separator + 1).trim());
+    if (key === '' || value === '') {
+      throw new Error('Invalid OTEL_EXPORTER_OTLP_HEADERS entry');
+    }
+    headers[key] = value;
+  }
+
+  return Object.keys(headers).length === 0 ? undefined : headers;
+}
 
 export function createLogger(serviceName: string, level: string): Logger {
   return pino({
@@ -113,6 +138,7 @@ export async function initializeObservability(
 
   if (options.otelEnabled) {
     const endpoint = options.otlpEndpoint;
+    const headers = parseOtlpHeaders(options.otlpHeaders);
     sdk = new NodeSDK({
       serviceName: options.serviceName,
       ...(endpoint === undefined
@@ -120,10 +146,12 @@ export async function initializeObservability(
         : {
             traceExporter: new OTLPTraceExporter({
               url: `${endpoint.replace(/\/$/, '')}/v1/traces`,
+              ...(headers === undefined ? {} : { headers }),
             }),
             metricReader: new PeriodicExportingMetricReader({
               exporter: new OTLPMetricExporter({
                 url: `${endpoint.replace(/\/$/, '')}/v1/metrics`,
+                ...(headers === undefined ? {} : { headers }),
               }),
               exportIntervalMillis: 10_000,
             }),
