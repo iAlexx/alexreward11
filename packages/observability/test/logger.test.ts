@@ -3,7 +3,7 @@ import { Writable } from 'node:stream';
 import pino from 'pino';
 import { describe, expect, it, vi } from 'vitest';
 
-import { createShutdownCoordinator } from '../src/index.js';
+import { createShutdownCoordinator, parseOtlpHeaders } from '../src/index.js';
 
 describe('structured logging safeguard', () => {
   it('redacts authentication material', async () => {
@@ -30,5 +30,17 @@ describe('shutdown coordinator', () => {
     const shutdown = createShutdownCoordinator(logger, 'test-service', [step]);
     await Promise.all([shutdown('SIGTERM'), shutdown('SIGINT')]);
     expect(step).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('OTLP header parsing', () => {
+  it('parses and decodes standard OTLP header syntax', () => {
+    expect(parseOtlpHeaders('Authorization=Basic%20YWJjZA%3D%3D')).toEqual({
+      Authorization: 'Basic YWJjZA==',
+    });
+  });
+
+  it('rejects malformed header entries without a key/value separator', () => {
+    expect(() => parseOtlpHeaders('not-a-header')).toThrow(/OTEL_EXPORTER_OTLP_HEADERS/);
   });
 });
