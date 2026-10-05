@@ -4,7 +4,7 @@ import { ControlCenterError } from './errors.js';
 
 type Db = Pool | PoolClient;
 
-export type PublicationStatus = 'PENDING' | 'PUBLISHED' | 'FAILED' | 'SUPERSEDED';
+export type PublicationStatus = 'PENDING' | 'PUBLISHED' | 'FAILED' | 'SKIPPED';
 
 export interface TelegramPublicationRow {
   readonly id: string;

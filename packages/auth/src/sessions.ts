@@ -73,7 +73,7 @@ function buildTokens(
 }
 
 export async function createUserSession(
-  pool: Pool,
+  db: Pool | PoolClient,
   config: SessionConfig,
   userId: string,
   meta: RequestMeta = {},
@@ -81,7 +81,7 @@ export async function createUserSession(
   const sessionSecret = generateOpaqueToken();
   const refreshToken = generateOpaqueToken();
   const refreshExpiresAt = new Date(Date.now() + config.refreshTtlSeconds * 1000);
-  const result = await pool.query<{ id: string }>(
+  const result = await db.query<{ id: string }>(
     `INSERT INTO user_sessions (
        user_id, session_secret_hash, refresh_token_hash, ip_hash,
        user_agent_summary, device_summary, expires_at

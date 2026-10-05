@@ -1,0 +1,121 @@
+{
+  "activatedAt": "2026-10-02T04:53:08.065Z",
+  "sourceCommit": "b9dd700de428498493fb6e497ec16901684532c0",
+  "artifactPath": "packages/fraud/policy/phase20-closed-beta-owner-approved.json",
+  "approvedDigests": {
+    "riskDigest": "c81bf1edeb82b2e3bf8da45ef9a4b409f1557412da4b87d78d8f322e0045ebb5",
+    "trustDigest": "8b0d26cc3d3df43595ade3e63f70abc4a460dcb93a2bcf7afc1dd98d58ee5ba1",
+    "eligibilityDigest": "69c714db79b687d85f199cf812d485bc243d6ef53e69c64bf05f830b392aac28",
+    "fullDigest": "8f8e4cba511900d7320ca8d80205389648d81a7778ce3b86a0add790bc039eeb"
+  },
+  "transactionResult": "COMMITTED",
+  "pre": {
+    "riskTotal": 0,
+    "trustTotal": 0,
+    "eligibilityTotal": 0,
+    "withdrawalPauseState": "MISSING",
+    "adsgram": {
+      "lifecycle_state": "SANDBOX",
+      "production_monetary_status": "BLOCKED"
+    }
+  },
+  "post": {
+    "riskActiveVersion": 1,
+    "trustActiveVersion": 1,
+    "eligibilityActiveVersion": 1,
+    "riskActiveCount": 1,
+    "trustActiveCount": 1,
+    "eligibilityActiveCount": 1,
+    "withdrawalRequestsPauseStaging": true,
+    "withdrawalPauseFlagVersion": 1,
+    "riskConfigDigest": "c81bf1edeb82b2e3bf8da45ef9a4b409f1557412da4b87d78d8f322e0045ebb5",
+    "trustConfigDigest": "8b0d26cc3d3df43595ade3e63f70abc4a460dcb93a2bcf7afc1dd98d58ee5ba1",
+    "eligibilityConfigDigest": "69c714db79b687d85f199cf812d485bc243d6ef53e69c64bf05f830b392aac28"
+  },
+  "behavior": {
+    "risk": {
+      "zero": {
+        "score": 0,
+        "tier": "LOW",
+        "action": "MANUAL_REVIEW"
+      },
+      "high": {
+        "score": 55,
+        "tier": "HIGH",
+        "action": "HELD"
+      },
+      "critical": {
+        "score": 80,
+        "tier": "CRITICAL",
+        "action": "WITHDRAWAL_BLOCKED"
+      },
+      "confirmed": {
+        "score": 60,
+        "tier": "HIGH",
+        "action": "HELD"
+      }
+    },
+    "trust": {
+      "s0": "NEW",
+      "s25": "BASIC",
+      "s50": "ESTABLISHED",
+      "s75": "TRUSTED"
+    }
+  },
+  "moneySafety": {
+    "adsgramLifecycle": "SANDBOX",
+    "adsgramProductionMonetaryStatus": "BLOCKED",
+    "payoutDispatchPauseStaging": true,
+    "referralRewardPauseStaging": true,
+    "withdrawalRequestsPauseStaging": true
+  },
+  "runtime": {
+    "runtimeHead": "b9dd700de428498493fb6e497ec16901684532c0",
+    "productionRuntimeBranch": "production-runtime",
+    "railwayEnvironmentName": "production",
+    "applicationDeploymentEnv": "staging",
+    "services": {
+      "api": {
+        "service": "api-staging",
+        "deploymentId": "183f0df2-57df-4ff4-9ceb-ac012813982b",
+        "commit": "b9dd700de428498493fb6e497ec16901684532c0",
+        "health": "PASS"
+      },
+      "worker": {
+        "service": "worker-staging",
+        "deploymentId": "16ea4c57-4ca7-4041-8854-dd48402b1de1",
+        "commit": "b9dd700de428498493fb6e497ec16901684532c0",
+        "health": "PASS"
+      },
+      "bot": {
+        "service": "bot-staging",
+        "deploymentId": "9597246d-7cd9-47f8-8582-7036941bbc80",
+        "commit": "b9dd700de428498493fb6e497ec16901684532c0",
+        "health": "PASS",
+        "getMeUsername": "LOOTRAbot"
+      },
+      "miniapp": {
+        "service": "miniapp-staging",
+        "deploymentId": "ffeafed1-5eda-4944-baed-9a3848fc8b0b",
+        "commit": "b9dd700de428498493fb6e497ec16901684532c0",
+        "health": "PASS",
+        "publicUrl": "https://miniapp-staging-production.up.railway.app"
+      },
+      "admin": {
+        "service": "admin-staging",
+        "deploymentId": "7c1c2e94-0f2e-495f-b0d3-761c7909ef0c",
+        "commit": "b9dd700de428498493fb6e497ec16901684532c0",
+        "health": "PASS"
+      }
+    }
+  },
+  "eligibilityValidation": {
+    "adOrdinary": "ELIGIBLE",
+    "adHigh": "INELIGIBLE_RISK_POLICY",
+    "adCritical": "INELIGIBLE_RISK_POLICY",
+    "withdrawalPaused": "INELIGIBLE_FEATURE_DISABLED",
+    "founderBypass": "NO"
+  },
+  "postCommitRollbackRequired": false,
+  "gap009Status": "REMEDIATED / OWNER_APPROVED / STAGING_ACTIVE / CONTROLLED_VALIDATION_PASS"
+}

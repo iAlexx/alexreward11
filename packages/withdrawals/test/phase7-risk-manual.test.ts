@@ -49,7 +49,7 @@ describe.skipIf(phase7DatabaseUrl === '')('Phase 7 risk manual', () => {
     adminUserId = base.adminUserId;
   });
 
-  it('V1 never auto-approves — ordinary path lands in MANUAL_REVIEW', async () => {
+  it('never auto-approves — ordinary path lands in MANUAL_REVIEW', async () => {
     const userId = await createTestUser(pool, '7201');
     await bindVerifiedPrimaryWallet(pool, userId, networkId);
     await fundUserAvailable({
@@ -68,7 +68,7 @@ describe.skipIf(phase7DatabaseUrl === '')('Phase 7 risk manual', () => {
     expect(row.rows[0]?.state).not.toBe('APPROVED');
   });
 
-  it('BLOCKED → REJECTED + release once (risk path after reservation)', async () => {
+  it('BLOCKED → create denied + no ledger reservation (preflight hard gate)', async () => {
     const userId = await createTestUser(pool, '7202');
     await bindVerifiedPrimaryWallet(pool, userId, networkId);
     await fundUserAvailable({
@@ -83,94 +83,66 @@ describe.skipIf(phase7DatabaseUrl === '')('Phase 7 risk manual', () => {
       amountAtomic: '200000',
     });
 
-    // Build REQUESTED + reservation without wallet-gate BLOCKED check, then apply risk.
-    const hot = await pool.query<{ id: string }>(
-      `SELECT id FROM hot_wallets WHERE status = 'ACTIVE' LIMIT 1`,
-    );
-    const inserted = await pool.query<{ id: string }>(
-      `INSERT INTO withdrawals (
-         user_id, withdrawal_quote_id, asset_id, network_id, wallet_id,
-         requested_amount_atomic, fee_amount_atomic, net_amount_atomic,
-         state, approval_policy_version, priority_review,
-         idempotency_scope, idempotency_key,
-         limit_rule_id, fee_rule_id, fee_rule_version, limit_rule_version,
-         base_platform_fee_atomic, membership_fee_discount_bps, hot_wallet_id
-       )
-       SELECT
-         $1::uuid, $2::uuid, asset_id, network_id, primary_wallet_id,
-         requested_amount_atomic, fee_amount_atomic, net_amount_atomic,
-         'REQUESTED', 1, false,
-         $3, $4,
-         limit_rule_id, fee_rule_id, fee_rule_version, limit_rule_version,
-         base_platform_fee_atomic, membership_fee_discount_bps, $5::uuid
-       FROM withdrawal_quotes WHERE id = $2::uuid
-       RETURNING id`,
-      [userId, quote.id, `user:${userId}:withdrawal`, randomUUID(), hot.rows[0]!.id],
-    );
-    const withdrawalId = inserted.rows[0]!.id;
-
-    await withWithdrawalTransaction(pool, async (client) => {
-      const { getOrCreateLedgerAccount, postLedgerTransaction } =
-        await import('@alex-rewards/ledger');
-      const available = await getOrCreateLedgerAccount(client, {
-        accountType: 'USER_AVAILABLE_LIABILITY',
-        assetId,
-        ownerId: userId,
-      });
-      const reserved = await getOrCreateLedgerAccount(client, {
-        accountType: 'USER_RESERVED_LIABILITY',
-        assetId,
-        ownerId: userId,
-      });
-      const tx = await postLedgerTransaction(client, {
-        transactionType: 'WITHDRAWAL_RESERVATION',
-        businessReferenceType: 'withdrawal',
-        businessReferenceId: withdrawalId,
-        idempotencyScope: `withdrawal-reservation:${withdrawalId}`,
-        idempotencyKey: 'reservation',
-        assetId,
-        entries: [
-          { ledgerAccountId: available.id, direction: 'DEBIT', amountAtomic: '200000' },
-          { ledgerAccountId: reserved.id, direction: 'CREDIT', amountAtomic: '200000' },
-        ],
-      });
-      await client.query(
-        `UPDATE withdrawals SET reservation_ledger_tx_id = $2::uuid WHERE id = $1::uuid`,
-        [withdrawalId, tx.id],
-      );
-    });
-
     await pool.query(`UPDATE users SET withdrawal_status = 'BLOCKED' WHERE id = $1::uuid`, [
       userId,
     ]);
-    expect(await userBucketBalance(pool, userId, assetId, 'USER_RESERVED_LIABILITY')).toBe(200000n);
 
-    const risk = await withWithdrawalTransaction(pool, async (client) =>
-      applyV1RiskPolicy(client, engineConfig, {
-        withdrawalId,
-        userId,
-        fromState: 'REQUESTED',
+    await expect(
+      createWithdrawalFromQuote(pool, engineConfig, {
+        authenticatedUserId: userId,
+        quoteId: quote.id,
+        idempotencyKey: randomUUID(),
       }),
+    ).rejects.toMatchObject({ code: 'ACCOUNT_BLOCKED' } satisfies Partial<WithdrawalDomainError>);
+
+    const withdrawals = await pool.query<{ c: string }>(
+      `SELECT count(*)::text AS c FROM withdrawals WHERE user_id = $1::uuid`,
+      [userId],
     );
-    expect(risk.decision).toBe('WITHDRAWAL_BLOCKED');
-    expect(risk.state).toBe('REJECTED');
+    expect(withdrawals.rows[0]?.c).toBe('0');
     expect(await userBucketBalance(pool, userId, assetId, 'USER_RESERVED_LIABILITY')).toBe(0n);
     expect(await userBucketBalance(pool, userId, assetId, 'USER_AVAILABLE_LIABILITY')).toBe(
       500000n,
     );
+  });
 
-    const release = await pool.query<{ release_ledger_tx_id: string | null }>(
-      `SELECT release_ledger_tx_id FROM withdrawals WHERE id = $1::uuid`,
+  it('legacy applyV1RiskPolicy refuses fabricated scores', async () => {
+    await expect(
+      withWithdrawalTransaction(pool, async (client) =>
+        applyV1RiskPolicy(client, engineConfig, {
+          withdrawalId: randomUUID(),
+          userId: randomUUID(),
+          fromState: 'REQUESTED',
+        }),
+      ),
+    ).rejects.toMatchObject({
+      code: 'CONFIG',
+      publicMessage: expect.stringMatching(/legacy V1 risk fabrication removed/i),
+    });
+  });
+
+  it('RESTRICTED → HELD with reserved funds (no auto-approve)', async () => {
+    const userId = await createTestUser(pool, '7210');
+    await pool.query(`UPDATE users SET withdrawal_status = 'RESTRICTED' WHERE id = $1::uuid`, [
+      userId,
+    ]);
+    await bindVerifiedPrimaryWallet(pool, userId, networkId);
+    await fundUserAvailable({
+      pool,
+      userId,
+      assetId,
+      amountAtomic: '500000',
+      key: randomUUID(),
+    });
+    const { state, withdrawalId } = await quoteAndCreate(pool, userId, '200000', randomUUID());
+    expect(state).toBe('HELD');
+    expect(await userBucketBalance(pool, userId, assetId, 'USER_RESERVED_LIABILITY')).toBe(200000n);
+
+    const row = await pool.query<{ risk_decision: string }>(
+      `SELECT risk_decision::text AS risk_decision FROM withdrawals WHERE id = $1::uuid`,
       [withdrawalId],
     );
-    expect(release.rows[0]?.release_ledger_tx_id).not.toBeNull();
-
-    // Release once: re-release is a no-op
-    await withWithdrawalTransaction(pool, async (client) => {
-      const { releaseWithdrawalReservation } = await import('../src/index.js');
-      const second = await releaseWithdrawalReservation(client, { withdrawalId });
-      expect(second.released).toBe(false);
-    });
+    expect(row.rows[0]?.risk_decision).toBe('HELD');
   });
 
   it('Owner APPROVE once; double approve 100x → one transition / one outbox', async () => {
@@ -287,7 +259,7 @@ describe.skipIf(phase7DatabaseUrl === '')('Phase 7 risk manual', () => {
     expect(await userBucketBalance(pool, userId, assetId, 'USER_RESERVED_LIABILITY')).toBe(200000n);
   });
 
-  it('priority=true does not skip MANUAL_REVIEW', async () => {
+  it('Founder priority=true does not skip MANUAL_REVIEW', async () => {
     const userId = await createTestUser(pool, '7206');
     await bindVerifiedPrimaryWallet(pool, userId, networkId);
     await claimFounderForUser(pool, userId);

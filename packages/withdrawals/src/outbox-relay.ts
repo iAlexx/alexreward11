@@ -1,11 +1,14 @@
 import { WorkflowExecutionAlreadyStartedError } from '@temporalio/client';
 import type { Pool, PoolClient } from 'pg';
 
+import { evaluateFailedPreBroadcastReuse } from './failed-pre-reuse.js';
 import {
   WITHDRAWAL_APPROVED_OUTBOX_EVENT,
+  WITHDRAWAL_FAILED_PRE_RETRY_OUTBOX_EVENT,
   WITHDRAWAL_OWNER_REVIEW_REQUIRED_OUTBOX_EVENT,
   withdrawalWorkflowId,
 } from './outbox.js';
+import { WITHDRAWAL_CONFIRMED_OUTBOX_EVENT } from './public-payout-outbox.js';
 
 export const WITHDRAWAL_PAYOUT_WORKFLOW_TYPE = 'withdrawalPayoutWorkflow' as const;
 
@@ -24,6 +27,8 @@ export interface StartWithdrawalWorkflowResult {
   readonly alreadyStarted: boolean;
 }
 
+export type TemporalWorkflowIdReusePolicy = 'REJECT_DUPLICATE' | 'ALLOW_DUPLICATE';
+
 /** Minimal Temporal client surface used by the outbox relay (real Client or test double). */
 export type TemporalWorkflowStarter = {
   readonly workflow: {
@@ -33,10 +38,17 @@ export type TemporalWorkflowStarter = {
         taskQueue: string;
         workflowId: string;
         args: [{ withdrawalId: string; realChainEnabled?: boolean }];
-        workflowIdReusePolicy?: 'REJECT_DUPLICATE';
+        workflowIdReusePolicy?: TemporalWorkflowIdReusePolicy;
         workflowIdConflictPolicy?: 'FAIL';
       },
     ): Promise<unknown>;
+    /**
+     * Optional: used by failed-pre retry to refuse when a prior run is still RUNNING.
+     * Real Temporal Client exposes getHandle(...).describe().
+     */
+    getHandle?(workflowId: string): {
+      describe(): Promise<{ status: { name?: string } | string | number }>;
+    };
   };
 };
 
@@ -54,7 +66,9 @@ export function redactOutboxError(error: unknown): string {
 
 export function outboxRetryBackoffSeconds(attemptsBeforeIncrement: number): number {
   const safe = Math.max(0, Math.floor(attemptsBeforeIncrement));
-  return Math.min(MAX_BACKOFF_SECONDS, Math.max(1, 2 ** safe));
+  // Cap exponent before 2**n so we never overflow Number / SQL int (2**31).
+  const cappedExp = Math.min(safe, 8);
+  return Math.min(MAX_BACKOFF_SECONDS, Math.max(1, 2 ** cappedExp));
 }
 
 function isAlreadyStarted(error: unknown): boolean {
@@ -69,7 +83,7 @@ function resolveWithdrawalId(event: WithdrawalApprovedOutboxEvent): string {
   if (event.aggregateId !== null && event.aggregateId.trim() !== '') {
     return event.aggregateId;
   }
-  throw new Error('withdrawal.approved outbox payload missing withdrawalId');
+  throw new Error(`${event.eventType} outbox payload missing withdrawalId`);
 }
 
 function resolveWorkflowId(event: WithdrawalApprovedOutboxEvent, withdrawalId: string): string {
@@ -80,16 +94,39 @@ function resolveWorkflowId(event: WithdrawalApprovedOutboxEvent, withdrawalId: s
   return withdrawalWorkflowId(withdrawalId);
 }
 
+function describeStatusName(status: { name?: string } | string | number | undefined): string {
+  if (status === undefined || status === null) return '';
+  if (typeof status === 'string') return status.toUpperCase();
+  if (typeof status === 'number') return String(status);
+  if (typeof status.name === 'string') return status.name.toUpperCase();
+  return '';
+}
+
 /**
  * Claim PENDING withdrawal.approved outbox rows (caller must be in a transaction).
  * Serialization is FOR UPDATE SKIP LOCKED on the selected rows while the transaction
  * is open — available_at is NOT fencing and is not bumped here.
  */
+
+export async function claimPendingWithdrawalConfirmedEvents(
+  client: PoolClient,
+  limit: number,
+): Promise<WithdrawalApprovedOutboxEvent[]> {
+  return claimPendingOutboxEventsByType(client, WITHDRAWAL_CONFIRMED_OUTBOX_EVENT, limit);
+}
+
 export async function claimPendingWithdrawalApprovedEvents(
   client: PoolClient,
   limit: number,
 ): Promise<WithdrawalApprovedOutboxEvent[]> {
   return claimPendingOutboxEventsByType(client, WITHDRAWAL_APPROVED_OUTBOX_EVENT, limit);
+}
+
+export async function claimPendingFailedPreRetryEvents(
+  client: PoolClient,
+  limit: number,
+): Promise<WithdrawalApprovedOutboxEvent[]> {
+  return claimPendingOutboxEventsByType(client, WITHDRAWAL_FAILED_PRE_RETRY_OUTBOX_EVENT, limit);
 }
 
 /**
@@ -163,6 +200,23 @@ export async function markOutboxDispatched(client: PoolClient, id: string): Prom
   );
 }
 
+export async function markOutboxDeadLetter(
+  client: PoolClient,
+  id: string,
+  errorMessage: unknown,
+): Promise<void> {
+  const redacted = redactOutboxError(errorMessage);
+  await client.query(
+    `UPDATE outbox_events
+     SET status = 'DEAD_LETTER',
+         last_error_redacted = $2,
+         attempts = attempts + 1
+     WHERE id = $1::uuid
+       AND status = 'PENDING'`,
+    [id, redacted],
+  );
+}
+
 /**
  * Leave status PENDING, increment attempts, store redacted error, schedule backoff.
  * PostgreSQL SET RHS expressions see pre-update column values.
@@ -173,12 +227,17 @@ export async function markOutboxRetry(
   errorMessage: unknown,
 ): Promise<void> {
   const redacted = redactOutboxError(errorMessage);
+  // Clamp exponent BEFORE casting to int — POWER(2, attempts)::int overflows at attempts>=31
+  // if LEAST is applied after the cast.
   await client.query(
     `UPDATE outbox_events
      SET attempts = attempts + 1,
          last_error_redacted = $2,
          available_at = now() + make_interval(
-           secs => LEAST($3::int, GREATEST(1, (POWER(2, attempts))::int))
+           secs => LEAST(
+             $3::int,
+             GREATEST(1, (POWER(2, LEAST(attempts, 8)))::int)
+           )
          )
      WHERE id = $1::uuid
        AND status = 'PENDING'`,
@@ -190,10 +249,14 @@ export async function startWithdrawalWorkflowFromOutbox(
   temporalClient: TemporalWorkflowStarter,
   event: WithdrawalApprovedOutboxEvent,
   taskQueue: string,
-  options?: { readonly realChainEnabled?: boolean },
+  options?: {
+    readonly realChainEnabled?: boolean;
+    readonly workflowIdReusePolicy?: TemporalWorkflowIdReusePolicy;
+  },
 ): Promise<StartWithdrawalWorkflowResult> {
   const withdrawalId = resolveWithdrawalId(event);
   const workflowId = resolveWorkflowId(event, withdrawalId);
+  const reusePolicy = options?.workflowIdReusePolicy ?? 'REJECT_DUPLICATE';
   try {
     await temporalClient.workflow.start(WITHDRAWAL_PAYOUT_WORKFLOW_TYPE, {
       taskQueue,
@@ -204,8 +267,7 @@ export async function startWithdrawalWorkflowFromOutbox(
           ...(options?.realChainEnabled === true ? { realChainEnabled: true } : {}),
         },
       ],
-      // Never mint a second logical payout for the same withdrawal/{id}.
-      workflowIdReusePolicy: 'REJECT_DUPLICATE',
+      workflowIdReusePolicy: reusePolicy,
       workflowIdConflictPolicy: 'FAIL',
     });
     return { workflowId, withdrawalId, alreadyStarted: false };
@@ -214,6 +276,32 @@ export async function startWithdrawalWorkflowFromOutbox(
       return { workflowId, withdrawalId, alreadyStarted: true };
     }
     throw error;
+  }
+}
+
+/**
+ * Before ALLOW_DUPLICATE start: refuse when an execution for this workflowId is RUNNING.
+ * Missing workflow / closed run → allow. Errors from describe are treated as unknown → allow
+ * Temporal start to apply ConflictPolicy (fail closed on concurrent).
+ */
+export async function assertNoRunningWithdrawalWorkflow(
+  temporalClient: TemporalWorkflowStarter,
+  workflowId: string,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const getHandle = temporalClient.workflow.getHandle;
+  if (typeof getHandle !== 'function') {
+    return { ok: true };
+  }
+  try {
+    const described = await getHandle.call(temporalClient.workflow, workflowId).describe();
+    const name = describeStatusName(described.status);
+    if (name.includes('RUNNING') || name === '1' || name === 'WORKFLOW_EXECUTION_STATUS_RUNNING') {
+      return { ok: false, reason: 'workflow_still_running' };
+    }
+    return { ok: true };
+  } catch {
+    // Not found / closed / describe unsupported → proceed; start + ConflictPolicy decide.
+    return { ok: true };
   }
 }
 
@@ -237,12 +325,14 @@ export interface ProcessWithdrawalApprovedOutboxBatchResult {
   readonly claimed: number;
   readonly dispatched: number;
   readonly retried: number;
+  readonly deadLetter?: number;
 }
 
 /**
  * Claim PENDING withdrawal.approved events and start Temporal workflows.
  * WorkflowExecutionAlreadyStarted → success (DISPATCHED).
  * Temporal unavailable → leave PENDING, increment attempts, store redacted error.
+ * Uses REJECT_DUPLICATE (ADR-017 first-start path).
  */
 export async function processWithdrawalApprovedOutboxBatch(
   pool: Pool,
@@ -265,7 +355,7 @@ export async function processWithdrawalApprovedOutboxBatch(
           options.client,
           event,
           options.taskQueue,
-          { realChainEnabled },
+          { realChainEnabled, workflowIdReusePolicy: 'REJECT_DUPLICATE' },
         );
         void started;
         await markOutboxDispatched(client, event.id);
@@ -284,6 +374,88 @@ export async function processWithdrawalApprovedOutboxBatch(
 
     await client.query('COMMIT');
     return { claimed, dispatched, retried };
+  } catch (error) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      // ignore
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Claim PENDING withdrawal.failed_pre_retry events and restart `withdrawal/{id}`
+ * with ALLOW_DUPLICATE after re-verifying FAILED_PRE reuse safety.
+ *
+ * - Unsafe reuse → DEAD_LETTER (no Temporal start)
+ * - RUNNING prior workflow → DEAD_LETTER (no concurrent mint)
+ * - AlreadyStarted / successful start → DISPATCHED (idempotent across relay retries)
+ */
+export async function processWithdrawalFailedPreRetryOutboxBatch(
+  pool: Pool,
+  options: ProcessWithdrawalApprovedOutboxBatchOptions,
+): Promise<ProcessWithdrawalApprovedOutboxBatchResult> {
+  void options.fakeChainEnabled;
+  const realChainEnabled = options.realChainEnabled === true && options.fakeChainEnabled === false;
+  const limit = options.limit ?? 20;
+  const client = await pool.connect();
+  let dispatched = 0;
+  let retried = 0;
+  let deadLetter = 0;
+  try {
+    await client.query('BEGIN');
+    const events = await claimPendingFailedPreRetryEvents(client, limit);
+    const claimed = events.length;
+
+    for (const event of events) {
+      try {
+        const withdrawalId = resolveWithdrawalId(event);
+        const workflowId = resolveWorkflowId(event, withdrawalId);
+
+        const evaluation = await evaluateFailedPreBroadcastReuse(client, withdrawalId);
+        if (!evaluation.ok) {
+          await markOutboxDeadLetter(
+            client,
+            event.id,
+            `reuse_refused:${evaluation.refusalReasons.join(',')}`,
+          );
+          deadLetter += 1;
+          continue;
+        }
+
+        const running = await assertNoRunningWithdrawalWorkflow(options.client, workflowId);
+        if (!running.ok) {
+          await markOutboxDeadLetter(client, event.id, running.reason);
+          deadLetter += 1;
+          continue;
+        }
+
+        const started = await startWithdrawalWorkflowFromOutbox(
+          options.client,
+          event,
+          options.taskQueue,
+          { realChainEnabled, workflowIdReusePolicy: 'ALLOW_DUPLICATE' },
+        );
+        void started;
+        await markOutboxDispatched(client, event.id);
+        dispatched += 1;
+      } catch (error) {
+        if (isAlreadyStarted(error)) {
+          // Concurrent relay / still-running race: treat as successful handoff.
+          await markOutboxDispatched(client, event.id);
+          dispatched += 1;
+          continue;
+        }
+        await markOutboxRetry(client, event.id, error);
+        retried += 1;
+      }
+    }
+
+    await client.query('COMMIT');
+    return { claimed, dispatched, retried, deadLetter };
   } catch (error) {
     try {
       await client.query('ROLLBACK');

@@ -83,6 +83,8 @@ export interface RewardRuleRecord {
   readonly status: RuleVersionStatus;
   readonly validFrom: string;
   readonly validTo: string | null;
+  /** NULL = historical unconfigured; fail closed when activating new ACTIVE rows. */
+  readonly referralEligible: boolean | null;
 }
 
 export interface ResolveRewardRuleContext {
@@ -112,6 +114,8 @@ export interface CreateRewardRuleVersionCommand {
   readonly sourceReference?: string | null;
   readonly createdByAdminId?: string | null;
   readonly activate?: boolean;
+  /** Required when activate/ACTIVE; NULL allowed only for non-ACTIVE (historical/DRAFT). */
+  readonly referralEligible?: boolean | null;
 }
 
 export interface CreateRewardBudgetPeriodCommand {
@@ -152,6 +156,26 @@ export interface CreateRewardQuoteCommand {
   readonly budgetPeriodId?: string | null;
   /** Optional locator; engine resolves ALL applicable bonus periods. */
   readonly membershipBonusBudgetPeriodId?: string | null;
+  /**
+   * Optional pre-generated quote id (required for atomic AD session+quote create).
+   * Spec V1.3: session id and quote id are pre-generated in one transaction.
+   */
+  readonly quoteId?: string;
+  /**
+   * Authoritative AD session FK (reward_quotes.ad_session_id). Required when sourceType=AD.
+   * Must equal sourceId for AD quotes.
+   */
+  readonly adSessionId?: string | null;
+  /** Optional ad unit binding for AD quotes. */
+  readonly adUnitId?: string | null;
+}
+
+export interface IssueAdRewardCommand {
+  readonly quoteId: string;
+  readonly userId: string;
+  readonly adSessionId: string;
+  readonly idempotencyKey: string;
+  readonly asOf?: Date;
 }
 
 export interface RewardQuoteResult {

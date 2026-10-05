@@ -48,6 +48,8 @@ export class FakeTonChainProvider implements TonChainProvider {
   private sendBocCallCount = 0;
   private seqnoErrorByAddress = new Map<string, Error>();
   private accountStateErrorByAddress = new Map<string, Error>();
+  private accountStateErrorQueueByAddress = new Map<string, Error[]>();
+  private accountStateCallCountByAddress = new Map<string, number>();
 
   constructor(options: FakeTonChainProviderOptions = {}) {
     assertTestnetOnly(options.networkGlobalId ?? TON_TESTNET_NETWORK_GLOBAL_ID);
@@ -117,6 +119,20 @@ export class FakeTonChainProvider implements TonChainProvider {
     this.accountStateErrorByAddress.set(address, error);
   }
 
+  /** Queue one-shot getAccountState errors (FIFO), then fall through to seeded state. */
+  seedTransientAccountStateErrors(address: string, errors: readonly Error[]): void {
+    this.accountStateErrorQueueByAddress.set(address, [...errors]);
+  }
+
+  clearAccountStateError(address: string): void {
+    this.accountStateErrorByAddress.delete(address);
+    this.accountStateErrorQueueByAddress.delete(address);
+  }
+
+  getAccountStateCallCount(address: string): number {
+    return this.accountStateCallCountByAddress.get(address) ?? 0;
+  }
+
   seedAccountBalance(address: string, balanceNanotons: string): void {
     this.balances.set(address, balanceNanotons);
   }
@@ -160,6 +176,14 @@ export class FakeTonChainProvider implements TonChainProvider {
   }
 
   async getAccountState(address: string): Promise<TonAccountState> {
+    this.accountStateCallCountByAddress.set(
+      address,
+      (this.accountStateCallCountByAddress.get(address) ?? 0) + 1,
+    );
+    const queued = this.accountStateErrorQueueByAddress.get(address);
+    if (queued !== undefined && queued.length > 0) {
+      throw queued.shift()!;
+    }
     const error = this.accountStateErrorByAddress.get(address);
     if (error !== undefined) throw error;
     const seeded = this.accountStates.get(address);

@@ -1,23 +1,19 @@
-import { Address, beginCell, internal, SendMode, type Cell, type MessageRelaxed } from '@ton/core';
+import { Address, beginCell, internal, type Cell, type MessageRelaxed } from '@ton/core';
 import { WalletContractV5R1 } from '@ton/ton';
 
 import { SignerError } from './errors.js';
+import {
+  SPIKE_JETTON_ATTACHED_TON,
+  SPIKE_JETTON_FORWARD_TON,
+  SPIKE_SEND_MODE,
+  resolveJettonTransferPolicy,
+  type JettonTransferExecutionPolicy,
+} from './jetton-transfer-policy.js';
 
 /** TEP-74 Jetton transfer op code. */
 export const JETTON_TRANSFER_OP = 0xf8a7ea5;
 
-/**
- * TESTNET/SPIKE only: attached TON for jetton-wallet gas.
- * Not a production funding / Mainnet default.
- */
-export const SPIKE_JETTON_ATTACHED_TON = 50_000_000n; // 0.05 TON
-
-/**
- * TESTNET/SPIKE only: forward TON amount inside jetton transfer body.
- */
-export const SPIKE_JETTON_FORWARD_TON = 1n;
-
-export const SPIKE_SEND_MODE = SendMode.PAY_GAS_SEPARATELY + SendMode.IGNORE_ERRORS;
+export { SPIKE_JETTON_ATTACHED_TON, SPIKE_JETTON_FORWARD_TON, SPIKE_SEND_MODE };
 
 export interface CanonicalPayoutIntent {
   readonly publicKey: Buffer;
@@ -43,7 +39,10 @@ export interface CanonicalMessageBuild {
   readonly jettonMasterIdentity: string;
 }
 
-export function buildJettonTransferBodyForIntent(intent: CanonicalPayoutIntent): Cell {
+export function buildJettonTransferBodyForIntent(
+  intent: CanonicalPayoutIntent,
+  policy: JettonTransferExecutionPolicy,
+): Cell {
   const destination = Address.parse(intent.recipientAddress);
   const responseDestination = Address.parse(intent.hotWalletAddress);
   return beginCell()
@@ -53,16 +52,32 @@ export function buildJettonTransferBodyForIntent(intent: CanonicalPayoutIntent):
     .storeAddress(destination)
     .storeAddress(responseDestination)
     .storeBit(0) // no custom payload
-    .storeCoins(SPIKE_JETTON_FORWARD_TON)
+    .storeCoins(policy.forwardTonAtomic)
     .storeBit(0) // no forward payload
     .endCell();
 }
 
 export async function buildCanonicalSigningMessageAsync(
   intent: CanonicalPayoutIntent,
+  options?: {
+    readonly phase21MainnetEnabled?: boolean;
+    readonly transferPolicy?: JettonTransferExecutionPolicy | null;
+  },
 ): Promise<CanonicalMessageBuild> {
-  if (intent.networkGlobalId === -239) {
+  const phase21 = options?.phase21MainnetEnabled === true;
+  const transferPolicy = resolveJettonTransferPolicy({
+    phase21MainnetEnabled: phase21,
+    transferPolicy: options?.transferPolicy ?? null,
+  });
+  if (intent.networkGlobalId === -239 && !phase21) {
     throw new SignerError('MAINNET_REJECTED', 'Cannot build MAINNET canonical message in Phase 9');
+  }
+  if (phase21 && intent.networkGlobalId !== -239) {
+    throw new SignerError(
+      'POLICY_REJECTED',
+      'Phase 21 Mainnet mode requires networkGlobalId -239 for canonical message',
+      { networkGlobalId: intent.networkGlobalId },
+    );
   }
   if (!intent.jettonMasterIdentity || intent.jettonMasterIdentity.trim() === '') {
     throw new SignerError('POLICY_REJECTED', 'Jetton master identity required');
@@ -77,11 +92,11 @@ export async function buildCanonicalSigningMessageAsync(
   });
 
   const jettonWallet = Address.parse(intent.payoutJettonWalletAddress);
-  const body = buildJettonTransferBodyForIntent(intent);
+  const body = buildJettonTransferBodyForIntent(intent, transferPolicy);
   const outboundMessages: MessageRelaxed[] = [
     internal({
       to: jettonWallet,
-      value: SPIKE_JETTON_ATTACHED_TON,
+      value: transferPolicy.attachedTonAtomic,
       bounce: true,
       body,
     }),
@@ -93,7 +108,7 @@ export async function buildCanonicalSigningMessageAsync(
   await wallet.createTransfer({
     seqno: intent.seqno,
     timeout: intent.validUntil,
-    sendMode: SPIKE_SEND_MODE,
+    sendMode: transferPolicy.sendMode,
     messages: outboundMessages,
     authType: 'external',
     signer: async (messageCell: Cell) => {

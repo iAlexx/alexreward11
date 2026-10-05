@@ -79,10 +79,16 @@ Maintain **two offline encrypted backups** of the key bundle (same ciphertext fo
 
 ### Recovery / rotation / Hot Wallet replacement
 
-1. Pause payout dispatch; do not unlock a suspect host.
-2. Restore from an offline encrypted backup onto a clean signer host, or generate a **new** Hot Wallet and update audited Hot Wallet configuration.
-3. Unlock only after identity checks (`publicKeyFingerprint`, derived address) match expected Hot Wallet rows.
-4. Rotation = new seed + new encrypted bundle + Hot Wallet config change + dual offline backups; old material revoked/destroyed under Owner procedure.
+Canonical Phase 18 markers: SIGNER_ROTATION_PROCEDURE, HOT_WALLET_RETIREMENT_PROCEDURE, NO_PLAINTEXT_KEY_IN_REPO.
+
+1. Pause payout dispatch first (`PAYOUT_DISPATCH_PAUSE=true` via Admin Feature Flags ceremony); do not unlock a suspect host.
+2. Generate new key/bundle on a controlled host (`generateHotWalletSeed` / `encryptKeyBundle` / `writeKeyBundleFile`), or restore from an offline encrypted backup onto a clean signer host.
+3. Create **dual encrypted offline backups** of the new ciphertext; store separately from the live host. Never store plaintext key/passphrase in repo or env files.
+4. Verify fingerprint/address (`publicKeyFingerprint`, derived Wallet V5 R1 address) against expected Hot Wallet rows / `SIGNER_EXPECTED_SIGNER_REFERENCE`.
+5. Perform audited Hot Wallet identity transition; deploy new bundle; unlock briefly; relock.
+6. Reconcile old/new wallet chain state (read-only Hot Wallet monitor / restore reconcile as applicable).
+7. Retire old signing capability and obsolete backups under Owner procedure.
+8. Resume payouts only after Owner approval (never auto-unpause).
 
 ### Compromise response
 

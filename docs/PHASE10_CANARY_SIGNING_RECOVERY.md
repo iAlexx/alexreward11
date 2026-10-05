@@ -25,16 +25,42 @@ Original workflow `withdrawal/01a0afbd-…` must be **TERMINATED** (never claim 
 Re-entry is a **direct** `runRealTestnetPayoutPipeline` call — **no** new Temporal workflow.  
 Completion is recorded in PostgreSQL + chain evidence.
 
-## CLI
+## Currently authorized during Owner-auth workstreams
+
+**Recovery CLI execution (including dry-run) is NOT authorized** during Owner authentication
+stabilization/closure. Do not run it from these workstreams.
+
+Owner-auth CLI may issue sessions only on approved **isolated** test databases.
+All Owner-auth operational `alex_rewards` entry points are **default-deny** until a separate
+Owner-held endpoint trust ceremony is approved and implemented
+(`docs/OWNER_ADMIN_DB_IDENTITY_DESIGN.md`). Operational first enrollment remains refused.
+
+Isolated auth CLI (test DB only):
+
+```powershell
+pnpm --filter @alex-rewards/auth run build
+pnpm --filter @alex-rewards/auth run owner-admin-auth -- enroll `
+  --expected-database <ISOLATED_TEST_DB_NAME> `
+  --admin-user-id <ACTIVE_OWNER_ADMIN_UUID>
+pnpm --filter @alex-rewards/auth run owner-admin-auth -- login `
+  --expected-database <ISOLATED_TEST_DB_NAME> `
+  --admin-user-id <ACTIVE_OWNER_ADMIN_UUID>
+```
+
+`--expected-database` is required. Session tokens are TTY-only; never argv/env.
+
+## Future / historical Recovery CLI (NOT authorized now)
+
+The following commands are documented for a **separate, Owner-authorized Recovery window**.
+They are **not** part of Owner-auth closure and must not be executed from this phase.
 
 ```bash
-# Dry-run (default)
+# Dry-run (default) — NOT authorized in Owner-auth closure
 pnpm --filter @alex-rewards/withdrawals run phase10:canary-recovery -- \
   --withdrawal-id 01a0afbd-2550-742b-967d-5aec6ee75a83 \
   --expected-fencing-token 1
 
-# Mutate (Owner-gated; still no broadcast)
-# Session token is prompted on an interactive TTY (hidden input) — never pass via argv/env.
+# Mutate — NOT authorized in Owner-auth closure
 pnpm --filter @alex-rewards/withdrawals run phase10:canary-recovery -- \
   --withdrawal-id 01a0afbd-2550-742b-967d-5aec6ee75a83 \
   --mode mutate \

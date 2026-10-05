@@ -13,6 +13,8 @@ import type { MatureRewardEventCommand, MatureRewardEventResult } from './types.
  * Mature a PENDING reward_event into AVAILABLE.
  * Idempotent and concurrent-safe (row lock + ledger idempotency).
  * Business reference: reward-maturity/{rewardEventId}
+ *
+ * Referral bonus issuance is not triggered here — use processReferralIssuanceBatch.
  */
 export async function matureRewardEvent(
   db: LedgerDb,
@@ -26,11 +28,13 @@ export async function matureRewardEvent(
       asset_id: string;
       amount_atomic: string;
       state: string;
+      source_type: string;
       pending_until: Date | null;
       available_at: Date | null;
       maturity_ledger_transaction_id: string | null;
     }>(
       `SELECT id, user_id, asset_id, amount_atomic::text AS amount_atomic, state::text AS state,
+              source_type::text AS source_type,
               pending_until, available_at, maturity_ledger_transaction_id
        FROM reward_events
        WHERE id = $1
@@ -49,7 +53,7 @@ export async function matureRewardEvent(
         rewardEventId: event.id,
         ledgerTransactionId: event.maturity_ledger_transaction_id,
         created: false,
-        state: 'AVAILABLE',
+        state: 'AVAILABLE' as const,
         availableAt: (event.available_at ?? asOf).toISOString(),
       };
     }
@@ -66,6 +70,54 @@ export async function matureRewardEvent(
           asOf: asOf.toISOString(),
         },
       });
+    }
+
+    // Referral maturity: require linked referral_reward_events + safe originating reward.
+    if (event.source_type === 'REFERRAL') {
+      const link = await client.query<{
+        source_reward_event_id: string;
+        source_state: string;
+      }>(
+        `SELECT rre.source_reward_event_id,
+                src.state::text AS source_state
+         FROM referral_reward_events rre
+         JOIN reward_events src ON src.id = rre.source_reward_event_id
+         WHERE rre.referrer_reward_event_id = $1::uuid
+         FOR SHARE OF rre, src`,
+        [event.id],
+      );
+      const referralLink = link.rows[0];
+      if (referralLink === undefined) {
+        throw new RewardDomainError(
+          'MATURITY_INVALID_STATE',
+          'REFERRAL reward event missing referral_reward_events link',
+          { details: { rewardEventId: event.id } },
+        );
+      }
+      if (referralLink.source_state === 'REVERSED') {
+        throw new RewardDomainError(
+          'MATURITY_INVALID_STATE',
+          'originating reward is REVERSED; referral cannot mature',
+          {
+            details: {
+              rewardEventId: event.id,
+              sourceRewardEventId: referralLink.source_reward_event_id,
+            },
+          },
+        );
+      }
+      if (referralLink.source_state !== 'AVAILABLE') {
+        throw new RewardDomainError(
+          'MATURITY_INVALID_STATE',
+          'originating reward is not AVAILABLE; referral cannot mature',
+          {
+            details: {
+              rewardEventId: event.id,
+              sourceState: referralLink.source_state,
+            },
+          },
+        );
+      }
     }
 
     const pending = await getOrCreateLedgerAccount(client, {
@@ -136,7 +188,7 @@ export async function matureRewardEvent(
       rewardEventId: event.id,
       ledgerTransactionId: ledger.id,
       created: ledger.created,
-      state: 'AVAILABLE',
+      state: 'AVAILABLE' as const,
       availableAt: asOf.toISOString(),
     };
   });

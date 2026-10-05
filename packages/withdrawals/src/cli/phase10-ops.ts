@@ -48,6 +48,7 @@ import {
   readonlyValidateVerdictImpliesSuccess,
   setPhase10OpsProcessExitCode,
 } from './phase10-ops-exit.js';
+import { evaluatePhase10ClosureEligibility } from '../phase10-closure-gate.js';
 
 const COMMANDS = new Set([
   'readiness',
@@ -62,6 +63,7 @@ const COMMANDS = new Set([
   'campaign-rescan',
   'campaign-finalize',
   'chain-history-readonly-validate',
+  'closure-evaluate',
 ]);
 
 function usage(): never {
@@ -69,7 +71,7 @@ function usage(): never {
     JSON.stringify({
       ok: false,
       message:
-        'usage: phase10-ops <readiness|preflight|baseline-capture|restore-reconcile|hot-wallet-monitor|campaign-plan|campaign-init|campaign-status|campaign-attach|campaign-rescan|campaign-finalize|chain-history-readonly-validate> [flags]',
+        'usage: phase10-ops <readiness|preflight|baseline-capture|restore-reconcile|hot-wallet-monitor|campaign-plan|campaign-init|campaign-status|campaign-attach|campaign-rescan|campaign-finalize|chain-history-readonly-validate|closure-evaluate> [flags]',
     }),
   );
   process.exit(2);
@@ -431,6 +433,94 @@ async function main(): Promise<void> {
           reportDigest: report.reportDigest,
           ...(outPath !== undefined ? { path: outPath } : {}),
         },
+      });
+      return;
+    }
+
+    if (command === 'closure-evaluate') {
+      const ownerReviewPackage = readFlag(argv, '--owner-review-package');
+      const archiveDir = readFlag(argv, '--archive-dir');
+      if (ownerReviewPackage === undefined || archiveDir === undefined) {
+        printJson({
+          ok: false,
+          command: 'closure-evaluate',
+          error:
+            'usage: phase10-ops closure-evaluate --owner-review-package <path> --archive-dir <path> [--user-id <uuid>]',
+        });
+        exitCode = 2;
+        setPhase10OpsProcessExitCode(2);
+        return;
+      }
+
+      let signerCustodyState: string | null = null;
+      let signingReady = false;
+      try {
+        const signerBase =
+          worker.SIGNER_BASE_URL?.replace(/\/$/, '') || 'http://127.0.0.1:3015';
+        const res = await fetch(`${signerBase}/health/ready`);
+        const body = (await res.json()) as {
+          custodyState?: string;
+          signingReady?: boolean;
+        };
+        signerCustodyState =
+          typeof body.custodyState === 'string' ? body.custodyState : null;
+        signingReady = body.signingReady === true;
+      } catch {
+        signerCustodyState = null;
+        signingReady = false;
+      }
+
+      const pauseClient = await pool.connect();
+      let paused = false;
+      try {
+        const { isPayoutDispatchPaused } = await import('../flags.js');
+        paused = await isPayoutDispatchPaused(
+          pauseClient,
+          mapDeploymentEnv(worker.DEPLOYMENT_ENV),
+        );
+      } finally {
+        pauseClient.release();
+      }
+
+      const eligibilityFinal = await evaluatePhase10ClosureEligibility({
+        ownerReviewPackagePath: ownerReviewPackage,
+        finalArchiveDirectory: archiveDir,
+        db: pool,
+        deploymentEnvironment: mapDeploymentEnv(worker.DEPLOYMENT_ENV),
+        ...(controlledUserId !== null ? { controlledUserId } : {}),
+        currentSafety: {
+          payoutDispatchPaused: paused,
+          signerCustodyState,
+          signingReady,
+          realChainEnabled: worker.WITHDRAWAL_REAL_CHAIN_ENABLED === true,
+          fakeChainEnabled: worker.WITHDRAWAL_FAKE_CHAIN_ENABLED === true,
+        },
+      });
+
+      const ok = eligibilityFinal.eligible && eligibilityFinal.mayMarkPhase10Closed;
+      exitCode = ok ? 0 : 1;
+      setPhase10OpsProcessExitCode(exitCode);
+      printJson({
+        ok,
+        command: 'closure-evaluate',
+        readOnly: true,
+        mutatesFinancialDb: false,
+        phase10Closed: false,
+        campaignStatusClosed: false,
+        executeMutation: false,
+        mayMarkPhase10Closed: eligibilityFinal.mayMarkPhase10Closed,
+        eligible: eligibilityFinal.eligible,
+        blockers: eligibilityFinal.blockers,
+        checks: eligibilityFinal.checks,
+        campaignSummary: eligibilityFinal.campaignSummary,
+        economicSummary: eligibilityFinal.economicSummary,
+        closureSafety: eligibilityFinal.closureSafety,
+        historicalLiveReadiness: eligibilityFinal.historicalLiveReadiness,
+        knownTestCondition: eligibilityFinal.knownTestCondition,
+        archive: eligibilityFinal.archive,
+        evidenceBinding: eligibilityFinal.evidenceBinding,
+        evaluatedAt: eligibilityFinal.evaluatedAt,
+        note: 'Read-only eligibility only. Does NOT close Phase 10. Owner must authorize closure mutation separately.',
       });
       return;
     }

@@ -10,9 +10,21 @@ import {
 } from '@alex-rewards/control-center';
 import { HEALTH_CONTRACT_VERSION, type HealthResponse } from '@alex-rewards/contracts';
 import { createShutdownCoordinator, initializeObservability } from '@alex-rewards/observability';
-import { withdrawalEngineConfigFromValidatedApi } from '@alex-rewards/withdrawals';
+import {
+  claimAndDeliverPublicPayoutBatch,
+  mapDeploymentEnvToFeatureEnvironment,
+  withdrawalEngineConfigFromValidatedApi,
+  type PublicPayoutFeatureEnvironment,
+} from '@alex-rewards/withdrawals';
 
 import { createGrammyApprovalsSender } from './approvals-telegram-sender.js';
+import {
+  PUBLIC_PAYOUT_POLL_INTERVAL_MS,
+  startPublicPayoutDeliveryPoller,
+} from './public-payout-poller.js';
+import { createGrammyPublicPayoutSender } from './public-payout-telegram-sender.js';
+import { buildPlainStartWebAppButton, resolveReferralStartBridge } from './referral-start.js';
+import { shouldStartTelegramControlCenter } from './telegram-control-center-gate.js';
 
 const OWNER_REVIEW_POLL_INTERVAL_MS = 2_000;
 
@@ -36,6 +48,8 @@ let pool: Pool | undefined;
 let ready = config.BOT_TRANSPORT_MODE === 'disabled';
 let ownerReviewPollTimer: ReturnType<typeof setInterval> | undefined;
 let ownerReviewPollInFlight = false;
+let publicPayoutPollTimer: ReturnType<typeof setInterval> | undefined;
+let publicPayoutFeatureEnvironment: PublicPayoutFeatureEnvironment | undefined;
 
 const controlCenterConfig = controlCenterConfigFromBot(config);
 const withdrawalEngineConfig = withdrawalEngineConfigFromValidatedApi({
@@ -45,6 +59,7 @@ const withdrawalEngineConfig = withdrawalEngineConfigFromValidatedApi({
   WITHDRAWAL_NETWORK_CODE: config.WITHDRAWAL_NETWORK_CODE,
   WITHDRAWAL_ASSET_SYMBOL: config.WITHDRAWAL_ASSET_SYMBOL,
   WITHDRAWAL_FAKE_CHAIN_ENABLED: config.WITHDRAWAL_FAKE_CHAIN_ENABLED,
+  STAGING_INTEGRATION_MODE: config.STAGING_INTEGRATION_MODE,
 });
 
 const response = (status: HealthResponse['status']): HealthResponse => ({
@@ -63,14 +78,51 @@ server.get('/health/ready', async (_request, reply) => {
 server.get('/health', async () => response('ok'));
 
 try {
-  await server.listen({ port: config.BOT_PORT, host: '0.0.0.0' });
-  if (config.BOT_TRANSPORT_MODE === 'polling' && config.TELEGRAM_BOT_TOKEN !== undefined) {
+  await server.listen({ port: config.BOT_PORT, host: config.BOT_LISTEN_HOST });
+  if (shouldStartTelegramControlCenter(config.BOT_TRANSPORT_MODE, config.TELEGRAM_BOT_TOKEN)) {
     if (config.DATABASE_URL === undefined) {
       throw new Error('DATABASE_URL is required when bot transport is enabled');
     }
     pool = new Pool({ connectionString: config.DATABASE_URL });
     bot = new Bot(config.TELEGRAM_BOT_TOKEN);
     const approvalsSender = createGrammyApprovalsSender(bot.api);
+    const publicPayoutSender = createGrammyPublicPayoutSender(bot.api);
+    try {
+      publicPayoutFeatureEnvironment = mapDeploymentEnvToFeatureEnvironment(config.DEPLOYMENT_ENV);
+    } catch (error) {
+      publicPayoutFeatureEnvironment = undefined;
+      observability.logger.warn(
+        { err: error, deploymentEnv: config.DEPLOYMENT_ENV },
+        'public payout delivery poller disabled: DEPLOYMENT_ENV unmapped (fail closed)',
+      );
+    }
+
+    // Public /start transport bridge only — no attribution / no financial authority.
+    bot.command('start', async (ctx) => {
+      const payload = typeof ctx.match === 'string' ? ctx.match : '';
+      const bridge = resolveReferralStartBridge({
+        startPayload: payload,
+        botUsername: config.TELEGRAM_PUBLIC_BOT_USERNAME,
+        miniAppPublicUrl: config.MINIAPP_PUBLIC_URL,
+      });
+      if (bridge.kind === 'IGNORE') {
+        return;
+      }
+      if (bridge.kind === 'LAUNCH_MAIN') {
+        await ctx.reply('Welcome to LOOTRA. Tap below to open the Mini App.', {
+          reply_markup: {
+            inline_keyboard: [[buildPlainStartWebAppButton(bridge.webAppUrl)]],
+          },
+        });
+        return;
+      }
+      await ctx.reply('Open LOOTRA to continue.', {
+        reply_markup: {
+          inline_keyboard: [[{ text: 'Open LOOTRA', url: bridge.launchUrl }]],
+        },
+      });
+    });
+
     bot.on('callback_query:data', async (ctx) => {
       const data = ctx.callbackQuery.data;
       const fromId = ctx.from?.id;
@@ -133,9 +185,31 @@ try {
           ownerReviewPollInFlight = false;
         });
     }, OWNER_REVIEW_POLL_INTERVAL_MS);
+
+    // Public payout Telegram delivery — missing destination/feature does not affect readiness.
+    publicPayoutPollTimer = startPublicPayoutDeliveryPoller({
+      enabled: publicPayoutFeatureEnvironment !== undefined,
+      intervalMs: PUBLIC_PAYOUT_POLL_INTERVAL_MS,
+      poll: async () => {
+        if (pool === undefined || publicPayoutFeatureEnvironment === undefined) return;
+        await claimAndDeliverPublicPayoutBatch(pool, {
+          owner: 'bot-public-payout',
+          sender: publicPayoutSender,
+          environment: publicPayoutFeatureEnvironment,
+          recoverStaleFirst: true,
+        });
+      },
+      onError: (error) => {
+        observability.logger.warn({ err: error }, 'public payout delivery batch failed');
+      },
+    });
   }
   observability.logger.info(
-    { port: config.BOT_PORT, transport: config.BOT_TRANSPORT_MODE },
+    {
+      port: config.BOT_PORT,
+      listenHost: config.BOT_LISTEN_HOST,
+      transport: config.BOT_TRANSPORT_MODE,
+    },
     'bot listening',
   );
 } catch (error) {
@@ -149,7 +223,16 @@ const shutdown = createShutdownCoordinator(observability.logger, 'bot', [
     ready = false;
   },
   () => {
-    if (ownerReviewPollTimer !== undefined) clearInterval(ownerReviewPollTimer);
+    if (ownerReviewPollTimer !== undefined) {
+      clearInterval(ownerReviewPollTimer);
+      ownerReviewPollTimer = undefined;
+    }
+  },
+  () => {
+    if (publicPayoutPollTimer !== undefined) {
+      clearInterval(publicPayoutPollTimer);
+      publicPayoutPollTimer = undefined;
+    }
   },
   async () => {
     if (bot?.isRunning()) await bot.stop();

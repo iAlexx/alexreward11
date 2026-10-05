@@ -66,3 +66,214 @@ See `docs/CONTROL_CENTER.md` and `docs/REVIEW_QUEUE.md`.
 - `local_ephemeral` mode is local/test only and does **not** satisfy the production self-hosted gate.
 
 See `docs/TON_SIGNER.md`.
+
+## Phase 11 — advertising trust boundary
+
+- **AdsGram production monetary issuance is BLOCKED** (`production_monetary_status = BLOCKED`,
+  six OPEN clarification items). Unblocking is an Owner-reviewed data change, not a code change.
+- Client evidence is **never** money. A client completion is a signal; it cannot advance a session
+  past `CLIENT_COMPLETED` and cannot raise a balance.
+- Session state is **derived** from append-only `ad_session_signals` and then persisted. Clients
+  never assign state, and signals are never mutated or deleted.
+- `v1/ads/*` requires an active Phase 3 session; the ad session id is a path locator only and
+  every request is re-checked against the authenticated user. Requests carrying reward-authority
+  fields (amount, bonus, verification, ledger ids) are refused `400` before any domain call.
+- `GET /webhooks/adsgram/reward` is unauthenticated by provider design. It returns one uniform
+  `{ accepted: true, rewardCredited: false }` body for every outcome so it cannot be used as an
+  oracle, is throttled through Redis, and **fails closed** when the throttle store is unavailable.
+- Providers are fixed at build time in a compile-time registry; nothing is loaded dynamically.
+- The monetary gate is provider-neutral and reads only data — no provider name is branched on.
+- `packages/ads` must never import `@alex-rewards/ledger` or post a ledger transaction; issuance
+  goes through `issueAdReward` in the Reward Engine, asserted against source on disk.
+- No production debug or fake-completion endpoint exists. The only provider that passes the gate
+  in tests (`HARNESS_CERT`) lives in the test harness and is never seeded or shipped.
+
+See `docs/ADS_SPEC.md` and `docs/ADSGRAM_CLARIFICATION_REGISTER.md`.
+
+## Phase 13 — Owner Admin control plane
+
+- Admin auth is **independent** of Telegram Mini App sessions (`AdminSessionGuard` refuses
+  Telegram-shaped JWTs).
+- **Primary:** WebAuthn/passkey (typed challenges: unpredictable, expiring, one-time; RP ID /
+  origin fail closed when unset outside local/test). Production RP ID remains
+  `OWNER_DECISION_REQUIRED`.
+- **Fallback:** password **and** TOTP together. Password-only and TOTP-only are refused.
+- **Recovery:** single-use hashed recovery codes; plaintext shown once; never logged.
+- Sessions support idle/absolute timeout, revocation, rotation, and recent-reauth for
+  high-impact mutations. Second-confirmation tokens bind action/resource/version/payload.
+- V1 RBAC: only **OWNER** is enabled server-side; client role claims are not authority.
+- Audit mutations append to append-only `audit_logs` with secrets redacted.
+- Admin browser never receives signer keys, mnemonics, provider API secrets, password hashes,
+  TOTP seeds after enrollment, raw recovery codes after generation, or DB credentials.
+- No direct balance editor; no Admin path that posts ledger entries outside approved domain
+  commands; Policy Center refuses arbitrary JS/SQL/eval; provider hard limits cannot be
+  exceeded; AdsGram monetary APPROVED refused while clarification gate is open;
+  `PAYOUT_DISPATCH_PAUSE` is not silently flipped.
+
+See `docs/OWNER_ADMIN_AUTH.md`, `docs/ADMIN_POLICY_CENTER.md`, ADR-023.
+
+## Phase 19 — Pre-Mainnet security review
+
+Phase 19 is **CLOSED / PASS / ARCHIVED**. `PHASE19_GATE=PASS`. Archive slug
+`PHASE_19_SECURITY_REVIEW`. Canonical accepted source
+`b5110524f90f29dc2a9235aac91ee9de731a03c0`.
+
+`PHASE 19 SECURITY REVIEW = PASS / ARCHIVED`.
+
+OPEN Critical = 0. OPEN High = 0. Residual OPEN Medium/Low/Info findings
+(P19-SEC-004, 005, 006, 007, 008, 010, 011, 012) remain visible as accepted residual /
+non-Mainnet-blocking carry-forward backlog (not silently closed; not Owner acceptance of
+Critical/High). Product + dependency Mainnet blockers
+P19-SEC-001/009/014/016/017/018/019/020/021/022/023 are RESOLVED in source.
+
+At Phase 19 archive time, Phase 20 had **not** started. Mainnet / production monetary / AdsGram monetary / payout resume
+remain unauthorized. The Phase 19 archive does **not** approve Mainnet or production monetary behavior.
+
+Authoritative review artifacts:
+
+- `docs/PHASE_19_ACCEPTANCE_REPORT.md`
+- `docs/PHASE_19_SECURITY_REVIEW_ACCEPTANCE.md` (same content alias)
+- `docs/PHASE_19_SECURITY_REVIEW_PLAN.md`
+- `docs/PHASE_19_SECURITY_FINDINGS.md`
+- `docs/PHASE_19_ATTACK_SURFACE.md`
+
+Verified-from-code statements for Phase 19 (not aspirational):
+
+- Founder claim **consume** stores hash only, is single-use under row lock, uses session `userId` authority, and issues zero ledger money.
+- Admin Founder **grant** requires CSRF + recent reauth + consumed confirmation with target binding; reassignment is unavailable.
+- Admin claim-code **issue** requires CSRF + recent reauth + consumed confirmation (`memberships.founder_claim_code_issue`) with payload binding reason / normalized expiresAt / issuedForReference / reserveFounderNumber (`P19-SEC-001` RESOLVED; route DB proofs added Step 2B).
+- AdsGram production monetary remains **BLOCKED**; client completion and AdsGram webhook do not issue money.
+- Policy Center refuses arbitrary code and returns `applied=false` for REWARD_RULES / PROVIDER_LIMITS / FEATURE_FLAGS / BENEFIT_RULES / WITHDRAWAL_LIMITS; sole FEATURE_FLAGS web mutation is dedicated Feature Flags route (`P19-SEC-009` RESOLVED; DB proof Step 2B).
+- Review Queue is not financial source of truth; Admin HTTP `RESOLVE_AFTER_DOMAIN` removed (`P19-SEC-017` RESOLVED).
+- Mission NEW claims and PENDING issuance refuse DRAFT/REVOKED mission versions (`P19-SEC-014` RESOLVED).
+- Missing `PAYOUT_DISPATCH_PAUSE` fails closed in STAGING/PRODUCTION (`P19-SEC-016` RESOLVED; pipeline DB proof Step 2B). Live STAGING pause flag unchanged.
+- Fastify 5.12.2; Next 16.3.6; `@nestjs/platform-fastify` 12.0.3; `@grpc/grpc-js` 1.14.5; `fast-uri` 4.1.4/3.1.7 (`P19-SEC-018..022` RESOLVED).
+- `brace-expansion` pinned to 2.1.7 / 5.0.12 (`P19-SEC-023` RESOLVED). Step 2B left 2.1.4/5.0.9 including API `@fastify/static` closure; static registration and attacker-controlled glob input were not observed, but the High advisory was still patched.
+  Mainnet / production monetary / AdsGram monetary / payout resume remain unauthorized.
+
+## Phase 20 — Closed Beta / Minimal Funds
+
+Phase 20 is **IN_PROGRESS**. Canonical Railway runtime cutover to `production-runtime` @ `b9dd700…` completed; Owner-authorized staging Risk/Trust/Eligibility v1 + `WITHDRAWAL_REQUESTS_PAUSE/STAGING=true` activated with controlled validation. Production money remains OFF (AdsGram BLOCKED; payout pause true). Overall `PHASE20_GATE=HOLD`. Phase 20 is **not** PASS and **not** archived.
+Branch: `phase20-closed-beta`. Starting HEAD:
+`240d22a6c877f2d678668ba596238f6c8b234f71`.
+
+Authority freeze unchanged: Mainnet OFF; production monetary OFF; AdsGram production
+monetary BLOCKED; payout resume unauthorized; `PHASE20_REAL_MONEY_EXECUTION_AUTHORIZED=false`.
+Phase 20 archive **not** created. Phase 21 **not** started.
+
+Owner NOTIFICATIONS_SCOPE=DRAFT_ONLY_NO_SEND (P20-GAP-007 DEFERRED). AdsGram monetary remains BLOCKED after Step 3 observation.
+
+Step 2 (historical): disposable draft-only notification proofs; fraud/eligibility fail-closed + TEST
+fixture proofs (REFERENCE ONLY — NOT APPROVED FOR STAGING); empty mission list honesty;
+referral self-referral / ALREADY_ATTRIBUTED smoke.
+Step 3 (complete): Owner `DRAFT_ONLY_NO_SEND`; AdsGram BLOCKED observation/no-fill/Earn UX validated on disposable DB.
+`RAILWAY_DEPLOYMENT_PERFORMED=NO`. GitHub commit status reported `alex-rewards-miniapp` Vercel success for the Step 3 commit (automatic; not Railway validation).
+Step 4C staging policy activation complete (P20-GAP-009 REMEDIATED). Step 5 Owner content scope
+recorded: pre-existing staging Referral v1 + code policy accepted for **non-monetary** Friends
+validation; missions deferred (`DEFERRED_NO_LIVE_CONTENT`). `base_rate_bps=500` is a staging
+placeholder — not monetary rate approval. `REFERRAL_REWARD_PAUSE/STAGING=true` keeps Referral
+issuance paused. `MISSION_REWARD_PAUSE/STAGING` remains MISSING (no live mission content). No
+operational DB mutation in Step 5.
+
+**Phase 20 final:** `PHASE 20 CLOSED BETA = PASS / ARCHIVED`. Canonical accepted source
+`b8135c2a94cf5939371100cdbbf2316ba2eeb5e8`. Canonical runtime remains
+`production-runtime @ b9dd700de428498493fb6e497ec16901684532c0`. Real-money blockers **7** remain
+OPEN. Phase 21 **NOT STARTED** / **NOT AUTHORIZED**. Final acceptance ceremony: no operational
+mutation; Phase 18 restore sibling retained.
+
+Authoritative artifacts:
+
+- `docs/PHASE_20_CLOSED_BETA_PLAN.md`
+- `docs/PHASE_20_READINESS_MATRIX.md`
+- `docs/PHASE_20_GAP_REGISTER.md`
+- `docs/PHASE_20_FRAUD_ELIGIBILITY_POLICY_PROPOSAL.md`
+- `docs/PHASE_20_CONTROLLED_CONTENT_PROPOSAL.md`
+- `docs/PHASE_20_STEP3_PROVIDER_NO_FILL_EVIDENCE.md`
+- `docs/PHASE_20_STEP4_OWNER_POLICY_DECISION.md`
+- `docs/PHASE_20_STEP4_OWNER_POLICY_APPROVAL.md`
+- `docs/PHASE_20_STEP5_MISSION_REFERRAL_SCOPE_DECISION.md`
+- `docs/PHASE_20_ACCEPTANCE_REPORT.md`
+
+Phase 19 residual OPEN findings (004–008, 010–012) are carried into the Phase 20 gap register
+and must not be silently discarded. P19-SEC-010/011/012 must be reconsidered before any
+provider production-money enablement.
+
+## Phase 21 — Mainnet micro-launch (Step 1 foundation)
+
+Phase 21 engineering started. Gate remains `BLOCKED_FOR_MAINNET_PROVISIONING`.
+Mainnet signing/config allow-path exists only behind explicit `PHASE21_MAINNET_ENABLED`
+(default false). Phase 9 Testnet rejection remains the default.
+
+`PRODUCTION_SIGNER_SERVICE=NOT_PROVISIONED`. No real production keys generated in Step 1.
+Railway signer hosting may be architecturally unsuitable for loopback-unlock /
+no-passphrase-in-env custody — see `docs/PHASE_21_SIGNER_HOT_WALLET_CEREMONY.md`.
+
+Phase 21 is **not** PASS and **not** archived.
+
+
+## Phase 21 Step 2
+
+Mainnet bundle encrypt requires explicit phase21MainnetEnabled. Mainnet jetton transfer gas requires Owner-approved policy; SPIKE constants are Testnet-only. Signer hosting: dedicated host recommended; Railway not approved without custody redesign.
+
+## Phase 21 Step 3
+
+Docs + readiness/preflight only. Signer hosting locked to `DEDICATED_CONTROLLED_HOST` (`self_hosted_encrypted`, LOCKED boot, passphrase not in env). Attached Mainnet GRAM remains ESTIMATED; SPIKE policy forbidden for Phase21. Canonical runtime still `b9dd700`; Phase21 not deployed. No live payout.
+
+## Phase 21 Step 3A pause / ceremony gates
+
+- WITHDRAWAL_REQUESTS_PAUSE missing row fails closed in STAGING/PRODUCTION (mirrors payout pause).
+- PRODUCTION safety flag baseline tooling exists (DRY_RUN default; apply ceremony-gated).
+- Controlled Available provision production path requires PHASE21_OPERATIONAL_CEREMONY_ENABLED.
+
+## Phase 21 Step 3B security notes
+
+- Ceremony mutation paths refuse orceApply arguments; tests use env gates only.
+- Missing STAGING/PRODUCTION WITHDRAWAL_REQUESTS_PAUSE remains fail-closed (Step 3A).
+- APPLY against staging is forbidden; fake local env against production DB is refused by DB identity gate.
+- External verification evidence redacts API keys (provider kind + hostname only).
+- Attached GRAM policy is not auto-promoted to OWNER_APPROVED by fee estimates.
+
+## Phase 21 Step 3C final operational truth gate
+
+Phase 21 Step 3C: provider URL SSRF allowlist (https only, no URL secrets), OWNER actor required for ceremony APPLY, dual-provider jetton derivation proof for hot wallet registration.
+
+### Phase 21 Step 4A — Production Owner bootstrap
+
+Production first-Owner trust uses `production_sealed_v1` with verify-full TLS, required `system_identifier`, dual-channel seal evidence, and independent human witnesses. Isolated `owner-bootstrap-ceremony` remains production-refusing. Existing admin UUID is a locator only — never Owner authority by itself.
+
+### Phase 21 Step 4A.1
+
+Production Owner bootstrap: branded trust, fail-closed session/auth inspection, live TTY Channel B, no same-host Channel B authority, no caller `trustClass`.
+
+### Phase 21 Step 4A.2
+
+Production Owner bootstrap final source hardening: `mintAuthenticatedProductionBootstrapTrust` not exported; forge helper test-only (`ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1`); Owner private key as Argon2id + XChaCha20-Poly1305 `.enc` (no plaintext seed); passphrase TTY-only (never env/argv/JSON/stdout); >=2 offline ciphertext backups; key dir outside repo/temp/cloud sync; APPLY default NO / Step4A.2 refuses real apply; no `forceApply`.
+
+### Phase 21 Step 4B.1
+
+- Preflight "ready" can only come from the runtime-branded `AuthenticatedProductionBootstrapTrust`
+  (live Owner TTY); the unauthenticated path cannot report ready and no boolean input grants authority.
+- Authentication returns a scoped session whose verified pool is closed by the caller (`finally`).
+- Authenticated preflight is `BEGIN READ ONLY` + `ROLLBACK`, verifies `transaction_read_only=on`, and
+  refuses pool/trust database or system_identifier mismatch. Offline-backup readiness is never taken from env.
+- Test-only pool injection requires `ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1` and is unreachable from the CLI.
+
+## Phase 21 Step 4B.2 - production Owner bootstrap APPLY controls
+
+- No production TOTP auto-confirm: the TOTP secret and confirmation code must come from the Owner's authenticator; they are validated before any DB access or decryption, and the orchestrator zeroizes its private secret copy.
+- Backup attestation and final APPLY confirmation are exact-phrase interactive prompts on a real TTY; env/argv/booleans cannot authorize them. Test injection requires `ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1`.
+- The decrypt/mutate path is reachable only after live Channel B, a fully READY authenticated read-only preflight and the final phrase.
+- Post-apply verification is read-only (`BEGIN READ ONLY` + `ROLLBACK`) and outputs no email or secret material.
+- Step 4B.2a: production CLI secrets use shared `readSecretFromTty` which resumes stdin after readline pause (Windows PowerShell exit-before-input fix). Secrets are never echoed, logged, argv, or env. Aborted TOTP enrollment secrets are not reused.
+
+## Phase 21 Owner ceremony trust (Step 4C / 4C.1 / 4C.2 / 4C.3)
+
+- Env UUID (`PHASE21_CEREMONY_ADMIN_USER_ID`) is **not** APPLY authority; it is an optional locator that must match the canonical `admin_owner_authority` seat holder.
+- APPLY requires WeakSet-branded `AuthenticatedPhase21OwnerCeremonyTrust` minted after live Owner TTY password + TOTP on a `Phase21CeremonyVerifiedPool`.
+- Production credential verification is `verifyProductionOwnerPasswordAndTotpOnVerifiedBootstrapPool` (WeakMap production `verify_full` pool). Generic `assertOwnerAdminAuthDatabaseWritable` remains test-DB-only and continues to refuse operational DB names.
+- Test registration into the production verified-pool WeakMap is **not** on the `@alex-rewards/auth` package root. It lives only under `owner-bootstrap/test-only/` and requires `NODE_ENV=test` + dual disposable gates + approved isolated test DB names (refuses `railway` / `alex_rewards`).
+- Forged `{ authenticated: true }` / `trustClass` strings / forged verified-pool objects cannot authorize.
+- Confirmation phrases and Hot Wallet backup attestations are WeakSet-branded and **required** on production APPLY APIs; booleans/env shortcuts refuse.
+- Mainnet registry APPLY additionally requires WeakSet-branded `AuthenticatedPhase21MainnetRegistryVerification` minted only via package-private in-process live verify+mint (`runLivePhase21MainnetRegistryVerificationAndMintTrust`) using concrete HTTP adapters. Public root does **not** export any raw-result mint. Plain `Phase21TwoProviderVerificationResult` (even with `PHASE21_EXTERNAL_PROBE_LIVE=1`) is diagnostic-only and cannot authorize APPLY. Freshness window is hardcoded (<=120s). Mock/skipped/incomplete/forged JSON/adapters cannot mint production trust. Provider independence requires different kind **and** hostname.
+- Auth anti-replay mutations are distinct from Phase21 business mutations.
+- Hot Wallet APPLY refuses `OWNER_SUPPLIED_EVIDENCE`, same-provider provenance, and incomplete provider evidence; mutation failures never claim rollback unless ROLLBACK confirmed.

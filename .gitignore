@@ -1,6 +1,8 @@
 .env
 .env.*
 !.env.example
+**/bootstrap-private-seed.hex
+**/owner-ceremony-private/
 .next/
 coverage/
 dist/
@@ -16,3 +18,14 @@ docs.zip
 phase-archives/
 kms-spike-report.json
 kms-spike-report.log
+test-pages/**/node_modules/
+test-pages/**/dist/
+test-pages/**/.vercel/
+
+.vercel
+.env*
+!.env.example
+# Local design-export extraction (never commit)
+.tmp-lootra-design/
+phase18-restore-drill-*.json
+phase18-restore-drill-*.md

@@ -12,7 +12,18 @@ export async function assertWithdrawalRequestsAllowed(
        AND environment = $1::environment_name`,
     [environment],
   );
-  if (result.rows[0]?.enabled === true) {
+  const row = result.rows[0];
+  if (row === undefined) {
+    // Missing kill-switch fails closed for production-like environments.
+    // LOCAL/DEV remain compatible with existing fixtures (missing => allow).
+    if (environment === 'STAGING' || environment === 'PRODUCTION') {
+      throw new WithdrawalDomainError('PAUSED', 'Withdrawal requests are paused', {
+        details: { reason: 'PAUSE_FLAG_MISSING', flagKey: 'WITHDRAWAL_REQUESTS_PAUSE', environment },
+      });
+    }
+    return;
+  }
+  if (row.enabled === true) {
     throw new WithdrawalDomainError('PAUSED', 'Withdrawal requests are paused');
   }
 }
@@ -27,5 +38,14 @@ export async function isPayoutDispatchPaused(
        AND environment = $1::environment_name`,
     [environment],
   );
-  return result.rows[0]?.enabled === true;
+  const row = result.rows[0];
+  if (row === undefined) {
+    // P19-SEC-016: missing kill-switch fails closed for production-like environments.
+    // LOCAL/DEV remain compatible with existing fixtures (missing => not paused).
+    if (environment === 'STAGING' || environment === 'PRODUCTION') {
+      return true;
+    }
+    return false;
+  }
+  return row.enabled === true;
 }

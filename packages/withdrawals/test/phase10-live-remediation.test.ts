@@ -692,6 +692,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 live remediation', () => {
       failureInjectionEvidencePath: failurePath,
       readinessEvidencePath: evidencePath,
       chainHistoryEvidencePath: chainPath,
+    acceptanceCutoff: new Date(Date.now() - 5_000).toISOString(),
     });
     expect(result.reasons.some((r) => r.includes(PHASE10_CHAIN_HISTORY_PROOF_REQUIRED))).toBe(true);
     expect(result.mayMarkPhase10Closed).toBe(false);
@@ -931,12 +932,15 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 live remediation', () => {
       expectedCampaignPayoutIdentities: [],
     });
     expect(providerBacked.reconciliationResult).toBe('ZERO_UNEXPECTED');
-    // Collector unavailable → claimed PROVIDER_BACKED never acceptance-ok.
-    const providerEval = evaluateChainHistoryForAcceptance(providerBacked);
-    expect(providerEval.ok).toBe(false);
-    expect(providerEval.reasons.some((r) => r.includes(PHASE10_CHAIN_HISTORY_PROOF_REQUIRED))).toBe(
-      true,
-    );
+    // Owner B1: valid PROVIDER_BACKED + independence + ZERO_UNEXPECTED is acceptance-ok.
+    const providerEval = evaluateChainHistoryForAcceptance(providerBacked, {
+      hotWalletAddress: '0:hot',
+      hotWalletJettonWallet: '0:jetton',
+      jettonMaster: '0:master',
+      networkGlobalId: -3,
+    });
+    expect(providerEval.ok).toBe(true);
+    expect(providerEval.reasons).toEqual([]);
 
     const wrongHot = evaluateChainHistoryForAcceptance(providerBacked, {
       hotWalletAddress: '0:wrong',
@@ -1021,6 +1025,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 live remediation', () => {
       failureInjectionEvidencePath: failurePath,
       readinessEvidencePath: readinessPath,
       chainHistoryEvidencePath: zeroPath,
+    acceptanceCutoff: new Date(Date.now() - 5_000).toISOString(),
     });
     expect(zero.reasons.some((r) => r.includes(PHASE10_CHAIN_HISTORY_PROOF_REQUIRED))).toBe(true);
     expect(zero.verdict).not.toBe('PASS_EVIDENCE_PRESENT_OWNER_REVIEW_REQUIRED');
@@ -1311,9 +1316,24 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 live remediation', () => {
       failureInjectionEvidencePath: scaffold.failurePath,
       readinessEvidencePath: scaffold.readinessPath,
       chainHistoryEvidencePath: chainPath,
+    acceptanceCutoff: new Date(Date.now() - 5_000).toISOString(),
     });
     expect(result.verdict).not.toBe('PASS_EVIDENCE_PRESENT_OWNER_REVIEW_REQUIRED');
-    expect(result.reasons.some((r) => r.includes(PHASE10_CHAIN_HISTORY_PROOF_REQUIRED))).toBe(true);
+    // B1: collector-available no longer refuses forged PROVIDER_BACKED solely via
+    // "collector unavailable". Empty forged history still fails closed (e.g. window /
+    // campaign binding / fingerprint / confirmed count) — never auto-PASS.
+    expect(
+      result.reasons.some(
+        (r) =>
+          r.includes('observationWindow') ||
+          r.includes('campaign') ||
+          r.includes('fingerprint') ||
+          r.includes('confirmed') ||
+          r.includes(PHASE10_CHAIN_HISTORY_PROOF_REQUIRED),
+      ),
+    ).toBe(true);
+    expect(result.mayMarkPhase10Closed).toBe(false);
+    expect(result.mayCreateFinalArchive).toBe(false);
   }, 120_000);
 
   it('acceptance entrypoint: provider-backed-looking artifact with wrong Hot Wallet is REFUSED', async () => {
@@ -1364,6 +1384,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 live remediation', () => {
       failureInjectionEvidencePath: scaffold.failurePath,
       readinessEvidencePath: scaffold.readinessPath,
       chainHistoryEvidencePath: chainPath,
+    acceptanceCutoff: new Date(Date.now() - 5_000).toISOString(),
     });
     expect(result.verdict).not.toBe('PASS_EVIDENCE_PRESENT_OWNER_REVIEW_REQUIRED');
     expect(result.reasons.some((r) => r.includes('hotWalletAddress'))).toBe(true);
@@ -1457,6 +1478,7 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 live remediation', () => {
         failureInjectionEvidencePath: scaffold.failurePath,
         readinessEvidencePath: scaffold.readinessPath,
         chainHistoryEvidencePath: chainPath,
+      acceptanceCutoff: new Date(Date.now() - 5_000).toISOString(),
       });
       expect(result.verdict).not.toBe('PASS_EVIDENCE_PRESENT_OWNER_REVIEW_REQUIRED');
       expect(result.reasons.some((r) => r.includes(c.reasonNeedle))).toBe(true);

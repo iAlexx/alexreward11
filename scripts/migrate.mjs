@@ -1,19 +1,16 @@
 #!/usr/bin/env node
 /**
  * Apply ordered explicit SQL migrations from migrations/*.sql.
- * Each migration is transactional and records itself in schema_migrations.
+ *
+ * Delegates to `@alex-rewards/db` migrateDatabase so ledger recording and the
+ * Phase 13 legacy marker repair stay in one place.
  */
-import { readdir, readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const migrationsDir = join(root, 'migrations');
-
-// `pg` is owned by the @alex-rewards/db workspace, not the repository root, so it is
-// resolved from that package rather than added as a second root dependency.
-const pg = createRequire(new URL('../packages/db/package.json', import.meta.url))('pg');
 
 function usage() {
   console.error('Usage: node scripts/migrate.mjs [--database-url <url>]');
@@ -37,58 +34,50 @@ function parseArgs(argv) {
   return { databaseUrl };
 }
 
-async function listMigrationFiles() {
-  const files = (await readdir(migrationsDir)).filter((name) => name.endsWith('.sql')).sort();
-  return files.map((name) => ({
-    name,
-    version: name.replace(/\.sql$/, ''),
-    path: join(migrationsDir, name),
-  }));
-}
-
-async function appliedVersions(client) {
-  const exists = await client.query(
-    `SELECT to_regclass('public.schema_migrations') IS NOT NULL AS present`,
-  );
-  if (!exists.rows[0].present) return new Set();
-  const result = await client.query(`SELECT version FROM schema_migrations`);
-  return new Set(result.rows.map((row) => row.version));
+async function loadMigrateDatabase() {
+  const require = createRequire(join(root, 'package.json'));
+  let resolved;
+  try {
+    resolved = require.resolve('@alex-rewards/db');
+  } catch {
+    resolved = join(root, 'packages/db/dist/index.js');
+  }
+  const mod = await import(pathToFileURL(resolved).href);
+  if (typeof mod.migrateDatabase !== 'function') {
+    throw new Error('migrateDatabase export missing from @alex-rewards/db — run pnpm --filter @alex-rewards/db build');
+  }
+  return mod.migrateDatabase;
 }
 
 async function main() {
   const { databaseUrl } = parseArgs(process.argv);
-  const migrations = await listMigrationFiles();
-  const client = new pg.Client({ connectionString: databaseUrl });
-  await client.connect();
-  try {
-    const applied = await appliedVersions(client);
-    let appliedNow = 0;
-    for (const migration of migrations) {
-      if (applied.has(migration.version)) {
-        console.log(`skip  ${migration.name}`);
-        continue;
-      }
-      const sql = await readFile(migration.path, 'utf8');
-      console.log(`apply ${migration.name}`);
-      await client.query(sql);
-      appliedNow += 1;
-    }
-    const finalApplied = await appliedVersions(client);
-    console.log(
-      JSON.stringify(
-        {
-          ok: true,
-          totalMigrations: migrations.length,
-          previouslyApplied: applied.size,
-          appliedNow,
-          appliedTotal: finalApplied.size,
-        },
-        null,
-        2,
-      ),
+  const migrateDatabase = await loadMigrateDatabase();
+  const result = await migrateDatabase(databaseUrl);
+  for (const version of result.repairedLegacyMarkers) {
+    console.log(`repair ${version}`);
+  }
+  for (const version of result.appliedNow) {
+    console.log(`apply ${version}.sql`);
+  }
+  console.log(
+    JSON.stringify(
+      {
+        ok: true,
+        totalMigrations: result.totalMigrations,
+        previouslyApplied: result.previouslyApplied,
+        appliedNow: result.appliedNow.length,
+        appliedTotal: result.appliedTotal,
+        repairedLegacyMarkers: result.repairedLegacyMarkers,
+      },
+      null,
+      2,
+    ),
+  );
+  if (result.appliedTotal !== result.totalMigrations) {
+    console.error(
+      `FAIL: appliedTotal (${result.appliedTotal}) !== totalMigrations (${result.totalMigrations})`,
     );
-  } finally {
-    await client.end();
+    process.exit(1);
   }
 }
 

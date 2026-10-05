@@ -12,7 +12,18 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint src",
-    "test": "vitest run --passWithNoTests"
+    "lint": "eslint src test",
+    "test": "vitest run --passWithNoTests",
+    "test:phase12": "cross-env PHASE12_SUPPORT_TESTS=1 vitest run --fileParallelism=false test/phase12-support.test.ts"
+  },
+  "dependencies": {
+    "@alex-rewards/contracts": "workspace:*",
+    "@alex-rewards/db": "workspace:*",
+    "pg": "8.23.0"
+  },
+  "devDependencies": {
+    "@types/pg": "8.23.1",
+    "cross-env": "7.0.3",
+    "vitest": "4.1.11"
   }
 }

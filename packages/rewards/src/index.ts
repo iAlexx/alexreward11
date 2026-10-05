@@ -6,6 +6,7 @@ export {
   clampRewardAtomic,
   computeQuotedRewardAtomic,
   computeMembershipBonusAtomic,
+  computeReferralBonusAtomic,
 } from './arithmetic.js';
 
 export { isPool, withLedgerTransaction } from './db.js';
@@ -56,7 +57,56 @@ export {
 } from './simulated.js';
 
 export { issueSimulatedReward } from './issuance.js';
+export { issueAdReward } from './issue-ad.js';
+export {
+  issueReferralReward,
+  referralBonusSourceIdFromOrigin,
+} from './issue-referral.js';
+export type {
+  IssueReferralRewardCommand,
+  IssueReferralRewardResult,
+  ReferralIssuanceKind,
+} from './issue-referral.js';
+export {
+  issueMissionReward,
+  issueMissionRewardOnClient,
+  missionRewardSourceIdFromClaim,
+} from './issue-mission.js';
+export type {
+  IssueMissionRewardCommand,
+  IssueMissionRewardResult,
+  MissionIssuanceKind,
+} from './issue-mission.js';
+export { reverseRewardEvent, reverseRewardEventOnClient } from './reverse-reward.js';
+export type {
+  ReverseRewardEventCommand,
+  ReverseRewardEventResult,
+} from './reverse-reward.js';
 export { matureRewardEvent } from './maturity.js';
+export {
+  processDueReferralMaturityBatch,
+  processReferralIssuanceBatch,
+} from './referral-maintenance.js';
+export {
+  processDueMissionRewardMaturityBatch,
+  processPendingMissionRewardClaimsBatch,
+} from './mission-maintenance.js';
+export type {
+  MissionIssuanceBatchItem,
+  MissionMaturityBatchItem,
+  ProcessDueMissionRewardMaturityBatchOptions,
+  ProcessDueMissionRewardMaturityBatchResult,
+  ProcessPendingMissionRewardClaimsBatchOptions,
+  ProcessPendingMissionRewardClaimsBatchResult,
+} from './mission-maintenance.js';
+export type {
+  ProcessDueReferralMaturityBatchOptions,
+  ProcessDueReferralMaturityBatchResult,
+  ProcessReferralIssuanceBatchOptions,
+  ProcessReferralIssuanceBatchResult,
+  ReferralIssuanceBatchItem,
+  ReferralMaturityBatchItem,
+} from './referral-maintenance.js';
 
 export {
   createExposureLimitVersion,
@@ -66,6 +116,9 @@ export {
 } from './config.js';
 
 export { insertOutboxEvent } from './outbox.js';
+
+export { readUserLifetimeEarned } from './user-read.js';
+export type { ReadUserLifetimeEarnedInput, UserLifetimeEarned } from './user-read.js';
 
 export type {
   MembershipBonusUnavailablePolicy,
@@ -87,6 +140,7 @@ export type {
   SimulatedSourceIdentity,
   CompleteSimulatedSourceCommand,
   IssueSimulatedRewardCommand,
+  IssueAdRewardCommand,
   IssuedRewardResult,
   MatureRewardEventCommand,
   MatureRewardEventResult,

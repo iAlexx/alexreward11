@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   loadApiConfig,
   loadBotConfig,
+  loadPhase10TestnetProvisionConfig,
   loadSignerConfig,
   loadWebConfig,
   loadWorkerConfig,
@@ -34,6 +35,15 @@ const remoteAuthPolicy = {
   WITHDRAWAL_NETWORK_CODE: 'TON',
   WITHDRAWAL_ASSET_SYMBOL: 'USDT',
   WITHDRAWAL_FAKE_CHAIN_ENABLED: 'false',
+  WALLET_TON_PROOF_DOMAIN: 'miniapp.example.com',
+  WALLET_CHALLENGE_TTL_SECONDS: '300',
+  WALLET_PROOF_MAX_AGE_SECONDS: '900',
+  WALLET_PROOF_MAX_FUTURE_SKEW_SECONDS: '60',
+  WALLET_PROOF_RATE_LIMIT_WINDOW_SECONDS: '300',
+  WALLET_PROOF_RATE_LIMIT_MAX: '10',
+  ADMIN_WEBAUTHN_RP_ID: 'admin.example.com',
+  ADMIN_WEBAUTHN_ORIGIN: 'https://admin.example.com',
+  ADMIN_WEBAUTHN_RP_NAME: 'ALEx Rewards Owner Admin',
 } as const;
 
 describe('environment validation', () => {
@@ -248,6 +258,65 @@ describe('environment validation', () => {
     expect(config.WITHDRAWAL_NETWORK_CODE).toBe('TON');
     expect(config.WITHDRAWAL_QUOTE_TTL_SECONDS).toBe(600);
     expect(config.WITHDRAWAL_FAKE_CHAIN_ENABLED).toBe(false);
+    expect(config.WALLET_TON_PROOF_DOMAIN).toBe('miniapp.example.com');
+    expect(config.WALLET_CHALLENGE_TTL_SECONDS).toBe(300);
+    expect(config.ADMIN_WEBAUTHN_RP_ID).toBe('admin.example.com');
+    expect(config.ADMIN_WEBAUTHN_ORIGIN).toBe('https://admin.example.com');
+  });
+
+  it('applies local wallet ownership defaults when unset', () => {
+    const config = loadApiConfig({
+      ...common,
+      ...apiAuth,
+      DATABASE_URL: 'postgresql://alex:local@localhost:5432/db',
+      REDIS_URL: 'redis://localhost:6379',
+      TEMPORAL_ADDRESS: 'localhost:7233',
+    });
+    expect(config.WALLET_TON_PROOF_DOMAIN).toBe('alex-rewards.local.test');
+    expect(config.WALLET_CHALLENGE_TTL_SECONDS).toBe(300);
+    expect(config.WALLET_PROOF_MAX_AGE_SECONDS).toBe(900);
+    expect(config.ADMIN_WEBAUTHN_RP_ID).toBe('localhost');
+    expect(config.ADMIN_WEBAUTHN_ORIGIN).toBe('http://localhost:3001');
+  });
+
+  it('fails closed when production omits ADMIN_WEBAUTHN_RP_ID', () => {
+    const { ADMIN_WEBAUTHN_RP_ID: _rp, ADMIN_WEBAUTHN_ORIGIN: _origin, ...withoutWebauthn } =
+      remoteAuthPolicy;
+    expect(() =>
+      loadApiConfig({
+        DEPLOYMENT_ENV: 'production',
+        NODE_ENV: 'production',
+        OTEL_ENABLED: 'true',
+        OTEL_EXPORTER_OTLP_ENDPOINT: 'https://otel.example.com',
+        SENTRY_DSN: 'https://public@example.com/1',
+        DATABASE_URL: 'postgresql://user:pass@db.example.com:5432/db',
+        REDIS_URL: 'rediss://redis.example.com:6379',
+        TEMPORAL_ADDRESS: 'temporal.example.com:7233',
+        TELEGRAM_BOT_TOKEN: 'production-grade-telegram-bot-token-value',
+        SESSION_ACCESS_SECRET: 'production-grade-session-access-secret',
+        ...withoutWebauthn,
+      }),
+    ).toThrow(/ADMIN_WEBAUTHN/);
+  });
+
+  it('rejects a local ton_proof domain outside local/test', () => {
+    expect(() =>
+      loadApiConfig({
+        DEPLOYMENT_ENV: 'production',
+        NODE_ENV: 'production',
+        OTEL_ENABLED: 'true',
+        OTEL_EXPORTER_OTLP_ENDPOINT: 'https://otel.example.com',
+        SENTRY_DSN: 'https://public@example.com/1',
+        DATABASE_URL: 'postgresql://user:pass@db.example.com:5432/db',
+        REDIS_URL: 'rediss://redis.example.com:6379',
+        TEMPORAL_ADDRESS: 'temporal.example.com:7233',
+        TELEGRAM_BOT_TOKEN: 'production-grade-telegram-bot-token',
+        SESSION_ACCESS_SECRET: 'production-grade-session-access-secret',
+        ...remoteAuthPolicy,
+        WITHDRAWAL_NETWORK_CODE: 'TON',
+        WALLET_TON_PROOF_DOMAIN: 'alex-rewards.local.test',
+      }),
+    ).toThrow(/WALLET_TON_PROOF_DOMAIN|local ton_proof domains/);
   });
 
   it('fails closed when staging omits withdrawal keys', () => {
@@ -338,12 +407,258 @@ describe('environment validation', () => {
     ).toThrow(/WITHDRAWAL_FAKE_CHAIN_ENABLED|fake payout/);
   });
 
+  describe('STAGING_INTEGRATION_MODE', () => {
+    const stagingBase = {
+      DEPLOYMENT_ENV: 'staging',
+      NODE_ENV: 'production',
+      DATABASE_URL: 'postgresql://user:pass@db.example.com:5432/db',
+      REDIS_URL: 'rediss://redis.example.com:6379',
+      TEMPORAL_ADDRESS: 'temporal.example.com:7233',
+      TELEGRAM_BOT_TOKEN: 'staging-grade-telegram-bot-token-value',
+      SESSION_ACCESS_SECRET: 'staging-grade-session-access-secret!!',
+      ...remoteAuthPolicy,
+      WITHDRAWAL_NETWORK_CODE: 'TON_TESTNET',
+      WITHDRAWAL_FAKE_CHAIN_ENABLED: 'false',
+    } as const;
+
+    it('defaults STAGING_INTEGRATION_MODE to false', () => {
+      const config = loadApiConfig({
+        ...common,
+        ...apiAuth,
+        DATABASE_URL: 'postgresql://alex:local@localhost:5432/db',
+        REDIS_URL: 'redis://localhost:6379',
+        TEMPORAL_ADDRESS: 'localhost:7233',
+      });
+      expect(config.STAGING_INTEGRATION_MODE).toBe(false);
+    });
+
+    it('refuses production with STAGING_INTEGRATION_MODE=true', () => {
+      expect(() =>
+        loadApiConfig({
+          ...stagingBase,
+          DEPLOYMENT_ENV: 'production',
+          STAGING_INTEGRATION_MODE: 'true',
+          OTEL_ENABLED: 'true',
+          OTEL_EXPORTER_OTLP_ENDPOINT: 'https://otel.example.com',
+          SENTRY_DSN: 'https://public@example.com/1',
+          WITHDRAWAL_NETWORK_CODE: 'TON',
+        }),
+      ).toThrow(/STAGING_INTEGRATION_MODE|DEPLOYMENT_ENV=staging/);
+    });
+
+    it('refuses local with STAGING_INTEGRATION_MODE=true', () => {
+      expect(() =>
+        loadApiConfig({
+          ...common,
+          ...apiAuth,
+          STAGING_INTEGRATION_MODE: 'true',
+          DATABASE_URL: 'postgresql://alex:local@localhost:5432/db',
+          REDIS_URL: 'redis://localhost:6379',
+          TEMPORAL_ADDRESS: 'localhost:7233',
+        }),
+      ).toThrow(/STAGING_INTEGRATION_MODE|DEPLOYMENT_ENV=staging/);
+    });
+
+    it('refuses test with STAGING_INTEGRATION_MODE=true', () => {
+      expect(() =>
+        loadApiConfig({
+          ...common,
+          DEPLOYMENT_ENV: 'test',
+          ...apiAuth,
+          STAGING_INTEGRATION_MODE: 'true',
+          DATABASE_URL: 'postgresql://alex:local@localhost:5432/db',
+          REDIS_URL: 'redis://localhost:6379',
+          TEMPORAL_ADDRESS: 'localhost:7233',
+        }),
+      ).toThrow(/STAGING_INTEGRATION_MODE|DEPLOYMENT_ENV=staging/);
+    });
+
+    it('accepts staging + mode=true + TON_TESTNET + fake=false without OTEL/Sentry', () => {
+      const config = loadApiConfig({
+        ...stagingBase,
+        STAGING_INTEGRATION_MODE: 'true',
+        OTEL_ENABLED: 'false',
+      });
+      expect(config.STAGING_INTEGRATION_MODE).toBe(true);
+      expect(config.DEPLOYMENT_ENV).toBe('staging');
+      expect(config.WITHDRAWAL_NETWORK_CODE).toBe('TON_TESTNET');
+      expect(config.WITHDRAWAL_FAKE_CHAIN_ENABLED).toBe(false);
+      expect(config.OTEL_ENABLED).toBe(false);
+      expect(config.SENTRY_DSN).toBeUndefined();
+    });
+
+    it('refuses staging + mode=true + MAINNET', () => {
+      expect(() =>
+        loadApiConfig({
+          ...stagingBase,
+          STAGING_INTEGRATION_MODE: 'true',
+          OTEL_ENABLED: 'false',
+          WITHDRAWAL_NETWORK_CODE: 'TON_MAINNET',
+        }),
+      ).toThrow(/MAINNET|TON_TESTNET/);
+    });
+
+    it('refuses staging + mode=true + fake chain enabled', () => {
+      expect(() =>
+        loadApiConfig({
+          ...stagingBase,
+          STAGING_INTEGRATION_MODE: 'true',
+          OTEL_ENABLED: 'false',
+          WITHDRAWAL_FAKE_CHAIN_ENABLED: 'true',
+        }),
+      ).toThrow(/WITHDRAWAL_FAKE_CHAIN_ENABLED|fake/);
+    });
+
+    it('keeps fail-closed staging + mode=false + TON_TESTNET', () => {
+      expect(() =>
+        loadApiConfig({
+          ...stagingBase,
+          STAGING_INTEGRATION_MODE: 'false',
+          OTEL_ENABLED: 'true',
+          OTEL_EXPORTER_OTLP_ENDPOINT: 'https://otel.example.com',
+          SENTRY_DSN: 'https://public@example.com/1',
+          WITHDRAWAL_NETWORK_CODE: 'TON_TESTNET',
+        }),
+      ).toThrow(/WITHDRAWAL_NETWORK_CODE|TON_TESTNET/);
+    });
+
+    it('still requires OTEL + Sentry in production', () => {
+      expect(() =>
+        loadApiConfig({
+          ...stagingBase,
+          DEPLOYMENT_ENV: 'production',
+          STAGING_INTEGRATION_MODE: 'false',
+          OTEL_ENABLED: 'false',
+          WITHDRAWAL_NETWORK_CODE: 'TON',
+        }),
+      ).toThrow(/OTLP|SENTRY/);
+    });
+
+    it('still refuses local-only secrets under staging integration mode', () => {
+      expect(() =>
+        loadApiConfig({
+          ...stagingBase,
+          STAGING_INTEGRATION_MODE: 'true',
+          OTEL_ENABLED: 'false',
+          TELEGRAM_BOT_TOKEN: 'local-only-telegram-bot-token-for-tests',
+          SESSION_ACCESS_SECRET: 'local-only-session-access-secret-32b',
+        }),
+      ).toThrow(/local-only/);
+    });
+
+    it('still refuses localhost Wallet/WebAuthn under staging integration mode', () => {
+      expect(() =>
+        loadApiConfig({
+          ...stagingBase,
+          STAGING_INTEGRATION_MODE: 'true',
+          OTEL_ENABLED: 'false',
+          WALLET_TON_PROOF_DOMAIN: 'localhost',
+          ADMIN_WEBAUTHN_RP_ID: 'localhost',
+          ADMIN_WEBAUTHN_ORIGIN: 'http://localhost:3001',
+        }),
+      ).toThrow(/WALLET_TON_PROOF_DOMAIN|ADMIN_WEBAUTHN/);
+    });
+
+    it('defaults API_LISTEN_HOST to 0.0.0.0 for local', () => {
+      const config = loadApiConfig({
+        ...common,
+        ...apiAuth,
+        DATABASE_URL: 'postgresql://alex:local@localhost:5432/db',
+        REDIS_URL: 'redis://localhost:6379',
+        TEMPORAL_ADDRESS: 'localhost:7233',
+      });
+      expect(config.API_LISTEN_HOST).toBe('0.0.0.0');
+    });
+
+    it('defaults API_LISTEN_HOST to :: under staging integration mode', () => {
+      const config = loadApiConfig({
+        ...stagingBase,
+        STAGING_INTEGRATION_MODE: 'true',
+        OTEL_ENABLED: 'false',
+      });
+      expect(config.API_LISTEN_HOST).toBe('::');
+    });
+
+    it('accepts explicit API_LISTEN_HOST=:: under staging integration', () => {
+      const config = loadApiConfig({
+        ...stagingBase,
+        STAGING_INTEGRATION_MODE: 'true',
+        OTEL_ENABLED: 'false',
+        API_LISTEN_HOST: '::',
+      });
+      expect(config.API_LISTEN_HOST).toBe('::');
+    });
+
+    it('refuses invalid API_LISTEN_HOST', () => {
+      expect(() =>
+        loadApiConfig({
+          ...common,
+          ...apiAuth,
+          DATABASE_URL: 'postgresql://alex:local@localhost:5432/db',
+          REDIS_URL: 'redis://localhost:6379',
+          TEMPORAL_ADDRESS: 'localhost:7233',
+          API_LISTEN_HOST: '127.0.0.1',
+        }),
+      ).toThrow(/API_LISTEN_HOST/);
+    });
+
+    it('keeps production default API_LISTEN_HOST at 0.0.0.0 when unset', () => {
+      const config = loadApiConfig({
+        ...stagingBase,
+        DEPLOYMENT_ENV: 'production',
+        STAGING_INTEGRATION_MODE: 'false',
+        OTEL_ENABLED: 'true',
+        OTEL_EXPORTER_OTLP_ENDPOINT: 'https://otel.example.com',
+        SENTRY_DSN: 'https://public@example.com/1',
+        WITHDRAWAL_NETWORK_CODE: 'TON',
+      });
+      expect(config.API_LISTEN_HOST).toBe('0.0.0.0');
+    });
+  });
+
   it('accepts only explicitly public web configuration', () => {
     const config = loadWebConfig({
       NODE_ENV: 'test',
       NEXT_PUBLIC_API_BASE_URL: 'https://api.example.com',
     });
     expect(Object.keys(config).sort()).toEqual(['NEXT_PUBLIC_API_BASE_URL', 'NODE_ENV']);
+    expect(config.NEXT_PUBLIC_TONCONNECT_MANIFEST_URL).toBeUndefined();
+  });
+
+  it('accepts optional TonConnect manifest URL without inventing one', () => {
+    const config = loadWebConfig({
+      NODE_ENV: 'test',
+      NEXT_PUBLIC_API_BASE_URL: 'https://api.example.com',
+      NEXT_PUBLIC_TONCONNECT_MANIFEST_URL: 'https://app.example.com/tonconnect-manifest.json',
+    });
+    expect(config.NEXT_PUBLIC_TONCONNECT_MANIFEST_URL).toBe(
+      'https://app.example.com/tonconnect-manifest.json',
+    );
+    const empty = loadWebConfig({
+      NODE_ENV: 'test',
+      NEXT_PUBLIC_API_BASE_URL: 'https://api.example.com',
+      NEXT_PUBLIC_TONCONNECT_MANIFEST_URL: '',
+    });
+    expect(empty.NEXT_PUBLIC_TONCONNECT_MANIFEST_URL).toBeUndefined();
+  });
+
+  it('accepts optional Terms/Privacy URLs without inventing legal destinations', () => {
+    const config = loadWebConfig({
+      NODE_ENV: 'test',
+      NEXT_PUBLIC_API_BASE_URL: 'https://api.example.com',
+      NEXT_PUBLIC_TERMS_URL: 'https://legal.test/terms',
+      NEXT_PUBLIC_PRIVACY_URL: 'https://legal.test/privacy',
+    });
+    expect(config.NEXT_PUBLIC_TERMS_URL).toBe('https://legal.test/terms');
+    expect(config.NEXT_PUBLIC_PRIVACY_URL).toBe('https://legal.test/privacy');
+    const empty = loadWebConfig({
+      NODE_ENV: 'test',
+      NEXT_PUBLIC_API_BASE_URL: 'https://api.example.com',
+      NEXT_PUBLIC_TERMS_URL: '',
+      NEXT_PUBLIC_PRIVACY_URL: '',
+    });
+    expect(empty.NEXT_PUBLIC_TERMS_URL).toBeUndefined();
+    expect(empty.NEXT_PUBLIC_PRIVACY_URL).toBeUndefined();
   });
 
   it('worker local defaults keep real chain off', () => {
@@ -358,6 +673,7 @@ describe('environment validation', () => {
     expect(config.WITHDRAWAL_FAKE_CHAIN_ENABLED).toBe(true);
     expect(config.SIGNER_BASE_URL).toBe('http://127.0.0.1:3005');
     expect(config.TON_TESTNET_JETTON_MASTER).toBe('');
+    expect(config.WORKER_LISTEN_HOST).toBe('0.0.0.0');
   });
 
   it('worker rejects real chain without Owner Jetton master', () => {
@@ -376,7 +692,43 @@ describe('environment validation', () => {
     ).toThrow(/TON_TESTNET_JETTON_MASTER/);
   });
 
-  it('worker rejects MAINNET withdrawal network code', () => {
+  it('signer Phase21 Mainnet allow-path requires TON_MAINNET/-239/self_hosted_encrypted', () => {
+    expect(() =>
+      loadSignerConfig({
+        ...common,
+        SIGNER_SERVICE_TOKEN: 'a-secure-local-token-that-is-long-enough',
+        PHASE21_MAINNET_ENABLED: 'true',
+        SIGNER_NETWORK_CODE: 'TON_MAINNET',
+        SIGNER_NETWORK_GLOBAL_ID: '-239',
+        SIGNER_KEY_MODE: 'local_ephemeral',
+      }),
+    ).toThrow(/self_hosted_encrypted|PHASE21_MAINNET_ENABLED/);
+
+    const enabled = loadSignerConfig({
+      ...common,
+      SIGNER_SERVICE_TOKEN: 'a-secure-local-token-that-is-long-enough',
+      PHASE21_MAINNET_ENABLED: 'true',
+      SIGNER_NETWORK_CODE: 'TON_MAINNET',
+      SIGNER_NETWORK_GLOBAL_ID: '-239',
+      SIGNER_KEY_MODE: 'self_hosted_encrypted',
+      SIGNER_KEY_BUNDLE_PATH: '/run/alex-rewards/signer/hot-wallet.enc',
+    });
+    expect(enabled.PHASE21_MAINNET_ENABLED).toBe(true);
+    expect(enabled.SIGNER_NETWORK_CODE).toBe('TON_MAINNET');
+    expect(enabled.SIGNER_NETWORK_GLOBAL_ID).toBe(-239);
+
+    expect(() =>
+      loadSignerConfig({
+        ...common,
+        SIGNER_SERVICE_TOKEN: 'a-secure-local-token-that-is-long-enough',
+        PHASE21_MAINNET_ENABLED: 'false',
+        SIGNER_NETWORK_CODE: 'TON_MAINNET',
+        SIGNER_NETWORK_GLOBAL_ID: '-239',
+      }),
+    ).toThrow(/MAINNET/);
+  });
+
+  it('worker rejects MAINNET withdrawal network code when Phase21 gate is off', () => {
     expect(() =>
       loadWorkerConfig({
         ...common,
@@ -386,7 +738,688 @@ describe('environment validation', () => {
         TEMPORAL_ADDRESS: 'localhost:7233',
         TEMPORAL_TASK_QUEUE: 'alex-rewards-foundation',
         WITHDRAWAL_NETWORK_CODE: 'TON_MAINNET',
+        PHASE21_MAINNET_ENABLED: 'false',
       }),
     ).toThrow(/MAINNET/);
+  });
+
+  it('worker accepts Phase21 Mainnet wiring only with explicit complete config', () => {
+    expect(() =>
+      loadWorkerConfig({
+        ...common,
+        DATABASE_URL:
+          'postgresql://alex_rewards:local-alex-rewards-only@localhost:5432/alex_rewards',
+        REDIS_URL: 'redis://localhost:6379/0',
+        TEMPORAL_ADDRESS: 'localhost:7233',
+        TEMPORAL_TASK_QUEUE: 'alex-rewards-foundation',
+        PHASE21_MAINNET_ENABLED: 'true',
+        WITHDRAWAL_NETWORK_CODE: 'TON_MAINNET',
+        WITHDRAWAL_FAKE_CHAIN_ENABLED: 'false',
+        WITHDRAWAL_REAL_CHAIN_ENABLED: 'false',
+      }),
+    ).toThrow(/WITHDRAWAL_REAL_CHAIN_ENABLED|TON_MAINNET_USDT_JETTON_MASTER/);
+
+    const enabled = loadWorkerConfig({
+      ...common,
+      DATABASE_URL:
+        'postgresql://alex_rewards:local-alex-rewards-only@localhost:5432/alex_rewards',
+      REDIS_URL: 'redis://localhost:6379/0',
+      TEMPORAL_ADDRESS: 'localhost:7233',
+      TEMPORAL_TASK_QUEUE: 'alex-rewards-foundation',
+      PHASE21_MAINNET_ENABLED: 'true',
+      WITHDRAWAL_NETWORK_CODE: 'TON_MAINNET',
+      WITHDRAWAL_FAKE_CHAIN_ENABLED: 'false',
+      WITHDRAWAL_REAL_CHAIN_ENABLED: 'true',
+      TON_MAINNET_USDT_JETTON_MASTER: 'EQD0vdSA_NedR9uvbgN9EikRX-suesDxGeFg69XQMavfLqIw',
+      TON_PRIMARY_PROVIDER_KIND: 'toncenter',
+      TON_PRIMARY_PROVIDER_URL: 'https://mainnet.example/primary',
+      TON_SECONDARY_PROVIDER_KIND: 'tonapi',
+      TON_SECONDARY_PROVIDER_URL: 'https://mainnet.example/secondary',
+      SIGNER_SERVICE_TOKEN: 'a-secure-local-token-that-is-long-enough',
+    });
+    expect(enabled.PHASE21_MAINNET_ENABLED).toBe(true);
+    expect(enabled.WITHDRAWAL_NETWORK_CODE).toBe('TON_MAINNET');
+    expect(enabled.TON_MAINNET_USDT_JETTON_MASTER).toBe(
+      'EQD0vdSA_NedR9uvbgN9EikRX-suesDxGeFg69XQMavfLqIw',
+    );
+  });
+
+  it('production Phase21 requires Tailscale-only signer transport', () => {
+    const productionPhase21 = {
+      DEPLOYMENT_ENV: 'production',
+      NODE_ENV: 'production',
+      LOG_LEVEL: 'info',
+      OTEL_ENABLED: 'true',
+      OTEL_EXPORTER_OTLP_ENDPOINT: 'https://otel.example.com',
+      SENTRY_DSN: 'https://public@example.ingest.sentry.io/1',
+      DATABASE_URL: 'postgresql://user:pass@db.example.com:5432/db',
+      REDIS_URL: 'rediss://redis.example.com:6379',
+      TEMPORAL_ADDRESS: 'temporal.example.com:7233',
+      TEMPORAL_TASK_QUEUE: 'alex-rewards-foundation',
+      WITHDRAWAL_QUOTE_TTL_SECONDS: '300',
+      WITHDRAWAL_RISK_POLICY_VERSION: '1',
+      WITHDRAWAL_NETWORK_CODE: 'TON_MAINNET',
+      WITHDRAWAL_ASSET_SYMBOL: 'USDT',
+      WITHDRAWAL_FAKE_CHAIN_ENABLED: 'false',
+      WITHDRAWAL_REAL_CHAIN_ENABLED: 'true',
+      PHASE21_MAINNET_ENABLED: 'true',
+      TON_MAINNET_USDT_JETTON_MASTER: 'EQD0vdSA_NedR9uvbgN9EikRX-suesDxGeFg69XQMavfLqIw',
+      TON_PRIMARY_PROVIDER_KIND: 'toncenter',
+      TON_PRIMARY_PROVIDER_URL: 'https://mainnet.example/primary',
+      TON_SECONDARY_PROVIDER_KIND: 'tonapi',
+      TON_SECONDARY_PROVIDER_URL: 'https://mainnet.example/secondary',
+      SIGNER_SERVICE_TOKEN: 'a-secure-production-token-that-is-long-enough',
+    };
+
+    expect(() =>
+      loadWorkerConfig({
+        ...productionPhase21,
+        SIGNER_BASE_URL: 'https://signer.example.com',
+        SIGNER_TRANSPORT_MODE: 'direct',
+      }),
+    ).toThrow(/SIGNER_TRANSPORT_MODE|SIGNER_BASE_URL|Tailscale/i);
+
+    expect(() =>
+      loadWorkerConfig({
+        ...productionPhase21,
+        SIGNER_BASE_URL: 'https://signer.example.com',
+        SIGNER_TRANSPORT_MODE: 'tailscale_userspace',
+      }),
+    ).toThrow(/SIGNER_BASE_URL|Tailscale/i);
+
+    const enabled = loadWorkerConfig({
+      ...productionPhase21,
+      SIGNER_BASE_URL: 'http://100.127.205.114:3005',
+      SIGNER_TRANSPORT_MODE: 'tailscale_userspace',
+    });
+
+    expect(enabled.SIGNER_TRANSPORT_MODE).toBe('tailscale_userspace');
+    expect(enabled.SIGNER_BASE_URL).toBe('http://100.127.205.114:3005');
+  });
+
+  describe('WORKER_LISTEN_HOST', () => {
+    const workerLocal = {
+      ...common,
+      DATABASE_URL: 'postgresql://alex_rewards:local-alex-rewards-only@localhost:5432/alex_rewards',
+      REDIS_URL: 'redis://localhost:6379/0',
+      TEMPORAL_ADDRESS: 'localhost:7233',
+      TEMPORAL_TASK_QUEUE: 'alex-rewards-foundation',
+    };
+
+    const workerRemote = {
+      NODE_ENV: 'production',
+      DATABASE_URL: 'postgresql://user:pass@db.example.com:5432/db',
+      REDIS_URL: 'rediss://redis.example.com:6379',
+      TEMPORAL_ADDRESS: 'temporal.example.com:7233',
+      TEMPORAL_TASK_QUEUE: 'alex-rewards-foundation',
+      WITHDRAWAL_QUOTE_TTL_SECONDS: '300',
+      WITHDRAWAL_RISK_POLICY_VERSION: '1',
+      WITHDRAWAL_ASSET_SYMBOL: 'USDT',
+      WITHDRAWAL_FAKE_CHAIN_ENABLED: 'false',
+      WITHDRAWAL_REAL_CHAIN_ENABLED: 'false',
+      SIGNER_BASE_URL: 'https://signer.example.com',
+    };
+
+    it('defaults local and test to 0.0.0.0', () => {
+      expect(loadWorkerConfig(workerLocal).WORKER_LISTEN_HOST).toBe('0.0.0.0');
+      expect(loadWorkerConfig({ ...workerLocal, DEPLOYMENT_ENV: 'test' }).WORKER_LISTEN_HOST).toBe(
+        '0.0.0.0',
+      );
+    });
+
+    it('defaults staging integration mode to :: when unset', () => {
+      const config = loadWorkerConfig({
+        ...workerRemote,
+        DEPLOYMENT_ENV: 'staging',
+        STAGING_INTEGRATION_MODE: 'true',
+        WITHDRAWAL_NETWORK_CODE: 'TON_TESTNET',
+      });
+      expect(config.WORKER_LISTEN_HOST).toBe('::');
+    });
+
+    it('accepts explicit 0.0.0.0 and ::', () => {
+      expect(
+        loadWorkerConfig({ ...workerLocal, WORKER_LISTEN_HOST: '0.0.0.0' }).WORKER_LISTEN_HOST,
+      ).toBe('0.0.0.0');
+      expect(
+        loadWorkerConfig({ ...workerLocal, WORKER_LISTEN_HOST: '::' }).WORKER_LISTEN_HOST,
+      ).toBe('::');
+    });
+
+    it('rejects an invalid listen host', () => {
+      expect(() => loadWorkerConfig({ ...workerLocal, WORKER_LISTEN_HOST: '127.0.0.1' })).toThrow(
+        /WORKER_LISTEN_HOST/,
+      );
+    });
+
+    it('keeps production default 0.0.0.0 when unset', () => {
+      const config = loadWorkerConfig({
+        ...workerRemote,
+        DEPLOYMENT_ENV: 'production',
+        OTEL_ENABLED: 'true',
+        OTEL_EXPORTER_OTLP_ENDPOINT: 'https://otel.example.com',
+        SENTRY_DSN: 'https://public@example.com/1',
+        WITHDRAWAL_NETWORK_CODE: 'TON',
+      });
+      expect(config.WORKER_LISTEN_HOST).toBe('0.0.0.0');
+      expect(config.WITHDRAWAL_FAKE_CHAIN_ENABLED).toBe(false);
+      expect(config.WITHDRAWAL_REAL_CHAIN_ENABLED).toBe(false);
+    });
+
+    it('keeps normal staging default 0.0.0.0 when integration mode is off', () => {
+      const config = loadWorkerConfig({
+        ...workerRemote,
+        DEPLOYMENT_ENV: 'staging',
+        STAGING_INTEGRATION_MODE: 'false',
+        OTEL_ENABLED: 'true',
+        OTEL_EXPORTER_OTLP_ENDPOINT: 'https://otel.example.com',
+        SENTRY_DSN: 'https://public@example.com/1',
+        WITHDRAWAL_NETWORK_CODE: 'TON',
+      });
+      expect(config.WORKER_LISTEN_HOST).toBe('0.0.0.0');
+    });
+  });
+
+  describe('WORKER_OUTBOX_RELAY_ENABLED', () => {
+    const workerLocal = {
+      ...common,
+      DATABASE_URL: 'postgresql://alex_rewards:local-alex-rewards-only@localhost:5432/alex_rewards',
+      REDIS_URL: 'redis://localhost:6379/0',
+      TEMPORAL_ADDRESS: 'localhost:7233',
+      TEMPORAL_TASK_QUEUE: 'alex-rewards-foundation',
+    };
+
+    const workerRemote = {
+      NODE_ENV: 'production',
+      DATABASE_URL: 'postgresql://user:pass@db.example.com:5432/db',
+      REDIS_URL: 'rediss://redis.example.com:6379',
+      TEMPORAL_ADDRESS: 'temporal.example.com:7233',
+      TEMPORAL_TASK_QUEUE: 'alex-rewards-foundation',
+      WITHDRAWAL_QUOTE_TTL_SECONDS: '300',
+      WITHDRAWAL_RISK_POLICY_VERSION: '1',
+      WITHDRAWAL_ASSET_SYMBOL: 'USDT',
+      WITHDRAWAL_FAKE_CHAIN_ENABLED: 'false',
+      WITHDRAWAL_REAL_CHAIN_ENABLED: 'false',
+      SIGNER_BASE_URL: 'https://signer.example.com',
+    };
+
+    it('preserves local and test relay-enabled behavior', () => {
+      expect(loadWorkerConfig(workerLocal).WORKER_OUTBOX_RELAY_ENABLED).toBe(true);
+      expect(
+        loadWorkerConfig({ ...workerLocal, DEPLOYMENT_ENV: 'test' }).WORKER_OUTBOX_RELAY_ENABLED,
+      ).toBe(true);
+      expect(loadWorkerConfig(workerLocal).WITHDRAWAL_FAKE_CHAIN_ENABLED).toBe(true);
+      expect(loadWorkerConfig(workerLocal).WITHDRAWAL_REAL_CHAIN_ENABLED).toBe(false);
+    });
+
+    it('defaults staging integration mode to false when unset', () => {
+      const config = loadWorkerConfig({
+        ...workerRemote,
+        DEPLOYMENT_ENV: 'staging',
+        STAGING_INTEGRATION_MODE: 'true',
+        WITHDRAWAL_NETWORK_CODE: 'TON_TESTNET',
+      });
+      expect(config.WORKER_OUTBOX_RELAY_ENABLED).toBe(false);
+      expect(config.WITHDRAWAL_FAKE_CHAIN_ENABLED).toBe(false);
+      expect(config.WITHDRAWAL_REAL_CHAIN_ENABLED).toBe(false);
+    });
+
+    it('accepts explicit false and true in staging integration', () => {
+      const base = {
+        ...workerRemote,
+        DEPLOYMENT_ENV: 'staging' as const,
+        STAGING_INTEGRATION_MODE: 'true',
+        WITHDRAWAL_NETWORK_CODE: 'TON_TESTNET',
+      };
+      expect(
+        loadWorkerConfig({ ...base, WORKER_OUTBOX_RELAY_ENABLED: 'false' })
+          .WORKER_OUTBOX_RELAY_ENABLED,
+      ).toBe(false);
+      expect(
+        loadWorkerConfig({ ...base, WORKER_OUTBOX_RELAY_ENABLED: 'true' })
+          .WORKER_OUTBOX_RELAY_ENABLED,
+      ).toBe(true);
+    });
+
+    it('rejects a non-boolean relay flag', () => {
+      expect(() =>
+        loadWorkerConfig({ ...workerLocal, WORKER_OUTBOX_RELAY_ENABLED: 'yes' }),
+      ).toThrow(/WORKER_OUTBOX_RELAY_ENABLED/);
+    });
+
+    it('keeps production unset relay enabled', () => {
+      const config = loadWorkerConfig({
+        ...workerRemote,
+        DEPLOYMENT_ENV: 'production',
+        OTEL_ENABLED: 'true',
+        OTEL_EXPORTER_OTLP_ENDPOINT: 'https://otel.example.com',
+        SENTRY_DSN: 'https://public@example.com/1',
+        WITHDRAWAL_NETWORK_CODE: 'TON',
+      });
+      expect(config.WORKER_OUTBOX_RELAY_ENABLED).toBe(true);
+      expect(config.WITHDRAWAL_FAKE_CHAIN_ENABLED).toBe(false);
+      expect(config.WITHDRAWAL_REAL_CHAIN_ENABLED).toBe(false);
+    });
+
+    it('keeps normal staging unset relay enabled', () => {
+      const config = loadWorkerConfig({
+        ...workerRemote,
+        DEPLOYMENT_ENV: 'staging',
+        OTEL_ENABLED: 'true',
+        OTEL_EXPORTER_OTLP_ENDPOINT: 'https://otel.example.com',
+        SENTRY_DSN: 'https://public@example.com/1',
+        WITHDRAWAL_NETWORK_CODE: 'TON',
+      });
+      expect(config.WORKER_OUTBOX_RELAY_ENABLED).toBe(true);
+      expect(config.STAGING_INTEGRATION_MODE).toBe(false);
+    });
+  });
+
+  describe('BOT_LISTEN_HOST', () => {
+    const botLocal = {
+      ...common,
+      BOT_TRANSPORT_MODE: 'disabled' as const,
+    };
+
+    const botTest = {
+      ...common,
+      DEPLOYMENT_ENV: 'test' as const,
+      BOT_TRANSPORT_MODE: 'polling' as const,
+      TELEGRAM_BOT_TOKEN: 'local-only-telegram-bot-token-for-tests',
+      DATABASE_URL: 'postgresql://alex:local@localhost:5432/db',
+    };
+
+    const botRemote = {
+      NODE_ENV: 'production' as const,
+      BOT_TRANSPORT_MODE: 'polling' as const,
+      TELEGRAM_BOT_TOKEN: 'staging-grade-telegram-bot-token-value',
+      DATABASE_URL: 'postgresql://user:pass@db.example.com:5432/db',
+      CONTROL_CENTER_OWNER_TELEGRAM_USER_IDS: '900001',
+      CONTROL_CENTER_ACTION_TOKEN_TTL_SECONDS: '900',
+      CONTROL_CENTER_CONFIRM_TOKEN_TTL_SECONDS: '300',
+      CONTROL_CENTER_RATE_LIMIT_WINDOW_SECONDS: '60',
+      CONTROL_CENTER_RATE_LIMIT_MAX: '30',
+      WITHDRAWAL_QUOTE_TTL_SECONDS: '300',
+      WITHDRAWAL_RISK_POLICY_VERSION: '1',
+      WITHDRAWAL_ASSET_SYMBOL: 'USDT',
+      WITHDRAWAL_FAKE_CHAIN_ENABLED: 'false',
+    };
+
+    it('defaults local and test to 0.0.0.0', () => {
+      expect(loadBotConfig(botLocal).BOT_LISTEN_HOST).toBe('0.0.0.0');
+      expect(loadBotConfig(botTest).BOT_LISTEN_HOST).toBe('0.0.0.0');
+      expect(loadBotConfig(botLocal).BOT_TRANSPORT_MODE).toBe('disabled');
+    });
+
+    it('defaults explicit staging integration to ::', () => {
+      const config = loadBotConfig({
+        ...botRemote,
+        DEPLOYMENT_ENV: 'staging',
+        STAGING_INTEGRATION_MODE: 'true',
+        WITHDRAWAL_NETWORK_CODE: 'TON_TESTNET',
+      });
+      expect(config.BOT_LISTEN_HOST).toBe('::');
+    });
+
+    it('keeps normal staging default 0.0.0.0', () => {
+      const config = loadBotConfig({
+        ...botRemote,
+        DEPLOYMENT_ENV: 'staging',
+        STAGING_INTEGRATION_MODE: 'false',
+        OTEL_ENABLED: 'true',
+        OTEL_EXPORTER_OTLP_ENDPOINT: 'https://otel.example.com',
+        SENTRY_DSN: 'https://public@example.com/1',
+        WITHDRAWAL_NETWORK_CODE: 'TON',
+      });
+      expect(config.BOT_LISTEN_HOST).toBe('0.0.0.0');
+    });
+
+    it('keeps production default 0.0.0.0', () => {
+      const config = loadBotConfig({
+        ...botRemote,
+        DEPLOYMENT_ENV: 'production',
+        OTEL_ENABLED: 'true',
+        OTEL_EXPORTER_OTLP_ENDPOINT: 'https://otel.example.com',
+        SENTRY_DSN: 'https://public@example.com/1',
+        WITHDRAWAL_NETWORK_CODE: 'TON',
+      });
+      expect(config.BOT_LISTEN_HOST).toBe('0.0.0.0');
+      expect(config.WITHDRAWAL_FAKE_CHAIN_ENABLED).toBe(false);
+    });
+
+    it('accepts explicit :: and 0.0.0.0', () => {
+      expect(loadBotConfig({ ...botLocal, BOT_LISTEN_HOST: '::' }).BOT_LISTEN_HOST).toBe('::');
+      expect(loadBotConfig({ ...botLocal, BOT_LISTEN_HOST: '0.0.0.0' }).BOT_LISTEN_HOST).toBe(
+        '0.0.0.0',
+      );
+    });
+
+    it('rejects an invalid listen host', () => {
+      expect(() => loadBotConfig({ ...botLocal, BOT_LISTEN_HOST: '127.0.0.1' })).toThrow(
+        /BOT_LISTEN_HOST/,
+      );
+    });
+  });
+
+  describe('staging integration disabled bot smoke', () => {
+    const smokeControl = {
+      NODE_ENV: 'production' as const,
+      CONTROL_CENTER_ACTION_TOKEN_TTL_SECONDS: '900',
+      CONTROL_CENTER_CONFIRM_TOKEN_TTL_SECONDS: '300',
+      CONTROL_CENTER_RATE_LIMIT_WINDOW_SECONDS: '60',
+      CONTROL_CENTER_RATE_LIMIT_MAX: '30',
+      WITHDRAWAL_QUOTE_TTL_SECONDS: '300',
+      WITHDRAWAL_RISK_POLICY_VERSION: '1',
+      WITHDRAWAL_ASSET_SYMBOL: 'USDT',
+      WITHDRAWAL_FAKE_CHAIN_ENABLED: 'false',
+    };
+
+    const stagingSmoke = {
+      ...smokeControl,
+      DEPLOYMENT_ENV: 'staging' as const,
+      STAGING_INTEGRATION_MODE: 'true',
+      BOT_TRANSPORT_MODE: 'disabled' as const,
+      WITHDRAWAL_NETWORK_CODE: 'TON_TESTNET',
+    };
+
+    const stagingPolling = {
+      ...smokeControl,
+      DEPLOYMENT_ENV: 'staging' as const,
+      STAGING_INTEGRATION_MODE: 'true',
+      BOT_TRANSPORT_MODE: 'polling' as const,
+      WITHDRAWAL_NETWORK_CODE: 'TON_TESTNET',
+      TELEGRAM_BOT_TOKEN: 'staging-grade-telegram-bot-token-value',
+      CONTROL_CENTER_OWNER_TELEGRAM_USER_IDS: '900001',
+      DATABASE_URL: 'postgresql://user:pass@db.example.com:5432/db',
+    };
+
+    it('allows disabled transport without token, allowlist, or database', () => {
+      const config = loadBotConfig(stagingSmoke);
+      expect(config.BOT_TRANSPORT_MODE).toBe('disabled');
+      expect(config.STAGING_INTEGRATION_MODE).toBe(true);
+      expect(config.TELEGRAM_BOT_TOKEN).toBeUndefined();
+      expect(config.ownerTelegramUserIds).toEqual([]);
+      expect(config.DATABASE_URL).toBeUndefined();
+      expect(config.REDIS_URL).toBeUndefined();
+      expect(config.WITHDRAWAL_NETWORK_CODE).toBe('TON_TESTNET');
+      expect(config.WITHDRAWAL_FAKE_CHAIN_ENABLED).toBe(false);
+    });
+
+    it('rejects disabled transport for normal staging and production', () => {
+      const observability = {
+        OTEL_ENABLED: 'true',
+        OTEL_EXPORTER_OTLP_ENDPOINT: 'https://otel.example.com',
+        SENTRY_DSN: 'https://public@example.com/1',
+      };
+      expect(() =>
+        loadBotConfig({
+          ...smokeControl,
+          ...observability,
+          DEPLOYMENT_ENV: 'staging',
+          STAGING_INTEGRATION_MODE: 'false',
+          BOT_TRANSPORT_MODE: 'disabled',
+          WITHDRAWAL_NETWORK_CODE: 'TON',
+          CONTROL_CENTER_OWNER_TELEGRAM_USER_IDS: '900001',
+          DATABASE_URL: 'postgresql://user:pass@db.example.com:5432/db',
+        }),
+      ).toThrow(/cannot be disabled/);
+      expect(() =>
+        loadBotConfig({
+          ...smokeControl,
+          ...observability,
+          DEPLOYMENT_ENV: 'production',
+          BOT_TRANSPORT_MODE: 'disabled',
+          WITHDRAWAL_NETWORK_CODE: 'TON',
+          CONTROL_CENTER_OWNER_TELEGRAM_USER_IDS: '900001',
+          DATABASE_URL: 'postgresql://user:pass@db.example.com:5432/db',
+        }),
+      ).toThrow(/cannot be disabled/);
+    });
+
+    it('still requires token, allowlist, and database when staging integration polls', () => {
+      expect(() =>
+        loadBotConfig({
+          ...stagingPolling,
+          TELEGRAM_BOT_TOKEN: undefined,
+        }),
+      ).toThrow(/TELEGRAM_BOT_TOKEN/);
+      expect(() =>
+        loadBotConfig({
+          ...stagingPolling,
+          CONTROL_CENTER_OWNER_TELEGRAM_USER_IDS: '',
+        }),
+      ).toThrow(/CONTROL_CENTER_OWNER_TELEGRAM_USER_IDS|Owner Telegram allowlist/);
+      expect(() =>
+        loadBotConfig({
+          ...stagingPolling,
+          DATABASE_URL: undefined,
+        }),
+      ).toThrow(/DATABASE_URL/);
+    });
+
+    it('preserves local disabled transport and rejects test disabled transport', () => {
+      const local = loadBotConfig({ ...common, BOT_TRANSPORT_MODE: 'disabled' });
+      expect(local.BOT_TRANSPORT_MODE).toBe('disabled');
+      expect(local.WITHDRAWAL_FAKE_CHAIN_ENABLED).toBe(true);
+      expect(() =>
+        loadBotConfig({
+          ...common,
+          DEPLOYMENT_ENV: 'test',
+          BOT_TRANSPORT_MODE: 'disabled',
+        }),
+      ).toThrow(/cannot be disabled/);
+    });
+  });
+});
+
+describe('Phase 10 Testnet provision config', () => {
+  const base = {
+    ...common,
+    DATABASE_URL: 'postgresql://alex:local@127.0.0.1:55440/alex_rewards_isolated_payout_test',
+  };
+  const allowUser = '00000000-0000-4000-8000-0000000000a1';
+  const ownerAdmin = '00000000-0000-4000-8000-0000000000a2';
+
+  it('defaults remain disabled with USDT', () => {
+    const config = loadPhase10TestnetProvisionConfig(base);
+    expect(config.PHASE10_TESTNET_AVAILABLE_PROVISION_ENABLED).toBe(false);
+    expect(config.WITHDRAWAL_ASSET_SYMBOL).toBe('USDT');
+    expect(config.PHASE10_TESTNET_PROVISION_REQUIRED_DATABASE_NAME).toBe('');
+  });
+
+  it('accepts aalex when enabled with isolated DB identity and capped max', () => {
+    const config = loadPhase10TestnetProvisionConfig({
+      ...base,
+      PHASE10_TESTNET_AVAILABLE_PROVISION_ENABLED: 'true',
+      WITHDRAWAL_ASSET_SYMBOL: 'aalex',
+      PHASE10_TESTNET_PROVISION_ALLOWED_USER_ID: allowUser,
+      PHASE10_TESTNET_PROVISION_OWNER_ADMIN_USER_ID: ownerAdmin,
+      PHASE10_TESTNET_PROVISION_MAX_ATOMIC: '1000000000',
+      PHASE10_TESTNET_PROVISION_REQUIRED_DATABASE_NAME: 'alex_rewards_isolated_payout_test',
+    });
+    expect(config.WITHDRAWAL_ASSET_SYMBOL).toBe('aalex');
+    expect(config.PHASE10_TESTNET_PROVISION_MAX_ATOMIC).toBe('1000000000');
+  });
+
+  it('rejects aalex enabled against operational DATABASE_URL', () => {
+    expect(() =>
+      loadPhase10TestnetProvisionConfig({
+        ...base,
+        DATABASE_URL: 'postgresql://alex:local@127.0.0.1:55432/alex_rewards',
+        PHASE10_TESTNET_AVAILABLE_PROVISION_ENABLED: 'true',
+        WITHDRAWAL_ASSET_SYMBOL: 'aalex',
+        PHASE10_TESTNET_PROVISION_ALLOWED_USER_ID: allowUser,
+        PHASE10_TESTNET_PROVISION_OWNER_ADMIN_USER_ID: ownerAdmin,
+        PHASE10_TESTNET_PROVISION_MAX_ATOMIC: '1000000000',
+        PHASE10_TESTNET_PROVISION_REQUIRED_DATABASE_NAME: 'alex_rewards_isolated_payout_test',
+      }),
+    ).toThrow(/operational|alex_rewards@55432|DATABASE_URL/i);
+  });
+
+  it('rejects aalex without required database name', () => {
+    expect(() =>
+      loadPhase10TestnetProvisionConfig({
+        ...base,
+        PHASE10_TESTNET_AVAILABLE_PROVISION_ENABLED: 'true',
+        WITHDRAWAL_ASSET_SYMBOL: 'aalex',
+        PHASE10_TESTNET_PROVISION_ALLOWED_USER_ID: allowUser,
+        PHASE10_TESTNET_PROVISION_OWNER_ADMIN_USER_ID: ownerAdmin,
+        PHASE10_TESTNET_PROVISION_MAX_ATOMIC: '1000000000',
+      }),
+    ).toThrow(/REQUIRED_DATABASE_NAME|required when WITHDRAWAL_ASSET_SYMBOL=aalex/i);
+  });
+
+  it('rejects production when provisioning enabled', () => {
+    expect(() =>
+      loadPhase10TestnetProvisionConfig({
+        ...base,
+        DEPLOYMENT_ENV: 'production',
+        WITHDRAWAL_NETWORK_CODE: 'TON_TESTNET',
+        WITHDRAWAL_ASSET_SYMBOL: 'USDT',
+        PHASE10_TESTNET_AVAILABLE_PROVISION_ENABLED: 'true',
+        PHASE10_TESTNET_PROVISION_ALLOWED_USER_ID: allowUser,
+        PHASE10_TESTNET_PROVISION_OWNER_ADMIN_USER_ID: ownerAdmin,
+        PHASE10_TESTNET_PROVISION_MAX_ATOMIC: '1000000',
+        PHASE10_TESTNET_PROVISION_REQUIRED_DATABASE_NAME: '',
+      }),
+    ).toThrow(/local\/test|cannot be enabled outside/i);
+  });
+
+  it('USDT enabled path unchanged (required DB name optional)', () => {
+    const config = loadPhase10TestnetProvisionConfig({
+      ...base,
+      PHASE10_TESTNET_AVAILABLE_PROVISION_ENABLED: 'true',
+      WITHDRAWAL_ASSET_SYMBOL: 'USDT',
+      PHASE10_TESTNET_PROVISION_ALLOWED_USER_ID: allowUser,
+      PHASE10_TESTNET_PROVISION_OWNER_ADMIN_USER_ID: ownerAdmin,
+      PHASE10_TESTNET_PROVISION_MAX_ATOMIC: '1000000',
+    });
+    expect(config.WITHDRAWAL_ASSET_SYMBOL).toBe('USDT');
+    expect(config.PHASE10_TESTNET_PROVISION_REQUIRED_DATABASE_NAME).toBe('');
+  });
+});
+
+describe('TELEGRAM_PUBLIC_BOT_USERNAME', () => {
+  it('is optional on ApiConfig and BotConfig; rejects leading @', () => {
+    const api = loadApiConfig({
+      ...common,
+      ...apiAuth,
+      DATABASE_URL: 'postgresql://alex:local@localhost:5432/db',
+      REDIS_URL: 'redis://localhost:6379',
+      TEMPORAL_ADDRESS: 'localhost:7233',
+    });
+    expect(api.TELEGRAM_PUBLIC_BOT_USERNAME).toBeUndefined();
+
+    const apiNamed = loadApiConfig({
+      ...common,
+      ...apiAuth,
+      DATABASE_URL: 'postgresql://alex:local@localhost:5432/db',
+      REDIS_URL: 'redis://localhost:6379',
+      TEMPORAL_ADDRESS: 'localhost:7233',
+      TELEGRAM_PUBLIC_BOT_USERNAME: 'ExampleBot',
+    });
+    expect(apiNamed.TELEGRAM_PUBLIC_BOT_USERNAME).toBe('ExampleBot');
+
+    expect(() =>
+      loadApiConfig({
+        ...common,
+        ...apiAuth,
+        DATABASE_URL: 'postgresql://alex:local@localhost:5432/db',
+        REDIS_URL: 'redis://localhost:6379',
+        TEMPORAL_ADDRESS: 'localhost:7233',
+        TELEGRAM_PUBLIC_BOT_USERNAME: '@ExampleBot',
+      }),
+    ).toThrow(/TELEGRAM_PUBLIC_BOT_USERNAME/);
+
+    const bot = loadBotConfig({
+      ...common,
+      BOT_TRANSPORT_MODE: 'disabled',
+    });
+    expect(bot.TELEGRAM_PUBLIC_BOT_USERNAME).toBeUndefined();
+
+    const botNamed = loadBotConfig({
+      ...common,
+      BOT_TRANSPORT_MODE: 'disabled',
+      TELEGRAM_PUBLIC_BOT_USERNAME: 'ExampleBot',
+    });
+    expect(botNamed.TELEGRAM_PUBLIC_BOT_USERNAME).toBe('ExampleBot');
+  });
+});
+
+describe('MINIAPP_PUBLIC_URL', () => {
+  it('is optional on BotConfig; empty becomes unset; rejects t.me deep links', () => {
+    const unset = loadBotConfig({
+      ...common,
+      BOT_TRANSPORT_MODE: 'disabled',
+    });
+    expect(unset.MINIAPP_PUBLIC_URL).toBeUndefined();
+
+    const empty = loadBotConfig({
+      ...common,
+      BOT_TRANSPORT_MODE: 'disabled',
+      MINIAPP_PUBLIC_URL: '',
+    });
+    expect(empty.MINIAPP_PUBLIC_URL).toBeUndefined();
+
+    const https = loadBotConfig({
+      ...common,
+      BOT_TRANSPORT_MODE: 'disabled',
+      MINIAPP_PUBLIC_URL: 'https://miniapp.example.com',
+    });
+    expect(https.MINIAPP_PUBLIC_URL).toBe('https://miniapp.example.com');
+
+    const localHttp = loadBotConfig({
+      ...common,
+      BOT_TRANSPORT_MODE: 'disabled',
+      MINIAPP_PUBLIC_URL: 'http://localhost:3000',
+    });
+    expect(localHttp.MINIAPP_PUBLIC_URL).toBe('http://localhost:3000');
+
+    expect(() =>
+      loadBotConfig({
+        ...common,
+        BOT_TRANSPORT_MODE: 'disabled',
+        MINIAPP_PUBLIC_URL: 'https://t.me/ExampleBot?startapp',
+      }),
+    ).toThrow(/MINIAPP_PUBLIC_URL/);
+  });
+
+  it('requires HTTPS outside local/test', () => {
+    expect(() =>
+      loadBotConfig({
+        DEPLOYMENT_ENV: 'staging',
+        NODE_ENV: 'production',
+        STAGING_INTEGRATION_MODE: 'true',
+        BOT_TRANSPORT_MODE: 'disabled',
+        CONTROL_CENTER_ACTION_TOKEN_TTL_SECONDS: '900',
+        CONTROL_CENTER_CONFIRM_TOKEN_TTL_SECONDS: '300',
+        CONTROL_CENTER_RATE_LIMIT_WINDOW_SECONDS: '60',
+        CONTROL_CENTER_RATE_LIMIT_MAX: '30',
+        WITHDRAWAL_QUOTE_TTL_SECONDS: '300',
+        WITHDRAWAL_RISK_POLICY_VERSION: '1',
+        WITHDRAWAL_NETWORK_CODE: 'TON_TESTNET',
+        WITHDRAWAL_ASSET_SYMBOL: 'USDT',
+        WITHDRAWAL_FAKE_CHAIN_ENABLED: 'false',
+        MINIAPP_PUBLIC_URL: 'http://miniapp.example.com',
+      }),
+    ).toThrow(/MINIAPP_PUBLIC_URL/);
+
+    const stagingHttps = loadBotConfig({
+      DEPLOYMENT_ENV: 'staging',
+      NODE_ENV: 'production',
+      STAGING_INTEGRATION_MODE: 'true',
+      BOT_TRANSPORT_MODE: 'disabled',
+      CONTROL_CENTER_ACTION_TOKEN_TTL_SECONDS: '900',
+      CONTROL_CENTER_CONFIRM_TOKEN_TTL_SECONDS: '300',
+      CONTROL_CENTER_RATE_LIMIT_WINDOW_SECONDS: '60',
+      CONTROL_CENTER_RATE_LIMIT_MAX: '30',
+      WITHDRAWAL_QUOTE_TTL_SECONDS: '300',
+      WITHDRAWAL_RISK_POLICY_VERSION: '1',
+      WITHDRAWAL_NETWORK_CODE: 'TON_TESTNET',
+      WITHDRAWAL_ASSET_SYMBOL: 'USDT',
+      WITHDRAWAL_FAKE_CHAIN_ENABLED: 'false',
+      MINIAPP_PUBLIC_URL: 'https://miniapp.example.com',
+    });
+    expect(stagingHttps.MINIAPP_PUBLIC_URL).toBe('https://miniapp.example.com');
   });
 });

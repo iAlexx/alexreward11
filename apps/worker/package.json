@@ -9,20 +9,24 @@
     "start": "node dist/main.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src test",
-    "test": "vitest run"
+    "test": "vitest run",
+    "start:tailscale": "sh ./scripts/start-tailscale.sh"
   },
   "dependencies": {
     "@alex-rewards/config": "workspace:*",
     "@alex-rewards/contracts": "workspace:*",
     "@alex-rewards/db": "workspace:*",
     "@alex-rewards/observability": "workspace:*",
+    "@alex-rewards/referrals": "workspace:*",
+    "@alex-rewards/rewards": "workspace:*",
     "@alex-rewards/signing": "workspace:*",
+    "@alex-rewards/tasks": "workspace:*",
     "@alex-rewards/withdrawals": "workspace:*",
     "@temporalio/activity": "1.23.0",
     "@temporalio/client": "1.23.0",
     "@temporalio/worker": "1.23.0",
     "@temporalio/workflow": "1.23.0",
-    "fastify": "5.12.1",
+    "fastify": "5.12.2",
     "pg": "8.23.0"
   },
   "devDependencies": {

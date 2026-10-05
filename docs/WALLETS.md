@@ -100,3 +100,12 @@ Redis may throttle challenge/verify abuse. Redis is **never** wallet ownership a
 ## Non-goals (Phase 7+)
 
 Withdrawal quotes, Available→Reserved, fees/limits/approvals, Temporal payout, fake chain, Jetton transfer, signer/KMS, Hot Wallet dispatch.
+
+## Phase 21 Step 3
+
+Payout wallet scope for Mainnet micro-launch: **TON Connect + TON Mainnet only** (`TON_MAINNET` / `-239`). Native display/canonical gas currency = Gram (GRAM); chain remains TON. USDT Jetton on TON Mainnet is the payout asset. See `docs/PHASE_21_MULTICHAIN_WALLET_COMPATIBILITY.md` and `docs/PHASE_21_GRAM_NAMING_COMPATIBILITY.md`. No live payout in Step 3.
+
+## Phase 21 Step 3A network environment matrix
+
+environmentAllowed unchanged: STAGING rejects MAINNET; PRODUCTION accepts MAINNET and rejects TESTNET.
+Cutover plan: docs/PHASE_21_PRODUCTION_ENVIRONMENT_CUTOVER.md (not executed in Step 3A).

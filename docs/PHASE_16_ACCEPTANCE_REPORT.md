@@ -1,0 +1,423 @@
+# Phase 16 Acceptance Report - Mission Engine / Basic Tasks
+
+**Status:** **PASS**
+
+**Phase slug:** `PHASE_16_MISSION_ENGINE`
+**Master specification:** Version 1.3 (sec 83 Tasks V1; sec 98 Task Tables; sec 104 Idempotency; sec 105 Transactional Outbox; sec 156L Economic Guardrails; sec 156P Generic Mission Engine; sec 173 Phase 16)
+**Canonical accepted source commit:** `81406dd9f8cf7592e20a1a08cd5b9d0b8dbd6e4a`
+**Branch:** `phase16-mission-engine`
+
+**AdsGram production monetary status:** **BLOCKED**
+**Auto payout:** **NOT ENABLED**
+**Mainnet:** **NOT ACTIVATED**
+**Production Mission money active:** **NO**
+**Phase 17:** **NOT STARTED**
+
+---
+
+## A. Phase objective
+
+Complete Master Specification V1.3 sec 173 Phase 16 - Generic Mission Engine / Basic Tasks.
+
+Required V1 capability (sec 83):
+
+- Daily Login
+- Complete 3 valid rewarded ads
+- Complete 10 valid rewarded ads
+- Streak milestone
+
+With:
+
+- versioned immutable Mission definitions / versions
+- deterministic progress periods and idempotent contribution
+- Phase 14 MISSION_CLAIM eligibility
+- membership / Founder-exclusive capability via entitlements (not bypass)
+- claim authority (client cannot self-claim unmet monetary Missions)
+- Mission reward issuance through Reward Engine -> Ledger
+- Mission budget + `MAX_MISSION_BONUS_DAILY` (global and Mission-specific)
+- Admin Mission create / version / activation with high-impact confirmation
+- Tasks API / UI as the user-facing surface over the Mission Engine
+- worker / runtime redrive that is replay-safe and starvation-resistant
+
+Gate conditions (must hold):
+
+- Client cannot self-claim an unmet monetary Mission.
+- Progress replay cannot duplicate reward.
+- Founder-only Mission cannot be claimed by an ineligible account.
+- Rule changes create new versions (historical versions remain immutable).
+
+Archive gate: `PHASE_16_MISSION_ENGINE`. Then STOP - no Phase 17.
+
+---
+
+## B. Exact scope delivered
+
+1. **Canonical `mission_*` Mission Engine** - authoritative domain model for definitions, versions, progress, claims, and monetary decisions.
+2. **Legacy `task_*` compatibility boundary** - retained as user-facing / compatibility projection only; not a second monetary engine.
+3. **Immutable Mission definitions** - semantic freeze for identity fields after reference.
+4. **Immutable Mission versions** - economics / condition / target / reset / windows frozen; status lifecycle mutable under safe rules.
+5. **Lifecycle concurrency protection** - ACTIVE overlap exclusion, definition/version `FOR UPDATE` on Admin activation, safe `end_at` closure.
+6. **Typed reset periods** - `NONE`->`LIFETIME`, `DAILY`->UTC day, `MONTHLY`->UTC month; `WEEKLY` fail-closed / `OWNER_POLICY_REQUIRED`.
+7. **Append-only contribution provenance** - `mission_progress_events` (and related claim events) reject destructive mutation.
+8. **Idempotent / replay-safe progress** - source key anti-join; contribute returns terminal / already-applied without fabricating money.
+9. **DAILY_LOGIN producer** - session evidence -> progress with terminal-period exclusion and capacity-aware selection.
+10. **VALID_AD producer** - AVAILABLE AD rewards -> progress; PENDING/REVERSED excluded; terminal periods idle.
+11. **STREAK_MILESTONE capability** - requires explicit configured source / timezone / graceDays / target; durable checkpoints for fairness.
+12. **Secure claim authority** - server claim path; unmet monetary claim blocked; wrong user blocked; duplicate claim idempotent.
+13. **Phase 14 MISSION_CLAIM eligibility** - Fraud / eligibility integration on claim/issuance path.
+14. **Membership / Founder-exclusive capability** - `EXCLUSIVE_MISSION_ACCESS` via membership plan entitlements; Founder is not a security bypass.
+15. **Country fail-closed authority** - typed country metadata supported; no production country group seeded; restricted Missions fail closed without authoritative country.
+16. **Mission reward issuance** - Mission Engine -> Reward Engine -> Ledger (`MISSION_REWARD_ISSUANCE` / `MISSION_REWARD_EXPENSE` / `USER_PENDING_LIABILITY`).
+17. **Mission budget authority** - budget periods reserved transactionally; exhaustion blocks issuance.
+18. **`MAX_MISSION_BONUS_DAILY`** - exposure limit enforcement.
+19. **Global + Mission-specific exposure composition** - both applicable limits must be satisfied; dual reservations + decision provenance.
+20. **`MISSION_REWARD_PAUSE`** - pause gate `FOR SHARE`; blocked decisions durable.
+21. **Mission maturity** - initial reward state PENDING; generic Reward Engine maturity / redrive.
+22. **Tasks API / UI** - server-authoritative task surfaces over Mission Engine.
+23. **Admin Mission controls** - allowlisted `DAILY_LOGIN` / `VALID_AD_COUNT` / `STREAK_MILESTONE`; create definition/version; high-impact activate.
+24. **Worker / runtime redrive** - producer batches + pending claim issuance + maturity; restart-safe.
+25. **Deterministic concurrency hardening** - two-client lock proofs (AD reverse, account, pause, membership, rule lifecycle, exposure).
+26. **Terminal producer starvation fix** - candidate selection derives period keys and excludes COMPLETED/EXPIRED progress periods (no fake post-terminal events).
+27. **Immutable financial decision provenance** - `mission_reward_decision_exposure_periods` append-only (0055 UPDATE/DELETE rejection).
+
+Out of scope (explicit non-delivery): Phase 17 Public Payout Logs; production Mission definition / reward / budget / exposure / streak / country seeds; post-grant AD->Mission reversal cascade (remains `OWNER_POLICY_REQUIRED`); AdsGram production monetary; Mainnet; auto payout.
+
+---
+
+## C. Files / modules changed (accepted source)
+
+Representative modules on canonical commit `81406dd` (full tree via `git archive`):
+
+- `packages/tasks/**` - Mission progress/claim domain, producers (`producer-shared` period + terminal exclusion), outbox insert, Tasks API surface, DB/unit tests
+- `packages/rewards/**` - `issue-mission` issuance locking, multi-exposure, maintenance batches, maturity path, deterministic concurrency DB suite, e2e runtime
+- `packages/fraud/**` - Phase 14 MISSION_CLAIM eligibility / trust integration used by Mission claim path
+- `packages/auth/**` - Admin web confirmation allowlist includes `missions.` prefix for high-impact Mission activation
+- `packages/contracts/**` - Tasks / Mission Admin DTOs
+- `apps/api/**` - Missions Admin controller (create/version/activate inside locked TX); Tasks read/claim APIs; Admin activation DB suite
+- `apps/worker/**` - Mission contribution / pending claim / maturity maintenance wiring
+- `apps/miniapp/**` - Tasks UI (server-authoritative)
+- `migrations/0051` ... `0055` Phase 16 forward migrations
+- `scripts/verify-boundaries.mjs` - tasks package must not import ledger / KMS
+
+---
+
+## D. Database migrations
+
+Verified repository filenames (Phase 16 forward migrations):
+
+| Migration | Purpose / integrity | Financial / security relevance | Seed status |
+| --------- | ------------------- | ------------------------------ | ----------- |
+| `0051_phase16_mission_integrity.sql` | `mission_*` authority comments; definition/version semantic freeze; ACTIVE GiST exclusion; safe `end_at`; first-reference `FOR SHARE`; progress/claim append-only events | Establishes Mission as sole monetary path; blocks historical semantic rewrite | **NO production seed** |
+| `0052_phase16_mission_lifecycle_hardening.sql` | Progress timestamp one-shot rules; progress-event window + `FOR SHARE`; claim-event actor provenance | Hardens lifecycle / provenance for concurrent producers and claims | **NO production seed** |
+| `0053_phase16_mission_reward_issuance.sql` | `mission_reward_decisions`, budget reservations, exposure reservation tables | Durable Mission money decisions without seeding budgets/limits | **NO production seed** |
+| `0054_phase16_mission_runtime_financial_hardening.sql` | Multi exposure per claim; `mission_reward_decision_exposure_periods`; streak fairness checkpoints | Global + Mission-specific exposure composition provenance | **NO production seed** |
+| `0055_phase16_final_integrity.sql` | UPDATE/DELETE rejection triggers on exposure decision provenance | Append-only Mission financial exposure provenance | **NO production seed** |
+
+Only `schema_migrations` inserts appear.
+**NO production Mission definitions / reward rules / budgets / `MAX_MISSION_BONUS_DAILY` / streak / country policy values are inserted.**
+
+---
+
+## E. Commands executed (final pre-archive gate)
+
+Isolated disposable DB only:
+
+`postgresql://alex_rewards:***@127.0.0.1:55432/alex_rewards_phase15_test`
+
+Mapped as `PHASE3_DATABASE_URL` / `PHASE4_DATABASE_URL` / `PHASE5_DATABASE_URL` / `PHASE14_DATABASE_URL` / `PHASE15_DATABASE_URL` / `PHASE16_DATABASE_URL` (+ Redis `PHASE3_REDIS_URL` for throttle). Never production / real-user / operational money DB.
+
+```text
+pnpm validate:migrations          # 55 migrations PASS
+pnpm verify:boundaries            # 8 apps, 21 packages PASS
+pnpm security:secrets             # PASS
+pnpm --filter @alex-rewards/tasks typecheck|test|build      # 53 PASS / 0 skipped
+pnpm --filter @alex-rewards/fraud typecheck|test|build      # 230 PASS / 0 skipped
+pnpm --filter @alex-rewards/rewards typecheck|test|build    # 114 PASS / 0 skipped
+pnpm --filter @alex-rewards/auth typecheck|test|build       # 90 PASS / 0 skipped
+pnpm --filter @alex-rewards/api typecheck|test|build        # 87 PASS / 4 skipped (non-Phase16 opt-in harness)
+pnpm --filter @alex-rewards/worker typecheck|test|build     # 15 PASS / 0 skipped
+pnpm --filter @alex-rewards/miniapp typecheck|test|build    # 134 PASS / 0 skipped
+pnpm test:phase3                  # 21 PASS / 0 skipped (DB + Redis throttle EXECUTED)
+pnpm test:phase4                  # 43 PASS / 0 skipped (DB EXECUTED)
+pnpm test:phase5                  # 59 PASS
+pnpm test:phase7                  # 124 PASS
+pnpm test:phase8                  # 52 PASS
+pnpm test:phase10                 # withdrawals 324 + ton 54 PASS
+pnpm test:phase11                 # 45 PASS
+pnpm test:phase13                 # auth/ads/api/admin suites PASS
+pnpm test:phase14                 # fraud 230 + api 18 PASS
+pnpm test:phase15                 # referrals + auth + rewards PASS
+pnpm test:phase16                 # tasks 53 + rewards 36 + admin 4 PASS / 0 skipped
+pnpm typecheck                    # PASS
+pnpm build                        # PASS
+
+pnpm archive:phase -- --phase 16 --slug MISSION_ENGINE \
+  --commit 81406dd9f8cf7592e20a1a08cd5b9d0b8dbd6e4a \
+  --report docs/PHASE_16_ACCEPTANCE_REPORT.md \
+  --roadmap-version 1.3 \
+  --next-phase-status "No Phase 17 work has started at packaging time." \
+  --stamp 20260929-230432
+```
+
+Required Phase 16 DB suites (producer, claim, issuance, concurrency, Admin create->activate) and Phase 3 / Phase 4 DB suites: **EXECUTED_PASS** (not skipped).
+
+---
+
+## F. Unit / integration / E2E / failure / security test evidence
+
+**PROGRESS**
+
+- Replay dedupe: same source key does not duplicate `mission_progress_events` / progress count.
+- Terminal period idle: `target=1` + `NONE` -> after LIFETIME COMPLETED, later DAILY_LOGIN days / remaining ADs are not reselected (no `IGNORED_TERMINAL` starvation loop).
+- Over-limit actionable work: `limit=3` eventually processes all actionable DAILY_LOGIN days / VALID_AD evidence when target/capacity permits; STREAK users beyond batch limit eventually evaluated.
+- Cross-user starvation: User A terminal evidence cannot monopolize candidate prefix ahead of User B actionable work (DAILY_LOGIN + VALID_AD).
+- Capabilities covered: DAILY_LOGIN, VALID_AD_COUNT (3 and 10), STREAK_MILESTONE.
+
+**CLAIMS**
+
+- Unmet monetary claim blocked.
+- Wrong user blocked.
+- Duplicate claim idempotent.
+- Membership restriction enforced; Founder-only via entitlement, not bypass.
+- Country-restricted without authoritative country: fail closed.
+- Source AD revalidated / locked before Mission money.
+- New claim after closed window blocked.
+
+**MONEY**
+
+- Fixed reward from pinned ACTIVE `reward_rules` (`source_type=MISSION`).
+- Mission budget enforced; global exposure enforced; Mission-specific exposure enforced; both together required when both exist.
+- `MISSION_REWARD_PAUSE` blocks issuance.
+- Initial state PENDING; maturity via Reward Engine; retry idempotent (no duplicate ledger).
+- Ledger: `MISSION_REWARD_ISSUANCE` -> `MISSION_REWARD_EXPENSE` + `USER_PENDING_LIABILITY`. `TASK_REWARD_ISSUANCE` not used by canonical Phase 16 Missions.
+
+**CONCURRENCY (deterministic two-client; no sleep-as-proof)**
+
+- AD reversal-first -> issuance blocked; Mission money NO.
+- Mission issuance-first -> AD reverse blocked by SHARE; post-grant cascade still `OWNER_POLICY_REQUIRED`.
+- Account block-first / Mission account-lock-first.
+- Pause-first / Mission pause-lock-first.
+- Membership revoke-first / Mission membership-lock-first.
+- Reward-rule lifecycle-first / Mission rule-lock-first.
+- Budget / global / Mission / combined exposure races: no overspend.
+
+**ADMIN**
+
+- Create definition; create version with explicit `startAt` + `resetPolicy`; DRAFT stored start_at exact.
+- Create->activate E2E with high-impact confirmation consume; definition+version ACTIVE; start_at immutable; create + activate audits present.
+- Stale lifecycle (non-DRAFT) race -> `VERSION_CONFLICT`; no activation audit.
+- Activation-first target `FOR UPDATE` blocks concurrent lifecycle UPDATE; rowCount===1 on activate.
+- No start_at mutation on activation; no eval / arbitrary SQL / JS eligibility.
+
+**OUTBOX (sec 105)**
+
+- Mission progress completion path inserts durable `outbox_events` with dedupe key (tasks local inserter; tasks package has no ledger import).
+
+---
+
+## G. Build / health results
+
+| Check | Result |
+| ----- | ------ |
+| `pnpm validate:migrations` | **PASS** (55) |
+| `pnpm verify:boundaries` | **PASS** |
+| `pnpm security:secrets` | **PASS** |
+| Package typecheck/test/build (tasks/fraud/rewards/auth/api/worker/miniapp) | **PASS** |
+| `pnpm typecheck` | **PASS** |
+| `pnpm build` | **PASS** |
+| Live/ready endpoints | unchanged Phase foundations; not re-deployed |
+
+---
+
+## H. CI / remote status
+
+At independent pre-archive review (Owner-stated; local `vercel` CLI not authorized in this packaging environment):
+
+| Surface | Status |
+| ------- | ------ |
+| Vercel `alex-rewards-miniapp` | **SUCCESS** |
+| Vercel `alex-isolated-ton-proof-testnet` | **FAILURE** (historically known; unrelated to Phase 16 Mission Engine) |
+
+**Do not claim ALL REMOTE CI GREEN.** Isolated TON proof failure remains outside Phase 16 acceptance.
+
+---
+
+## I. Known deviations / unresolved policy
+
+1. **Post-grant AD -> Mission reward reversal** remains **`OWNER_POLICY_REQUIRED`**. Pre-issuance REVERSED AD evidence blocks Mission money; if Mission issuance serializes first and the source AD reverses afterward, Phase 16 does **not** auto-reverse the granted Mission reward.
+2. **Production monetary `VALID_AD_COUNT` activation** remains blocked until that Owner policy is approved.
+3. **`WEEKLY` reset** remains fail-closed / `OWNER_POLICY_REQUIRED` (no approved week boundary).
+4. **No production streak policy** seeded (source / timezone / graceDays / target / reward).
+5. **No production country group/policy** seeded; country-restricted monetary Missions fail closed without authoritative country.
+6. **No production Mission definitions / reward rules / budgets / exposure values** seeded.
+7. Phase 16 proves capability using **isolated synthetic** Admin/test configuration only.
+8. **No deployment** performed as part of this acceptance/archive.
+
+---
+
+## J. Open blockers / technical debt
+
+**IMPLEMENTATION BLOCKERS:** NONE
+
+**PRODUCTION / OWNER CONFIGURATION REQUIRED (does not authorize money):**
+
+- approved Mission definitions
+- Mission reward values / rules
+- Mission budget periods
+- `MAX_MISSION_BONUS_DAILY` values (global and/or Mission-specific)
+- Mission pause configuration
+- streak target / grace / reward (and source/timezone)
+- country authority / groups if country-restricted Missions are desired
+- post-grant VALID_AD -> Mission reversal policy
+- WEEKLY boundary policy if WEEKLY reset is desired
+
+---
+
+## K. Security / financial invariant checks
+
+| Invariant | Value |
+| --------- | ----- |
+| CANONICAL_ENGINE | MISSIONS |
+| TASK_MODEL_ROLE | LEGACY_COMPATIBILITY_PROJECTION |
+| CLIENT_PROGRESS_AUTHORITY | NONE |
+| CLIENT_COMPLETION_AUTHORITY | NONE |
+| CLIENT_PERIOD_AUTHORITY | NONE |
+| CLIENT_TARGET_AUTHORITY | NONE |
+| CLIENT_MISSION_VERSION_AUTHORITY | NONE |
+| CLIENT_REWARD_RULE_AUTHORITY | NONE |
+| CLIENT_REWARD_AMOUNT_AUTHORITY | NONE |
+| CLIENT_ACCOUNT_STATE_AUTHORITY | NONE |
+| CLIENT_MEMBERSHIP_AUTHORITY | NONE |
+| CLIENT_COUNTRY_AUTHORITY | NONE |
+| CLIENT_FINANCIAL_ENVIRONMENT_AUTHORITY | NONE |
+| UNMET_MONETARY_SELF_CLAIM | BLOCKED |
+| PROGRESS_REPLAY_DUPLICATE | NO |
+| DUPLICATE_CLAIM_REWARD | NO |
+| FOUNDER_SECURITY_BYPASS | NO |
+| MISSION_REWARD_PATH | REWARD_ENGINE_TO_LEDGER |
+| TASK_REWARD_LEDGER_PATH | NOT_USED |
+| LEDGER_TRANSACTION_TYPE | MISSION_REWARD_ISSUANCE |
+| EXPENSE_ACCOUNT | MISSION_REWARD_EXPENSE |
+| MISSION_REWARD_INITIAL_STATE | PENDING |
+| MISSION_REWARD_PAUSE | ENFORCED |
+| MISSION_BUDGET | ENFORCED |
+| MAX_MISSION_BONUS_DAILY | ENFORCED |
+| GLOBAL_AND_MISSION_LIMITS | BOTH_ENFORCED |
+| MISSION_EXPOSURE_PROVENANCE | APPEND_ONLY |
+| HISTORICAL_MISSION_VERSION_MUTATION | BLOCKED |
+| RULE_CHANGE | NEW_VERSION_REQUIRED |
+| ARBITRARY_ELIGIBILITY_EVAL | NO |
+| ADMIN_DIRECT_LEDGER_MUTATION | NO |
+| TASKS_PACKAGE_LEDGER_ACCESS | NO |
+| PRODUCTION_POLICY_SEEDS | NONE |
+| PRODUCTION_MISSION_DEFINITIONS_SEEDED | NO |
+| PRODUCTION_MISSION_REWARD_RULE_SEEDED | NO |
+| PRODUCTION_MISSION_BUDGET_SEEDED | NO |
+| PRODUCTION_MAX_MISSION_BONUS_DAILY_SEEDED | NO |
+| PRODUCTION_STREAK_POLICY_SEEDED | NO |
+| PRODUCTION_COUNTRY_POLICY_SEEDED | NO |
+| PRODUCTION_MISSION_MONEY_ACTIVE | NO |
+| POST_GRANT_AD_TO_MISSION_REVERSAL_POLICY | OWNER_POLICY_REQUIRED |
+| WEEKLY_RESET_POLICY | OWNER_POLICY_REQUIRED / FAIL_CLOSED |
+| COUNTRY_AUTHORITY | NOT_CONFIGURED_FOR_PRODUCTION |
+| MAINNET_ACTIVATED | NO |
+| AUTO_PAYOUT | NO |
+| ADSGRAM_PRODUCTION_MONETARY | BLOCKED |
+
+**Period policy (runtime):** NONE->LIFETIME; DAILY->`DAY:YYYY-MM-DD` UTC; MONTHLY->`MONTH:YYYY-MM` UTC; WEEKLY fail-closed. No client timezone authority.
+
+**Streak:** capability exists; requires explicit configured source / timezone / graceDays / target; no default / production seed.
+
+**Founder / membership:** Founder-exclusive Missions use membership plan + `EXCLUSIVE_MISSION_ACCESS`. Founder membership cannot bypass account state, risk, pause, source evidence, budget/exposure, or reward-rule validity.
+
+---
+
+## L. Rollback / recovery notes
+
+- Mission contribution provenance is append-only; progress is a bounded deterministic projection from events.
+- Producer batches are replay-safe and exclude terminal COMPLETED/EXPIRED periods so terminal evidence cannot starve the candidate prefix.
+- Claims are idempotent; Mission financial decisions are durable (`mission_reward_decisions`).
+- Reward ledger transactions are immutable; Mission maturity is retriable via Reward Engine.
+- Exposure reservations and `mission_reward_decision_exposure_periods` are durable / append-only (0055 rejects UPDATE/DELETE).
+- Absent production configuration fails closed (no silent money).
+- Worker restart does not depend on in-memory financial truth.
+- Historical Mission versions remain reconstructable; semantic mutation of referenced versions is blocked.
+
+---
+
+## M. Exact accepted commit SHA
+
+**CANONICAL_ACCEPTED_SOURCE_COMMIT:**
+
+`81406dd9f8cf7592e20a1a08cd5b9d0b8dbd6e4a`
+
+**Branch:** `phase16-mission-engine`
+
+A later documentation-only commit records this acceptance report; it is **not** the canonical Phase 16 software source. Archive packaging always targets the canonical SHA above.
+
+---
+
+## N. Gate PASS/FAIL
+
+| Gate | Result |
+| ---- | ------ |
+| Phase3 | **PASS** (DB EXECUTED) |
+| Phase4 | **PASS** (DB EXECUTED) |
+| Phase5 | **PASS** |
+| Phase7 | **PASS** |
+| Phase8 | **PASS** |
+| Phase10 | **PASS** |
+| Phase11 | **PASS** |
+| Phase13 | **PASS** |
+| Phase14 | **PASS** |
+| Phase15 | **PASS** |
+| Phase16 | **PASS** (producer/claim/issuance/concurrency/admin DB EXECUTED) |
+| validate:migrations | **PASS** |
+| verify:boundaries | **PASS** |
+| secret scan | **PASS** |
+| tasks tests | **PASS** (53/0 skipped) |
+| fraud tests | **PASS** (230/0 skipped) |
+| rewards tests | **PASS** (114/0 skipped) |
+| API tests | **PASS** (87 passed; 4 skipped non-Phase16 opt-in) |
+| worker tests | **PASS** (15/0 skipped) |
+| Mini App tests | **PASS** (134/0 skipped) |
+| typecheck | **PASS** |
+| build | **PASS** |
+| producer starvation | **PASS** |
+| Mission claim authority | **PASS** |
+| Mission reward budget | **PASS** |
+| global exposure | **PASS** |
+| Mission exposure | **PASS** |
+| combined exposure | **PASS** |
+| Mission pause | **PASS** |
+| financial concurrency | **PASS** |
+| membership concurrency | **PASS** |
+| source reversal concurrency | **PASS** |
+| Admin lifecycle concurrency | **PASS** |
+| Admin audit atomicity | **PASS** |
+| Mission financial provenance immutability | **PASS** |
+| **PHASE16_GATE** | **PASS** |
+
+Required DB suites were executed against the isolated database; none were silently skipped to force a green result.
+
+---
+
+## O. Archive verification
+
+Archive helper version: **2.1.0**  
+Fixed packaging stamp: **20260929-230432**  
+Exact accepted source commit: `81406dd9f8cf7592e20a1a08cd5b9d0b8dbd6e4a`
+
+| Artifact | Result |
+| -------- | ------ |
+| Canonical source ZIP | `ALEx_Rewards_PHASE_16_MISSION_ENGINE_20260929-230432_81406dd.zip` |
+| Canonical source ZIP path | `phase-archives/PHASE_16_MISSION_ENGINE/ALEx_Rewards_PHASE_16_MISSION_ENGINE_20260929-230432_81406dd.zip` |
+| Canonical source ZIP SHA256 | `47608d256bdc36df0757e60213eb042658a3b734381288664b04bbecde2fc5d8` |
+| Final review-package filename | `PHASE_16_MISSION_ENGINE_PACKAGE_20260929-230432_81406dd.zip` |
+| Source extraction | **PASS** |
+| Outer package extraction | **PASS** |
+| Prohibited-path scan (source + outer) | **PASS** |
+| Nested source validation | **PASS** |
+| Forward-slash ZIP entry names | **PASS** (4 entries under `PHASE_16_MISSION_ENGINE/`) |
+
+Final review-package SHA256 is recorded externally in `PACKAGE_SHA256.txt` beside the package.

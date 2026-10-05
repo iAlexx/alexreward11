@@ -445,7 +445,10 @@ export async function applyObservationInTxn(
       from: 'RECONCILE_REQUIRED',
       to: 'CONFIRMED',
     });
-    await settleWithdrawalReservation(client, { withdrawalId: w.id });
+    await settleWithdrawalReservation(client, {
+      withdrawalId: w.id,
+      confirmedAttemptId: a.id,
+    });
     state = 'CONFIRMED';
     await releaseHotWalletDispatchLease(client, {
       hotWalletId: a.hot_wallet_id,

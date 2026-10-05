@@ -122,6 +122,7 @@ export async function createTestOnlyPromotionRule(
       validFrom: new Date(Date.now() - 86_400_000),
       reason: 'test-only Phase 5 rule',
       activate: true,
+      referralEligible: false,
     });
     return { ruleId: rule.id, code, providerId: provider.id };
   });
@@ -268,4 +269,60 @@ export async function newSimulatedSource(pool: Pool): Promise<{
 }> {
   const identity = await createSimulatedRewardSourceIdentity(pool);
   return { sourceId: identity.sourceId, providerId: identity.providerId };
+}
+
+/** Deterministic wait until another backend is blocked on holderPid's granted locks. */
+export async function waitForBlockedOnHolder(
+  watcher: import('pg').PoolClient,
+  holderPid: number,
+  timeoutMs = 10_000,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const waiting = await watcher.query<{ c: number }>(
+      `SELECT count(*)::int AS c
+       FROM pg_locks blocked
+       JOIN pg_locks holder
+         ON holder.locktype = blocked.locktype
+        AND holder.database IS NOT DISTINCT FROM blocked.database
+        AND holder.relation IS NOT DISTINCT FROM blocked.relation
+        AND holder.page IS NOT DISTINCT FROM blocked.page
+        AND holder.tuple IS NOT DISTINCT FROM blocked.tuple
+        AND holder.virtualxid IS NOT DISTINCT FROM blocked.virtualxid
+        AND holder.transactionid IS NOT DISTINCT FROM blocked.transactionid
+        AND holder.classid IS NOT DISTINCT FROM blocked.classid
+        AND holder.objid IS NOT DISTINCT FROM blocked.objid
+        AND holder.objsubid IS NOT DISTINCT FROM blocked.objsubid
+        AND holder.pid <> blocked.pid
+       WHERE NOT blocked.granted
+         AND holder.granted
+         AND holder.pid = $1`,
+      [holderPid],
+    );
+    if ((waiting.rows[0]?.c ?? 0) > 0) return true;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  return false;
+}
+
+/** Wait until holderPid holds a granted lock on a heap relation (by relname). */
+export async function waitForHolderGrantedRelation(
+  watcher: import('pg').PoolClient,
+  holderPid: number,
+  relationName: string,
+  timeoutMs = 10_000,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const row = await watcher.query<{ c: number }>(
+      `SELECT count(*)::int AS c
+       FROM pg_locks l
+       JOIN pg_class c ON c.oid = l.relation
+       WHERE l.pid = $1 AND l.granted AND c.relname = $2`,
+      [holderPid, relationName],
+    );
+    if ((row.rows[0]?.c ?? 0) > 0) return true;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  return false;
 }

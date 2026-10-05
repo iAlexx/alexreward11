@@ -26,22 +26,36 @@ export type { WithdrawalDb } from './db.js';
 
 export { insertWithdrawalAuditLog, insertWithdrawalOutboxEvent } from './audit.js';
 
+export { evaluateFailedPreBroadcastReuse, enqueueFailedPreBroadcastRetry } from './failed-pre-reuse.js';
+export type {
+  EnqueueFailedPreBroadcastRetryResult,
+  FailedPreBroadcastReuseEvaluation,
+  FailedPreBroadcastReuseSnapshot,
+} from './failed-pre-reuse.js';
+
 export {
   WITHDRAWAL_APPROVED_OUTBOX_EVENT,
+  WITHDRAWAL_FAILED_PRE_RETRY_OUTBOX_EVENT,
   WITHDRAWAL_OWNER_REVIEW_REQUIRED_OUTBOX_EVENT,
   withdrawalApprovedDedupeKey,
+  withdrawalFailedPreRetryDedupeKey,
   withdrawalOwnerReviewRequiredDedupeKey,
   withdrawalWorkflowId,
 } from './outbox.js';
 
 export {
   WITHDRAWAL_PAYOUT_WORKFLOW_TYPE,
+  assertNoRunningWithdrawalWorkflow,
   claimPendingWithdrawalApprovedEvents,
+  claimPendingWithdrawalConfirmedEvents,
+  claimPendingFailedPreRetryEvents,
   claimPendingOwnerReviewRequiredEvents,
+  markOutboxDeadLetter,
   markOutboxDispatched,
   markOutboxRetry,
   startWithdrawalWorkflowFromOutbox,
   processWithdrawalApprovedOutboxBatch,
+  processWithdrawalFailedPreRetryOutboxBatch,
   redactOutboxError,
   outboxRetryBackoffSeconds,
 } from './outbox-relay.js';
@@ -50,6 +64,7 @@ export type {
   StartWithdrawalWorkflowResult,
   ProcessWithdrawalApprovedOutboxBatchOptions,
   ProcessWithdrawalApprovedOutboxBatchResult,
+  TemporalWorkflowIdReusePolicy,
   TemporalWorkflowStarter,
 } from './outbox-relay.js';
 
@@ -63,8 +78,15 @@ export {
   resolveActiveFeeRule,
   resolveActiveLimitRule,
   seedLockedInitialWithdrawalRules,
+  seedProposedIsolatedAalexWithdrawalRules,
 } from './rules.js';
 export type { FeeRuleRow, LimitRuleRow } from './rules.js';
+
+export {
+  PROPOSED_ISOLATED_AALEX_WITHDRAWAL,
+  validateOneAalexUnderProposedRules,
+} from './proposed-isolated-aalex-rules.js';
+export type { OneAalexQuoteValidation } from './proposed-isolated-aalex-rules.js';
 
 export { resolvePlatformFeeDiscount, resolvePriorityReview } from './entitlements.js';
 export type { FeeDiscountEntitlement, PriorityEntitlement } from './entitlements.js';
@@ -105,8 +127,17 @@ export type { WithdrawalQuoteView } from './quotes.js';
 export { createWithdrawalFromQuote } from './create.js';
 export type { WithdrawalView } from './create.js';
 
-export { applyV1RiskPolicy } from './risk.js';
+export {
+  applyV1RiskPolicy,
+  attachAuthoritativeRiskToWithdrawal,
+} from './risk.js';
 export type { V1RiskDecision } from './risk.js';
+
+export {
+  runWithdrawalEligibilityPreflight,
+  mapFraudErrorToWithdrawal,
+  isEligibilityOutcomeEligible,
+} from './phase14-preflight.js';
 
 export { decideWithdrawal } from './decide.js';
 export type { DecideWithdrawalResult, WithdrawalDecision } from './decide.js';
@@ -116,6 +147,82 @@ export type { TransitionWithdrawalInput } from './transitions.js';
 
 export { releaseWithdrawalReservation } from './release.js';
 export { settleWithdrawalReservation } from './settlement.js';
+
+export {
+  WITHDRAWAL_CONFIRMED_OUTBOX_EVENT,
+  withdrawalConfirmedDedupeKey,
+} from './public-payout-outbox.js';
+
+export { sanitizePublicPayoutUsernameSnapshot } from './public-payout-username.js';
+export {
+  mapDeploymentEnvToFeatureEnvironment,
+  parsePublicPayoutLogsEnabledFlag,
+  readPublicPayoutLogsFeatureFlag,
+  isPublicPayoutLogsEnabled,
+} from './public-payout-feature.js';
+export type {
+  PublicPayoutFeatureEnvironment,
+  PublicPayoutLogsFeatureFlagState,
+} from './public-payout-feature.js';
+
+export {
+  formatAtomicAmount,
+  buildExplorerUrl,
+  formatConfirmedUtcDate,
+} from './public-payout-format.js';
+
+export {
+  renderPublicPayoutMessage,
+} from './public-payout-render.js';
+export type {
+  PublicPayoutMessageRenderInput,
+  PublicPayoutDeliverySnapshot,
+  PublicPayoutIdentityMode,
+} from './public-payout-render.js';
+
+export {
+  createConfirmedPayoutPublication,
+} from './public-payout-builder.js';
+export type {
+  CreateConfirmedPayoutPublicationInput,
+  CreateConfirmedPayoutPublicationOutcome,
+  CreateConfirmedPayoutPublicationResult,
+} from './public-payout-builder.js';
+
+export {
+  processWithdrawalConfirmedPublicPayoutOutboxBatch,
+} from './public-payout-outbox-consumer.js';
+export type {
+  ProcessWithdrawalConfirmedPublicPayoutOutboxBatchOptions,
+  ProcessWithdrawalConfirmedPublicPayoutOutboxBatchResult,
+} from './public-payout-outbox-consumer.js';
+
+export {
+  PublicPayoutDefiniteFailureError,
+  PublicPayoutPreNetworkAuthError,
+  claimAndDeliverPublicPayoutBatch,
+  claimPublicPayoutPublications,
+  classifyPublicPayoutSenderError,
+  deliverClaimedPublicPayout,
+  finalizePublicPayoutAmbiguous,
+  finalizePublicPayoutFailed,
+  finalizePublicPayoutPublished,
+  markPublicPayoutNetworkAttemptStarted,
+  publicPayoutDeliveryBackoffSeconds,
+  recoverStalePublicPayoutSendingBatch,
+  redactPublicPayoutDeliveryError,
+} from './public-payout-delivery.js';
+export type {
+  ClaimAndDeliverPublicPayoutBatchOptions,
+  ClaimAndDeliverPublicPayoutBatchResult,
+  ClaimedPublicPayoutPublication,
+  DeliverClaimedPublicPayoutOutcome,
+  DeliverClaimedPublicPayoutResult,
+  MarkNetworkAttemptStartedResult,
+  PublicPayoutSendClassification,
+  PublicPayoutTelegramSender,
+  RecoverStalePublicPayoutSendingBatchResult,
+} from './public-payout-delivery.js';
 
 export {
   createWithdrawalAttempt,
@@ -179,6 +286,7 @@ export type {
 export {
   assertBlindResendForbidden,
   broadcastGate,
+  claimFirstBroadcastSend,
   classifySubmitError,
   markBroadcastSubmitted,
   persistPreBroadcastEvidence,
@@ -206,6 +314,28 @@ export type {
   RealTestnetPayoutPipelineState,
   RunRealTestnetPayoutPipelineInput,
 } from './real-payout-pipeline.js';
+
+export { reconcileRealWithdrawalAttemptOnly } from './real-chain-reconcile-only.js';
+export {
+  DEFINITIVE_NONPAYMENT_REASON_V5R1_EXPIRED_UNCONSUMED_SEQNO,
+} from './real-chain-reconcile-only.js';
+export type {
+  DefinitiveNonpaymentReasonCode,
+  RealChainReconcileOnlyClassification,
+  RealChainReconcileOnlyResolution,
+  RealChainReconcileProviderObservation,
+  ReconcileRealWithdrawalAttemptOnlyInput,
+  ReconcileRealWithdrawalAttemptOnlyResult,
+} from './real-chain-reconcile-only.js';
+
+export {
+  HOLD_AFTER_DEFINITIVE_NONPAYMENT_ACTION,
+  holdReconciledWithdrawalAfterDefinitiveNonpayment,
+} from './hold-after-definitive-nonpayment.js';
+export type {
+  HoldReconciledWithdrawalAfterDefinitiveNonpaymentInput,
+  HoldReconciledWithdrawalAfterDefinitiveNonpaymentResult,
+} from './hold-after-definitive-nonpayment.js';
 
 export { runPhase10Readiness } from './phase10-readiness.js';
 export type {
@@ -289,6 +419,34 @@ export {
   resumeCampaignById,
   writeEvidenceFile,
 } from './phase10-campaign.js';
+export {
+  PHASE10_SUCCESS_BATCH_FEE_ATOMIC,
+  PHASE10_SUCCESS_BATCH_GROSS_ATOMIC,
+  PHASE10_SUCCESS_BATCH_MAX_ADDITIONAL_UTC_DAY,
+  PHASE10_SUCCESS_BATCH_MAX_PER_HOUR,
+  PHASE10_SUCCESS_BATCH_NET_ATOMIC,
+  assertPhase10BatchPreStart,
+  classifyTerminalPayoutState,
+  nextBatchStopAfterSuccess,
+  planPhase10SuccessBatch,
+  shouldStopForHourlyCap,
+} from './phase10-success-batch-runner.js';
+export type {
+  Phase10BatchCapacitySnapshot,
+  Phase10BatchPlan,
+  Phase10BatchPayoutOutcome,
+  Phase10BatchSafetyPreconditions,
+  Phase10BatchStopReason,
+} from './phase10-success-batch-runner.js';
+export {
+  evaluatePhase10FinalSlotOccupancy,
+  isBaselineIsolatedHistoricalAttemptId,
+  isHiddenReadyFinalSlotOccupancyBlocker,
+} from './phase10-final-slot-gate.js';
+export type {
+  Phase10FinalSlotOccupancyResult,
+  Phase10HiddenReadyCandidate,
+} from './phase10-final-slot-gate.js';
 export type {
   AttachPhase10CampaignWithdrawalInput,
   InitPhase10CampaignManifestInput,
@@ -320,13 +478,20 @@ export {
   SECONDARY_PROVIDER_WRONG_NETWORK,
   evaluateProviderIndependence,
   fingerprintProviderEndpoint,
+  parsePhase10AcceptanceCutoff,
+  resolvePhase10LiveProviderRoles,
   runPhase10LiveExternalProbes,
   signerLockedFromProbe,
 } from './phase10-live-probes.js';
 export type {
   Phase10LiveExternalProbeEvidence,
   Phase10LiveExternalProbeInput,
+  Phase10LiveProviderKind,
+  Phase10LiveProviderRoleEndpointInput,
+  Phase10LiveProviderRolesResolveResult,
   Phase10ProviderProbeObservation,
+  Phase10ResolvedLiveProviderRole,
+  Phase10ResolvedLiveProviderRoles,
   Phase10SignerProbeObservation,
   Phase10WalletSeqnoAdmissionObservation,
 } from './phase10-live-probes.js';
@@ -421,6 +586,12 @@ export { loadPhase10AuthoritativeHotWalletIdentity } from './phase10-hot-wallet-
 export type { Phase10AuthoritativeHotWalletIdentity } from './phase10-hot-wallet-identity.js';
 
 export {
+  PHASE10_USDT_Z_CANARY_WITHDRAWAL_ID,
+  isAuthorizedPhase10PreManifestCanary,
+} from './phase10-usdt-z-canary.js';
+export type { Phase10PreManifestCanaryAuthorizationInput } from './phase10-usdt-z-canary.js';
+
+export {
   PHASE10_REQUIRED_REAL_FAILURE_SCENARIO_IDS,
   evaluatePhase10AcceptanceGate,
   evaluatePhase10AcceptanceFromEvidence,
@@ -436,3 +607,276 @@ export type {
   Phase10AcceptanceGateVerdict,
   Phase10LiveEvidencePresence,
 } from './phase10-acceptance-gate.js';
+
+export {
+  PHASE10_CLOSURE_GATE_SCHEMA_VERSION,
+  PHASE10_REQUIRED_ACCEPTANCE_PAYOUTS,
+  buildPhase10ClosureAuditRecord,
+  closePhase10,
+  evaluatePhase10ClosureEligibility,
+  loadPhase10ClosureEconomicSnapshot,
+  phase10ClosureSha256Hex,
+  transitionCampaignToPhase10FinalState,
+} from './phase10-closure-gate.js';
+export type {
+  ClosePhase10Input,
+  ClosePhase10OutcomeCode,
+  ClosePhase10Result,
+  Phase10CampaignClosureTransitionResult,
+  Phase10CampaignFinalStatus,
+  Phase10ClosureAuditRecord,
+  Phase10ClosureBlocker,
+  Phase10ClosureBlockerCode,
+  Phase10ClosureCheckResult,
+  Phase10ClosureCheckStatus,
+  Phase10ClosureCurrentSafetyInput,
+  Phase10ClosureEconomicSnapshot,
+  Phase10ClosureEligibilityInput,
+  Phase10ClosureEligibilityResult,
+  Phase10ClosureEvidenceBindingSummary,
+} from './phase10-closure-gate.js';
+
+
+export {
+  PHASE21_FORBIDDEN_JETTON_PLACEHOLDERS,
+  PHASE21_MICRO_LAUNCH_USDT_ATOMIC_MAX,
+  PHASE21_MICRO_LAUNCH_USDT_ATOMIC_MIN,
+  PHASE21_NETWORK_CODE,
+  PHASE21_NETWORK_GLOBAL_ID,
+  PHASE21_REQUIRED_CONFIRMED_WITHDRAWALS,
+  PHASE21_TESTNET_NETWORK_GLOBAL_ID,
+  PHASE21_WALLET_VERSION,
+  assertPhase21Ready,
+  assessPhase21InitialFundingExposure,
+  buildPhase21PayoutConfig,
+  listPhase21MissingResources,
+  phase21ReadyCheck,
+} from './phase21-config.js';
+export type {
+  Phase21ConfigInput,
+  Phase21PayoutConfig,
+  Phase21ProviderEndpointConfig,
+  Phase21ProviderKind,
+  Phase21ReadyCheck,
+} from './phase21-config.js';
+
+export { evaluatePhase21ExpansionGate } from './phase21-expansion-gate.js';
+export type {
+  Phase21ExpansionGateInput,
+  Phase21ExpansionGateResult,
+  Phase21ExpansionGateVerdict,
+} from './phase21-expansion-gate.js';
+
+export {
+  buildPhase21ReadinessReport,
+  defaultPhase21Step1Observations,
+} from './phase21-readiness.js';
+export type {
+  Phase21ReadinessItem,
+  Phase21ReadinessObservations,
+  Phase21ReadinessReport,
+  Phase21ReadinessStatus,
+  Phase21WithdrawableBalanceSourceStatus,
+  Phase21AttachedGramLifecycleObservation,
+} from './phase21-readiness.js';
+
+export {
+  selectWithdrawalPayoutAuthority,
+  assertWithdrawalAuthorityMatchesNetwork,
+} from './phase21-runtime-selection.js';
+export type { WithdrawalPayoutAuthority } from './phase21-runtime-selection.js';
+
+export {
+  validateMainnetJettonMasterAddress,
+  validateProviderIndependence,
+  normalizeProviderHost,
+  normalizeOfficialTetherUsdMetadataSymbol,
+  runOptionalMainnetProviderReachabilityProbe,
+  verifyMainnetUsdtWithTwoProviders,
+} from './phase21-external-probes.js';
+export type {
+  Phase21ExternalProbeResult,
+  Phase21JettonMasterValidation,
+  Phase21ProviderIndependenceValidation,
+  Phase21ProbeProvenance,
+  Phase21TwoProviderVerificationResult,
+  MainnetIdentityProbeAdapter,
+  UsdtJettonMetadataProbeAdapter,
+  JettonWalletDerivationProbeAdapter,
+} from './phase21-external-probes.js';
+
+export {
+  PHASE21_PRODUCTION_FLAG_BASELINE,
+  PHASE21_PRODUCTION_FLAG_BASELINE_LOCK_KEY1,
+  planPhase21ProductionFlagBaseline,
+  applyPhase21ProductionFlagBaseline,
+  runPhase21ProductionFlagBaseline,
+} from './phase21-production-flag-baseline.js';
+export type {
+  Phase21ProductionFlagBaselineMode,
+  Phase21ProductionFlagBaselinePlanRow,
+  Phase21ProductionFlagBaselineResult,
+  Phase21ProductionBaselineFlagKey,
+  Phase21ProductionFlagBaselineApplyInput,
+} from './phase21-production-flag-baseline.js';
+
+export {
+  PHASE21_MAINNET_REGISTRY_BOOTSTRAP_LOCK_KEY1,
+  planPhase21MainnetRegistryBootstrap,
+  applyPhase21MainnetRegistryBootstrap,
+  runPhase21MainnetRegistryBootstrap,
+} from './phase21-mainnet-registry-bootstrap.js';
+export type {
+  Phase21MainnetRegistryBootstrapInput,
+  Phase21MainnetRegistryBootstrapApplyInput,
+  Phase21MainnetRegistryBootstrapMode,
+  Phase21MainnetRegistryBootstrapResult,
+  Phase21MainnetRegistryPlanItem,
+} from './phase21-mainnet-registry-bootstrap.js';
+
+export {
+  PHASE21_MAINNET_REGISTRY_VERIFICATION_TRUST_CLASS,
+  isAuthenticatedPhase21MainnetRegistryVerification,
+  assertAuthenticatedPhase21MainnetRegistryVerification,
+  Phase21MainnetRegistryVerificationError,
+  type AuthenticatedPhase21MainnetRegistryVerification,
+  type Phase21MainnetRegistryVerificationTrustClass,
+} from './phase21-mainnet-registry-verification-trust.js';
+
+export {
+  PHASE21_MAINNET_REGISTRY_VERIFICATION_MAX_AGE_MS,
+  PHASE21_MAINNET_REGISTRY_VERIFICATION_MAX_AGE_SECONDS,
+  assertPhase21MainnetRegistryVerificationFresh,
+} from './phase21-mainnet-registry-live-verify-mint.js';
+/** Production live verify+mint is intentionally NOT exported from package root. */
+
+export {
+  verifyPhase21MainnetRegistryBootstrapReadOnly,
+  Phase21MainnetRegistryPostApplyVerifyError,
+  type Phase21MainnetRegistryPostApplyExpected,
+  type Phase21MainnetRegistryPostApplyVerifyResult,
+} from './phase21-mainnet-registry-post-apply-verify.js';
+
+export {
+  assertPhase21CeremonyApplyGates,
+  __phase21TestSetApplyEnv,
+  Phase21CeremonyApplyGateError,
+  PHASE21_CEREMONY_REQUIRED_DATABASE_NAME_ENV,
+} from './phase21-ceremony-apply-gates.js';
+
+export { createPhase21MainnetExternalAdapters } from './phase21-mainnet-adapters.js';
+export type {
+  Phase21MainnetExternalAdaptersConfig,
+  Phase21MainnetProviderEndpoint,
+  Phase21MainnetProviderKind,
+} from './phase21-mainnet-adapters.js';
+
+export {
+  PHASE21_HOT_WALLET_REGISTER_LOCK_KEY1,
+  planPhase21HotWalletRegistration,
+  applyPhase21HotWalletRegistration,
+} from './phase21-hot-wallet-registration.js';
+export type {
+  Phase21HotWalletRegistrationInput,
+  Phase21HotWalletRegistrationPlan,
+  Phase21HotWalletRegistrationResult,
+  Phase21HotWalletDerivationProof,
+} from './phase21-hot-wallet-registration.js';
+
+export {
+  PHASE21_DERIVATION_PROOF_SCHEMA,
+  buildPhase21HotWalletDerivationProofDocument,
+  readPhase21HotWalletDerivationProofFile,
+  resolvePhase21HotWalletDerivationProofFromEnv,
+  writePhase21HotWalletDerivationProofFile,
+} from './phase21-hot-wallet-derivation-proof.js';
+export type { Phase21HotWalletDerivationProofDocument } from './phase21-hot-wallet-derivation-proof.js';
+
+export {
+  realPayoutNetworkFromPhase10,
+  realPayoutNetworkFromPhase21,
+  resolveRealPayoutNetworkBinding,
+} from './real-payout-network.js';
+export type { RealPayoutNetworkBinding } from './real-payout-network.js';
+
+export { runPhase21Preflight } from './phase21-preflight.js';
+export type {
+  Phase21ForbiddenPreflightVerdict,
+  Phase21PreflightReport,
+  Phase21PreflightVerdict,
+} from './phase21-preflight.js';
+
+export {
+  resolvePhase21CeremonyOwnerAdmin,
+  Phase21CeremonyOwnerAdminError,
+} from './phase21-ceremony-owner-admin.js';
+export {
+  Phase21ProvisioningEvidenceSchema,
+  buildEmptyPhase21ProvisioningEvidenceFixture,
+  parsePhase21ProvisioningEvidence,
+  type Phase21ProvisioningEvidence,
+} from './phase21-provisioning-evidence.js';
+
+export {
+  PHASE21_OWNER_CEREMONY_TRUST_CLASS,
+  isAuthenticatedPhase21OwnerCeremonyTrust,
+  assertAuthenticatedPhase21OwnerCeremonyTrust,
+  Phase21OwnerCeremonyTrustError,
+  type AuthenticatedPhase21OwnerCeremonyTrust,
+  type Phase21OwnerCeremonyTrustClass,
+} from './phase21-owner-ceremony-trust.js';
+export {
+  resolveCanonicalPhase21OwnerSeat,
+  authenticatePhase21OwnerCeremonyFromOwnerTty,
+  Phase21OwnerCeremonyAuthError,
+} from './phase21-owner-ceremony-auth.js';
+export {
+  PHASE21_PRODUCTION_FLAGS_APPLY_PHRASE,
+  PHASE21_MAINNET_REGISTRY_APPLY_PHRASE,
+  PHASE21_HOT_WALLET_REGISTER_PHRASE,
+  PHASE21_HOT_WALLET_BACKUP_ATTESTATION_PHRASE,
+  confirmPhase21ProductionFlagsApplyInteractive,
+  confirmPhase21MainnetRegistryApplyInteractive,
+  confirmPhase21HotWalletRegisterInteractive,
+  attestPhase21HotWalletOfflineBackupsInteractive,
+  assertPhase21ProductionFlagsApplyConfirmation,
+  assertPhase21MainnetRegistryApplyConfirmation,
+  assertPhase21HotWalletRegisterConfirmation,
+  assertPhase21HotWalletBackupAttestation,
+  isPhase21ProductionFlagsApplyConfirmation,
+  isPhase21MainnetRegistryApplyConfirmation,
+  isPhase21HotWalletRegisterConfirmation,
+  isPhase21HotWalletBackupAttestation,
+  Phase21CeremonyConfirmationError,
+  type Phase21InteractivePhraseInput,
+  type Phase21ProductionFlagsApplyConfirmation,
+  type Phase21MainnetRegistryApplyConfirmation,
+  type Phase21HotWalletRegisterConfirmation,
+  type Phase21HotWalletBackupAttestation,
+} from './phase21-ceremony-confirmations.js';
+export {
+  createPhase21CeremonyVerifiedPool,
+  assertPhase21CeremonyVerifiedPool,
+  assertOwnerTrustMatchesLiveConnection,
+  loadPhase21CeremonyEndpointProfile,
+  Phase21CeremonyVerifiedPoolError,
+  type Phase21CeremonyVerifiedPool,
+} from './phase21-ceremony-verified-pool.js';
+export {
+  PHASE21_CEREMONY_REQUIRED_SYSTEM_IDENTIFIER_ENV,
+} from './phase21-ceremony-apply-gates.js';
+export {
+  PHASE21_HOT_WALLET_IDENTITY_PROOF_SCHEMA,
+  readPhase21HotWalletIdentityProofFile,
+  writePhase21HotWalletIdentityProofFile,
+  buildPhase21HotWalletIdentityProofDocument,
+  assertIdentityProofMatchesRegistrationInput,
+  Phase21HotWalletIdentityProofError,
+  type Phase21HotWalletIdentityProof,
+} from './phase21-hot-wallet-identity-proof.js';
+export {
+  verifyPhase21HotWalletRegistrationReadOnly,
+  Phase21HotWalletPostRegisterVerifyError,
+  type Phase21HotWalletPostRegisterExpected,
+  type Phase21HotWalletPostRegisterVerifyResult,
+} from './phase21-hot-wallet-post-register-verify.js';

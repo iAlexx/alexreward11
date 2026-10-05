@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { HEALTH_CONTRACT_VERSION, type HealthResponse } from '@alex-rewards/contracts';
 import {
   LocalEphemeralSignPort,
+  PHASE21_MAINNET_OWNER_APPROVED_TRANSFER_POLICY,
   SignerError,
   deriveWalletV5R1,
   localSigningFixtureConfig,
@@ -179,6 +180,7 @@ export async function registerSignerRoutes(
         publicKey,
         networkGlobalId: deps.runtime.networkGlobalId,
         workchain: deps.runtime.workchain,
+        phase21MainnetEnabled: deps.runtime.phase21MainnetEnabled === true,
       });
       return reply.code(200).send({
         publicKeyHex: publicKey.toString('hex'),
@@ -244,6 +246,7 @@ export function runtimeFromEnv(config: {
   SIGNER_WALLET_VERSION: 'v5R1';
   SIGNER_WORKCHAIN: number;
   SIGNER_EXPECTED_ASSET_SYMBOL: string;
+  PHASE21_MAINNET_ENABLED?: boolean;
 }): SignerRuntimeConfig {
   return localSigningFixtureConfig({
     deploymentEnv: config.DEPLOYMENT_ENV,
@@ -256,5 +259,10 @@ export function runtimeFromEnv(config: {
     walletVersion: config.SIGNER_WALLET_VERSION,
     workchain: config.SIGNER_WORKCHAIN,
     expectedAssetSymbol: config.SIGNER_EXPECTED_ASSET_SYMBOL,
+    phase21MainnetEnabled: config.PHASE21_MAINNET_ENABLED === true,
+    mainnetTransferPolicy:
+      config.PHASE21_MAINNET_ENABLED === true
+        ? PHASE21_MAINNET_OWNER_APPROVED_TRANSFER_POLICY
+        : null,
   });
 }

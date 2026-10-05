@@ -8,6 +8,8 @@ export interface WalletV5R1DerivationInput {
   readonly publicKey: Buffer;
   readonly networkGlobalId: number;
   readonly workchain?: number;
+  /** When true, allow/require Mainnet (-239). Default false = Phase 9 Testnet-only. */
+  readonly phase21MainnetEnabled?: boolean;
 }
 
 export interface WalletV5R1Derivation {
@@ -22,15 +24,27 @@ export function deriveWalletV5R1(input: WalletV5R1DerivationInput): WalletV5R1De
   if (input.publicKey.length !== 32) {
     throw new SignerError('POLICY_REJECTED', 'Wallet V5 R1 public key must be 32 bytes');
   }
-  if (input.networkGlobalId === SIGNER_BOUNDARY.networkGlobalIdMainnet) {
-    throw new SignerError('MAINNET_REJECTED', 'Phase 9 rejects MAINNET Wallet V5 R1 identity');
-  }
-  if (input.networkGlobalId !== SIGNER_BOUNDARY.networkGlobalIdTestnet) {
-    throw new SignerError(
-      'POLICY_REJECTED',
-      `Phase 9 requires TESTNET networkGlobalId ${SIGNER_BOUNDARY.networkGlobalIdTestnet}`,
-      { networkGlobalId: input.networkGlobalId },
-    );
+
+  const phase21 = input.phase21MainnetEnabled === true;
+  if (phase21) {
+    if (input.networkGlobalId !== SIGNER_BOUNDARY.networkGlobalIdMainnet) {
+      throw new SignerError(
+        'POLICY_REJECTED',
+        `Phase 21 Mainnet mode requires networkGlobalId ${SIGNER_BOUNDARY.networkGlobalIdMainnet}`,
+        { networkGlobalId: input.networkGlobalId },
+      );
+    }
+  } else {
+    if (input.networkGlobalId === SIGNER_BOUNDARY.networkGlobalIdMainnet) {
+      throw new SignerError('MAINNET_REJECTED', 'Phase 9 rejects MAINNET Wallet V5 R1 identity');
+    }
+    if (input.networkGlobalId !== SIGNER_BOUNDARY.networkGlobalIdTestnet) {
+      throw new SignerError(
+        'POLICY_REJECTED',
+        `Phase 9 requires TESTNET networkGlobalId ${SIGNER_BOUNDARY.networkGlobalIdTestnet}`,
+        { networkGlobalId: input.networkGlobalId },
+      );
+    }
   }
 
   const workchain = input.workchain ?? 0;
@@ -44,7 +58,11 @@ export function deriveWalletV5R1(input: WalletV5R1DerivationInput): WalletV5R1De
 
   return {
     addressRaw: wallet.address.toRawString(),
-    addressFriendly: wallet.address.toString({ bounceable: true, urlSafe: true, testOnly: true }),
+    addressFriendly: wallet.address.toString({
+      bounceable: true,
+      urlSafe: true,
+      testOnly: !phase21,
+    }),
     networkGlobalId: input.networkGlobalId,
     workchain,
     walletVersion: 'v5R1',

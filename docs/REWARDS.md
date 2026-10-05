@@ -117,6 +117,31 @@ pnpm test:phase5
 
 No mock data: suites use real PostgreSQL via `resetAndMigrate`.
 
+## AD source (Phase 11)
+
+Phase 11 adds `source_type = 'AD'`. Economics, budgets, guardrails and arithmetic are unchanged —
+only the source of the quote differs.
+
+- `createRewardQuote` accepts `AD` with `source_id` = the ad session id. The database enforces
+  `source_id = ad_session_id` for AD quotes, and `reward_quotes.ad_session_id` is unique
+  (`reward_quotes_ad_session_uidx`), so a session has at most one authoritative quote. The FK
+  points from the quote to the session; `ad_sessions` holds no quote column.
+- The quote is created in the **same transaction** as the ad session, so an authorized session
+  always has frozen economics and a budget reservation, or neither row exists.
+- `issueAdReward` is the only path that turns ad evidence into money. In one transaction it posts
+  the ledger legs, consumes the budget reservation, increments the daily success counter and moves
+  the session to `REWARDED`. It is idempotent on the server-derived idempotency key, so a retried
+  verification never produces a second reward.
+- Ledger legs match the simulated path: base `PLATFORM_REWARD_EXPENSE` → `USER_PENDING_LIABILITY`
+  as `REWARD_ISSUANCE`, optional bonus as `MEMBERSHIP_BONUS_ISSUANCE`.
+- Terminal non-reward outcomes release the reservations and cancel the quote while it is still
+  `OPEN` with `source_started_at IS NULL`.
+- The Reward Engine does not decide whether a provider may pay; `@alex-rewards/ads` gates that and
+  calls in only after the gate passes. AdsGram is BLOCKED (`docs/ADS_SPEC.md`).
+
+Still no `AD_NETWORK_RECEIVABLE` / `AD_REVENUE` posts: Phase 11 issues user rewards, it does not
+recognize ad revenue.
+
 ## Explicit non-goals (Phase 5)
 
 - AdsGram adapter / real provider money

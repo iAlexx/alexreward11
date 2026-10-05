@@ -7,7 +7,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    }
+    },
+    "./messages/ar.json": "./messages/ar.json",
+    "./messages/en.json": "./messages/en.json",
+    "./messages/ru.json": "./messages/ru.json"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

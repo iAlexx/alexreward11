@@ -1,0 +1,45 @@
+FROM node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d AS build
+
+ENV PNPM_HOME=/pnpm
+ENV PATH=$PNPM_HOME:$PATH
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV TURBO_TELEMETRY_DISABLED=1
+RUN npm install --global pnpm@11.25.0
+
+WORKDIR /workspace
+COPY . .
+RUN --mount=type=cache,id=s/ba2a082e-6478-4f14-a0bb-f56a4ddddfaf-/pnpm/store,target=/pnpm/store \
+    pnpm install --frozen-lockfile
+
+ARG NEXT_PUBLIC_API_BASE_URL=http://localhost:3002
+ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL
+ENV NODE_ENV=production
+RUN pnpm turbo run build --filter=@alex-rewards/worker...
+
+FROM node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d AS runtime
+
+ENV PNPM_HOME=/pnpm
+ENV PATH=$PNPM_HOME:$PATH
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV TURBO_TELEMETRY_DISABLED=1
+
+RUN npm install --global pnpm@11.25.0 \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && mkdir -p --mode=0755 /usr/share/keyrings \
+    && curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.noarmor.gpg \
+       -o /usr/share/keyrings/tailscale-archive-keyring.gpg \
+    && curl -fsSL https://pkgs.tailscale.com/stable/debian/bookworm.tailscale-keyring.list \
+       -o /etc/apt/sources.list.d/tailscale.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends tailscale \
+    && tailscale version \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --uid 10001 alex
+
+WORKDIR /workspace
+COPY --from=build --chown=alex:alex /workspace /workspace
+USER alex
+
+CMD ["pnpm", "--filter", "@alex-rewards/worker", "run", "start:tailscale"]

@@ -3,7 +3,9 @@
  * validation. Validation-ONLY — never acceptance evidence.
  *
  * Schema is distinct from Phase10ChainHistoryEvidenceArtifact.
- * PHASE10_CHAIN_HISTORY_PROVIDER_COLLECTOR_AVAILABLE remains false forever.
+ * This RO path remains validationOnly/acceptanceEnabled=false regardless of
+ * PHASE10_CHAIN_HISTORY_PROVIDER_COLLECTOR_AVAILABLE (acceptance uses the
+ * separate live collector + evidence artifact path).
  *
  * Production: runPhase10ChainHistoryReadonlyValidate (constructs providers).
  * Test-only: runPhase10ChainHistoryReadonlyValidateForTests (injectable
@@ -32,6 +34,7 @@ import {
   type Phase10AuthoritativeHotWalletIdentity,
 } from './phase10-hot-wallet-identity.js';
 import { fingerprintProviderEndpoint } from './phase10-live-probes.js';
+import { resolvePhase10LiveProviderRoles } from './phase10-provider-roles.js';
 
 export const PHASE10_READONLY_VALIDATION_SCHEMA_VERSION = 1 as const;
 
@@ -370,10 +373,6 @@ function toAgreedTransfer(
   };
 }
 
-function normalizeProviderKind(kind: string): string {
-  return kind.trim().toLowerCase();
-}
-
 function finishReport(
   partial: Omit<Phase10ReadonlyValidationReport, 'reportDigest'>,
 ): Phase10ReadonlyValidationReport {
@@ -467,8 +466,6 @@ async function runReadonlyValidateCore(
           networkCode: 'TON_TESTNET',
         });
 
-  const primaryKind = normalizeProviderKind(input.primary.kind);
-  const secondaryKind = normalizeProviderKind(input.secondary.kind);
   const primaryFingerprint = fingerprintProviderEndpoint(input.primary.baseUrl) ?? '';
   const secondaryFingerprint = fingerprintProviderEndpoint(input.secondary.baseUrl) ?? '';
 
@@ -522,7 +519,19 @@ async function runReadonlyValidateCore(
     });
   }
 
-  if (primaryKind !== 'toncenter') {
+  const roles = resolvePhase10LiveProviderRoles({
+    primary: {
+      kind: input.primary.kind,
+      baseUrl: input.primary.baseUrl,
+      apiKey: input.primary.apiKey ?? null,
+    },
+    secondary: {
+      kind: input.secondary.kind,
+      baseUrl: input.secondary.baseUrl,
+      apiKey: input.secondary.apiKey ?? null,
+    },
+  });
+  if (!roles.ok) {
     return baseFailReport({
       generatedAt,
       hotWalletAddress,
@@ -533,75 +542,28 @@ async function runReadonlyValidateCore(
       primaryFingerprint,
       secondaryFingerprint,
       verdict: 'FAIL_BINDING',
-      notes: [
-        `FAIL_BINDING: primary.kind must be 'toncenter' (got ${input.primary.kind.trim() || '<empty>'})`,
-      ],
+      notes: roles.reasons.map((r) => `FAIL_BINDING: ${r}`),
     });
   }
 
-  if (secondaryKind !== 'tonapi') {
-    return baseFailReport({
-      generatedAt,
-      hotWalletAddress,
-      hotWalletJettonWallet,
-      jettonMaster,
-      windowStart,
-      windowEnd,
-      primaryFingerprint,
-      secondaryFingerprint,
-      verdict: 'FAIL_BINDING',
-      notes: [
-        `FAIL_BINDING: secondary.kind must be 'tonapi' (got ${input.secondary.kind.trim() || '<empty>'})`,
-      ],
-    });
-  }
-
-  const primaryFpRaw = fingerprintProviderEndpoint(input.primary.baseUrl);
-  const secondaryFpRaw = fingerprintProviderEndpoint(input.secondary.baseUrl);
-  if (primaryFpRaw === null || secondaryFpRaw === null) {
-    return baseFailReport({
-      generatedAt,
-      hotWalletAddress,
-      hotWalletJettonWallet,
-      jettonMaster,
-      windowStart,
-      windowEnd,
-      primaryFingerprint: primaryFpRaw ?? '',
-      secondaryFingerprint: secondaryFpRaw ?? '',
-      verdict: 'FAIL_BINDING',
-      notes: ['FAIL_BINDING: unable to derive provider endpoint fingerprints'],
-    });
-  }
-  if (primaryFpRaw === secondaryFpRaw) {
-    return baseFailReport({
-      generatedAt,
-      hotWalletAddress,
-      hotWalletJettonWallet,
-      jettonMaster,
-      windowStart,
-      windowEnd,
-      primaryFingerprint: primaryFpRaw,
-      secondaryFingerprint: secondaryFpRaw,
-      verdict: 'FAIL_BINDING',
-      notes: ['FAIL_BINDING: primary and secondary endpoint fingerprints must differ'],
-    });
-  }
+  const primaryFpRaw = roles.roles.primary.endpointFingerprint;
+  const secondaryFpRaw = roles.roles.secondary.endpointFingerprint;
 
   const fetchImpl = options.fetchImpl;
   const primary =
     options.primaryProvider ??
     createTonChainProvider({
-      kind: 'toncenter',
-      baseUrl: input.primary.baseUrl,
-      ...(input.primary.apiKey !== undefined ? { apiKey: input.primary.apiKey } : {}),
+      kind: roles.roles.primary.kind,
+      baseUrl: roles.roles.primary.baseUrl,
+      ...(roles.roles.primary.apiKey !== null ? { apiKey: roles.roles.primary.apiKey } : {}),
       ...(fetchImpl !== undefined ? { fetchImpl } : {}),
     });
   const secondary =
     options.secondaryProvider ??
     createTonChainProvider({
-      kind: 'tonapi',
-      baseUrl: input.secondary.baseUrl,
-      ...(input.secondary.apiKey !== undefined ? { apiKey: input.secondary.apiKey } : {}),
+      kind: roles.roles.secondary.kind,
+      baseUrl: roles.roles.secondary.baseUrl,
+      ...(roles.roles.secondary.apiKey !== null ? { apiKey: roles.roles.secondary.apiKey } : {}),
       ...(fetchImpl !== undefined ? { fetchImpl } : {}),
     });
 
@@ -757,8 +719,9 @@ async function runReadonlyValidateCore(
 }
 
 /**
- * Production readonly validation runner. Constructs TonCenter (primary) + TonAPI
- * (secondary) itself. Never accepts fetchImpl or injectable fakes.
+ * Production readonly validation runner. Constructs primary + secondary providers
+ * from the same authoritative role mapping as live readiness / collector.
+ * Never accepts fetchImpl or injectable fakes.
  */
 export async function runPhase10ChainHistoryReadonlyValidate(
   input: RunPhase10ChainHistoryReadonlyValidateInput,

@@ -12,6 +12,11 @@ export interface ValidatedTelegramUser {
   readonly isPremium: boolean | null;
   readonly authDate: Date;
   readonly authDateUnix: number;
+  /**
+   * HMAC-validated Telegram `start_param` from initData, or null when absent.
+   * Never populated from initDataUnsafe or an unsigned client body field.
+   */
+  readonly startParam: string | null;
 }
 
 export interface ValidateInitDataOptions {
@@ -153,6 +158,10 @@ export function validateTelegramInitData(
   const user = userJson as Record<string, unknown>;
   const telegramUserId = assertSafeTelegramUserId(user.id);
 
+  const startParamRaw = pairs.get('start_param');
+  const startParam =
+    startParamRaw === undefined || startParamRaw === '' ? null : startParamRaw;
+
   return {
     telegramUserId,
     username: typeof user.username === 'string' ? user.username : null,
@@ -162,6 +171,7 @@ export function validateTelegramInitData(
     isPremium: typeof user.is_premium === 'boolean' ? user.is_premium : null,
     authDate: new Date(authDateUnix * 1000),
     authDateUnix,
+    startParam,
   };
 }
 

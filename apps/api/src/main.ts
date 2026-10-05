@@ -39,11 +39,16 @@ try {
   });
 
   const origins = config.CORS_ORIGINS;
+  const adminOrigin = config.ADMIN_WEBAUTHN_ORIGIN.trim();
+  const corsOriginList =
+    origins.length === 0 && adminOrigin === ''
+      ? []
+      : [...new Set([...origins, ...(adminOrigin !== '' ? [adminOrigin] : [])])];
   app.enableCors({
-    origin: origins.length === 0 ? false : origins,
-    credentials: false,
-    methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Authorization', 'Content-Type', 'X-Request-Id'],
+    origin: corsOriginList.length === 0 ? false : corsOriginList,
+    credentials: corsOriginList.length > 0,
+    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Authorization', 'Content-Type', 'X-Request-Id', 'X-Admin-Webauthn-Phase'],
   });
 
   const fastify = app.getHttpAdapter().getInstance() as {
@@ -74,8 +79,11 @@ try {
     .addBearerAuth()
     .build();
   SwaggerModule.setup('docs', app, SwaggerModule.createDocument(app, openApiConfig));
-  await app.listen(config.API_PORT, '0.0.0.0');
-  observability.logger.info({ port: config.API_PORT }, 'api listening');
+  await app.listen(config.API_PORT, config.API_LISTEN_HOST);
+  observability.logger.info(
+    { port: config.API_PORT, listenHost: config.API_LISTEN_HOST },
+    'api listening',
+  );
 
   const shutdown = createShutdownCoordinator(observability.logger, 'api', [
     () => app.close(),

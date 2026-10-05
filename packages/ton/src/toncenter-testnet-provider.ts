@@ -113,10 +113,14 @@ function messageBody(message: Record<string, unknown>): string | null {
 }
 
 function transactionSucceeded(transaction: Record<string, unknown>): boolean {
-  if (transaction.aborted !== false) return false;
+  // Explicit abort only. TonCenter v2 getTransactions often omits `aborted` and
+  // `description`; callers still enforce message-level TEP-74 proof.
+  if (transaction.aborted === true) return false;
   const description = transaction.description;
-  if (description === null || typeof description !== 'object' || Array.isArray(description))
-    return false;
+  if (description === null || description === undefined) {
+    return true;
+  }
+  if (typeof description !== 'object' || Array.isArray(description)) return false;
   const compute = (description as Record<string, unknown>).compute_ph;
   if (compute === null || typeof compute !== 'object' || Array.isArray(compute)) return false;
   const computePhase = compute as Record<string, unknown>;
@@ -143,21 +147,20 @@ function isExternalInMessage(message: Record<string, unknown>, hotWallet: string
 }
 
 /**
- * Match the persisted Tonkeeper-normalized External-In identity against TonCenter
+ * Match persisted External-In identity (normalized and/or cell hash) against TonCenter
  * message hash fields returned by getTransactions / index APIs.
  */
 function externalInHashMatches(
   message: Record<string, unknown>,
-  normalizedExternalMessageHash: string,
+  candidateHashes: readonly string[],
 ): boolean {
+  const candidates = candidateHashes.filter((value) => value.trim() !== '');
+  if (candidates.length === 0) return false;
   for (const key of ['hash', 'hash_norm', 'message_hash', 'msg_hash'] as const) {
     const value = message[key];
-    if (
-      typeof value === 'string' &&
-      value !== '' &&
-      hashEquals(value, normalizedExternalMessageHash)
-    ) {
-      return true;
+    if (typeof value !== 'string' || value === '') continue;
+    for (const candidate of candidates) {
+      if (hashEquals(value, candidate)) return true;
     }
   }
   return false;
@@ -441,11 +444,17 @@ export class TonCenterTestnetProvider implements TonChainProvider {
           ? null
           : asRecord(transaction.in_msg, 'TonCenter hot wallet external-in');
       // Chain identity: External-In accepted by the Hot Wallet must match the
-      // persisted normalized message hash (no query_id-only confirmation).
+      // persisted normalized and/or cell message hash (no query_id-only confirmation).
+      const identityHashes = [
+        input.normalizedExternalMessageHash,
+        ...(typeof input.externalMessageCellHash === 'string'
+          ? [input.externalMessageCellHash]
+          : []),
+      ];
       if (
         externalIn === null ||
         !isExternalInMessage(externalIn, input.hotWallet) ||
-        !externalInHashMatches(externalIn, input.normalizedExternalMessageHash)
+        !externalInHashMatches(externalIn, identityHashes)
       ) {
         continue;
       }

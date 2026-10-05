@@ -8,12 +8,48 @@ export {
   buildCanonicalSigningMessageAsync,
   buildJettonTransferBodyForIntent,
   JETTON_TRANSFER_OP,
-  SPIKE_JETTON_ATTACHED_TON,
-  SPIKE_JETTON_FORWARD_TON,
-  SPIKE_SEND_MODE,
   type CanonicalMessageBuild,
   type CanonicalPayoutIntent,
 } from './canonical-message.js';
+export {
+  PHASE10_TESTNET_SPIKE_TRANSFER_POLICY,
+  PHASE21_ATTACHED_GRAM_POLICY_STATUS,
+  PHASE21_MAINNET_FORWARD_APPROVED_POLICY_TEMPLATE,
+  PHASE21_MAINNET_OWNER_APPROVED_TRANSFER_POLICY,
+  SPIKE_JETTON_ATTACHED_TON,
+  SPIKE_JETTON_FORWARD_TON,
+  SPIKE_SEND_MODE,
+  assertJettonTransferPolicyValid,
+  assertPhase21MainnetTransferPolicy,
+  isPhase21ForwardGramPolicySourceReady,
+  resolveJettonTransferPolicy,
+  type AttachedGramLifecycleStatus,
+  type JettonTransferExecutionPolicy,
+} from './jetton-transfer-policy.js';
+export {
+  GRAM_DECIMALS,
+  GRAM_DISPLAY_NAME,
+  GRAM_SYMBOL,
+  NANOGRAM_PER_GRAM,
+  NATIVE_CURRENCY_ALIASES_TO_GRAM,
+  PHASE21_OWNER_APPROVED_ATTACHED_GRAM_ATOMIC,
+  PHASE21_OWNER_APPROVED_FORWARD_GRAM_ATOMIC,
+  classifyNativeCurrencyIdentifier,
+  gramToNanogram,
+  nanogramToGramString,
+  normalizeNativeCurrencyAlias,
+  type NativeCurrencyNamingClass,
+} from './gram-native-currency.js';
+export {
+  LiveOptionalMainnetFeeEstimator,
+  MockMainnetFeeEstimator,
+  type MainnetFeeEstimationInput,
+  type MainnetFeeEstimationResult,
+  type MainnetFeeEstimator,
+  type ReadOnlyMainnetFeeProvider,
+  ToncenterMainnetFeeProvider,
+  type ToncenterMainnetFeeProviderConfig,
+} from './mainnet-fee-estimation.js';
 export { localSigningFixtureConfig, type SignerRuntimeConfig } from './config.js';
 export { SignerError, type SignerErrorCode } from './errors.js';
 export {
@@ -58,6 +94,11 @@ export { EncryptedLocalSigningProvider } from './encrypted-local-signing-provide
 export { LocalEphemeralSignPort, publicKeyFingerprint } from './local-ephemeral-kms.js';
 export { assertSigningPolicy } from './policy.js';
 export { loadSigningView, type SigningViewRow } from './read-model.js';
+export {
+  assertSignerDatabaseReadBoundary,
+  inspectSignerDatabasePrivileges,
+  type SignerDbPrivilegeSnapshot,
+} from './db-privilege-boundary.js';
 export {
   reconstructCanonicalHash,
   signWithdrawalAttempt,

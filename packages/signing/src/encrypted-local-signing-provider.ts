@@ -33,6 +33,8 @@ export interface EncryptedLocalSigningProviderOptions {
   /** Expected public key fingerprint (signer_reference). */
   readonly expectedPublicKeyFingerprint?: string | null;
   readonly expectedNetworkGlobalId?: number;
+  /** When true, allow Mainnet (-239) bundle unlock/derivation. Default false. */
+  readonly phase21MainnetEnabled?: boolean;
 }
 
 function scrubMaterial(material: DecryptedSigningMaterial | undefined): void {
@@ -83,7 +85,9 @@ export class EncryptedLocalSigningProvider implements LockableSignPort {
         });
       }
 
-      candidate = decryptKeyBundle(bundle, passphrase);
+      candidate = decryptKeyBundle(bundle, passphrase, {
+        phase21MainnetEnabled: this.opts.phase21MainnetEnabled === true,
+      });
 
       if (
         this.opts.expectedPublicKeyFingerprint !== undefined &&
@@ -111,6 +115,7 @@ export class EncryptedLocalSigningProvider implements LockableSignPort {
         publicKey: candidate.publicKey,
         networkGlobalId: candidate.networkGlobalId,
         workchain: candidate.workchain,
+        phase21MainnetEnabled: this.opts.phase21MainnetEnabled === true,
       });
       if (!addressesEqual(derived.addressRaw, candidate.addressRaw)) {
         throw new SignerError('KEY_IDENTITY_MISMATCH', 'Wallet V5 R1 re-derivation failed');

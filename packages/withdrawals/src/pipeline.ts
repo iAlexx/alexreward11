@@ -292,7 +292,10 @@ export async function runFakePayoutPipeline(
         from: 'CONFIRMING',
         to: 'CONFIRMED',
       });
-      await settleWithdrawalReservation(client, { withdrawalId: w.id });
+      await settleWithdrawalReservation(client, {
+        withdrawalId: w.id,
+        confirmedAttemptId: attempt.id,
+      });
       await releaseHotWalletDispatchLease(client, {
         hotWalletId: hotWalletId,
         ownerIdentity,

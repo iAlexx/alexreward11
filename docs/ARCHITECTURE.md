@@ -20,6 +20,25 @@ Phase 10 adds the **Testnet payout foundation outside the signer**: provider-neu
 but still must not call TON RPC or broadcast. Real chain stays fail-closed until Owner supplies
 Testnet Jetton master + providers (`docs/PHASE_10_ACCEPTANCE_REPORT.md`).
 
+Phase 11 adds the **advertising provider plugin boundary**: `@alex-rewards/ads` owns ad session
+evidence, derived session state and the provider-neutral monetary eligibility gate. Providers are
+plugins behind one contract (`RewardedAdProvider`) listed in a **compile-time** registry — nothing
+is loaded dynamically, so the set of providers that can ever touch money is fixed at build time.
+The package composes transactions through `@alex-rewards/rewards` and must never import
+`@alex-rewards/ledger` or post a ledger transaction; that boundary is asserted against the source
+on disk by `packages/ads/test/phase11-boundaries.test.ts` as well as by the CI architecture check.
+Provider SDKs stay out of the domain: `@adsgram/react` lives in `apps/miniapp`, and `packages/ads`
+exports only the client signal data contract (`docs/ADS_SPEC.md`).
+
+Phase 13 adds the **Owner Admin control plane**: `apps/admin` is a browser UI over `v1/admin/*`
+in `apps/api`. Admin authentication (`admin_sessions`, WebAuthn primary, password+TOTP fallback,
+recovery codes) is independent of Telegram Mini App sessions. Admin is a control/read surface —
+not a financial source of truth, ledger bypass, payout signing path, or arbitrary policy scripting
+engine. Typed Policy Center, provider operations, economics (ESTIMATED vs SETTLED), Review Queue
+projection, feature flags, and membership/Founder admin call existing domain commands. See
+`docs/OWNER_ADMIN_AUTH.md`, `docs/ADMIN_POLICY_CENTER.md`, `docs/ADMIN_ECONOMICS.md`,
+`docs/REVIEW_QUEUE.md`.
+
 Readiness means a process can serve its intended current-phase role. Liveness means its event
 loop and HTTP server are responsive. Dependency-aware services expose component status without
 putting secrets in responses.

@@ -14,6 +14,7 @@ export interface TransitionWithdrawalInput {
   readonly riskPolicyVersion?: number | null;
   readonly riskDecision?: string | null;
   readonly riskSnapshotId?: string | null;
+  readonly eligibilityDecisionId?: string | null;
   readonly reservationLedgerTxId?: string | null;
   readonly releaseLedgerTxId?: string | null;
   readonly settlementLedgerTxId?: string | null;
@@ -61,7 +62,8 @@ export async function transitionWithdrawal(
        risk_snapshot_id = COALESCE($7::uuid, risk_snapshot_id),
        reservation_ledger_tx_id = COALESCE($8::uuid, reservation_ledger_tx_id),
        release_ledger_tx_id = COALESCE($9::uuid, release_ledger_tx_id),
-       settlement_ledger_tx_id = COALESCE($10::uuid, settlement_ledger_tx_id)
+       settlement_ledger_tx_id = COALESCE($10::uuid, settlement_ledger_tx_id),
+       eligibility_decision_id = COALESCE($12::uuid, eligibility_decision_id)
      WHERE id = $1::uuid AND state = $11::withdrawal_state
      RETURNING id, state`,
     [
@@ -76,6 +78,7 @@ export async function transitionWithdrawal(
       input.releaseLedgerTxId ?? null,
       input.settlementLedgerTxId ?? null,
       input.from,
+      input.eligibilityDecisionId ?? null,
     ],
   );
 

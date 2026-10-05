@@ -47,7 +47,7 @@ describe.skipIf(phase7DatabaseUrl === '')('Phase 7 reservation concurrency', () 
     assetId = base.assetId;
     networkId = base.networkId;
     adminUserId = base.adminUserId;
-  });
+  }, 60_000);
 
   it('moves Available → Reserved exact gross on create', async () => {
     const userId = await createTestUser(pool, '7101');
@@ -152,7 +152,9 @@ describe.skipIf(phase7DatabaseUrl === '')('Phase 7 reservation concurrency', () 
     expect(await userBucketBalance(pool, userId, assetId, 'USER_RESERVED_LIABILITY')).toBe(200000n);
   });
 
-  it('100 concurrent creates vs Available=1000000: Reserved<=fund, Available never negative, ledger balanced', async () => {
+  it(
+    '100 concurrent creates vs Available=1000000: Reserved<=fund, Available never negative, ledger balanced',
+    async () => {
     const userId = await createTestUser(pool, '7105');
     await bindVerifiedPrimaryWallet(pool, userId, networkId);
     await fundUserAvailable({
@@ -204,7 +206,9 @@ describe.skipIf(phase7DatabaseUrl === '')('Phase 7 reservation concurrency', () 
     expect(reserved).toBe(1000000n);
     expect(reserved <= 1000000n).toBe(true);
     await assertLedgerBalanced(pool);
-  });
+  },
+    120_000,
+  );
 
   it('user hourly final-slot race with real PG', async () => {
     const userId = await createTestUser(pool, '7106');

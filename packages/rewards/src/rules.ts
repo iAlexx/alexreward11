@@ -31,7 +31,14 @@ interface RuleRow {
   status: RuleVersionStatus;
   valid_from: Date;
   valid_to: Date | null;
+  referral_eligible: boolean | null;
 }
+
+const RULE_RETURNING = `id, code, rule_version, source_type, provider_id, country_group, asset_id,
+               user_share_bps, safety_factor_bps, estimated_ecpm_atomic::text AS estimated_ecpm_atomic,
+               min_reward_atomic::text AS min_reward_atomic, max_reward_atomic::text AS max_reward_atomic,
+               fixed_reward_atomic::text AS fixed_reward_atomic, pending_hold_seconds, quote_ttl_seconds,
+               parameters, status, valid_from, valid_to, referral_eligible`;
 
 function mapRule(row: RuleRow): RewardRuleRecord {
   return {
@@ -54,12 +61,26 @@ function mapRule(row: RuleRow): RewardRuleRecord {
     status: row.status,
     validFrom: row.valid_from.toISOString(),
     validTo: row.valid_to === null ? null : row.valid_to.toISOString(),
+    referralEligible: row.referral_eligible,
   };
 }
 
 function atomicOrNull(value: bigint | string | null | undefined): string | null {
   if (value === undefined || value === null) return null;
   return amountAtomicToString(typeof value === 'bigint' ? value : BigInt(value.trim()));
+}
+
+function assertReferralEligibleForActive(
+  referralEligible: boolean | null | undefined,
+  context: string,
+): boolean {
+  if (referralEligible === null || referralEligible === undefined) {
+    throw new RewardDomainError(
+      'VALIDATION',
+      `referralEligible is required for ACTIVE reward rules (${context}); fail closed`,
+    );
+  }
+  return referralEligible;
 }
 
 export async function createRewardRuleVersion(
@@ -77,6 +98,12 @@ export async function createRewardRuleVersion(
   const ruleVersion = Number(versionResult.rows[0]?.next_version ?? 1);
   const status: RuleVersionStatus = command.activate === true ? 'ACTIVE' : 'DRAFT';
   const validFrom = command.validFrom ?? new Date();
+  const referralEligible =
+    status === 'ACTIVE'
+      ? assertReferralEligibleForActive(command.referralEligible, 'create')
+      : command.referralEligible === undefined
+        ? null
+        : command.referralEligible;
 
   if (status === 'ACTIVE') {
     await client.query(
@@ -98,17 +125,15 @@ export async function createRewardRuleVersion(
        user_share_bps, safety_factor_bps, estimated_ecpm_atomic,
        min_reward_atomic, max_reward_atomic, fixed_reward_atomic,
        pending_hold_seconds, quote_ttl_seconds, parameters,
-       status, valid_from, reason, source_reference, created_by_admin_id
+       status, valid_from, reason, source_reference, created_by_admin_id,
+       referral_eligible
      ) VALUES (
        $1, $2, $3::reward_source_type, $4::uuid, $5, $6::uuid,
        $7, $8, $9::bigint, $10::bigint, $11::bigint, $12::bigint,
-       $13, $14, $15::jsonb, $16::rule_version_status, $17::timestamptz, $18, $19, $20::uuid
+       $13, $14, $15::jsonb, $16::rule_version_status, $17::timestamptz, $18, $19, $20::uuid,
+       $21
      )
-     RETURNING id, code, rule_version, source_type, provider_id, country_group, asset_id,
-               user_share_bps, safety_factor_bps, estimated_ecpm_atomic::text AS estimated_ecpm_atomic,
-               min_reward_atomic::text AS min_reward_atomic, max_reward_atomic::text AS max_reward_atomic,
-               fixed_reward_atomic::text AS fixed_reward_atomic, pending_hold_seconds, quote_ttl_seconds,
-               parameters, status, valid_from, valid_to`,
+     RETURNING ${RULE_RETURNING}`,
     [
       command.code,
       ruleVersion,
@@ -130,6 +155,7 @@ export async function createRewardRuleVersion(
       command.reason ?? null,
       command.sourceReference ?? null,
       command.createdByAdminId ?? null,
+      referralEligible,
     ],
   );
   const row = inserted.rows[0];
@@ -143,11 +169,7 @@ export async function activateRewardRuleVersion(
   asOf: Date = new Date(),
 ): Promise<RewardRuleRecord> {
   const current = await client.query<RuleRow>(
-    `SELECT id, code, rule_version, source_type, provider_id, country_group, asset_id,
-            user_share_bps, safety_factor_bps, estimated_ecpm_atomic::text AS estimated_ecpm_atomic,
-            min_reward_atomic::text AS min_reward_atomic, max_reward_atomic::text AS max_reward_atomic,
-            fixed_reward_atomic::text AS fixed_reward_atomic, pending_hold_seconds, quote_ttl_seconds,
-            parameters, status, valid_from, valid_to
+    `SELECT ${RULE_RETURNING}
      FROM reward_rules WHERE id = $1 FOR UPDATE`,
     [ruleId],
   );
@@ -163,6 +185,7 @@ export async function activateRewardRuleVersion(
       details: { ruleId, status: row.status },
     });
   }
+  assertReferralEligibleForActive(row.referral_eligible, 'activate');
 
   await client.query(
     `UPDATE reward_rules
@@ -181,11 +204,7 @@ export async function activateRewardRuleVersion(
     `UPDATE reward_rules
      SET status = 'ACTIVE', updated_at = now()
      WHERE id = $1
-     RETURNING id, code, rule_version, source_type, provider_id, country_group, asset_id,
-               user_share_bps, safety_factor_bps, estimated_ecpm_atomic::text AS estimated_ecpm_atomic,
-               min_reward_atomic::text AS min_reward_atomic, max_reward_atomic::text AS max_reward_atomic,
-               fixed_reward_atomic::text AS fixed_reward_atomic, pending_hold_seconds, quote_ttl_seconds,
-               parameters, status, valid_from, valid_to`,
+     RETURNING ${RULE_RETURNING}`,
     [ruleId],
   );
   const activated = updated.rows[0];
@@ -206,11 +225,7 @@ export async function supersedeRewardRuleVersion(
          valid_to = LEAST(COALESCE(valid_to, $2::timestamptz), $2::timestamptz),
          updated_at = now()
      WHERE id = $1
-     RETURNING id, code, rule_version, source_type, provider_id, country_group, asset_id,
-               user_share_bps, safety_factor_bps, estimated_ecpm_atomic::text AS estimated_ecpm_atomic,
-               min_reward_atomic::text AS min_reward_atomic, max_reward_atomic::text AS max_reward_atomic,
-               fixed_reward_atomic::text AS fixed_reward_atomic, pending_hold_seconds, quote_ttl_seconds,
-               parameters, status, valid_from, valid_to`,
+     RETURNING ${RULE_RETURNING}`,
     [ruleId, asOf.toISOString()],
   );
   const row = updated.rows[0];
@@ -232,11 +247,7 @@ export async function resolveRewardRule(
   context: ResolveRewardRuleContext,
 ): Promise<RewardRuleRecord> {
   const result = await client.query<RuleRow>(
-    `SELECT id, code, rule_version, source_type, provider_id, country_group, asset_id,
-            user_share_bps, safety_factor_bps, estimated_ecpm_atomic::text AS estimated_ecpm_atomic,
-            min_reward_atomic::text AS min_reward_atomic, max_reward_atomic::text AS max_reward_atomic,
-            fixed_reward_atomic::text AS fixed_reward_atomic, pending_hold_seconds, quote_ttl_seconds,
-            parameters, status, valid_from, valid_to
+    `SELECT ${RULE_RETURNING}
      FROM reward_rules
      WHERE status = 'ACTIVE'
        AND source_type = $1::reward_source_type

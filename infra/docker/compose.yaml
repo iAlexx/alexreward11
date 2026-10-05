@@ -165,6 +165,23 @@ services:
       timeout: 3s
       retries: 20
 
+  # One-shot local schema + signer LOGIN password (S-05). Not an ops production migrator.
+  db-init:
+    <<: *app
+    restart: 'no'
+    command:
+      [
+        sh,
+        -c,
+        'node scripts/migrate.mjs && SIGNER_DB_PROVISION_ALLOW_ALEX_REWARDS=1 node scripts/provision-signer-db-role.mjs',
+      ]
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      <<: *runtime-env
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      SIGNER_DB_PASSWORD: ${SIGNER_DB_PASSWORD:?SIGNER_DB_PASSWORD is required}
+
   api:
     <<: *app
     command: [node, apps/api/dist/main.js]
@@ -173,6 +190,7 @@ services:
       redis: { condition: service_healthy }
       temporal: { condition: service_healthy }
       otel-collector: { condition: service_started }
+      db-init: { condition: service_completed_successfully }
     environment:
       <<: *runtime-env
       API_PORT: 3002
@@ -234,6 +252,7 @@ services:
     depends_on:
       temporal: { condition: service_healthy }
       otel-collector: { condition: service_started }
+      db-init: { condition: service_completed_successfully }
     environment:
       <<: *runtime-env
       WORKER_PORT: 3004
@@ -265,6 +284,7 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
       otel-collector: { condition: service_started }
+      db-init: { condition: service_completed_successfully }
     environment:
       <<: *runtime-env
       SIGNER_PORT: 3005
@@ -281,8 +301,8 @@ services:
       SIGNER_WALLET_VERSION: ${SIGNER_WALLET_VERSION:?SIGNER_WALLET_VERSION is required}
       SIGNER_WORKCHAIN: ${SIGNER_WORKCHAIN:?SIGNER_WORKCHAIN is required}
       SIGNER_EXPECTED_ASSET_SYMBOL: ${SIGNER_EXPECTED_ASSET_SYMBOL:?SIGNER_EXPECTED_ASSET_SYMBOL is required}
-      # Docker-network Postgres (same construction pattern as api/worker DATABASE_URL).
-      SIGNER_DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      # Dedicated least-privilege signer login (S-05). Never reuse POSTGRES_USER here.
+      SIGNER_DATABASE_URL: postgresql://${SIGNER_DB_USER:?SIGNER_DB_USER is required}:${SIGNER_DB_PASSWORD:?SIGNER_DB_PASSWORD is required}@postgres:5432/${POSTGRES_DB}
       # Host .env SIGNER_KEY_BUNDLE_PATH is the bind-mount source only; process sees the container path.
       SIGNER_KEY_BUNDLE_PATH: /run/alex-rewards/signer/hot-wallet.enc
     volumes:

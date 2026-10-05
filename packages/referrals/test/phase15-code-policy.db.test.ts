@@ -1,0 +1,332 @@
+/**
+ * Phase 15 Step 7 — referral code policy + ensureReferralCode + summary reads.
+ */
+import { Pool } from 'pg';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+
+import {
+  assertReferralCodePolicyShape,
+  ensureReferralCode,
+  readReferralSummary,
+  referralCodeEntropyBits,
+  ReferralDomainError,
+} from '../src/index.js';
+import {
+  createPool,
+  createTestUser,
+  phase15DatabaseUrl,
+  resetAndMigrate,
+  waitForBlockedOnHolder,
+  withClient,
+} from './harness.js';
+
+const TEST_ALPHABET =
+  'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+
+function entropyOkLength(): number {
+  let len = 8;
+  while (referralCodeEntropyBits(TEST_ALPHABET.length, len) < 96) len += 1;
+  return len;
+}
+
+async function seedActivePolicy(
+  pool: Pool,
+  input: { readonly alphabet?: string; readonly length?: number; readonly version?: number } = {},
+): Promise<void> {
+  const alphabet = input.alphabet ?? TEST_ALPHABET;
+  const length = input.length ?? entropyOkLength();
+  assertReferralCodePolicyShape({ alphabet, codeLength: length });
+  await pool.query(
+    `INSERT INTO referral_code_policy_versions (
+       policy_version, code_length, alphabet, status, effective_from, reason
+     ) VALUES ($1, $2, $3, 'ACTIVE', now() - interval '1 hour', 'phase15-step7-test')`,
+    [input.version ?? 1, length, alphabet],
+  );
+}
+
+describe('Phase 15 code policy entropy (pure)', () => {
+  it('rejects insufficient entropy and unsafe alphabet', () => {
+    expect(referralCodeEntropyBits(2, 10)).toBeCloseTo(10, 5);
+    expect(() =>
+      assertReferralCodePolicyShape({ alphabet: 'ab', codeLength: 10 }),
+    ).toThrow(ReferralDomainError);
+    expect(() =>
+      assertReferralCodePolicyShape({ alphabet: 'abc&def', codeLength: 40 }),
+    ).toThrow(ReferralDomainError);
+    expect(() =>
+      assertReferralCodePolicyShape({ alphabet: 'aabb', codeLength: 40 }),
+    ).toThrow(ReferralDomainError);
+    expect(() =>
+      assertReferralCodePolicyShape({ alphabet: TEST_ALPHABET, codeLength: 61 }),
+    ).toThrow(ReferralDomainError);
+  });
+});
+
+describe.skipIf(phase15DatabaseUrl === '')('Phase 15 referral code policy DB', () => {
+  let pool: Pool;
+  let seq = 0;
+
+  beforeAll(async () => {
+    await resetAndMigrate(phase15DatabaseUrl);
+    pool = createPool(phase15DatabaseUrl);
+  }, 120_000);
+
+  afterAll(async () => {
+    await pool.end();
+  });
+
+  beforeEach(async () => {
+    await pool.query(`
+      TRUNCATE TABLE
+        referral_edges,
+        referral_codes,
+        referral_code_policy_versions,
+        users
+      RESTART IDENTITY CASCADE
+    `);
+    seq += 1;
+  });
+
+  it('fail-closes when no ACTIVE policy exists', async () => {
+    const userId = await createTestUser(pool, String(17_000_000 + seq));
+    await expect(
+      withClient(pool, (client) => ensureReferralCode(client, { userId })),
+    ).rejects.toMatchObject({ code: 'REFERRAL_CODE_POLICY_NOT_CONFIGURED' });
+  });
+
+  it('generates server-side code with pinned policy and is idempotent concurrently', async () => {
+    await seedActivePolicy(pool);
+    const userId = await createTestUser(pool, String(17_000_100 + seq));
+
+    const first = await withClient(pool, (client) =>
+      ensureReferralCode(client, { userId }),
+    );
+    expect(first.created).toBe(true);
+    expect(first.policyVersion).toBe(1);
+    expect(first.code.length).toBe(entropyOkLength());
+
+    const second = await withClient(pool, (client) =>
+      ensureReferralCode(client, { userId }),
+    );
+    expect(second.created).toBe(false);
+    expect(second.code).toBe(first.code);
+    expect(second.codeId).toBe(first.codeId);
+
+    const [a, b] = await Promise.all([
+      withClient(pool, (client) => ensureReferralCode(client, { userId })),
+      withClient(pool, (client) => ensureReferralCode(client, { userId })),
+    ]);
+    expect(a.code).toBe(first.code);
+    expect(b.code).toBe(first.code);
+
+    const count = await pool.query<{ c: string }>(
+      `SELECT count(*)::text AS c FROM referral_codes WHERE user_id = $1`,
+      [userId],
+    );
+    expect(count.rows[0]?.c).toBe('1');
+  });
+
+  it('summary counts are exact DB values with no fabricated rows', async () => {
+    await seedActivePolicy(pool);
+    const referrer = await createTestUser(pool, String(17_000_200 + seq));
+    const invitee1 = await createTestUser(pool, String(17_000_201 + seq));
+    const invitee2 = await createTestUser(pool, String(17_000_202 + seq));
+    await withClient(pool, (client) => ensureReferralCode(client, { userId: referrer }));
+    const codeId = (
+      await pool.query<{ id: string }>(`SELECT id FROM referral_codes WHERE user_id = $1`, [
+        referrer,
+      ])
+    ).rows[0]?.id;
+    if (codeId === undefined) throw new Error('code missing');
+
+    await pool.query(
+      `INSERT INTO referral_rule_versions (
+         rule_version, activation_account_age_seconds, activation_valid_ad_count,
+         base_rate_bps, status, effective_from, reason
+       ) VALUES (1, 0, 0, 123, 'ACTIVE', now() - interval '1 hour', 'step7-test')
+       ON CONFLICT (rule_version) DO NOTHING`,
+    );
+
+    await pool.query(
+      `INSERT INTO referral_edges (
+         referrer_user_id, referred_user_id, code_id, state
+       ) VALUES ($1::uuid, $2::uuid, $3::uuid, 'PENDING')`,
+      [referrer, invitee1, codeId],
+    );
+    await pool.query(
+      `INSERT INTO referral_edges (
+         referrer_user_id, referred_user_id, code_id, state,
+         activation_rule_version, activated_at
+       ) VALUES ($1::uuid, $2::uuid, $3::uuid, 'ACTIVE', 1, now())`,
+      [referrer, invitee2, codeId],
+    );
+
+    const summary = await withClient(pool, (client) =>
+      readReferralSummary(client, { userId: referrer }),
+    );
+    expect(summary.invitedCount).toBe(2);
+    expect(summary.activatedCount).toBe(1);
+    expect(summary.referralCode).not.toBeNull();
+  });
+
+  it('referenced effective_to closure requires after MAX(code.created_at); rejects rewrite/reopen', async () => {
+    const RESTRICT_VIOLATION = '23001';
+    await seedActivePolicy(pool, { version: 7 });
+    const userId = await createTestUser(pool, String(17_000_300 + seq));
+    const ensured = await withClient(pool, (client) =>
+      ensureReferralCode(client, { userId }),
+    );
+    expect(ensured.created).toBe(true);
+
+    const createdAt = await pool.query<{ created_at: Date }>(
+      `SELECT created_at FROM referral_codes WHERE id = $1`,
+      [ensured.codeId],
+    );
+    const maxCreated = createdAt.rows[0]!.created_at;
+    const tooEarly = new Date(maxCreated.getTime());
+    await expect(
+      pool.query(
+        `UPDATE referral_code_policy_versions SET effective_to = $1::timestamptz WHERE policy_version = 7`,
+        [tooEarly.toISOString()],
+      ),
+    ).rejects.toMatchObject({ code: RESTRICT_VIOLATION });
+
+    const safeClosure = new Date(maxCreated.getTime() + 60_000);
+    await pool.query(
+      `UPDATE referral_code_policy_versions SET effective_to = $1::timestamptz WHERE policy_version = 7`,
+      [safeClosure.toISOString()],
+    );
+
+    await expect(
+      pool.query(
+        `UPDATE referral_code_policy_versions SET effective_to = $1::timestamptz WHERE policy_version = 7`,
+        [new Date(safeClosure.getTime() + 60_000).toISOString()],
+      ),
+    ).rejects.toMatchObject({ code: RESTRICT_VIOLATION });
+
+    await expect(
+      pool.query(
+        `UPDATE referral_code_policy_versions SET effective_to = NULL WHERE policy_version = 7`,
+      ),
+    ).rejects.toMatchObject({ code: RESTRICT_VIOLATION });
+  });
+
+  it('first-reference FOR SHARE blocks concurrent premature effective_to closure', async () => {
+    const RESTRICT_VIOLATION = '23001';
+    await seedActivePolicy(pool, { version: 8 });
+    const userId = await createTestUser(pool, String(17_000_400 + seq));
+
+    const clientA = await pool.connect();
+    const clientB = await pool.connect();
+    const watcher = await pool.connect();
+    try {
+      await clientA.query('BEGIN');
+      await clientB.query('BEGIN');
+      // First-reference path: ensureReferralCode locks policy FOR SHARE then inserts code.
+      const ensurePromise = ensureReferralCode(clientA, { userId });
+      await new Promise((r) => setTimeout(r, 30));
+      const holderPid = (
+        await clientA.query<{ pid: number }>(`SELECT pg_backend_pid() AS pid`)
+      ).rows[0]!.pid;
+
+      // Concurrent closure attempt against referenced-in-progress policy.
+      const closePromise = clientB.query(
+        `UPDATE referral_code_policy_versions
+         SET effective_to = now() - interval '1 second'
+         WHERE policy_version = 8`,
+      );
+      // May block on FOR SHARE vs UPDATE, or fail after commit on created_at gate.
+      const blocked = await waitForBlockedOnHolder(watcher, holderPid, 3_000);
+      const ensured = await ensurePromise;
+      expect(ensured.created).toBe(true);
+      await clientA.query('COMMIT');
+
+      if (blocked) {
+        await expect(closePromise).rejects.toMatchObject({ code: RESTRICT_VIOLATION });
+        await clientB.query('ROLLBACK');
+      } else {
+        try {
+          await closePromise;
+          await clientB.query('COMMIT');
+        } catch {
+          try {
+            await clientB.query('ROLLBACK');
+          } catch {
+            /* ignore */
+          }
+        }
+        // After first reference exists, closure at/before created_at must fail.
+        const createdAt = await pool.query<{ created_at: Date }>(
+          `SELECT created_at FROM referral_codes WHERE id = $1`,
+          [ensured.codeId],
+        );
+        await expect(
+          pool.query(
+            `UPDATE referral_code_policy_versions
+             SET effective_to = $1::timestamptz
+             WHERE policy_version = 8 AND effective_to IS NULL`,
+            [createdAt.rows[0]!.created_at.toISOString()],
+          ),
+        ).rejects.toMatchObject({ code: RESTRICT_VIOLATION });
+      }
+    } finally {
+      try {
+        await clientA.query('ROLLBACK');
+      } catch {
+        /* ignore */
+      }
+      try {
+        await clientB.query('ROLLBACK');
+      } catch {
+        /* ignore */
+      }
+      clientA.release();
+      clientB.release();
+      watcher.release();
+    }
+  }, 60_000);
+
+  it('DB rejects code_length > 60 and Telegram-unsafe alphabet via raw SQL', async () => {
+    await expect(
+      pool.query(
+        `INSERT INTO referral_code_policy_versions (
+           policy_version, code_length, alphabet, status, effective_from, reason
+         ) VALUES (901, 61, $1, 'ACTIVE', now() - interval '1 hour', 'db-overlength')`,
+        [TEST_ALPHABET],
+      ),
+    ).rejects.toThrow();
+
+    await expect(
+      pool.query(
+        `INSERT INTO referral_code_policy_versions (
+           policy_version, code_length, alphabet, status, effective_from, reason
+         ) VALUES (902, 64, $1, 'ACTIVE', now() - interval '1 hour', 'db-overlength-64')`,
+        [TEST_ALPHABET],
+      ),
+    ).rejects.toThrow();
+
+    await expect(
+      pool.query(
+        `INSERT INTO referral_code_policy_versions (
+           policy_version, code_length, alphabet, status, effective_from, reason
+         ) VALUES (903, 40, $1, 'ACTIVE', now() - interval '1 hour', 'db-dot-alphabet')`,
+        [`${TEST_ALPHABET}.`],
+      ),
+    ).rejects.toThrow();
+
+    await expect(
+      pool.query(
+        `INSERT INTO referral_code_policy_versions (
+           policy_version, code_length, alphabet, status, effective_from, reason
+         ) VALUES (904, 40, $1, 'ACTIVE', now() - interval '1 hour', 'db-plus-alphabet')`,
+        [`${TEST_ALPHABET}+`],
+      ),
+    ).rejects.toThrow();
+
+    const seeded = await pool.query<{ c: string }>(
+      `SELECT count(*)::text AS c FROM referral_code_policy_versions
+       WHERE reason ILIKE '%production%' OR reason ILIKE '%seed%'`,
+    );
+    expect(Number(seeded.rows[0]?.c ?? '0')).toBe(0);
+  });
+});

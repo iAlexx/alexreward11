@@ -611,6 +611,8 @@ export async function issueFounderClaimCode(
     readonly reserveFounderNumber?: boolean;
     readonly actorSource?: 'TELEGRAM' | 'API' | 'WEB';
     readonly traceId?: string | null;
+    /** Owner ceremony reason retained in audit (never includes raw claim code). */
+    readonly reason?: string | null;
   },
 ): Promise<FounderClaimCodeIssueResult> {
   const actorSource = input.actorSource ?? 'TELEGRAM';
@@ -622,6 +624,10 @@ export async function issueFounderClaimCode(
   if (issuedForReference !== null && issuedForReference.length > 200) {
     throw new AuthDomainError('VALIDATION', 'issuedForReference too long');
   }
+  const auditReason =
+    input.reason !== undefined && input.reason !== null && input.reason.trim() !== ''
+      ? input.reason.trim().slice(0, 500)
+      : 'Owner issued Founder claim code';
 
   return withTransaction(pool, async (client) => {
     const admin = await client.query<{ id: string; status: string }>(
@@ -686,7 +692,7 @@ export async function issueFounderClaimCode(
           founderNumberReserved: reserved,
           // raw code intentionally omitted
         }),
-        'Owner issued Founder claim code',
+        auditReason,
         actorSource,
         input.traceId ?? null,
       ],

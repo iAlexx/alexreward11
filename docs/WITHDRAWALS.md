@@ -202,6 +202,61 @@ Before `INTENDED_PAYOUT_PROVEN` or `DEFINITIVE_NONPAYMENT`, the observation must
 exact attempt (withdrawalId, attemptId, queryId, recipient, net atomic, asset, correlation,
 canonical message hash). Mismatch → `AMBIGUOUS` (never definitive proof).
 
+### Real-chain reconcile-only (`reconcileRealWithdrawalAttemptOnly`)
+
+Safety classifier only: never signs, broadcasts, settles, rejects, releases Reserved, or
+creates attempts. Allowed while `PAYOUT_DISPATCH_PAUSE=true`.
+
+Supported durable outcomes:
+
+| Resolution | When |
+| --- | --- |
+| `INTENDED_PAYOUT_PROVEN` | Dual-provider COMPLETE TEP-74 match (no confirm/settle in this path) |
+| `AMBIGUOUS` | Fail-closed default (including provider disagreement / incomplete evidence) |
+| `DEFINITIVE_NONPAYMENT` | **Only** reason `WALLET_V5R1_EXPIRED_UNCONSUMED_SEQNO` (below) |
+
+#### `WALLET_V5R1_EXPIRED_UNCONSUMED_SEQNO`
+
+Narrowly scoped to verified Wallet V5R1 `auth_signed_external` (`0x7369676e`) requests
+built via `@ton/ton` `WalletContractV5R1`. **All** of the following must hold:
+
+1. Exact persisted signed request identity validates (canonical hash, seqno, `valid_until`,
+   hashes / Hot Wallet destination where present).
+2. Decoded `valid_until` is strictly before the observation clock (`observedAt > valid_until`).
+   No invented grace period.
+3. TonAPI and TonCenter independently return the same current wallet seqno, and that seqno
+   equals the attempt `expected_seqno` (slot unconsumed).
+4. No positive payout proof already exists (`INTENDED_PAYOUT_PROVEN`, settlement, confirmation).
+5. Dual-provider TEP-74 observation does **not** COMPLETE-match the intended transfer
+   (defense-in-depth / conflict detection — **provider “not found” alone is never sufficient**).
+
+If `currentSeqno > expectedSeqno`, this rule **must not** classify nonpayment (forensics
+required). If `observedAt <= valid_until`, result stays `AMBIGUOUS`.
+
+Persisting `DEFINITIVE_NONPAYMENT` here does **not** transition the withdrawal, release
+Reserved, or queue retry — a separate Owner-authorized domain command is required for any
+post-proof financial action.
+
+#### Real-chain DNP hold bridge (`holdReconciledWithdrawalAfterDefinitiveNonpayment`)
+
+Purpose-specific Owner/domain command. Atomic, fail-closed:
+
+```
+RECONCILE_REQUIRED
+  ↓  durable DEFINITIVE_NONPAYMENT (WALLET_V5R1_EXPIRED_UNCONSUMED_SEQNO)
+Owner/domain bridge
+  ↓
+HELD + held_from_reconcile=true
+  ↓  separate Owner decideWithdrawal(REJECT, definitiveNonpayment:true)
+REJECTED + WITHDRAWAL_RELEASE
+```
+
+The bridge itself performs **zero** ledger posting: Available and Reserved are unchanged.
+It does not REJECT, release, approve, queue, sign, broadcast, settle, or create attempts.
+Safe while `PAYOUT_DISPATCH_PAUSE=true` / REAL=false / FAKE=false / signer LOCKED.
+Idempotent replay of an already-applied successful bridge returns `alreadyApplied` without
+a second mutation. Normal Owner `HOLD` (non-reconcile) must not set `held_from_reconcile`.
+
 ## Settlement (CONFIRMED)
 
 At `CONFIRMED`, one `WITHDRAWAL_SETTLEMENT`:
@@ -256,3 +311,33 @@ mappings cannot point at a benefit rule for a different entitlement or another p
 
 See `docs/LEDGER.md` (Phase 7 accounting), `docs/DATABASE.md`, and
 `docs/PHASE_07_ACCEPTANCE_REPORT.md`.
+
+## Phase 21 Mainnet micro-launch foundation (Step 1)
+
+Phase 10 Testnet payout config remains unchanged and continues to refuse Mainnet.
+
+Phase 21 adds an explicit Mainnet layer (`packages/withdrawals/src/phase21-*.ts`):
+
+- Network: `TON_MAINNET` / `-239` only when `phase21MainnetEnabled=true`
+- Manual approval only; auto payout / auto unpause / auto resend forbidden
+- Jetton master must be Owner-supplied (`TON_MAINNET_USDT_JETTON_MASTER`); no placeholders
+- Expansion gate: 50 confirmed+reconciled+ledger_ok; never automatic expansion
+- CLI: `pnpm phase21:readiness` / `pnpm phase21:preflight` (expect BLOCKED in Step 1)
+
+Worker schema still refuses MAINNET `WITHDRAWAL_NETWORK_CODE` until a later step wires
+live Phase 21 dispatch. No real Mainnet payout in Step 1.
+
+
+## Phase 21 Step 2
+
+Worker supports explicit PHASE21_MAINNET_ENABLED selection (default OFF). Real payout pipeline accepts Phase10 or Phase21 network binding. Mainnet transfer policy: BLOCKED_OWNER_DECISION_MAINNET_TRANSFER_GAS_POLICY until Owner approves.
+
+## Phase 21 Step 3
+
+Forward GRAM gas policy Owner-approved at 1 nanogram; attached GRAM lifecycle remains ESTIMATED (not activated). Controlled Mainnet Available provision tooling status: `SOURCE_IMPLEMENTED_OWNER_APPROVED_BUT_NOT_EXECUTED` (SUPPORT_ADJUSTMENT; ceiling 10_000_000 atomic USDT; disabled). Readiness may reach `READY_FOR_OWNER_PROVISIONING_CEREMONY`; `READY_FOR_LIVE_PAYOUT=NO`. No live Mainnet payout in Step 3.
+
+## Phase 21 Step 3A
+
+- Withdrawal request pause fail-closed for missing STAGING/PRODUCTION rows.
+- Mainnet registry bootstrap + PRODUCTION flag baseline tooling are DRY_RUN by default.
+- Fee estimator honesty: LIVE without provider => UNAVAILABLE (never relabel mock).

@@ -305,6 +305,51 @@ async function createRewardQuoteOnClient(
     providerId = simulated.providerId;
   }
 
+  let adSessionId: string | null = command.adSessionId ?? null;
+  if (command.sourceType === 'AD') {
+    if (adSessionId === null || adSessionId === '') {
+      throw new RewardDomainError(
+        'VALIDATION',
+        'adSessionId is required for AD reward quotes (Spec V1.3 authoritative FK)',
+      );
+    }
+    if (adSessionId !== command.sourceId) {
+      throw new RewardDomainError(
+        'VALIDATION',
+        'AD quote sourceId must equal adSessionId',
+        { details: { sourceId: command.sourceId, adSessionId } },
+      );
+    }
+    if (command.quoteId === undefined || command.quoteId === '') {
+      throw new RewardDomainError(
+        'VALIDATION',
+        'quoteId must be pre-generated for AD session+quote atomic create',
+      );
+    }
+    const session = await client.query<{ id: string; user_id: string; provider_id: string }>(
+      `SELECT id, user_id, provider_id FROM ad_sessions WHERE id = $1::uuid FOR UPDATE`,
+      [adSessionId],
+    );
+    const sessionRow = session.rows[0];
+    if (sessionRow === undefined) {
+      throw new RewardDomainError('SOURCE_INVALID', 'ad session not found for AD quote', {
+        details: { adSessionId },
+      });
+    }
+    if (sessionRow.user_id !== command.userId) {
+      throw new RewardDomainError('SOURCE_INVALID', 'ad session does not belong to user');
+    }
+    if (providerId !== null && providerId !== sessionRow.provider_id) {
+      throw new RewardDomainError('SOURCE_INVALID', 'providerId does not match ad session');
+    }
+    providerId = sessionRow.provider_id;
+  } else if (adSessionId !== null) {
+    throw new RewardDomainError(
+      'VALIDATION',
+      'adSessionId is only valid for sourceType=AD',
+    );
+  }
+
   const rule = await resolveRewardRule(client, asOf, {
     sourceType: command.sourceType,
     assetId: command.assetId,
@@ -362,7 +407,15 @@ async function createRewardQuoteOnClient(
 
   const quoteTtlSeconds = rule.quoteTtlSeconds > 0 ? rule.quoteTtlSeconds : 300;
   const expiresAt = new Date(asOf.getTime() + quoteTtlSeconds * 1000);
-  const quoteId = randomUUID();
+  const quoteId = command.quoteId ?? randomUUID();
+  if (
+    command.quoteId !== undefined &&
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      command.quoteId,
+    )
+  ) {
+    throw new RewardDomainError('VALIDATION', 'quoteId must be a UUID');
+  }
   const totalAmount = baseAmount + bonus.bonusAmountAtomic;
   const quoteCreatedAt = asOf.toISOString();
   const bonusBudgetPeriodIds = bonus.bonusBudgetPeriodIds;
@@ -397,14 +450,14 @@ async function createRewardQuoteOnClient(
 
   await client.query(
     `INSERT INTO reward_quotes (
-       id, user_id, source_type, source_id, provider_id, asset_id,
+       id, user_id, source_type, source_id, provider_id, ad_unit_id, ad_session_id, asset_id,
        reward_rule_id, rule_version, base_amount_atomic, membership_bonus_amount_atomic,
        amount_atomic, membership_id, status, expires_at,
        applied_economics, bonus_unavailable_policy, created_at
      ) VALUES (
-       $1::uuid, $2::uuid, $3::reward_source_type, $4::uuid, $5::uuid, $6::uuid,
-       $7::uuid, $8, $9::bigint, $10::bigint, $11::bigint, $12::uuid, 'OPEN', $13::timestamptz,
-       $14::jsonb, $15, $16::timestamptz
+       $1::uuid, $2::uuid, $3::reward_source_type, $4::uuid, $5::uuid, $6::uuid, $7::uuid, $8::uuid,
+       $9::uuid, $10, $11::bigint, $12::bigint, $13::bigint, $14::uuid, 'OPEN', $15::timestamptz,
+       $16::jsonb, $17, $18::timestamptz
      )`,
     [
       quoteId,
@@ -412,6 +465,8 @@ async function createRewardQuoteOnClient(
       command.sourceType,
       command.sourceId,
       providerId,
+      command.adUnitId ?? null,
+      adSessionId,
       command.assetId,
       rule.id,
       rule.ruleVersion,

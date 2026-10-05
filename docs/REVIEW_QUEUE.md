@@ -33,3 +33,10 @@ domain shortcuts.
 
 Implemented in `@alex-rewards/control-center` (`review-queue.ts`). Telegram Owner
 authorization is required before invoking these from Control Center callbacks.
+
+## Phase 13 Admin Web surface
+
+`apps/admin` Review Queue UI and `v1/admin/review-queue*` call the same control-center /
+domain wrappers. The queue remains an **operational projection**, not financial truth:
+resolving a case never posts ledger entries by itself. Withdrawal / membership / support
+actions must invoke the authoritative domain command; stale resource state is refused.
