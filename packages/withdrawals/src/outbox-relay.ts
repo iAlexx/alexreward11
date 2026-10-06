@@ -6,8 +6,13 @@ import {
   WITHDRAWAL_APPROVED_OUTBOX_EVENT,
   WITHDRAWAL_FAILED_PRE_RETRY_OUTBOX_EVENT,
   WITHDRAWAL_OWNER_REVIEW_REQUIRED_OUTBOX_EVENT,
+  WITHDRAWAL_PHASE21_MANUAL_DISPATCH_OUTBOX_EVENT,
   withdrawalWorkflowId,
 } from './outbox.js';
+import {
+  evaluatePhase21ManualDispatchRestartSafety,
+  type Phase21ManualDispatchRelayAuthority,
+} from './phase21-manual-dispatch-permit.js';
 import { WITHDRAWAL_CONFIRMED_OUTBOX_EVENT } from './public-payout-outbox.js';
 
 export const WITHDRAWAL_PAYOUT_WORKFLOW_TYPE = 'withdrawalPayoutWorkflow' as const;
@@ -127,6 +132,17 @@ export async function claimPendingFailedPreRetryEvents(
   limit: number,
 ): Promise<WithdrawalApprovedOutboxEvent[]> {
   return claimPendingOutboxEventsByType(client, WITHDRAWAL_FAILED_PRE_RETRY_OUTBOX_EVENT, limit);
+}
+
+export async function claimPendingPhase21ManualDispatchEvents(
+  client: PoolClient,
+  limit: number,
+): Promise<WithdrawalApprovedOutboxEvent[]> {
+  return claimPendingOutboxEventsByType(
+    client,
+    WITHDRAWAL_PHASE21_MANUAL_DISPATCH_OUTBOX_EVENT,
+    limit,
+  );
 }
 
 /**
@@ -445,6 +461,107 @@ export async function processWithdrawalFailedPreRetryOutboxBatch(
       } catch (error) {
         if (isAlreadyStarted(error)) {
           // Concurrent relay / still-running race: treat as successful handoff.
+          await markOutboxDispatched(client, event.id);
+          dispatched += 1;
+          continue;
+        }
+        await markOutboxRetry(client, event.id, error);
+        retried += 1;
+      }
+    }
+
+    await client.query('COMMIT');
+    return { claimed, dispatched, retried, deadLetter };
+  } catch (error) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      // ignore
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+
+/**
+ * Dedicated options for Phase 21 manual-dispatch relay.
+ * Authority is branded/fail-closed — never infer from fake/real booleans alone.
+ */
+export interface ProcessPhase21ManualDispatchOutboxBatchOptions {
+  readonly client: TemporalWorkflowStarter;
+  readonly taskQueue: string;
+  readonly authority: Phase21ManualDispatchRelayAuthority | null;
+  readonly limit?: number;
+}
+
+/**
+ * Claim PENDING withdrawal.phase21_manual_dispatch events and restart
+ * withdrawal/{id} with ALLOW_DUPLICATE only under exact Phase21 Mainnet authority
+ * and restart-safety gates. Fail-closed otherwise.
+ * Never enters fake payout / Testnet / realChain=false paths for this event type.
+ * Does NOT globally unpause payout dispatch.
+ */
+export async function processWithdrawalPhase21ManualDispatchOutboxBatch(
+  pool: Pool,
+  options: ProcessPhase21ManualDispatchOutboxBatchOptions,
+): Promise<ProcessWithdrawalApprovedOutboxBatchResult> {
+  const limit = options.limit ?? 20;
+  const client = await pool.connect();
+  let dispatched = 0;
+  let retried = 0;
+  let deadLetter = 0;
+  try {
+    await client.query('BEGIN');
+    const events = await claimPendingPhase21ManualDispatchEvents(client, limit);
+    const claimed = events.length;
+
+    for (const event of events) {
+      try {
+        // Fail closed: missing Mainnet authority (realChain=false, fakeChain, Testnet, incomplete Phase21).
+        if (options.authority === null) {
+          await markOutboxDeadLetter(
+            client,
+            event.id,
+            'phase21_mainnet_relay_authority_not_ready',
+          );
+          deadLetter += 1;
+          continue;
+        }
+
+        const withdrawalId = resolveWithdrawalId(event);
+        const workflowId = resolveWorkflowId(event, withdrawalId);
+
+        const safety = await evaluatePhase21ManualDispatchRestartSafety(client, withdrawalId);
+        if (!safety.allowDuplicate) {
+          await markOutboxDeadLetter(client, event.id, safety.reason);
+          deadLetter += 1;
+          continue;
+        }
+
+        // Crash-before-DISPATCHED repair: live handoff already succeeded — do not start another.
+        const running = await assertNoRunningWithdrawalWorkflow(options.client, workflowId);
+        if (!running.ok) {
+          await markOutboxDispatched(client, event.id);
+          dispatched += 1;
+          continue;
+        }
+
+        const started = await startWithdrawalWorkflowFromOutbox(
+          options.client,
+          event,
+          options.taskQueue,
+          {
+            realChainEnabled: true,
+            workflowIdReusePolicy: 'ALLOW_DUPLICATE',
+          },
+        );
+        void started;
+        await markOutboxDispatched(client, event.id);
+        dispatched += 1;
+      } catch (error) {
+        if (isAlreadyStarted(error)) {
           await markOutboxDispatched(client, event.id);
           dispatched += 1;
           continue;

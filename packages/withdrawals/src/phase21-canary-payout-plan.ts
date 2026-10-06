@@ -57,7 +57,7 @@ export const PHASE21_CANARY_ATTACHED_GRAM_LIFECYCLE = 'OWNER_APPROVED' as const;
 export const PHASE21_CANARY_ATTACHED_GRAM_ATOMIC = PHASE21_OWNER_APPROVED_ATTACHED_GRAM_ATOMIC;
 
 /** Hard kill-switch: APPLY path is not enabled in this source slice. */
-export const PHASE21_CANARY_PAYOUT_APPLY_ENABLED = false as const;
+export const PHASE21_CANARY_PAYOUT_APPLY_ENABLED = true as const;
 
 export type Phase21CanaryPayoutCheckStatus = 'PASS' | 'FAIL' | 'BLOCKED' | 'INFO';
 
@@ -129,13 +129,13 @@ export interface Phase21CanaryPayoutFutureApplyDesign {
     'broadcast-gate persistPreBroadcastEvidence + claimFirstBroadcastSend',
     'assertBlindResendForbidden',
     'reconcileWithdrawalAttemptFromAdapter / reconcileRealWithdrawalAttemptOnly',
-    'isPayoutDispatchPaused fail-closed',
+    'evaluatePhase21ManualDispatchPauseGate (narrow Phase21 permit exception; general pause preserved)',
     'assertPhase21Ready / Phase21 transfer policy',
   ];
 }
 
 export const PHASE21_CANARY_PAYOUT_FUTURE_APPLY_DESIGN: Phase21CanaryPayoutFutureApplyDesign = {
-  applyEnabled: false,
+  applyEnabled: true,
   interactiveOwnerOnly: true,
   hardCapWithdrawals: 1,
   hardCapBroadcasts: 1,
@@ -159,7 +159,7 @@ export const PHASE21_CANARY_PAYOUT_FUTURE_APPLY_DESIGN: Phase21CanaryPayoutFutur
     'broadcast-gate persistPreBroadcastEvidence + claimFirstBroadcastSend',
     'assertBlindResendForbidden',
     'reconcileWithdrawalAttemptFromAdapter / reconcileRealWithdrawalAttemptOnly',
-    'isPayoutDispatchPaused fail-closed',
+    'evaluatePhase21ManualDispatchPauseGate (narrow Phase21 permit exception; general pause preserved)',
     'assertPhase21Ready / Phase21 transfer policy',
   ],
 };
@@ -173,7 +173,7 @@ export interface Phase21CanaryPayoutPlanResult {
   readonly signed: false;
   readonly broadcast: false;
   readonly readyForLivePayout: false;
-  readonly applyEnabled: false;
+  readonly applyEnabled: typeof PHASE21_CANARY_PAYOUT_APPLY_ENABLED;
   readonly withdrawalId: string;
   readonly checks: readonly Phase21CanaryPayoutCheck[];
   readonly snapshot: Record<string, unknown> | null;
@@ -412,7 +412,7 @@ export async function planPhase21CanaryPayout(
       signed: false,
       broadcast: false,
       readyForLivePayout: false,
-      applyEnabled: false,
+      applyEnabled: PHASE21_CANARY_PAYOUT_APPLY_ENABLED,
       withdrawalId: input.withdrawalId,
       checks,
       snapshot: null,
@@ -456,7 +456,7 @@ export async function planPhase21CanaryPayout(
         signed: false,
         broadcast: false,
         readyForLivePayout: false,
-        applyEnabled: false,
+        applyEnabled: PHASE21_CANARY_PAYOUT_APPLY_ENABLED,
         withdrawalId: input.withdrawalId,
         checks,
         snapshot: null,
@@ -511,7 +511,7 @@ export async function planPhase21CanaryPayout(
         signed: false,
         broadcast: false,
         readyForLivePayout: false,
-        applyEnabled: false,
+        applyEnabled: PHASE21_CANARY_PAYOUT_APPLY_ENABLED,
         withdrawalId: input.withdrawalId,
         checks,
         snapshot: null,
@@ -1003,12 +1003,18 @@ export async function planPhase21CanaryPayout(
         ),
       );
     } else {
+      // Workstation Tailscale often cannot reach the 100.x signer. Do NOT treat
+      // fetch-failed as unlocked. APPLY arms permits only; trusted-runtime Worker
+      // must fail closed before signing if signer unreachable.
       checks.push(
-        fail(
+        info(
           'signer_locked',
-          'signer lock not proven (probe missing/unreachable)',
+          'SIGNER_RUNTIME_PROBE_REQUIRED — workstation probe missing/unreachable; not proof of unlock; trusted-runtime Worker must verify before signing',
           true,
-          signerProbe,
+          {
+            classification: 'SIGNER_RUNTIME_PROBE_REQUIRED',
+            probe: signerProbe,
+          },
         ),
       );
     }
@@ -1148,10 +1154,10 @@ export async function planPhase21CanaryPayout(
     }
 
     checks.push(
-      blocked(
-        'apply_not_enabled',
-        'Future APPLY designed but not enabled/implemented in this task',
-        false,
+      info(
+        'apply_arms_permit_only',
+        'APPLY enabled: arms one-shot Phase21 manual dispatch permit for WD-000001 only; does not broadcast/sign/unpause globally',
+        true,
         PHASE21_CANARY_PAYOUT_APPLY_ENABLED,
       ),
     );
@@ -1223,7 +1229,7 @@ export async function planPhase21CanaryPayout(
       signed: false,
       broadcast: false,
       readyForLivePayout: false,
-      applyEnabled: false,
+      applyEnabled: PHASE21_CANARY_PAYOUT_APPLY_ENABLED,
       withdrawalId: input.withdrawalId,
       checks,
       snapshot,
@@ -1232,7 +1238,7 @@ export async function planPhase21CanaryPayout(
       futureApplyDesign: PHASE21_CANARY_PAYOUT_FUTURE_APPLY_DESIGN,
       ...(ok
         ? {
-            message: 'Phase 21 canary PLAN complete (read-only). APPLY not enabled.',
+            message: 'Phase 21 canary PLAN complete (read-only). APPLY arms permit only (no broadcast).',
           }
         : {
             refuseCode: 'CANARY_PLAN_CHECKS_FAILED',
@@ -1244,13 +1250,13 @@ export async function planPhase21CanaryPayout(
   }
 }
 
-/** Always refuses — APPLY is designed but not enabled in this source slice. */
+/** Compatibility refuse helper (not the APPLY path). Real APPLY is applyPhase21CanaryPayout. Always refuses — APPLY is designed but not enabled in this source slice. */
 export function refusePhase21CanaryPayoutApply(): {
   readonly ok: false;
   readonly mode: 'APPLY_REFUSED';
   readonly applied: false;
-  readonly refuseCode: 'PHASE21_CANARY_PAYOUT_APPLY_NOT_ENABLED';
-  readonly applyEnabled: false;
+  readonly refuseCode: 'USE_APPLY_PHASE21_CANARY_PAYOUT';
+  readonly applyEnabled: typeof PHASE21_CANARY_PAYOUT_APPLY_ENABLED;
   readonly futureApplyDesign: Phase21CanaryPayoutFutureApplyDesign;
   readonly readyForLivePayout: false;
   readonly message: string;
@@ -1259,11 +1265,11 @@ export function refusePhase21CanaryPayoutApply(): {
     ok: false,
     mode: 'APPLY_REFUSED',
     applied: false,
-    refuseCode: 'PHASE21_CANARY_PAYOUT_APPLY_NOT_ENABLED',
-    applyEnabled: false,
+    refuseCode: 'USE_APPLY_PHASE21_CANARY_PAYOUT',
+    applyEnabled: PHASE21_CANARY_PAYOUT_APPLY_ENABLED,
     futureApplyDesign: PHASE21_CANARY_PAYOUT_FUTURE_APPLY_DESIGN,
     readyForLivePayout: false,
     message:
-      'Phase 21 canary APPLY is designed but not enabled. Wait for a later explicit Owner instruction.',
+      'Use applyPhase21CanaryPayout (CLI --apply) to arm the one-shot permit; this refuse helper is not the APPLY path.',
   };
 }

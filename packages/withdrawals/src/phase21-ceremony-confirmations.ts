@@ -15,6 +15,8 @@ export const PHASE21_HOT_WALLET_REGISTER_PHRASE =
   'APPLY_LOOTRA_PHASE21_HOT_WALLET_REGISTER' as const;
 export const PHASE21_HOT_WALLET_BACKUP_ATTESTATION_PHRASE =
   'I_HAVE_TWO_SHA256_VERIFIED_OFFLINE_HOT_WALLET_BACKUPS' as const;
+export const PHASE21_CANARY_PAYOUT_APPLY_PHRASE =
+  'APPLY_LOOTRA_PHASE21_CANARY_MANUAL_DISPATCH_PERMIT' as const;
 
 export type Phase21InteractivePhraseInput = {
   /** Default true. false is honoured only with TEST_HOOKS and an injected readPhrase. */
@@ -47,10 +49,17 @@ export type Phase21HotWalletBackupAttestation = {
   readonly attestedAt: string;
 };
 
+export type Phase21CanaryPayoutApplyConfirmation = {
+  readonly brand: 'Phase21CanaryPayoutApplyConfirmation';
+  readonly phrase: typeof PHASE21_CANARY_PAYOUT_APPLY_PHRASE;
+  readonly confirmedAt: string;
+};
+
 const productionFlagsBrand = new WeakSet<object>();
 const mainnetRegistryBrand = new WeakSet<object>();
 const hotWalletRegisterBrand = new WeakSet<object>();
 const hotWalletBackupBrand = new WeakSet<object>();
+const canaryPayoutApplyBrand = new WeakSet<object>();
 
 export class Phase21CeremonyConfirmationError extends Error {
   readonly code: string;
@@ -183,6 +192,64 @@ export function assertPhase21HotWalletBackupAttestation(
       {},
     );
   }
+}
+
+
+export function isPhase21CanaryPayoutApplyConfirmation(
+  value: unknown,
+): value is Phase21CanaryPayoutApplyConfirmation {
+  return typeof value === 'object' && value !== null && canaryPayoutApplyBrand.has(value);
+}
+
+export function assertPhase21CanaryPayoutApplyConfirmation(
+  value: unknown,
+): asserts value is Phase21CanaryPayoutApplyConfirmation {
+  if (!isPhase21CanaryPayoutApplyConfirmation(value)) {
+    throw new Phase21CeremonyConfirmationError(
+      'APPLY_CONFIRMATION_REQUIRED',
+      'branded Phase21CanaryPayoutApplyConfirmation required',
+      {},
+    );
+  }
+}
+
+export async function confirmPhase21CanaryPayoutApplyInteractive(
+  input?: Phase21InteractivePhraseInput,
+): Promise<Phase21CanaryPayoutApplyConfirmation> {
+  const confirmedAt = await requireExactPhrase({
+    options: input,
+    expected: PHASE21_CANARY_PAYOUT_APPLY_PHRASE,
+    prompt:
+      'FINAL CONFIRMATION — this will ARM a one-shot Phase 21 manual Mainnet dispatch permit for WD-000001 only.\n' +
+      'It does NOT broadcast, sign, unlock the signer, or globally unpause payout dispatch.\n' +
+      `Type exactly ${PHASE21_CANARY_PAYOUT_APPLY_PHRASE}: `,
+    failureCode: 'APPLY_CONFIRMATION_FAILED',
+  });
+  const obj: Phase21CanaryPayoutApplyConfirmation = {
+    brand: 'Phase21CanaryPayoutApplyConfirmation',
+    phrase: PHASE21_CANARY_PAYOUT_APPLY_PHRASE,
+    confirmedAt,
+  };
+  canaryPayoutApplyBrand.add(obj);
+  return obj;
+}
+
+/** @internal Test-only mint — requires ALEX_PHASE21_CEREMONY_TEST_HOOKS=1. */
+export function __mintPhase21CanaryPayoutApplyConfirmationForTests(): Phase21CanaryPayoutApplyConfirmation {
+  if (!testHooksEnabled()) {
+    throw new Phase21CeremonyConfirmationError(
+      'FORBIDDEN',
+      'canary apply confirmation test mint requires ALEX_PHASE21_CEREMONY_TEST_HOOKS=1',
+      {},
+    );
+  }
+  const obj: Phase21CanaryPayoutApplyConfirmation = {
+    brand: 'Phase21CanaryPayoutApplyConfirmation',
+    phrase: PHASE21_CANARY_PAYOUT_APPLY_PHRASE,
+    confirmedAt: new Date().toISOString(),
+  };
+  canaryPayoutApplyBrand.add(obj);
+  return obj;
 }
 
 export async function confirmPhase21ProductionFlagsApplyInteractive(

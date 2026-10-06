@@ -17,7 +17,6 @@ import {
   PHASE21_CANARY_PAYOUT_PUBLIC_ID,
   PHASE21_CANARY_PAYOUT_WITHDRAWAL_ID,
   planPhase21CanaryPayout,
-  refusePhase21CanaryPayoutApply,
   type Phase21CanaryPayoutEnvObservations,
   type Phase21CanaryPayoutPlanClient,
   type Phase21CanaryPayoutSignerProbe,
@@ -220,7 +219,7 @@ describe('phase21 canary payout PLAN', () => {
     expect(plan.mutated).toBe(false);
     expect(plan.signed).toBe(false);
     expect(plan.broadcast).toBe(false);
-    expect(plan.applyEnabled).toBe(false);
+    expect(plan.applyEnabled).toBe(true);
     expect(plan.readyForLivePayout).toBe(false);
     expect(plan.intendedTransfer.forwardTonAtomic).toBe(PHASE21_CANARY_FORWARD_TON_ATOMIC);
     expect(plan.intendedTransfer.forwardGramAtomic).toBe(1n);
@@ -293,32 +292,29 @@ describe('phase21 canary payout PLAN', () => {
     }
   });
 
-  it('refuses APPLY and keeps APPLY disabled', () => {
-    expect(PHASE21_CANARY_PAYOUT_APPLY_ENABLED).toBe(false);
-    expect(PHASE21_CANARY_PAYOUT_FUTURE_APPLY_DESIGN.applyEnabled).toBe(false);
+  it('keeps APPLY arm-permit-only design (no direct broadcast)', () => {
+    expect(PHASE21_CANARY_PAYOUT_APPLY_ENABLED).toBe(true);
+    expect(PHASE21_CANARY_PAYOUT_FUTURE_APPLY_DESIGN.applyEnabled).toBe(true);
     expect(PHASE21_CANARY_PAYOUT_FUTURE_APPLY_DESIGN.hardCapBroadcasts).toBe(1);
     expect(PHASE21_CANARY_PAYOUT_FUTURE_APPLY_DESIGN.unknownResultPolicy).toBe(
       'RECONCILE_REQUIRED',
     );
-    const refused = refusePhase21CanaryPayoutApply();
-    expect(refused.ok).toBe(false);
-    expect(refused.refuseCode).toBe('PHASE21_CANARY_PAYOUT_APPLY_NOT_ENABLED');
-    expect(refused.applied).toBe(false);
   });
 
-  it('CLI source is plan-only and refuses apply enablement', () => {
+  it('CLI source supports plan and apply-arm-permit without direct broadcast', () => {
     const src = readFileSync(
       path.resolve(here, '../src/cli/phase21-canary-payout.ts'),
       'utf8',
     );
     expect(src).toMatch(/--plan/);
-    expect(src).toMatch(/refusePhase21CanaryPayoutApply/);
+    expect(src).toMatch(/applyPhase21CanaryPayout/);
     expect(src).toMatch(/openPhase21CanaryPlanVerifiedPool/);
+    expect(src).toMatch(/openPhase21ApplyVerifiedPool/);
     expect(src).toMatch(/--ceremony-endpoint-profile/);
     expect(src).not.toMatch(/new Pool\s*\(/);
     expect(src).not.toMatch(/runRealTestnetPayoutPipeline/);
     expect(src).not.toMatch(/claimFirstBroadcastSend/);
     expect(src).not.toMatch(/local-unlock|signerUnlock|unlockSigner/);
-    expect(src).toMatch(/Never unlocks signer/);
+    expect(src).toMatch(/Never broadcasts/);
   });
 });

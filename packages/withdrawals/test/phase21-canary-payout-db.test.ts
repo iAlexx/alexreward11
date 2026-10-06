@@ -255,7 +255,7 @@ describe('phase21 canary PLAN verified DB path', () => {
     expect(src).not.toMatch(/new Pool\s*\(/);
     expect(src).not.toMatch(/rejectUnauthorized\s*:\s*false/);
     expect(src).not.toMatch(/NODE_TLS_REJECT_UNAUTHORIZED/);
-    expect(src).toMatch(/refusePhase21CanaryPayoutApply/);
+    expect(src).toMatch(/applyPhase21CanaryPayout/);
   });
 
   it('preserves verify_full requirement in verified-pool module source', () => {

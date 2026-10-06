@@ -97,6 +97,6 @@ describe('phase21 canary PLAN JSON BigInt serialization', () => {
     const src = readFileSync(path.resolve(here, '../src/cli/phase21-canary-payout.ts'), 'utf8');
     expect(src).toMatch(/stringifyPhase21CanaryPayoutJson/);
     expect(src).not.toMatch(/JSON\.stringify/);
-    expect(src).toMatch(/refusePhase21CanaryPayoutApply/);
+    expect(src).toMatch(/applyPhase21CanaryPayout/);
   });
 });

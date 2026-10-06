@@ -36,6 +36,7 @@ export type {
 export {
   WITHDRAWAL_APPROVED_OUTBOX_EVENT,
   WITHDRAWAL_FAILED_PRE_RETRY_OUTBOX_EVENT,
+  WITHDRAWAL_PHASE21_MANUAL_DISPATCH_OUTBOX_EVENT,
   WITHDRAWAL_OWNER_REVIEW_REQUIRED_OUTBOX_EVENT,
   withdrawalApprovedDedupeKey,
   withdrawalFailedPreRetryDedupeKey,
@@ -56,6 +57,7 @@ export {
   startWithdrawalWorkflowFromOutbox,
   processWithdrawalApprovedOutboxBatch,
   processWithdrawalFailedPreRetryOutboxBatch,
+  processWithdrawalPhase21ManualDispatchOutboxBatch,
   redactOutboxError,
   outboxRetryBackoffSeconds,
 } from './outbox-relay.js';
@@ -64,6 +66,7 @@ export type {
   StartWithdrawalWorkflowResult,
   ProcessWithdrawalApprovedOutboxBatchOptions,
   ProcessWithdrawalApprovedOutboxBatchResult,
+  ProcessPhase21ManualDispatchOutboxBatchOptions,
   TemporalWorkflowIdReusePolicy,
   TemporalWorkflowStarter,
 } from './outbox-relay.js';
@@ -835,24 +838,29 @@ export {
   PHASE21_MAINNET_REGISTRY_APPLY_PHRASE,
   PHASE21_HOT_WALLET_REGISTER_PHRASE,
   PHASE21_HOT_WALLET_BACKUP_ATTESTATION_PHRASE,
+  PHASE21_CANARY_PAYOUT_APPLY_PHRASE,
   confirmPhase21ProductionFlagsApplyInteractive,
   confirmPhase21MainnetRegistryApplyInteractive,
   confirmPhase21HotWalletRegisterInteractive,
+  confirmPhase21CanaryPayoutApplyInteractive,
   attestPhase21HotWalletOfflineBackupsInteractive,
   assertPhase21ProductionFlagsApplyConfirmation,
   assertPhase21MainnetRegistryApplyConfirmation,
   assertPhase21HotWalletRegisterConfirmation,
   assertPhase21HotWalletBackupAttestation,
+  assertPhase21CanaryPayoutApplyConfirmation,
   isPhase21ProductionFlagsApplyConfirmation,
   isPhase21MainnetRegistryApplyConfirmation,
   isPhase21HotWalletRegisterConfirmation,
   isPhase21HotWalletBackupAttestation,
+  isPhase21CanaryPayoutApplyConfirmation,
   Phase21CeremonyConfirmationError,
   type Phase21InteractivePhraseInput,
   type Phase21ProductionFlagsApplyConfirmation,
   type Phase21MainnetRegistryApplyConfirmation,
   type Phase21HotWalletRegisterConfirmation,
   type Phase21HotWalletBackupAttestation,
+  type Phase21CanaryPayoutApplyConfirmation,
 } from './phase21-ceremony-confirmations.js';
 export {
   createPhase21CeremonyVerifiedPool,
@@ -901,6 +909,32 @@ export {
   planPhase21CanaryPayout,
   refusePhase21CanaryPayoutApply,
 } from './phase21-canary-payout-plan.js';
+export {
+  applyPhase21CanaryPayout,
+  PHASE21_CANARY_MANUAL_DISPATCH_BINDINGS,
+} from './phase21-canary-payout-apply.js';
+export type { Phase21CanaryPayoutApplyResult } from './phase21-canary-payout-apply.js';
+export {
+  armPhase21ManualDispatchPermit,
+  assertPhase21ManualDispatchLiveBindingsOrThrow,
+  bindPhase21ManualDispatchPermitToAttempt,
+  consumePhase21ManualDispatchPermit,
+  evaluatePhase21ManualDispatchPauseGate,
+  evaluatePhase21ManualDispatchRestartSafety,
+  enqueuePhase21ManualDispatchOutbox,
+  getPhase21ManualDispatchPermitByWithdrawalId,
+  phase21CanaryManualDispatchIdempotencyKey,
+  PHASE21_CANARY_FROZEN_JETTON_MASTER,
+  tryBuildPhase21ManualDispatchRelayAuthority,
+} from './phase21-manual-dispatch-permit.js';
+export type {
+  Phase21ManualDispatchPermitBindings,
+  Phase21ManualDispatchPermitRow,
+  Phase21ManualDispatchPermitStatus,
+  Phase21ManualDispatchPauseGateResult,
+  Phase21ManualDispatchRelayAuthority,
+  Phase21ManualDispatchRestartSafetyResult,
+} from './phase21-manual-dispatch-permit.js';
 
 export {
   Phase21CanaryPlanDbError,

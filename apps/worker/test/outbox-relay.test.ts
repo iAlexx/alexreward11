@@ -13,6 +13,7 @@ describe('withdrawal outbox relay gate', () => {
   it('does not schedule or invoke relay handlers when disabled', async () => {
     const processApproved = vi.fn(async () => undefined);
     const processFailedPreRetry = vi.fn(async () => undefined);
+    const processPhase21ManualDispatch = vi.fn(async () => undefined);
     const processConfirmedPublicPayout = vi.fn(async () => undefined);
     const schedule = vi.fn();
     const timer = startWithdrawalOutboxRelay({
@@ -21,6 +22,7 @@ describe('withdrawal outbox relay gate', () => {
       poll: createWithdrawalOutboxPoller({
         processApproved,
         processFailedPreRetry,
+        processPhase21ManualDispatch,
         processConfirmedPublicPayout,
       }),
       onError: () => undefined,
@@ -34,13 +36,16 @@ describe('withdrawal outbox relay gate', () => {
     expect(processConfirmedPublicPayout).not.toHaveBeenCalled();
   });
 
-  it('runs approved, failed-pre-retry, then confirmed public-payout when enabled', async () => {
+  it('runs approved, failed-pre-retry, phase21-manual-dispatch, then confirmed public-payout when enabled', async () => {
     const order: string[] = [];
     const processApproved = vi.fn(async () => {
       order.push('approved');
     });
     const processFailedPreRetry = vi.fn(async () => {
       order.push('failed-pre-retry');
+    });
+    const processPhase21ManualDispatch = vi.fn(async () => {
+      order.push('phase21-manual-dispatch');
     });
     const processConfirmedPublicPayout = vi.fn(async () => {
       order.push('confirmed-public-payout');
@@ -57,6 +62,7 @@ describe('withdrawal outbox relay gate', () => {
       poll: createWithdrawalOutboxPoller({
         processApproved,
         processFailedPreRetry,
+        processPhase21ManualDispatch,
         processConfirmedPublicPayout,
       }),
       onError: () => {
@@ -70,7 +76,7 @@ describe('withdrawal outbox relay gate', () => {
     await vi.waitFor(() => {
       expect(processConfirmedPublicPayout).toHaveBeenCalledTimes(1);
     });
-    expect(order).toEqual(['approved', 'failed-pre-retry', 'confirmed-public-payout']);
+    expect(order).toEqual(['approved', 'failed-pre-retry', 'phase21-manual-dispatch', 'confirmed-public-payout']);
   });
 
   it('worker outbox modules never import Telegram/grammY', () => {

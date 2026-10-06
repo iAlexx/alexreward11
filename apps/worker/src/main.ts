@@ -11,11 +11,13 @@ import { createShutdownCoordinator, initializeObservability } from '@alex-reward
 import {
   processWithdrawalApprovedOutboxBatch,
   processWithdrawalFailedPreRetryOutboxBatch,
+  processWithdrawalPhase21ManualDispatchOutboxBatch,
   processWithdrawalConfirmedPublicPayoutOutboxBatch,
   mapDeploymentEnvToFeatureEnvironment,
   buildPhase10PayoutConfig,
   buildPhase21PayoutConfig,
   selectWithdrawalPayoutAuthority,
+  tryBuildPhase21ManualDispatchRelayAuthority,
   type Phase21PayoutConfig,
   type PublicPayoutFeatureEnvironment,
 } from '@alex-rewards/withdrawals';
@@ -78,6 +80,14 @@ const phase21Config: Phase21PayoutConfig | undefined =
     : undefined;
 const realChainEnabled =
   phase21Config?.realChainEnabled ?? phase10Config?.realChainEnabled ?? false;
+const phase21ManualDispatchAuthority = tryBuildPhase21ManualDispatchRelayAuthority({
+  payoutAuthority,
+  phase21MainnetEnabled: config.PHASE21_MAINNET_ENABLED,
+  withdrawalNetworkCode: config.WITHDRAWAL_NETWORK_CODE,
+  realChainEnabled: config.WITHDRAWAL_REAL_CHAIN_ENABLED,
+  fakeChainEnabled: config.WITHDRAWAL_FAKE_CHAIN_ENABLED,
+  phase21: phase21Config ?? null,
+});
 Runtime.install({ shutdownSignals: [] });
 const observability = await initializeObservability({
   serviceName: 'worker',
@@ -182,6 +192,12 @@ try {
             taskQueue: config.TEMPORAL_TASK_QUEUE,
             fakeChainEnabled: withdrawalConfig.fakeChainEnabled,
             realChainEnabled,
+          }),
+        processPhase21ManualDispatch: () =>
+          processWithdrawalPhase21ManualDispatchOutboxBatch(pool, {
+            client,
+            taskQueue: config.TEMPORAL_TASK_QUEUE,
+            authority: phase21ManualDispatchAuthority,
           }),
         processConfirmedPublicPayout: async () => {
           if (publicPayoutEnvironment === undefined) return;

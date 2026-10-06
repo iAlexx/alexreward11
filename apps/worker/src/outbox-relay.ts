@@ -6,6 +6,7 @@
 export interface WithdrawalOutboxRelayHandlers {
   readonly processApproved: () => Promise<unknown>;
   readonly processFailedPreRetry: () => Promise<unknown>;
+  readonly processPhase21ManualDispatch: () => Promise<unknown>;
   readonly processConfirmedPublicPayout: () => Promise<unknown>;
 }
 
@@ -15,6 +16,7 @@ export function createWithdrawalOutboxPoller(
   return async () => {
     await handlers.processApproved();
     await handlers.processFailedPreRetry();
+    await handlers.processPhase21ManualDispatch();
     await handlers.processConfirmedPublicPayout();
   };
 }

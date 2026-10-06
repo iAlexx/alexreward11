@@ -30,7 +30,12 @@ import { matchIntendedJettonPayout, primarySecondaryEvidenceAgree } from './conf
 import type { WithdrawalEngineConfig } from './config.js';
 import { withWithdrawalTransaction } from './db.js';
 import { WithdrawalDomainError } from './errors.js';
-import { isPayoutDispatchPaused } from './flags.js';
+import {
+  assertPhase21ManualDispatchLiveBindingsOrThrow,
+  bindPhase21ManualDispatchPermitToAttempt,
+  evaluatePhase21ManualDispatchPauseGate,
+  getPhase21ManualDispatchPermitByWithdrawalId,
+} from './phase21-manual-dispatch-permit.js';
 import {
   assertPhase10Ready,
   listPhase10MissingResources,
@@ -1057,11 +1062,35 @@ export async function runRealTestnetPayoutPipeline(
   const payout = resolveRealPayoutNetworkBinding(input);
   const stagesCompleted: string[] = [];
 
-  const paused = await withWithdrawalTransaction(db, async (client) =>
-    isPayoutDispatchPaused(client, input.engine.deploymentEnvironment),
+  // Narrow Phase21 manual-permit exception: general PAYOUT_DISPATCH_PAUSE stays true.
+  // Exact ARMED/CONSUMED permit for THIS withdrawal may continue; all others stay paused.
+  // Lightweight attempt-id peek (before pause gate) so CONSUMED resume can match exactly.
+  const earlyAttemptIdResult = await db.query<{ id: string }>(
+    `SELECT id::text AS id
+     FROM withdrawal_attempts
+     WHERE withdrawal_id = $1::uuid
+     ORDER BY attempt_number DESC
+     LIMIT 1`,
+    [input.withdrawalId],
   );
-  if (paused) {
-    return { state: 'PAUSED', attemptId: null, reason: 'PAYOUT_DISPATCH_PAUSE', stagesCompleted };
+  const earlyAttemptId = earlyAttemptIdResult.rows[0]?.id ?? null;
+  const pauseGate = await withWithdrawalTransaction(db, async (client) =>
+    evaluatePhase21ManualDispatchPauseGate(client, {
+      withdrawalId: input.withdrawalId,
+      deploymentEnvironment: input.engine.deploymentEnvironment,
+      currentAttemptId: earlyAttemptId,
+    }),
+  );
+  if (pauseGate.paused) {
+    return {
+      state: 'PAUSED',
+      attemptId: null,
+      reason: pauseGate.reason ?? 'PAYOUT_DISPATCH_PAUSE',
+      stagesCompleted,
+    };
+  }
+  if (pauseGate.permitException) {
+    stagesCompleted.push('phase21_manual_dispatch_permit_pause_exception');
   }
   stagesCompleted.push('pause_check');
 
@@ -1416,7 +1445,17 @@ export async function runRealTestnetPayoutPipeline(
     let attempt;
     try {
       attempt = await withWithdrawalTransaction(db, async (client) => {
-        return createWithdrawalAttempt(client, {
+        const permit = await getPhase21ManualDispatchPermitByWithdrawalId(
+          client,
+          context.withdrawalId,
+        );
+        if (permit !== null && permit.status === 'ARMED') {
+          await assertPhase21ManualDispatchLiveBindingsOrThrow(client, {
+            withdrawalId: context.withdrawalId,
+            permit,
+          });
+        }
+        const created = await createWithdrawalAttempt(client, {
           withdrawalId: context.withdrawalId,
           hotWalletId: context.hotWalletId,
           fencingToken,
@@ -1429,6 +1468,20 @@ export async function runRealTestnetPayoutPipeline(
           requiresStateInit: admission.requiresStateInit,
           scenarioHashInputs: { recipient: context.recipient, path: 'phase10-real' },
         });
+        const bound = await bindPhase21ManualDispatchPermitToAttempt(client, {
+          withdrawalId: context.withdrawalId,
+          attemptId: created.id,
+        });
+        if (!bound.ok) {
+          throw new WithdrawalDomainError('STATE_CONFLICT', bound.reason, {
+            details: {
+              withdrawalId: context.withdrawalId,
+              attemptId: created.id,
+              permitId: bound.permit?.id ?? null,
+            },
+          });
+        }
+        return created;
       });
     } catch (error) {
       await withWithdrawalTransaction(db, async (client) => {
@@ -1796,7 +1849,17 @@ export async function runRealTestnetPayoutPipeline(
   let attempt;
   try {
     attempt = await withWithdrawalTransaction(db, async (client) => {
-      return createWithdrawalAttempt(client, {
+      const permit = await getPhase21ManualDispatchPermitByWithdrawalId(
+        client,
+        context.withdrawalId,
+      );
+      if (permit !== null && permit.status === 'ARMED') {
+        await assertPhase21ManualDispatchLiveBindingsOrThrow(client, {
+          withdrawalId: context.withdrawalId,
+          permit,
+        });
+      }
+      const created = await createWithdrawalAttempt(client, {
         withdrawalId: context.withdrawalId,
         hotWalletId: context.hotWalletId,
         fencingToken: context.fencingToken,
@@ -1809,6 +1872,20 @@ export async function runRealTestnetPayoutPipeline(
         requiresStateInit: readmission.requiresStateInit,
         scenarioHashInputs: { recipient: context.recipient, path: 'phase10-real' },
       });
+      const bound = await bindPhase21ManualDispatchPermitToAttempt(client, {
+        withdrawalId: context.withdrawalId,
+        attemptId: created.id,
+      });
+      if (!bound.ok) {
+        throw new WithdrawalDomainError('STATE_CONFLICT', bound.reason, {
+          details: {
+            withdrawalId: context.withdrawalId,
+            attemptId: created.id,
+            permitId: bound.permit?.id ?? null,
+          },
+        });
+      }
+      return created;
     });
   } catch (error) {
     await withWithdrawalTransaction(db, async (client) => {
