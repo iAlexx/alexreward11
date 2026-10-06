@@ -313,7 +313,9 @@ describe('phase21 canary payout PLAN', () => {
     );
     expect(src).toMatch(/--plan/);
     expect(src).toMatch(/refusePhase21CanaryPayoutApply/);
-    expect(src).toMatch(/LIVE_DATABASE_REQUIRED_FOR_PLAN/);
+    expect(src).toMatch(/openPhase21CanaryPlanVerifiedPool/);
+    expect(src).toMatch(/--ceremony-endpoint-profile/);
+    expect(src).not.toMatch(/new Pool\s*\(/);
     expect(src).not.toMatch(/runRealTestnetPayoutPipeline/);
     expect(src).not.toMatch(/claimFirstBroadcastSend/);
     expect(src).not.toMatch(/local-unlock|signerUnlock|unlockSigner/);

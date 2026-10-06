@@ -131,6 +131,7 @@ describe('phase21 owner ceremony authority', () => {
           databaseName: 'db',
           systemIdentifier: '1',
           tlsServerName: 'x',
+          sslInUse: true,
           close: async () => undefined,
         } as never,
         injectedSecrets: { password: 'x', totpCode: '123456' },

@@ -1,5 +1,5 @@
 /**
- * Root-bound Phase 21 ceremony verified production pool for APPLY.
+ * Root-bound Phase 21 ceremony verified production pool (APPLY + canary PLAN).
  * Wraps @alex-rewards/auth createProductionOwnerBootstrapPool (verify_full TLS + identity).
  */
 import { readFileSync } from 'node:fs';
@@ -36,6 +36,7 @@ export type Phase21CeremonyVerifiedPool = {
   readonly databaseName: string;
   readonly systemIdentifier: string;
   readonly tlsServerName: string;
+  readonly sslInUse: true;
   readonly close: () => Promise<void>;
 };
 
@@ -97,7 +98,7 @@ export async function createPhase21CeremonyVerifiedPool(input: {
   if (bootstrapProfile.tls.mode !== 'verify_full') {
     throw new Phase21CeremonyVerifiedPoolError(
       'VERIFY_FULL_TLS_REQUIRED',
-      'Phase 21 APPLY verified pool requires verify_full TLS',
+      'Phase 21 ceremony verified pool requires verify_full TLS',
       {},
     );
   }
@@ -107,12 +108,22 @@ export async function createPhase21CeremonyVerifiedPool(input: {
     profile: bootstrapProfile,
   });
 
+  if (bootstrap.connectionFacts.sslInUse !== true) {
+    await bootstrap.pool.end().catch(() => undefined);
+    throw new Phase21CeremonyVerifiedPoolError(
+      'VERIFY_FULL_TLS_REQUIRED',
+      'Phase 21 ceremony verified pool requires pg_stat_ssl.ssl=true',
+      {},
+    );
+  }
+
   const obj: Phase21CeremonyVerifiedPool = {
     brand: 'Phase21CeremonyVerifiedPool',
     pool: bootstrap.pool,
     databaseName: bootstrap.connectionFacts.currentDatabase,
     systemIdentifier: bootstrap.connectionFacts.clusterSystemIdentifier,
     tlsServerName: bootstrapProfile.tls.tlsServerName,
+    sslInUse: true,
     close: async () => {
       await bootstrap.pool.end();
     },

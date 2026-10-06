@@ -2,13 +2,13 @@
 /**
  * Phase 21 Mainnet canary payout CLI.
  *
- * PLAN (default / --plan): read-only. Proves canary preconditions.
+ * PLAN (default / --plan): read-only. Proves canary preconditions via ceremony
+ * verified pool (verify_full TLS + TCP proxy). No Owner TTY auth for PLAN.
  * APPLY: designed but refused — not enabled in this source slice.
  *
  * Never unlocks signer, never signs, never broadcasts, never mutates flags/DB/Railway.
+ * Never disables TLS verification.
  */
-import { Pool } from 'pg';
-
 import {
   PHASE21_CANARY_PAYOUT_APPLY_ENABLED,
   PHASE21_CANARY_PAYOUT_FUTURE_APPLY_DESIGN,
@@ -18,6 +18,10 @@ import {
   probePhase21CanarySignerLockedReadOnly,
   refusePhase21CanaryPayoutApply,
 } from '../phase21-canary-payout-plan.js';
+import {
+  Phase21CanaryPlanDbError,
+  openPhase21CanaryPlanVerifiedPool,
+} from '../phase21-canary-payout-db.js';
 
 function usage(exitCode = 2): never {
   console.error(
@@ -25,9 +29,13 @@ function usage(exitCode = 2): never {
       {
         ok: false,
         message:
-          'usage: phase21-canary-payout --plan --withdrawal-id <uuid>  |  phase21-canary-payout --apply (REFUSED)',
+          'usage: phase21-canary-payout --plan --withdrawal-id <uuid> --ceremony-endpoint-profile <path>  |  phase21-canary-payout --apply (REFUSED)',
         soleAuthorizedWithdrawalId: PHASE21_CANARY_PAYOUT_WITHDRAWAL_ID,
         applyEnabled: PHASE21_CANARY_PAYOUT_APPLY_ENABLED,
+        requiresCeremonyEndpointProfile: true,
+        requiresTcpProxyEnv:
+          'PHASE21_CEREMONY_PROXY_HOST|RAILWAY_TCP_PROXY_HOST|RAILWAY_TCP_PROXY_DOMAIN + PORT',
+        genericPoolRefused: true,
         readyForLivePayout: false,
       },
       null,
@@ -41,13 +49,6 @@ function printJson(value: unknown): void {
   console.log(JSON.stringify(value, null, 2));
 }
 
-function envNonEmpty(name: string): string | null {
-  const raw = process.env[name];
-  if (raw === undefined || raw === null) return null;
-  const trimmed = raw.trim();
-  return trimmed === '' ? null : trimmed;
-}
-
 function readFlag(argv: ReadonlyArray<string>, name: string): string | undefined {
   const idx = argv.indexOf(name);
   if (idx < 0) return undefined;
@@ -58,53 +59,13 @@ function hasSwitch(argv: ReadonlyArray<string>, name: string): boolean {
   return argv.includes(name);
 }
 
-async function assertLivePlanDatabaseOrRefuse(
-  command: string,
-): Promise<{ pool: Pool; currentDatabase: string } | null> {
-  const url = envNonEmpty('DATABASE_URL');
-  if (url === null) {
-    printJson({
-      ok: false,
-      command,
-      refuseCode: 'LIVE_DATABASE_REQUIRED_FOR_PLAN',
-      message: 'DATABASE_URL required for live PLAN (no silent mock empty-DB plan)',
-      readyForLivePayout: false,
-      applied: false,
-      mutated: false,
-      signed: false,
-      broadcast: false,
-    });
-    process.exitCode = 1;
-    return null;
+function redactSecrets(text: string, secrets: ReadonlyArray<string>): string {
+  let out = text;
+  for (const secret of secrets) {
+    if (secret.length === 0) continue;
+    out = out.split(secret).join('[REDACTED]');
   }
-  const pool = new Pool({ connectionString: url });
-  const client = await pool.connect();
-  try {
-    const row = await client.query<{ name: string }>(`SELECT current_database() AS name`);
-    const currentDatabase = row.rows[0]?.name ?? '';
-    const requiredDatabase = envNonEmpty('PHASE21_CEREMONY_REQUIRED_DATABASE_NAME');
-    if (requiredDatabase !== null && currentDatabase !== requiredDatabase) {
-      printJson({
-        ok: false,
-        command,
-        refuseCode: 'PLAN_DATABASE_IDENTITY_MISMATCH',
-        message: 'current_database does not match PHASE21_CEREMONY_REQUIRED_DATABASE_NAME',
-        current_database: currentDatabase,
-        required_database: requiredDatabase,
-        readyForLivePayout: false,
-        applied: false,
-        mutated: false,
-        signed: false,
-        broadcast: false,
-      });
-      process.exitCode = 1;
-      await pool.end();
-      return null;
-    }
-    return { pool, currentDatabase };
-  } finally {
-    client.release();
-  }
+  return out;
 }
 
 async function main(): Promise<void> {
@@ -135,13 +96,52 @@ async function main(): Promise<void> {
     usage();
   }
 
-  const live = await assertLivePlanDatabaseOrRefuse('phase21:canary-payout');
-  if (live === null) return;
+  const secretsToRedact: string[] = [];
+  const dbUrl = process.env.DATABASE_URL;
+  if (typeof dbUrl === 'string' && dbUrl.length > 0) secretsToRedact.push(dbUrl);
+  try {
+    if (typeof dbUrl === 'string') {
+      const u = new URL(dbUrl);
+      if (u.password) secretsToRedact.push(decodeURIComponent(u.password));
+    }
+  } catch {
+    // ignore parse for redaction
+  }
+
+  let live;
+  try {
+    live = await openPhase21CanaryPlanVerifiedPool({ argv });
+  } catch (error: unknown) {
+    const code =
+      error instanceof Phase21CanaryPlanDbError ? error.code : 'PLAN_VERIFIED_POOL_OPEN_FAILED';
+    const message = error instanceof Error ? error.message : String(error);
+    printJson({
+      ok: false,
+      command: 'phase21:canary-payout',
+      refuseCode: code,
+      message: redactSecrets(message, secretsToRedact),
+      readyForLivePayout: false,
+      applied: false,
+      mutated: false,
+      signed: false,
+      broadcast: false,
+      productionMutationOccurred: false,
+      signerActionOccurred: false,
+      broadcastOccurred: false,
+      genericPoolRefused: true,
+      details:
+        error instanceof Phase21CanaryPlanDbError
+          ? JSON.parse(redactSecrets(JSON.stringify(error.details), secretsToRedact))
+          : undefined,
+    });
+    process.exitCode = 1;
+    return;
+  }
 
   const env = observePhase21CanaryPayoutEnv();
   const signerProbe = await probePhase21CanarySignerLockedReadOnly(env.signerBaseUrl);
 
-  const client = await live.pool.connect();
+  const client = await live.verified.pool.connect();
   try {
     const result = await planPhase21CanaryPayout(client, {
       withdrawalId: withdrawalId.trim(),
@@ -151,7 +151,8 @@ async function main(): Promise<void> {
     printJson({
       ...result,
       command: 'phase21:canary-payout',
-      current_database: live.currentDatabase,
+      current_database: live.evidence.currentDatabase,
+      dbVerification: live.evidence,
       productionMutationOccurred: false,
       signerActionOccurred: false,
       broadcastOccurred: false,
@@ -161,16 +162,17 @@ async function main(): Promise<void> {
     }
   } finally {
     client.release();
-    await live.pool.end();
+    await live.close();
   }
 }
 
 main().catch((error: unknown) => {
+  const message = error instanceof Error ? error.message : String(error);
   printJson({
     ok: false,
     command: 'phase21:canary-payout',
     refuseCode: 'PLAN_UNEXPECTED_ERROR',
-    message: error instanceof Error ? error.message : String(error),
+    message,
     readyForLivePayout: false,
     applied: false,
     mutated: false,

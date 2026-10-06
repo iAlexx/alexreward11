@@ -79,6 +79,7 @@ export function mintPhase21CeremonyVerifiedPoolForTests(input: {
     databaseName: input.databaseName,
     systemIdentifier: input.systemIdentifier,
     tlsServerName: input.tlsServerName ?? 'test-production.local',
+    sslInUse: true,
     close: async () => {
       await input.pool.end().catch(() => undefined);
     },

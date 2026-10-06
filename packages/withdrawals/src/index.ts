@@ -901,6 +901,23 @@ export {
   planPhase21CanaryPayout,
   refusePhase21CanaryPayoutApply,
 } from './phase21-canary-payout-plan.js';
+
+export {
+  Phase21CanaryPlanDbError,
+  isRailwayInternalHostname,
+  resolvePhase21CanaryPlanProxyHost,
+  resolvePhase21CanaryPlanProxyPort,
+  extractCredentialsFromDatabaseUrl,
+  loadPhase21CanaryPlanEndpointProfile,
+  buildPhase21CanaryPlanVerifiedConnectionString,
+  openPhase21CanaryPlanVerifiedPool,
+  refuseGenericPoolForPhase21CanaryPlan,
+} from './phase21-canary-payout-db.js';
+export type {
+  Phase21CanaryPlanDbVerificationEvidence,
+  Phase21CanaryPlanDbCredentials,
+  Phase21CanaryPlanVerifiedDb,
+} from './phase21-canary-payout-db.js';
 export type {
   Phase21CanaryPayoutCheck,
   Phase21CanaryPayoutCheckStatus,
