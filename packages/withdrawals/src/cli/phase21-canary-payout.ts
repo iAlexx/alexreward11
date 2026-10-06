@@ -22,10 +22,11 @@ import {
   Phase21CanaryPlanDbError,
   openPhase21CanaryPlanVerifiedPool,
 } from '../phase21-canary-payout-db.js';
+import { stringifyPhase21CanaryPayoutJson } from '../phase21-canary-payout-json.js';
 
 function usage(exitCode = 2): never {
   console.error(
-    JSON.stringify(
+    stringifyPhase21CanaryPayoutJson(
       {
         ok: false,
         message:
@@ -38,7 +39,6 @@ function usage(exitCode = 2): never {
         genericPoolRefused: true,
         readyForLivePayout: false,
       },
-      null,
       2,
     ),
   );
@@ -46,7 +46,7 @@ function usage(exitCode = 2): never {
 }
 
 function printJson(value: unknown): void {
-  console.log(JSON.stringify(value, null, 2));
+  console.log(stringifyPhase21CanaryPayoutJson(value, 2));
 }
 
 function readFlag(argv: ReadonlyArray<string>, name: string): string | undefined {
@@ -131,7 +131,7 @@ async function main(): Promise<void> {
       genericPoolRefused: true,
       details:
         error instanceof Phase21CanaryPlanDbError
-          ? JSON.parse(redactSecrets(JSON.stringify(error.details), secretsToRedact))
+          ? JSON.parse(redactSecrets(stringifyPhase21CanaryPayoutJson(error.details, undefined), secretsToRedact))
           : undefined,
     });
     process.exitCode = 1;
