@@ -16,7 +16,7 @@ When Phase21 on: requires `TON_MAINNET`, real chain on, fake chain off, jetton m
 ## Signing / gas
 
 - Mainnet forward GRAM = **1 nanogram** (Owner-approved).
-- Attached GRAM lifecycle = **ESTIMATED** (not activated; SPIKE 0.05 forbidden on Mainnet).
+- Attached GRAM lifecycle = **OWNER_APPROVED** at 50000000 nanogram (0.05 GRAM); SPIKE/Testnet policy identity forbidden on Mainnet.
 - Testnet keeps SPIKE policy. Phase21 must **not** use SPIKE policy.
 
 ## Native naming

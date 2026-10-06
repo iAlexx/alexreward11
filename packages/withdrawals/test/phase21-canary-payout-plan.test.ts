@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import {
+  PHASE21_CANARY_ATTACHED_GRAM_ATOMIC,
   PHASE21_CANARY_ATTACHED_GRAM_LIFECYCLE,
   PHASE21_CANARY_FORWARD_TON_ATOMIC,
   PHASE21_CANARY_PAYOUT_APPLY_ENABLED,
@@ -222,9 +223,15 @@ describe('phase21 canary payout PLAN', () => {
     expect(plan.applyEnabled).toBe(false);
     expect(plan.readyForLivePayout).toBe(false);
     expect(plan.intendedTransfer.forwardTonAtomic).toBe(PHASE21_CANARY_FORWARD_TON_ATOMIC);
+    expect(plan.intendedTransfer.forwardGramAtomic).toBe(1n);
     expect(plan.intendedTransfer.usdtNetAtomic).toBe(PHASE21_CANARY_PAYOUT_EXPECTED_NET_ATOMIC);
-    expect(plan.intendedTransfer.attachedGramLifecycle).toBe(PHASE21_CANARY_ATTACHED_GRAM_LIFECYCLE);
-    expect(plan.intendedTransfer.attachedGramAtomicOwnerApproved).toBeNull();
+    expect(plan.intendedTransfer.attachedGramLifecycle).toBe('OWNER_APPROVED');
+    expect(plan.intendedTransfer.status).toBe('OWNER_APPROVED');
+    expect(plan.intendedTransfer.attachedGramAtomic).toBe('50000000');
+    expect(plan.intendedTransfer.attachedGramAtomicOwnerApproved).toBe('50000000');
+    expect(PHASE21_CANARY_ATTACHED_GRAM_LIFECYCLE).toBe('OWNER_APPROVED');
+    expect(PHASE21_CANARY_ATTACHED_GRAM_ATOMIC).toBe(50_000_000n);
+    expect(PHASE21_CANARY_FORWARD_TON_ATOMIC).toBe(1n);
     expect(plan.checks.every((c) => c.status !== 'FAIL')).toBe(true);
     expect(plan.checks.some((c) => c.id === 'exactly_one_approval' && c.status === 'PASS')).toBe(
       true,
@@ -269,6 +276,21 @@ describe('phase21 canary payout PLAN', () => {
     expect(
       unpaused.checks.some((c) => c.id === 'payout_dispatch_pause' && c.status === 'FAIL'),
     ).toBe(true);
+  });
+
+  it('hard-fails source truth if attached/forward constants are wrong', () => {
+    expect(PHASE21_CANARY_ATTACHED_GRAM_LIFECYCLE).toBe('OWNER_APPROVED');
+    expect(PHASE21_CANARY_ATTACHED_GRAM_ATOMIC.toString(10)).toBe('50000000');
+    expect(PHASE21_CANARY_FORWARD_TON_ATOMIC.toString(10)).toBe('1');
+    if (PHASE21_CANARY_ATTACHED_GRAM_LIFECYCLE !== 'OWNER_APPROVED') {
+      throw new Error('attached lifecycle must be OWNER_APPROVED');
+    }
+    if (PHASE21_CANARY_ATTACHED_GRAM_ATOMIC !== 50_000_000n) {
+      throw new Error('attached amount must be 50000000');
+    }
+    if (PHASE21_CANARY_FORWARD_TON_ATOMIC !== 1n) {
+      throw new Error('forward amount must be 1');
+    }
   });
 
   it('refuses APPLY and keeps APPLY disabled', () => {

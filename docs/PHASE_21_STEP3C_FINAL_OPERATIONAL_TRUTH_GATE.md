@@ -33,7 +33,7 @@ API keys via headers/config only — never in ceremony provider URLs.
 - candidateAttachedGramAtomic — candidate for unsigned body construction only (NOT Owner-approved)
 - forwardGramAtomic — Owner-approved 1 nanogram
 - estimatedTotalNativeExposureAtomic = candidateAttached + forward (gas attachment exposure; network fee NOT double-counted)
-- attachedGramLifecycle = ESTIMATED, broadcast = false
+- attachedGramLifecycle = OWNER_APPROVED (50000000 nanogram); broadcast = false
 
 Cycle-safe: unsigned Jetton body helper lives in @alex-rewards/ton (signing already depends on ton).
 

@@ -111,11 +111,11 @@ describe('Phase 21 Mainnet signing policy allow-path', () => {
     ).not.toThrow();
 
     const ownerApprovedPolicy = {
-      attachedTonAtomic: 60_000_000n,
+      attachedTonAtomic: 50_000_000n,
       forwardTonAtomic: 1n,
       sendMode: SPIKE_SEND_MODE,
       networkScope: 'MAINNET_OWNER_APPROVED' as const,
-      sourceReference: 'OWNER_APPROVED_FIXTURE_STEP3_TEST_ONLY',
+      sourceReference: 'PHASE21_OWNER_APPROVED_ATTACHED_50000000_NANOGRAM',
       attachedGramLifecycle: 'OWNER_APPROVED' as const,
     };
 

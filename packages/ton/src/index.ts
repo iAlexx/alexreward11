@@ -127,6 +127,7 @@ export {
 } from './toncenter-mainnet-fee-provider.js';
 export {
   JETTON_TRANSFER_OP,
+  PHASE21_OWNER_APPROVED_ATTACHED_GRAM_ATOMIC,
   PHASE21_FEE_ESTIMATE_CANDIDATE_ATTACHED_GRAM_ATOMIC,
   buildUnsignedJettonTransferBody,
   buildUnsignedJettonTransferBodyBase64,

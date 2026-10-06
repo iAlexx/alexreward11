@@ -4,7 +4,7 @@
  *
  * Field separation (no double-counting):
  * - estimatedNetworkFeeAtomic: provider estimateFee total (network fee)
- * - candidateAttachedGramAtomic: candidate for body / gas attachment (NOT Owner-approved)
+ * - candidateAttachedGramAtomic: Owner-approved attached GRAM used for estimate body construction
  * - forwardGramAtomic: Owner-approved 1 nanogram forward
  * - estimatedTotalNativeExposureAtomic: candidateAttached + forward
  *   (gas attachment exposure; network fee reported separately — not added here)
@@ -46,7 +46,7 @@ export interface ToncenterMainnetFeeEstimateResult {
   readonly estimatedTotalNativeExposureAtomic: bigint | null;
   readonly emulationMethod: string;
   readonly mode: 'LIVE_READ_ONLY';
-  readonly attachedGramLifecycle: 'ESTIMATED';
+  readonly attachedGramLifecycle: 'OWNER_APPROVED';
   readonly broadcast: false;
   /** @deprecated Prefer candidateAttachedGramAtomic — kept for ReadOnlyMainnetFeeProvider duck-type. */
   readonly attachedTonAtomicEstimated: bigint | null;
@@ -169,7 +169,7 @@ export class ToncenterMainnetFeeProvider {
       estimatedTotalNativeExposureAtomic: exposure,
       emulationMethod: 'toncenter_estimateFee_unsigned_jetton_body',
       mode: 'LIVE_READ_ONLY',
-      attachedGramLifecycle: 'ESTIMATED',
+      attachedGramLifecycle: 'OWNER_APPROVED',
       broadcast: false,
       attachedTonAtomicEstimated: candidate,
       estimatedFeeNativeAtomic: fee.feeNanotons,

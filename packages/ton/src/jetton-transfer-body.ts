@@ -10,11 +10,19 @@ import { Address, beginCell, type Cell } from '@ton/core';
 export const JETTON_TRANSFER_OP = 0xf8a7ea5;
 
 /**
- * Candidate attached GRAM used ONLY to construct an unsigned estimateFee body.
- * NOT Owner-approved Mainnet attached policy. NOT a live payout value.
- * Documented Phase 21 Step 3C placeholder for fee emulation body shape.
+ * Owner-approved Phase 21 Mainnet attached GRAM for micro-launch payouts.
+ * 50_000_000 nanogram = 0.05 GRAM. Prior live Mainnet fee-estimate decision;
+ * historical OWNER_APPROVED_DECISION / SOURCE_WIRING_PENDING is now wired here.
+ * Distinct from PHASE10 SPIKE policy sourceReference even when numeric equal.
  */
-export const PHASE21_FEE_ESTIMATE_CANDIDATE_ATTACHED_GRAM_ATOMIC = 50_000_000n;
+export const PHASE21_OWNER_APPROVED_ATTACHED_GRAM_ATOMIC = 50_000_000n;
+
+/**
+ * Fee-estimate body construction uses the Owner-approved attached amount.
+ * Alias retained for callers; value is no longer an unapproved candidate.
+ */
+export const PHASE21_FEE_ESTIMATE_CANDIDATE_ATTACHED_GRAM_ATOMIC =
+  PHASE21_OWNER_APPROVED_ATTACHED_GRAM_ATOMIC;
 
 export interface UnsignedJettonTransferBodyInput {
   readonly queryId: bigint;

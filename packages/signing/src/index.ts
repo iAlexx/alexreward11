@@ -14,6 +14,8 @@ export {
 export {
   PHASE10_TESTNET_SPIKE_TRANSFER_POLICY,
   PHASE21_ATTACHED_GRAM_POLICY_STATUS,
+  PHASE21_OWNER_APPROVED_ATTACHED_GRAM_ATOMIC,
+  PHASE21_OWNER_APPROVED_ATTACHED_GRAM_SOURCE_REFERENCE,
   PHASE21_MAINNET_FORWARD_APPROVED_POLICY_TEMPLATE,
   SPIKE_JETTON_ATTACHED_TON,
   SPIKE_JETTON_FORWARD_TON,
@@ -21,6 +23,7 @@ export {
   assertJettonTransferPolicyValid,
   assertPhase21MainnetTransferPolicy,
   isPhase21ForwardGramPolicySourceReady,
+  isPhase21AttachedGramPolicySourceReady,
   resolveJettonTransferPolicy,
   type AttachedGramLifecycleStatus,
   type JettonTransferExecutionPolicy,

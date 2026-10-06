@@ -84,7 +84,7 @@ describe('phase21 readiness / preflight', () => {
     expect(byCode['REAL_CHAIN_GATE']?.status).toBe('PASS');
     expect(byCode['MAINNET_TRANSFER_GAS_POLICY']?.status).toBe('PASS');
     expect(byCode['WITHDRAWABLE_BALANCE_SOURCE']?.status).toBe('PASS');
-    expect(byCode['MAINNET_ATTACHED_GRAM_POLICY']?.status).toBe('BLOCKED');
+    expect(byCode['MAINNET_ATTACHED_GRAM_POLICY']?.status).toBe('PASS');
     expect(byCode['SIGNER_HOSTING_DECISION']?.message).toMatch(/DEDICATED_CONTROLLED_HOST/);
     expect(byCode['TON_GAS']?.message).toMatch(/GRAM gas/);
   });

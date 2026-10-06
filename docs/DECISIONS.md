@@ -1077,3 +1077,16 @@ Decision: keep `mintAuthenticatedProductionBootstrapTrust` package-private (not 
 ## ADR-PHASE21-STEP4B1 - Authenticated read-only preflight (2026-10-03)
 
 Decision: unauthenticated preflight can never report ready (no trustAuthenticated input). Readiness is reported only by `runAuthenticatedProductionOwnerBootstrapPreflightOnly` using the runtime-branded trust and its session-bound verified pool (BEGIN READ ONLY). `authenticateProductionCeremonyFromOwnerTty` returns a scoped session; callers close the pool in finally. Offline-backup readiness is never read from env. Source/test only - no real key, apply, or operational DB mutation.
+
+## ADR-PHASE21-ATTACHED-GRAM-OWNER-APPROVED — Mainnet attached GRAM source wiring
+
+Decision (Owner): Phase 21 Mainnet micro-launch attached GRAM is **Owner-approved** at
+`attachedGramAtomic = 50000000` (0.05 GRAM). `forwardTonAtomic` / `forwardGramAtomic` remains `1`
+nanogram. The prior live Mainnet fee-estimate decision was the Owner approval; historical wording
+`OWNER_APPROVED_DECISION / SOURCE_WIRING_PENDING` meant the decision existed and source must
+reflect it. SPIKE/Testnet policy identity remains forbidden even when the numeric amount matches.
+Source wiring: `@alex-rewards/ton` `PHASE21_OWNER_APPROVED_ATTACHED_GRAM_ATOMIC` and
+`@alex-rewards/signing` `PHASE21_ATTACHED_GRAM_POLICY_STATUS = OWNER_APPROVED`.
+Canary PLAN reports `status=OWNER_APPROVED` and `attachedGramAtomic="50000000"`. APPLY remains
+disabled. No live payout / broadcast / signer unlock in this wiring step.
+

@@ -16,7 +16,7 @@ describe('mainnet fee estimation', () => {
     else process.env.PHASE21_FEE_ESTIMATION_LIVE = prev;
   });
 
-  it('mock estimator never broadcasts and keeps attached ESTIMATED', async () => {
+  it('mock estimator never broadcasts and reports Owner-approved attached lifecycle', async () => {
     const estimator = new MockMainnetFeeEstimator(60_000_000n);
     const result = await estimator.estimate({
       networkCode: 'TON_MAINNET',
@@ -30,7 +30,7 @@ describe('mainnet fee estimation', () => {
     expect(result.candidateAttachedGramAtomic).toBe(60_000_000n);
     expect(result.estimatedNetworkFeeAtomic).toBeNull();
     expect(result.attachedGramLifecycle).toBe(PHASE21_ATTACHED_GRAM_POLICY_STATUS);
-    expect(result.attachedGramLifecycle).toBe('ESTIMATED');
+    expect(result.attachedGramLifecycle).toBe('OWNER_APPROVED');
     expect(result.estimatedTotalNativeExposureAtomic).toBe(60_000_001n);
     // fee not double-counted into exposure
     expect(result.estimatedTotalNativeExposureAtomic).toBe(
@@ -61,7 +61,7 @@ describe('mainnet fee estimation', () => {
     });
     expect(result.mode).toBe('MOCK');
     expect(result.broadcast).toBe(false);
-    expect(result.attachedGramLifecycle).toBe('ESTIMATED');
+    expect(result.attachedGramLifecycle).toBe('OWNER_APPROVED');
   });
 
   it('LIVE=1 without provider returns UNAVAILABLE (never relabels mock)', async () => {
@@ -75,7 +75,7 @@ describe('mainnet fee estimation', () => {
     });
     expect(result.mode).toBe('UNAVAILABLE');
     expect(result.broadcast).toBe(false);
-    expect(result.attachedGramLifecycle).toBe('ESTIMATED');
+    expect(result.attachedGramLifecycle).toBe('OWNER_APPROVED');
     expect(result.candidateAttachedGramAtomic).toBeNull();
   });
 
@@ -125,7 +125,7 @@ describe('mainnet fee estimation', () => {
     });
     expect(result.mode).toBe('LIVE_READ_ONLY');
     expect(result.broadcast).toBe(false);
-    expect(result.attachedGramLifecycle).toBe('ESTIMATED');
+    expect(result.attachedGramLifecycle).toBe('OWNER_APPROVED');
     expect(result.providerKind).toBe('toncenter');
     expect(result.providerHost).toBe('toncenter.example');
     expect(result.networkIdentity).toBe('-239');

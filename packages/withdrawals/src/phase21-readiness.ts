@@ -213,13 +213,13 @@ export function buildPhase21ReadinessReport(
     code: 'MAINNET_TRANSFER_GAS_POLICY',
     status: forwardApproved ? 'PASS' : 'BLOCKED',
     message: forwardApproved
-      ? 'Owner-approved Mainnet forward GRAM policy (1 nanogram); attached remains ESTIMATED'
+      ? 'Owner-approved Mainnet forward GRAM policy (1 nanogram); attached Owner-approved at 50000000'
       : 'BLOCKED_OWNER_DECISION_MAINNET_TRANSFER_GAS_POLICY',
     details: {
       mainnetForwardGramPolicyApproved: forwardApproved,
       mainnetTransferGasPolicyApproved: observations.mainnetTransferGasPolicyApproved === true,
       attachedGramLifecycle: attachedLifecycle,
-      note: 'attachedTonAtomic NOT Owner-approved; SPIKE policy must not be used by Phase21',
+      note: 'attachedTonAtomic Owner-approved 50000000; SPIKE policy identity must not be used by Phase21',
     },
   });
 
@@ -228,8 +228,8 @@ export function buildPhase21ReadinessReport(
     status: attachedLifecycle === 'OWNER_APPROVED' ? 'PASS' : 'BLOCKED',
     message:
       attachedLifecycle === 'OWNER_APPROVED'
-        ? 'Mainnet attached GRAM Owner-approved'
-        : 'OWNER_DECISION_REQUIRED: Mainnet attached GRAM lifecycle is ESTIMATED (not activated)',
+        ? 'Mainnet attached GRAM Owner-approved (50000000 nanogram / 0.05 GRAM)'
+        : 'OWNER_DECISION_REQUIRED: Mainnet attached GRAM lifecycle is not OWNER_APPROVED',
     details: {
       mainnetAttachedGramLifecycle: attachedLifecycle,
       livePayoutOnly: true,
@@ -1002,7 +1002,7 @@ export function defaultPhase21Step1Observations(): Phase21ReadinessObservations 
     workerMainnetWiringComplete: true,
     mainnetTransferGasPolicyApproved: true,
     mainnetForwardGramPolicyApproved: true,
-    mainnetAttachedGramLifecycle: 'ESTIMATED',
+    mainnetAttachedGramLifecycle: 'OWNER_APPROVED',
     mainnetJettonExternalVerified: null,
     signerHostingDecisionDocumented: true,
     signerHostingDecision: 'DEDICATED_CONTROLLED_HOST',

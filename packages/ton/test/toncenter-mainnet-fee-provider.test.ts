@@ -96,7 +96,7 @@ describe('ToncenterMainnetFeeProvider Step3C', () => {
           (result.estimatedNetworkFeeAtomic ?? 0n),
       );
       expect(result.broadcast).toBe(false);
-      expect(result.attachedGramLifecycle).toBe('ESTIMATED');
+      expect(result.attachedGramLifecycle).toBe('OWNER_APPROVED');
       expect(result.emulationMethod).toMatch(/estimateFee/);
     }
     expect(sawRunGetMethod).toBe(false);

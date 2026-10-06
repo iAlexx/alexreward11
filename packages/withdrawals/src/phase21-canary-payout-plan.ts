@@ -9,7 +9,7 @@
  * persist signed BOC before send, and stop on UNKNOWN → RECONCILE_REQUIRED.
  */
 import {
-  PHASE21_FEE_ESTIMATE_CANDIDATE_ATTACHED_GRAM_ATOMIC,
+  PHASE21_OWNER_APPROVED_ATTACHED_GRAM_ATOMIC,
   tonAddressesEqual,
 } from '@alex-rewards/ton';
 
@@ -50,10 +50,11 @@ export const PHASE21_CANARY_PAYOUT_EXPECTED_RECIPIENT_RAW =
 export const PHASE21_CANARY_FORWARD_TON_ATOMIC = 1n;
 
 /**
- * Attached GRAM has NO Owner-approved source truth in-repo (lifecycle ESTIMATED).
- * Candidate 50_000_000n is fee-estimate-only and must never be treated as approved.
+ * Owner-approved Phase 21 Mainnet attached GRAM (wired from @alex-rewards/ton).
+ * 50_000_000 nanogram = 0.05 GRAM. Not SPIKE/Testnet policy identity.
  */
-export const PHASE21_CANARY_ATTACHED_GRAM_LIFECYCLE = 'ESTIMATED' as const;
+export const PHASE21_CANARY_ATTACHED_GRAM_LIFECYCLE = 'OWNER_APPROVED' as const;
+export const PHASE21_CANARY_ATTACHED_GRAM_ATOMIC = PHASE21_OWNER_APPROVED_ATTACHED_GRAM_ATOMIC;
 
 /** Hard kill-switch: APPLY path is not enabled in this source slice. */
 export const PHASE21_CANARY_PAYOUT_APPLY_ENABLED = false as const;
@@ -180,10 +181,12 @@ export interface Phase21CanaryPayoutPlanResult {
     readonly recipientFriendly: typeof PHASE21_CANARY_PAYOUT_EXPECTED_RECIPIENT_FRIENDLY;
     readonly usdtNetAtomic: typeof PHASE21_CANARY_PAYOUT_EXPECTED_NET_ATOMIC;
     readonly forwardTonAtomic: typeof PHASE21_CANARY_FORWARD_TON_ATOMIC;
+    readonly forwardGramAtomic: typeof PHASE21_CANARY_FORWARD_TON_ATOMIC;
     readonly attachedGramLifecycle: typeof PHASE21_CANARY_ATTACHED_GRAM_LIFECYCLE;
-    readonly attachedGramAtomicOwnerApproved: null;
+    readonly status: typeof PHASE21_CANARY_ATTACHED_GRAM_LIFECYCLE;
+    readonly attachedGramAtomic: string;
+    readonly attachedGramAtomicOwnerApproved: string;
     readonly attachedGramNote: string;
-    readonly feeEstimateCandidateAttachedGramAtomic: string;
   };
   readonly runtimeRequirementsEnumeratedNotApplied: readonly string[];
   readonly futureApplyDesign: Phase21CanaryPayoutFutureApplyDesign;
@@ -380,12 +383,13 @@ export async function planPhase21CanaryPayout(
     recipientFriendly: PHASE21_CANARY_PAYOUT_EXPECTED_RECIPIENT_FRIENDLY,
     usdtNetAtomic: PHASE21_CANARY_PAYOUT_EXPECTED_NET_ATOMIC,
     forwardTonAtomic: PHASE21_CANARY_FORWARD_TON_ATOMIC,
+    forwardGramAtomic: PHASE21_CANARY_FORWARD_TON_ATOMIC,
     attachedGramLifecycle: PHASE21_CANARY_ATTACHED_GRAM_LIFECYCLE,
-    attachedGramAtomicOwnerApproved: null,
+    status: PHASE21_CANARY_ATTACHED_GRAM_LIFECYCLE,
+    attachedGramAtomic: PHASE21_CANARY_ATTACHED_GRAM_ATOMIC.toString(10),
+    attachedGramAtomicOwnerApproved: PHASE21_CANARY_ATTACHED_GRAM_ATOMIC.toString(10),
     attachedGramNote:
-      'No Owner-approved attached GRAM source truth in-repo (ESTIMATED / OWNER_DECISION_REQUIRED). PLAN refuses to invent. Fee-estimate candidate 50000000 is NOT Owner-approved and must not be used as live Mainnet attached.',
-    feeEstimateCandidateAttachedGramAtomic:
-      PHASE21_FEE_ESTIMATE_CANDIDATE_ATTACHED_GRAM_ATOMIC.toString(10),
+      'Owner-approved Phase 21 Mainnet attached GRAM = 50000000 nanogram (0.05 GRAM) from prior Mainnet fee-estimate decision; source wiring reflects OWNER_APPROVED. Not SPIKE/Testnet defaults.',
   } as const;
 
   const runtimeRequirementsEnumeratedNotApplied = enumerateRuntimeRequirementsNotApplied(env);
@@ -1104,19 +1108,44 @@ export async function planPhase21CanaryPayout(
       );
     }
 
-    checks.push(
-      pass(
-        'intended_transfer',
-        'exact intended transfer calculated; attached GRAM not invented',
-        {
-          recipient: PHASE21_CANARY_PAYOUT_EXPECTED_RECIPIENT_FRIENDLY,
-          usdtNetAtomic: PHASE21_CANARY_PAYOUT_EXPECTED_NET_ATOMIC.toString(10),
-          forwardTonAtomic: PHASE21_CANARY_FORWARD_TON_ATOMIC.toString(10),
-          attachedGramLifecycle: PHASE21_CANARY_ATTACHED_GRAM_LIFECYCLE,
-        },
-        intendedTransfer,
-      ),
-    );
+    const attachedApproved =
+      PHASE21_CANARY_ATTACHED_GRAM_LIFECYCLE === 'OWNER_APPROVED' &&
+      PHASE21_CANARY_ATTACHED_GRAM_ATOMIC === 50_000_000n &&
+      intendedTransfer.attachedGramAtomic === '50000000' &&
+      intendedTransfer.status === 'OWNER_APPROVED';
+    const forwardApproved =
+      PHASE21_CANARY_FORWARD_TON_ATOMIC === 1n &&
+      intendedTransfer.forwardTonAtomic === 1n &&
+      intendedTransfer.forwardGramAtomic === 1n;
+    if (attachedApproved && forwardApproved) {
+      checks.push(
+        pass(
+          'intended_transfer',
+          'exact intended transfer: Owner-approved attached=50000000, forward=1',
+          {
+            recipient: PHASE21_CANARY_PAYOUT_EXPECTED_RECIPIENT_FRIENDLY,
+            usdtNetAtomic: PHASE21_CANARY_PAYOUT_EXPECTED_NET_ATOMIC.toString(10),
+            forwardGramAtomic: '1',
+            attachedGramAtomic: '50000000',
+            status: 'OWNER_APPROVED',
+          },
+          intendedTransfer,
+        ),
+      );
+    } else {
+      checks.push(
+        fail(
+          'intended_transfer',
+          'canary attached/forward source truth mismatch',
+          {
+            attachedGramAtomic: '50000000',
+            status: 'OWNER_APPROVED',
+            forwardGramAtomic: '1',
+          },
+          intendedTransfer,
+        ),
+      );
+    }
 
     checks.push(
       blocked(

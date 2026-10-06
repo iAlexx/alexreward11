@@ -1,7 +1,11 @@
 import { SendMode } from '@ton/core';
 
+import { PHASE21_OWNER_APPROVED_ATTACHED_GRAM_ATOMIC } from '@alex-rewards/ton';
+
 import { SignerError } from './errors.js';
 import { PHASE21_OWNER_APPROVED_FORWARD_GRAM_ATOMIC } from './gram-native-currency.js';
+
+export { PHASE21_OWNER_APPROVED_ATTACHED_GRAM_ATOMIC };
 
 /**
  * TESTNET/SPIKE only: attached TON/GRAM for jetton-wallet gas.
@@ -15,12 +19,16 @@ export const SPIKE_JETTON_FORWARD_TON = 1n;
 export const SPIKE_SEND_MODE = SendMode.PAY_GAS_SEPARATELY + SendMode.IGNORE_ERRORS;
 
 /**
- * Lifecycle for Mainnet attached GRAM (gas). Forward is separately Owner-approved at 1 nanogram.
- * Phase 21 Step 3: attached remains ESTIMATED / OWNER_DECISION_REQUIRED.
+ * Lifecycle for Mainnet attached GRAM (gas). Forward is Owner-approved at 1 nanogram.
+ * Attached GRAM is Owner-approved at 50_000_000 nanogram (0.05 GRAM) for Phase 21
+ * Mainnet micro-launch — prior fee-estimate decision, now source-wired.
  */
 export type AttachedGramLifecycleStatus = 'UNVERIFIED' | 'ESTIMATED' | 'OWNER_APPROVED';
 
-export const PHASE21_ATTACHED_GRAM_POLICY_STATUS: AttachedGramLifecycleStatus = 'ESTIMATED';
+export const PHASE21_ATTACHED_GRAM_POLICY_STATUS: AttachedGramLifecycleStatus = 'OWNER_APPROVED';
+
+export const PHASE21_OWNER_APPROVED_ATTACHED_GRAM_SOURCE_REFERENCE =
+  'PHASE21_OWNER_APPROVED_ATTACHED_50000000_NANOGRAM' as const;
 
 export interface JettonTransferExecutionPolicy {
   /** Legacy internal field name; atomic unit is nanogram on Mainnet native GRAM. */
@@ -44,21 +52,21 @@ export const PHASE10_TESTNET_SPIKE_TRANSFER_POLICY: JettonTransferExecutionPolic
 };
 
 /**
- * Phase 21 Owner-approved *forward* policy fragment (1 nanogram).
- * Attached remains ESTIMATED — not activated; SPIKE 0.05 must not be used as Mainnet attached.
- * Full live signing still requires attachedGramLifecycle === OWNER_APPROVED (future Owner decision).
+ * Phase 21 Owner-approved Mainnet transfer policy fragment.
+ * forward = 1 nanogram; attached = 50_000_000 nanogram (0.05 GRAM).
+ * Must not be confused with PHASE10_TESTNET_SPIKE_TRANSFER_POLICY even when
+ * attached atomic amounts numerically match.
  */
-export const PHASE21_MAINNET_FORWARD_APPROVED_POLICY_TEMPLATE: Omit<
-  JettonTransferExecutionPolicy,
-  'attachedTonAtomic'
-> & {
+export const PHASE21_MAINNET_FORWARD_APPROVED_POLICY_TEMPLATE: JettonTransferExecutionPolicy & {
+  readonly attachedTonAtomic: typeof PHASE21_OWNER_APPROVED_ATTACHED_GRAM_ATOMIC;
   readonly forwardTonAtomic: typeof PHASE21_OWNER_APPROVED_FORWARD_GRAM_ATOMIC;
   readonly attachedGramLifecycle: typeof PHASE21_ATTACHED_GRAM_POLICY_STATUS;
 } = {
+  attachedTonAtomic: PHASE21_OWNER_APPROVED_ATTACHED_GRAM_ATOMIC,
   forwardTonAtomic: PHASE21_OWNER_APPROVED_FORWARD_GRAM_ATOMIC,
   sendMode: SPIKE_SEND_MODE,
   networkScope: 'MAINNET_OWNER_APPROVED',
-  sourceReference: 'PHASE21_OWNER_APPROVED_FORWARD_1_NANOGRAM',
+  sourceReference: PHASE21_OWNER_APPROVED_ATTACHED_GRAM_SOURCE_REFERENCE,
   attachedGramLifecycle: PHASE21_ATTACHED_GRAM_POLICY_STATUS,
 };
 
@@ -79,9 +87,11 @@ export function assertJettonTransferPolicyValid(
 
 /**
  * Phase 21 Mainnet policy checks:
+ * - networkScope must be MAINNET_OWNER_APPROVED (never TESTNET_SPIKE)
  * - forward must be exactly Owner-approved 1 nanogram
- * - SPIKE attached (0.05) cannot be used as Mainnet attached
- * - attachedGramLifecycle must be OWNER_APPROVED for live signing
+ * - attached must be exactly Owner-approved 50_000_000 nanogram
+ * - attachedGramLifecycle must be OWNER_APPROVED
+ * - SPIKE policy identity (networkScope/sourceReference) is forbidden even if amounts match
  */
 export function assertPhase21MainnetTransferPolicy(
   policy: JettonTransferExecutionPolicy,
@@ -91,7 +101,21 @@ export function assertPhase21MainnetTransferPolicy(
     throw new SignerError(
       'POLICY_REJECTED',
       'Phase 21 Mainnet cannot use Testnet SPIKE transfer policy',
-      { networkScope: policy.networkScope },
+      { networkScope: policy.networkScope, code: 'SPIKE_POLICY_FORBIDDEN_ON_MAINNET' },
+    );
+  }
+  if (
+    policy.sourceReference === PHASE10_TESTNET_SPIKE_TRANSFER_POLICY.sourceReference ||
+    policy.sourceReference.trim().toUpperCase().includes('TESTNET_SPIKE') ||
+    policy.sourceReference.trim().toUpperCase().includes('PHASE10_TESTNET_SPIKE')
+  ) {
+    throw new SignerError(
+      'POLICY_REJECTED',
+      'Phase 21 Mainnet must not use SPIKE/Testnet transfer policy sourceReference',
+      {
+        code: 'SPIKE_ATTACHED_FORBIDDEN_ON_MAINNET',
+        sourceReference: policy.sourceReference,
+      },
     );
   }
   if (policy.forwardTonAtomic !== PHASE21_OWNER_APPROVED_FORWARD_GRAM_ATOMIC) {
@@ -105,22 +129,26 @@ export function assertPhase21MainnetTransferPolicy(
       },
     );
   }
-  if (policy.attachedTonAtomic === SPIKE_JETTON_ATTACHED_TON) {
-    throw new SignerError(
-      'POLICY_REJECTED',
-      'Phase 21 Mainnet must not use SPIKE attached (0.05) as Mainnet attached GRAM',
-      { code: 'SPIKE_ATTACHED_FORBIDDEN_ON_MAINNET' },
-    );
-  }
   const lifecycle = policy.attachedGramLifecycle ?? 'UNVERIFIED';
-  if (lifecycle !== 'OWNER_APPROVED') {
+  if (lifecycle !== 'OWNER_APPROVED' || PHASE21_ATTACHED_GRAM_POLICY_STATUS !== 'OWNER_APPROVED') {
     throw new SignerError(
       'POLICY_REJECTED',
-      'Phase 21 Mainnet attached GRAM is not Owner-approved (ESTIMATED / OWNER_DECISION_REQUIRED)',
+      'Phase 21 Mainnet attached GRAM is not Owner-approved',
       {
         code: 'BLOCKED_OWNER_DECISION_MAINNET_ATTACHED_GRAM',
         attachedGramLifecycle: lifecycle,
         phase21AttachedGramPolicyStatus: PHASE21_ATTACHED_GRAM_POLICY_STATUS,
+      },
+    );
+  }
+  if (policy.attachedTonAtomic !== PHASE21_OWNER_APPROVED_ATTACHED_GRAM_ATOMIC) {
+    throw new SignerError(
+      'POLICY_REJECTED',
+      'Phase 21 Mainnet attachedTonAtomic must be Owner-approved 50000000 nanogram (0.05 GRAM)',
+      {
+        code: 'PHASE21_ATTACHED_GRAM_ATOMIC_MISMATCH',
+        expected: PHASE21_OWNER_APPROVED_ATTACHED_GRAM_ATOMIC.toString(),
+        actual: policy.attachedTonAtomic.toString(),
       },
     );
   }
@@ -146,11 +174,21 @@ export function resolveJettonTransferPolicy(input: {
   return policy;
 }
 
-/** True when Phase21 source has Owner-approved forward=1 nanogram (attached may still be ESTIMATED). */
+/** True when Phase21 source has Owner-approved forward=1 nanogram. */
 export function isPhase21ForwardGramPolicySourceReady(): boolean {
   return (
     PHASE21_MAINNET_FORWARD_APPROVED_POLICY_TEMPLATE.forwardTonAtomic ===
-      PHASE21_OWNER_APPROVED_FORWARD_GRAM_ATOMIC &&
-    PHASE21_ATTACHED_GRAM_POLICY_STATUS === 'ESTIMATED'
+    PHASE21_OWNER_APPROVED_FORWARD_GRAM_ATOMIC
+  );
+}
+
+/** True when Phase21 source has Owner-approved attached=50000000 nanogram. */
+export function isPhase21AttachedGramPolicySourceReady(): boolean {
+  return (
+    PHASE21_ATTACHED_GRAM_POLICY_STATUS === 'OWNER_APPROVED' &&
+    PHASE21_OWNER_APPROVED_ATTACHED_GRAM_ATOMIC === 50_000_000n &&
+    PHASE21_MAINNET_FORWARD_APPROVED_POLICY_TEMPLATE.attachedTonAtomic ===
+      PHASE21_OWNER_APPROVED_ATTACHED_GRAM_ATOMIC &&
+    PHASE21_MAINNET_FORWARD_APPROVED_POLICY_TEMPLATE.attachedGramLifecycle === 'OWNER_APPROVED'
   );
 }
