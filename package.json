@@ -73,7 +73,8 @@
     "phase21:estimate-mainnet-fee": "pnpm --filter @alex-rewards/withdrawals run phase21:estimate-mainnet-fee",
     "phase21:hot-wallet:plan": "pnpm --filter @alex-rewards/withdrawals run phase21:hot-wallet:plan",
     "phase21:hot-wallet:register": "pnpm --filter @alex-rewards/withdrawals run phase21:hot-wallet:register",
-    "phase21:hot-wallet:verify-identity": "pnpm --filter @alex-rewards/signer run phase21:hot-wallet:verify-identity"
+    "phase21:hot-wallet:verify-identity": "pnpm --filter @alex-rewards/signer run phase21:hot-wallet:verify-identity",
+    "phase21:canary-payout": "pnpm --filter @alex-rewards/withdrawals run phase21:canary-payout"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

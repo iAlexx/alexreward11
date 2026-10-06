@@ -880,3 +880,32 @@ export {
   type Phase21HotWalletPostRegisterExpected,
   type Phase21HotWalletPostRegisterVerifyResult,
 } from './phase21-hot-wallet-post-register-verify.js';
+
+export {
+  PHASE21_CANARY_PAYOUT_WITHDRAWAL_ID,
+  PHASE21_CANARY_PAYOUT_PUBLIC_ID,
+  PHASE21_CANARY_PAYOUT_EXPECTED_GROSS_ATOMIC,
+  PHASE21_CANARY_PAYOUT_EXPECTED_FEE_ATOMIC,
+  PHASE21_CANARY_PAYOUT_EXPECTED_NET_ATOMIC,
+  PHASE21_CANARY_PAYOUT_EXPECTED_AVAILABLE_ATOMIC,
+  PHASE21_CANARY_PAYOUT_EXPECTED_RESERVED_ATOMIC,
+  PHASE21_CANARY_PAYOUT_EXPECTED_RECIPIENT_FRIENDLY,
+  PHASE21_CANARY_PAYOUT_EXPECTED_RECIPIENT_RAW,
+  PHASE21_CANARY_FORWARD_TON_ATOMIC,
+  PHASE21_CANARY_ATTACHED_GRAM_LIFECYCLE,
+  PHASE21_CANARY_PAYOUT_APPLY_ENABLED,
+  PHASE21_CANARY_PAYOUT_FUTURE_APPLY_DESIGN,
+  observePhase21CanaryPayoutEnv,
+  probePhase21CanarySignerLockedReadOnly,
+  planPhase21CanaryPayout,
+  refusePhase21CanaryPayoutApply,
+} from './phase21-canary-payout-plan.js';
+export type {
+  Phase21CanaryPayoutCheck,
+  Phase21CanaryPayoutCheckStatus,
+  Phase21CanaryPayoutEnvObservations,
+  Phase21CanaryPayoutFutureApplyDesign,
+  Phase21CanaryPayoutPlanClient,
+  Phase21CanaryPayoutPlanResult,
+  Phase21CanaryPayoutSignerProbe,
+} from './phase21-canary-payout-plan.js';
