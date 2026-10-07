@@ -97,6 +97,9 @@ const observability = await initializeObservability({
   ...(config.OTEL_EXPORTER_OTLP_ENDPOINT === undefined
     ? {}
     : { otlpEndpoint: config.OTEL_EXPORTER_OTLP_ENDPOINT }),
+  ...(config.OTEL_EXPORTER_OTLP_HEADERS === undefined
+    ? {}
+    : { otlpHeaders: config.OTEL_EXPORTER_OTLP_HEADERS }),
   ...(config.SENTRY_DSN === undefined ? {} : { sentryDsn: config.SENTRY_DSN }),
 });
 const server = Fastify({

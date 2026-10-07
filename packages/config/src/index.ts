@@ -20,6 +20,7 @@ const commonSchema = z.object({
   LOG_LEVEL: logLevel.default('info'),
   OTEL_ENABLED: booleanFromString,
   OTEL_EXPORTER_OTLP_ENDPOINT: optionalUrl,
+  OTEL_EXPORTER_OTLP_HEADERS: optionalSecret,
   SENTRY_DSN: optionalUrl,
   /**
    * Explicit Railway / non-production staging-integration opt-in.
@@ -464,6 +465,7 @@ const LOCAL_WORKER_WITHDRAWAL_DEFAULTS = {
   WITHDRAWAL_REAL_CHAIN_ENABLED: 'false',
   PHASE21_MAINNET_ENABLED: 'false',
   SIGNER_BASE_URL: 'http://127.0.0.1:3005',
+  SIGNER_TRANSPORT_MODE: 'direct',
   TON_TESTNET_JETTON_MASTER: '',
   TON_MAINNET_USDT_JETTON_MASTER: '',
   TON_PRIMARY_PROVIDER_KIND: '',
@@ -478,6 +480,34 @@ const optionalEmptyString = z.preprocess(
   (value) => (value === undefined || value === null ? '' : value),
   z.string().max(512),
 );
+
+function isTailscaleIpv4(hostname: string): boolean {
+  const octets = hostname.split('.').map((part) => Number(part));
+  const first = octets[0];
+  const second = octets[1];
+
+  return (
+    octets.length === 4 &&
+    first !== undefined &&
+    second !== undefined &&
+    octets.every((octet) => Number.isInteger(octet) && octet >= 0 && octet <= 255) &&
+    first === 100 &&
+    second >= 64 &&
+    second <= 127
+  );
+}
+
+function isApprovedTailscaleSignerUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'http:' || url.username !== '' || url.password !== '') return false;
+    const host = url.hostname.toLowerCase();
+    const tailnetHost = isTailscaleIpv4(host) || host.endsWith('.ts.net');
+    return tailnetHost && url.port === '3005' && url.pathname === '/' && url.search === '' && url.hash === '';
+  } catch {
+    return false;
+  }
+}
 
 const workerSchema = serviceSchema
   .extend({
@@ -514,6 +544,10 @@ const workerSchema = serviceSchema
      */
     PHASE21_MAINNET_ENABLED: booleanFromString,
     SIGNER_BASE_URL: z.string().min(1).max(512),
+    SIGNER_TRANSPORT_MODE: z.preprocess(
+      (value) => (value === '' || value === undefined || value === null ? undefined : value),
+      z.enum(['direct', 'tailscale_userspace']).optional(),
+    ),
     TON_TESTNET_JETTON_MASTER: optionalEmptyString,
     TON_MAINNET_USDT_JETTON_MASTER: optionalEmptyString,
     TON_PRIMARY_PROVIDER_KIND: optionalEmptyString,
@@ -564,6 +598,24 @@ const workerSchema = serviceSchema
           path: ['WITHDRAWAL_FAKE_CHAIN_ENABLED'],
           message: 'PHASE21_MAINNET_ENABLED requires WITHDRAWAL_FAKE_CHAIN_ENABLED=false',
         });
+      }
+      if (value.DEPLOYMENT_ENV === 'production') {
+        if (value.SIGNER_TRANSPORT_MODE !== 'tailscale_userspace') {
+          context.addIssue({
+            code: 'custom',
+            path: ['SIGNER_TRANSPORT_MODE'],
+            message:
+              'Production Phase21 requires SIGNER_TRANSPORT_MODE=tailscale_userspace (no public signer ingress)',
+          });
+        }
+        if (!isApprovedTailscaleSignerUrl(value.SIGNER_BASE_URL)) {
+          context.addIssue({
+            code: 'custom',
+            path: ['SIGNER_BASE_URL'],
+            message:
+              'Production Phase21 signer URL must be http://<Tailscale-100.64.0.0/10-or-ts.net>:3005 with no credentials/path/query',
+          });
+        }
       }
       if (value.TON_MAINNET_USDT_JETTON_MASTER.trim() === '') {
         context.addIssue({
