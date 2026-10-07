@@ -5,6 +5,8 @@ import {
   createTonChainProvider,
   FakeTonChainProvider,
   DEFAULT_SEQNO_READMISSION_PACE_MS,
+  TON_MAINNET_NETWORK_GLOBAL_ID,
+  TON_TESTNET_NETWORK_GLOBAL_ID,
   type AdmitWalletSeqnoBlocked,
   type AdmitWalletSeqnoRateLimitRetryOptions,
   type TonChainProvider,
@@ -161,11 +163,26 @@ function createProviderFromConfig(
   kind: TonProviderKind | null,
   url: string | null,
   apiKey: string | null,
-  networkGlobalId: TonNetworkGlobalId,
+  networkGlobalId: number,
 ): TonChainProvider | null {
   if (kind === null || url === null) return null;
   if (kind !== 'toncenter' && kind !== 'tonapi') return null;
-  return createTonChainProvider({ kind, baseUrl: url, apiKey, networkGlobalId });
+  if (
+    networkGlobalId !== TON_TESTNET_NETWORK_GLOBAL_ID &&
+    networkGlobalId !== TON_MAINNET_NETWORK_GLOBAL_ID
+  ) {
+    throw new WithdrawalDomainError(
+      'CONFIG',
+      `Unsupported TON networkGlobalId=${networkGlobalId}`,
+    );
+  }
+  const supportedNetworkGlobalId: TonNetworkGlobalId = networkGlobalId;
+  return createTonChainProvider({
+    kind,
+    baseUrl: url,
+    apiKey,
+    networkGlobalId: supportedNetworkGlobalId,
+  });
 }
 
 function deriveQueryId(withdrawalId: string, attemptNumber: number, salt: string): bigint {
