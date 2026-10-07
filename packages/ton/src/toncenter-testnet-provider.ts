@@ -1,7 +1,9 @@
 import { Address, beginCell, Cell } from '@ton/core';
 
 import {
+  TON_MAINNET_NETWORK_GLOBAL_ID,
   TON_TESTNET_NETWORK_GLOBAL_ID,
+  type TonNetworkGlobalId,
   type EnumerateOutgoingJettonTransfersInput,
   type EnumerateOutgoingJettonTransfersResult,
   type EnumeratedOutgoingJettonTransfer,
@@ -28,12 +30,13 @@ import {
 import {
   asRecord,
   assertOkTonCenterBody,
+  assertProviderResponseForNetwork,
   assertTestnetProviderUrl,
-  assertTestnetResponse,
   decimalString,
   fetchJson,
   parseStackNumber,
 } from './provider-http.js';
+import { assertMainnetProviderUrl } from './mainnet-provider-http.js';
 import {
   JETTON_INTERNAL_TRANSFER_OP,
   JETTON_TRANSFER_NOTIFICATION_OP,
@@ -45,6 +48,7 @@ export interface TonCenterTestnetProviderConfig {
   readonly baseUrl: string;
   readonly apiKey?: string | null;
   readonly fetchImpl?: typeof fetch;
+  readonly networkGlobalId?: TonNetworkGlobalId;
 }
 
 type StackEntry = readonly [unknown, unknown];
@@ -187,14 +191,26 @@ export function deriveTonCenterV3BaseUrl(baseUrl: string): string {
 }
 
 export class TonCenterTestnetProvider implements TonChainProvider {
-  readonly networkGlobalId = TON_TESTNET_NETWORK_GLOBAL_ID;
+  readonly networkGlobalId: TonNetworkGlobalId;
   private readonly baseUrl: string;
   private readonly v3BaseUrl: string;
   private readonly apiKey: string | null;
   private readonly fetchImpl: typeof fetch;
 
   constructor(config: TonCenterTestnetProviderConfig) {
-    this.baseUrl = assertTestnetProviderUrl(config.baseUrl, 'TonCenterTestnetProvider');
+    this.networkGlobalId = config.networkGlobalId ?? TON_TESTNET_NETWORK_GLOBAL_ID;
+    if (
+      this.networkGlobalId !== TON_TESTNET_NETWORK_GLOBAL_ID &&
+      this.networkGlobalId !== TON_MAINNET_NETWORK_GLOBAL_ID
+    ) {
+      throw new Error(
+        `NETWORK_MISMATCH: TonCenter provider unsupported networkGlobalId=${this.networkGlobalId}`,
+      );
+    }
+    this.baseUrl =
+      this.networkGlobalId === TON_MAINNET_NETWORK_GLOBAL_ID
+        ? assertMainnetProviderUrl(config.baseUrl, 'TonCenterMainnetProvider')
+        : assertTestnetProviderUrl(config.baseUrl, 'TonCenterTestnetProvider');
     this.v3BaseUrl = deriveTonCenterV3BaseUrl(this.baseUrl);
     this.apiKey = config.apiKey?.trim() ? config.apiKey.trim() : null;
     this.fetchImpl = config.fetchImpl ?? fetch;
@@ -214,7 +230,7 @@ export class TonCenterTestnetProvider implements TonChainProvider {
       { method: 'GET', headers: this.headers() },
       context,
     );
-    assertOkTonCenterBody(body, context);
+    assertOkTonCenterBody(body, context, this.networkGlobalId);
     return body.result;
   }
 
@@ -225,7 +241,7 @@ export class TonCenterTestnetProvider implements TonChainProvider {
       { method: 'POST', headers: this.headers(true), body: JSON.stringify(payload) },
       context,
     );
-    assertOkTonCenterBody(body, context);
+    assertOkTonCenterBody(body, context, this.networkGlobalId);
     return body.result;
   }
 
@@ -236,7 +252,7 @@ export class TonCenterTestnetProvider implements TonChainProvider {
       { method: 'GET', headers: this.headers() },
       context,
     );
-    assertTestnetResponse(body, context);
+    assertProviderResponseForNetwork(body, context, this.networkGlobalId);
     return asRecord(body, context);
   }
 

@@ -1,4 +1,9 @@
-import { assertTestnetOnly, TON_TESTNET_NETWORK_GLOBAL_ID } from './chain-provider.js';
+import {
+  assertTestnetOnly,
+  TON_MAINNET_NETWORK_GLOBAL_ID,
+  TON_TESTNET_NETWORK_GLOBAL_ID,
+  type TonNetworkGlobalId,
+} from './chain-provider.js';
 
 const BODY_SNIPPET_LENGTH = 500;
 
@@ -55,23 +60,56 @@ export function assertTestnetProviderUrl(baseUrl: string, provider: string): str
   return trimmed.replace(/\/+$/, '');
 }
 
-export function assertTestnetResponse(value: unknown, context: string): void {
+export function assertProviderResponseForNetwork(
+  value: unknown,
+  context: string,
+  expectedNetworkGlobalId: TonNetworkGlobalId,
+): void {
   if (value === null || typeof value !== 'object') return;
   const record = value as Record<string, unknown>;
   const network = record.network ?? record.networkGlobalId ?? record.global_id;
-  if (network === -239 || (typeof network === 'string' && /mainnet|-239/i.test(network))) {
-    throw new Error(`NETWORK_MISMATCH: ${context} returned mainnet data`);
+
+  if (expectedNetworkGlobalId === TON_TESTNET_NETWORK_GLOBAL_ID) {
+    if (
+      network === TON_MAINNET_NETWORK_GLOBAL_ID ||
+      (typeof network === 'string' && /mainnet|-239/i.test(network))
+    ) {
+      throw new Error(`NETWORK_MISMATCH: ${context} returned mainnet data`);
+    }
+    return;
   }
+
+  if (expectedNetworkGlobalId === TON_MAINNET_NETWORK_GLOBAL_ID) {
+    const text = typeof network === 'string' ? network.trim().toLowerCase() : '';
+    if (
+      network === TON_TESTNET_NETWORK_GLOBAL_ID ||
+      text === '-3' ||
+      text === 'testnet' ||
+      text.includes('testnet')
+    ) {
+      throw new Error(`NETWORK_MISMATCH: ${context} returned testnet data`);
+    }
+    return;
+  }
+
+  throw new Error(
+    `NETWORK_MISMATCH: ${context} unsupported expected networkGlobalId=${expectedNetworkGlobalId}`,
+  );
+}
+
+export function assertTestnetResponse(value: unknown, context: string): void {
+  assertProviderResponseForNetwork(value, context, TON_TESTNET_NETWORK_GLOBAL_ID);
 }
 
 export function assertOkTonCenterBody(
   body: unknown,
   context: string,
+  expectedNetworkGlobalId: TonNetworkGlobalId = TON_TESTNET_NETWORK_GLOBAL_ID,
 ): asserts body is { ok: true; result: unknown } {
   if (body === null || typeof body !== 'object') {
     throw new Error(`MALFORMED_RESPONSE: ${context} did not return an object`);
   }
-  assertTestnetResponse(body, context);
+  assertProviderResponseForNetwork(body, context, expectedNetworkGlobalId);
   const record = body as Record<string, unknown>;
   if (record.ok !== true || !('result' in record)) {
     const message =

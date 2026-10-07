@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import {
+  TON_MAINNET_NETWORK_GLOBAL_ID,
   TON_TESTNET_NETWORK_GLOBAL_ID,
   TonApiTestnetProvider,
   TonCenterTestnetProvider,
@@ -370,6 +371,33 @@ describe('provider failure handling and selection', () => {
     expect(() => createTonChainProvider({ kind: 'fake', baseUrl: 'test-only' })).toThrow(
       /test-only/,
     );
+  });
+
+  it('creates Mainnet-capable provider adapters only when networkGlobalId=-239 is explicit', () => {
+    const center = createTonChainProvider({
+      kind: 'toncenter',
+      baseUrl: 'https://toncenter.com/api/v2',
+      networkGlobalId: TON_MAINNET_NETWORK_GLOBAL_ID,
+      fetchImpl: tonCenterFetch(),
+    });
+    const api = createTonChainProvider({
+      kind: 'tonapi',
+      baseUrl: 'https://tonapi.io',
+      networkGlobalId: TON_MAINNET_NETWORK_GLOBAL_ID,
+      fetchImpl: tonApiFetch(),
+    });
+    expect(center.networkGlobalId).toBe(TON_MAINNET_NETWORK_GLOBAL_ID);
+    expect(api.networkGlobalId).toBe(TON_MAINNET_NETWORK_GLOBAL_ID);
+  });
+
+  it('refuses Testnet hosts when Mainnet networkGlobalId=-239 is explicit', () => {
+    expect(() =>
+      createTonChainProvider({
+        kind: 'toncenter',
+        baseUrl: 'https://testnet.toncenter.com/api/v2',
+        networkGlobalId: TON_MAINNET_NETWORK_GLOBAL_ID,
+      }),
+    ).toThrow(/NETWORK_MISMATCH|testnet/i);
   });
 
   it('makes primary/secondary low-level evidence disagreement detectable', async () => {

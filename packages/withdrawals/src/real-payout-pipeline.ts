@@ -9,6 +9,7 @@ import {
   type AdmitWalletSeqnoRateLimitRetryOptions,
   type TonChainProvider,
   type TonProviderKind,
+  type TonNetworkGlobalId,
 } from '@alex-rewards/ton';
 
 import {
@@ -160,10 +161,11 @@ function createProviderFromConfig(
   kind: TonProviderKind | null,
   url: string | null,
   apiKey: string | null,
+  networkGlobalId: TonNetworkGlobalId,
 ): TonChainProvider | null {
   if (kind === null || url === null) return null;
   if (kind !== 'toncenter' && kind !== 'tonapi') return null;
-  return createTonChainProvider({ kind, baseUrl: url, apiKey });
+  return createTonChainProvider({ kind, baseUrl: url, apiKey, networkGlobalId });
 }
 
 function deriveQueryId(withdrawalId: string, attemptNumber: number, salt: string): bigint {
@@ -1161,6 +1163,7 @@ export async function runRealTestnetPayoutPipeline(
       payout.primaryProvider.kind,
       payout.primaryProvider.url,
       payout.primaryProvider.apiKey,
+      payout.networkGlobalId,
     );
   if (primary === null) {
     return {
@@ -1179,6 +1182,7 @@ export async function runRealTestnetPayoutPipeline(
           payout.secondaryProvider.kind,
           payout.secondaryProvider.url,
           payout.secondaryProvider.apiKey,
+          payout.networkGlobalId,
         );
 
   if (!(primary instanceof FakeTonChainProvider) && !testPath && !payout.realChainEnabled) {

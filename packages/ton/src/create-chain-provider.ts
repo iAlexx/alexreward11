@@ -1,4 +1,4 @@
-import type { TonChainProvider } from './chain-provider.js';
+import { TON_TESTNET_NETWORK_GLOBAL_ID, type TonChainProvider, type TonNetworkGlobalId } from './chain-provider.js';
 import { TonApiTestnetProvider } from './tonapi-testnet-provider.js';
 import { TonCenterTestnetProvider } from './toncenter-testnet-provider.js';
 
@@ -9,11 +9,13 @@ export function createTonChainProvider(input: {
   baseUrl: string;
   apiKey?: string | null;
   fetchImpl?: typeof fetch;
+  networkGlobalId?: TonNetworkGlobalId;
 }): TonChainProvider {
   const config = {
     baseUrl: input.baseUrl,
     ...(input.apiKey !== undefined ? { apiKey: input.apiKey } : {}),
     ...(input.fetchImpl !== undefined ? { fetchImpl: input.fetchImpl } : {}),
+    networkGlobalId: input.networkGlobalId ?? TON_TESTNET_NETWORK_GLOBAL_ID,
   };
   switch (input.kind) {
     case 'toncenter':

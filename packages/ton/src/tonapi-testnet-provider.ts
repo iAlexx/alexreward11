@@ -1,7 +1,9 @@
 import { Address } from '@ton/core';
 
 import {
+  TON_MAINNET_NETWORK_GLOBAL_ID,
   TON_TESTNET_NETWORK_GLOBAL_ID,
+  type TonNetworkGlobalId,
   type EnumerateOutgoingJettonTransfersInput,
   type EnumerateOutgoingJettonTransfersResult,
   type EnumeratedOutgoingJettonTransfer,
@@ -27,12 +29,13 @@ import {
 } from './outgoing-jetton-history.js';
 import {
   asRecord,
+  assertProviderResponseForNetwork,
   assertTestnetProviderUrl,
-  assertTestnetResponse,
   decimalString,
   fetchJson,
   fetchOk,
 } from './provider-http.js';
+import { assertMainnetProviderUrl } from './mainnet-provider-http.js';
 import {
   JETTON_INTERNAL_TRANSFER_OP,
   JETTON_TRANSFER_NOTIFICATION_OP,
@@ -44,6 +47,7 @@ export interface TonApiTestnetProviderConfig {
   readonly baseUrl: string;
   readonly apiKey?: string | null;
   readonly fetchImpl?: typeof fetch;
+  readonly networkGlobalId?: TonNetworkGlobalId;
 }
 
 function addressValue(value: unknown, context: string): string {
@@ -168,13 +172,25 @@ function collectJettonTransferCandidateHashes(body: Record<string, unknown>): st
 }
 
 export class TonApiTestnetProvider implements TonChainProvider {
-  readonly networkGlobalId = TON_TESTNET_NETWORK_GLOBAL_ID;
+  readonly networkGlobalId: TonNetworkGlobalId;
   private readonly baseUrl: string;
   private readonly apiKey: string | null;
   private readonly fetchImpl: typeof fetch;
 
   constructor(config: TonApiTestnetProviderConfig) {
-    this.baseUrl = assertTestnetProviderUrl(config.baseUrl, 'TonApiTestnetProvider');
+    this.networkGlobalId = config.networkGlobalId ?? TON_TESTNET_NETWORK_GLOBAL_ID;
+    if (
+      this.networkGlobalId !== TON_TESTNET_NETWORK_GLOBAL_ID &&
+      this.networkGlobalId !== TON_MAINNET_NETWORK_GLOBAL_ID
+    ) {
+      throw new Error(
+        `NETWORK_MISMATCH: TonAPI provider unsupported networkGlobalId=${this.networkGlobalId}`,
+      );
+    }
+    this.baseUrl =
+      this.networkGlobalId === TON_MAINNET_NETWORK_GLOBAL_ID
+        ? assertMainnetProviderUrl(config.baseUrl, 'TonApiMainnetProvider')
+        : assertTestnetProviderUrl(config.baseUrl, 'TonApiTestnetProvider');
     this.apiKey = config.apiKey?.trim() ? config.apiKey.trim() : null;
     this.fetchImpl = config.fetchImpl ?? fetch;
   }
@@ -193,7 +209,7 @@ export class TonApiTestnetProvider implements TonChainProvider {
       { method: 'GET', headers: this.headers() },
       context,
     );
-    assertTestnetResponse(body, context);
+    assertProviderResponseForNetwork(body, context, this.networkGlobalId);
     return asRecord(body, context);
   }
 
