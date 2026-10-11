@@ -444,6 +444,7 @@ async function probeOneProvider(
       injectHealth !== undefined
         ? await injectHealth()
         : await createTonChainProvider({
+            networkGlobalId: PHASE10_TON_TESTNET_NETWORK_GLOBAL_ID,
             kind: kind as TonProviderKind,
             baseUrl: config.baseUrl,
             apiKey: config.apiKey ?? null,
@@ -938,11 +939,13 @@ async function probeWalletSeqnoAdmission(
 
   try {
     const primary = createTonChainProvider({
+      networkGlobalId: PHASE10_TON_TESTNET_NETWORK_GLOBAL_ID,
       kind: rolesForSeqno.roles.primary.kind,
       baseUrl: rolesForSeqno.roles.primary.baseUrl,
       apiKey: rolesForSeqno.roles.primary.apiKey,
     });
     const secondary = createTonChainProvider({
+      networkGlobalId: PHASE10_TON_TESTNET_NETWORK_GLOBAL_ID,
       kind: rolesForSeqno.roles.secondary.kind,
       baseUrl: rolesForSeqno.roles.secondary.baseUrl,
       apiKey: rolesForSeqno.roles.secondary.apiKey,

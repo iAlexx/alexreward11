@@ -1,5 +1,5 @@
 import {
-  assertTestnetOnly,
+  TON_MAINNET_NETWORK_GLOBAL_ID,
   TON_TESTNET_NETWORK_GLOBAL_ID,
   type EnumerateOutgoingJettonTransfersInput,
   type EnumerateOutgoingJettonTransfersResult,
@@ -11,6 +11,7 @@ import {
   type TonAccountStatus,
   type TonChainProvider,
   type TonJettonBalance,
+  type TonNetworkGlobalId,
   type TonProviderHealth,
   type TonSendBocResult,
 } from './chain-provider.js';
@@ -29,11 +30,20 @@ export interface FakeTonChainProviderOptions {
   readonly sendBocAcceptedFalse?: boolean;
 }
 
+function assertFakeNetworkGlobalId(networkGlobalId: number): TonNetworkGlobalId {
+  if (networkGlobalId === TON_TESTNET_NETWORK_GLOBAL_ID) return TON_TESTNET_NETWORK_GLOBAL_ID;
+  if (networkGlobalId === TON_MAINNET_NETWORK_GLOBAL_ID) return TON_MAINNET_NETWORK_GLOBAL_ID;
+  throw new Error(
+    `Unsupported FakeTonChainProvider networkGlobalId ${networkGlobalId}; require -3 or -239`,
+  );
+}
+
 /**
  * Deterministic in-memory fake for unit tests. Not for production paths.
+ * Supports Testnet (-3) and Mainnet (-239) network identity for simulation.
  */
 export class FakeTonChainProvider implements TonChainProvider {
-  readonly networkGlobalId = TON_TESTNET_NETWORK_GLOBAL_ID;
+  readonly networkGlobalId: TonNetworkGlobalId;
 
   private readonly seqnoByAddress = new Map<string, number>();
   private readonly accountStates = new Map<string, TonAccountState>();
@@ -52,7 +62,9 @@ export class FakeTonChainProvider implements TonChainProvider {
   private accountStateCallCountByAddress = new Map<string, number>();
 
   constructor(options: FakeTonChainProviderOptions = {}) {
-    assertTestnetOnly(options.networkGlobalId ?? TON_TESTNET_NETWORK_GLOBAL_ID);
+    this.networkGlobalId = assertFakeNetworkGlobalId(
+      options.networkGlobalId ?? TON_TESTNET_NETWORK_GLOBAL_ID,
+    );
     this.sendBocTimeout = options.sendBocTimeout === true;
     this.sendBocFailBeforeSubmit = options.sendBocFailBeforeSubmit === true;
     this.sendBocAcceptedFalse = options.sendBocAcceptedFalse === true;
@@ -93,7 +105,7 @@ export class FakeTonChainProvider implements TonChainProvider {
   }): void {
     const codeHash = approvedWalletV5R1CodeHash({
       publicKeyHex: input.publicKeyHex,
-      networkGlobalId: input.networkGlobalId ?? TON_TESTNET_NETWORK_GLOBAL_ID,
+      networkGlobalId: input.networkGlobalId ?? this.networkGlobalId,
     });
     this.seedSeqno(input.address, input.seqno);
     this.seedAccountState(input.address, {
@@ -142,7 +154,10 @@ export class FakeTonChainProvider implements TonChainProvider {
   }
 
   seedTransfer(evidence: JettonTransferEvidence): void {
-    this.transfers.push(evidence);
+    this.transfers.push({
+      ...evidence,
+      networkGlobalId: evidence.networkGlobalId ?? this.networkGlobalId,
+    });
   }
 
   seedEnumeratedOutgoingTransfer(record: EnumeratedOutgoingJettonTransfer): void {
@@ -167,6 +182,13 @@ export class FakeTonChainProvider implements TonChainProvider {
 
   setSendBocAcceptedFalse(value: boolean): void {
     this.sendBocAcceptedFalse = value;
+  }
+
+  private stampEvidence(evidence: JettonTransferEvidence): JettonTransferEvidence {
+    return {
+      ...evidence,
+      networkGlobalId: this.networkGlobalId,
+    };
   }
 
   async getSeqno(address: string): Promise<number> {
@@ -252,16 +274,18 @@ export class FakeTonChainProvider implements TonChainProvider {
   async findTransactionsByQueryId(
     input: FindTransactionsByQueryIdInput,
   ): Promise<readonly JettonTransferEvidence[]> {
-    return this.transfers.filter(
-      (t) =>
-        t.hotWallet === input.hotWallet &&
-        t.jettonMaster === input.jettonMaster &&
-        t.queryId === input.queryId &&
-        (input.recipient === undefined || t.recipient === input.recipient) &&
-        (input.amountAtomic === undefined || t.amountAtomic === input.amountAtomic) &&
-        (input.senderJettonWallet === undefined ||
-          t.senderJettonWallet === input.senderJettonWallet),
-    );
+    return this.transfers
+      .filter(
+        (t) =>
+          t.hotWallet === input.hotWallet &&
+          t.jettonMaster === input.jettonMaster &&
+          t.queryId === input.queryId &&
+          (input.recipient === undefined || t.recipient === input.recipient) &&
+          (input.amountAtomic === undefined || t.amountAtomic === input.amountAtomic) &&
+          (input.senderJettonWallet === undefined ||
+            t.senderJettonWallet === input.senderJettonWallet),
+      )
+      .map((evidence) => this.stampEvidence(evidence));
   }
 
   async observeJettonTransfer(

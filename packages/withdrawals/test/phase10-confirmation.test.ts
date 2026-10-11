@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import { matchIntendedJettonPayout, primarySecondaryEvidenceAgree } from '../src/confirmation.js';
+import { TON_TESTNET_NETWORK_GLOBAL_ID, TON_MAINNET_NETWORK_GLOBAL_ID } from '@alex-rewards/ton';
 
 describe('phase10 confirmation matchIntendedJettonPayout', () => {
   const expected = {
+      networkGlobalId: TON_TESTNET_NETWORK_GLOBAL_ID,
     hotWallet: 'EQ_hot',
     jettonMaster: 'EQ_master',
     recipient: 'EQ_recv',
@@ -153,6 +155,7 @@ describe('phase10 confirmation matchIntendedJettonPayout', () => {
 
 describe('phase10 confirmation primarySecondaryEvidenceAgree', () => {
   const expected = {
+    networkGlobalId: TON_TESTNET_NETWORK_GLOBAL_ID,
     hotWallet: '0:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
     jettonMaster: '0:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
     recipient: '0:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
@@ -226,4 +229,35 @@ describe('phase10 confirmation primarySecondaryEvidenceAgree', () => {
       ),
     ).toBe(false);
   });
+
+  it('fails closed when expected.networkGlobalId is omitted', () => {
+    const withoutNetwork = {
+      hotWallet: expected.hotWallet,
+      jettonMaster: expected.jettonMaster,
+      recipient: expected.recipient,
+      amountAtomic: expected.amountAtomic,
+      queryId: expected.queryId,
+    };
+    expect(
+      matchIntendedJettonPayout(
+        { ...expected, success: true, bounced: false },
+        withoutNetwork,
+      ),
+    ).toBe(false);
+  });
+
+  it('fails closed for Mainnet expected when evidence omits networkGlobalId', () => {
+    const expectedMainnet = { ...expected, networkGlobalId: TON_MAINNET_NETWORK_GLOBAL_ID };
+    const evidenceWithout = {
+      hotWallet: expectedMainnet.hotWallet,
+      jettonMaster: expectedMainnet.jettonMaster,
+      recipient: expectedMainnet.recipient,
+      amountAtomic: expectedMainnet.amountAtomic,
+      queryId: expectedMainnet.queryId,
+      success: true,
+      bounced: false,
+    };
+    expect(matchIntendedJettonPayout(evidenceWithout, expectedMainnet)).toBe(false);
+  });
+
 });

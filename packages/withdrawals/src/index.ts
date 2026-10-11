@@ -318,7 +318,10 @@ export type {
   RunRealTestnetPayoutPipelineInput,
 } from './real-payout-pipeline.js';
 
-export { reconcileRealWithdrawalAttemptOnly } from './real-chain-reconcile-only.js';
+export {
+  reconcileRealWithdrawalAttemptOnly,
+  resolveReconcileNetworkGlobalId,
+} from './real-chain-reconcile-only.js';
 export {
   DEFINITIVE_NONPAYMENT_REASON_V5R1_EXPIRED_UNCONSUMED_SEQNO,
 } from './real-chain-reconcile-only.js';
@@ -927,6 +930,10 @@ export {
   PHASE21_CANARY_FROZEN_JETTON_MASTER,
   tryBuildPhase21ManualDispatchRelayAuthority,
 } from './phase21-manual-dispatch-permit.js';
+export {
+  isPhase21CanaryPriorWorkflowSafeToRestart,
+  isPhase21CanaryWithdrawalStateAllowedForResume,
+} from './phase21-resume-canary-gates.js';
 export type {
   Phase21ManualDispatchPermitBindings,
   Phase21ManualDispatchPermitRow,

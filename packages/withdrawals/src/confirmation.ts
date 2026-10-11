@@ -7,7 +7,7 @@ export interface ExpectedJettonPayout {
   readonly recipient: string;
   readonly amountAtomic: string;
   readonly queryId: string;
-  /** Explicit Mainnet network identity is required for Phase 21 confirmation. */
+  /** Required network identity: -3 (Testnet) or -239 (Mainnet). Omitted => match fails closed. */
   readonly networkGlobalId?: number;
   /** Expected Hot Wallet Jetton wallet (sender side of TEP-74 transfer). */
   readonly senderJettonWallet?: string;
@@ -43,21 +43,22 @@ export function matchIntendedJettonPayout(
     return false;
   }
 
-  const expectedNetwork = expected.networkGlobalId ?? TON_TESTNET_NETWORK_GLOBAL_ID;
+  // Fail closed: expected.networkGlobalId must be explicit (-3 or -239). Never default to Testnet.
   if (
-    expectedNetwork !== TON_TESTNET_NETWORK_GLOBAL_ID &&
-    expectedNetwork !== TON_MAINNET_NETWORK_GLOBAL_ID
+    expected.networkGlobalId !== TON_TESTNET_NETWORK_GLOBAL_ID &&
+    expected.networkGlobalId !== TON_MAINNET_NETWORK_GLOBAL_ID
   ) {
     return false;
   }
-  // Testnet compatibility: older deterministic fixtures omitted network identity.
-  // Phase 21 is stricter: never infer Mainnet from an absent evidence network id.
+  const expectedNetwork = expected.networkGlobalId;
+  // Phase 21 / Mainnet: never infer Mainnet from an absent evidence network id.
   if (
     expectedNetwork === TON_MAINNET_NETWORK_GLOBAL_ID &&
     evidence.networkGlobalId === undefined
   ) {
     return false;
   }
+  // Testnet: allow older fixtures that omit evidence.networkGlobalId by falling back to expected.
   const evidenceNetwork = evidence.networkGlobalId ?? expectedNetwork;
   if (evidenceNetwork !== expectedNetwork) {
     return false;

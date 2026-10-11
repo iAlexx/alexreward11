@@ -706,12 +706,14 @@ async function runLiveProviderBackedCollection(
   }
 
   const primary = createTonChainProvider({
+    networkGlobalId: TON_TESTNET_NETWORK_GLOBAL_ID,
     kind: roles.primary.kind,
     baseUrl: roles.primary.baseUrl,
     ...(roles.primary.apiKey !== null ? { apiKey: roles.primary.apiKey } : {}),
     ...(fetchImpl !== undefined ? { fetchImpl } : {}),
   });
   const secondary = createTonChainProvider({
+    networkGlobalId: TON_TESTNET_NETWORK_GLOBAL_ID,
     kind: roles.secondary.kind,
     baseUrl: roles.secondary.baseUrl,
     ...(roles.secondary.apiKey !== null ? { apiKey: roles.secondary.apiKey } : {}),

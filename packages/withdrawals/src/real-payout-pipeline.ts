@@ -1648,12 +1648,19 @@ export async function runRealTestnetPayoutPipeline(
       ).rows[0]?.contract_identity ??
       null;
     if (jettonMaster === null || jettonMaster.trim() === '') {
+      const isPhase21 = payout.authority === 'PHASE21_MAINNET';
       throw new WithdrawalDomainError(
         'EXTERNAL_RESOURCE_REQUIRED',
-        'PHASE10_EXTERNAL_RESOURCE_REQUIRED: TON_TESTNET_JETTON_MASTER',
+        isPhase21
+          ? 'PHASE21_EXTERNAL_RESOURCE_REQUIRED: TON_MAINNET_USDT_JETTON_MASTER'
+          : 'PHASE10_EXTERNAL_RESOURCE_REQUIRED: TON_TESTNET_JETTON_MASTER',
         {
           details: {
-            missingResources: ['TON_TESTNET_JETTON_MASTER (Owner-approved Testnet Jetton master)'],
+            missingResources: [
+              isPhase21
+                ? 'TON_MAINNET_USDT_JETTON_MASTER (Owner-approved Mainnet USDT Jetton master)'
+                : 'TON_TESTNET_JETTON_MASTER (Owner-approved Testnet Jetton master)',
+            ],
           },
         },
       );

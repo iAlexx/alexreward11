@@ -243,8 +243,9 @@ export async function fundHotWalletUsdt(
   pool: Pool,
   hotWalletId: string,
   amountAtomic: string,
+  assetIdOverride?: string,
 ): Promise<void> {
-  const assetId = await usdtAssetId(pool);
+  const assetId = assetIdOverride ?? (await usdtAssetId(pool));
   await withLedgerTransaction(pool, async (client) => {
     const hot = await getOrCreateLedgerAccount(client, {
       accountType: 'HOT_WALLET_USDT_ASSET',
@@ -822,7 +823,7 @@ export async function createApprovedWithdrawal(
     amountAtomic: '5000000',
     key: randomUUID(),
   });
-  await fundHotWalletUsdt(pool, input.hotWalletId, '10000000');
+  await fundHotWalletUsdt(pool, input.hotWalletId, '10000000', input.assetId);
   const { withdrawalId } = await quoteAndCreate(
     pool,
     input.userId,
@@ -841,6 +842,7 @@ export async function truncateWithdrawalTables(pool: Pool): Promise<void> {
       withdrawal_payout_reconciliations,
       withdrawal_volume_reservations,
       withdrawal_volume_periods,
+      phase21_manual_dispatch_permits,
       withdrawal_attempts,
       withdrawal_approvals,
       withdrawals,

@@ -101,7 +101,7 @@ function loadWalletIdV5R1Client(
  */
 export function decodeWalletV5R1SignedExternal(
   bocBase64: string,
-  networkGlobalId: number = TON_TESTNET_NETWORK_GLOBAL_ID,
+  networkGlobalId: number,
 ): DecodeWalletV5R1SignedExternalResult {
   if (
     networkGlobalId !== TON_TESTNET_NETWORK_GLOBAL_ID &&
@@ -230,7 +230,8 @@ export interface WalletV5R1AttemptIdentityInput {
   readonly canonicalMessageHash: string;
   readonly validUntilUnix: number;
   readonly hotWalletAddress: string;
-  readonly networkGlobalId?: number;
+  /** Required: -3 (Testnet) or -239 (Mainnet). Never inferred. */
+  readonly networkGlobalId: number;
   readonly signedExternalMessageBoc?: string | null;
   readonly normalizedExternalMessageHash?: string | null;
   readonly externalMessageCellHash?: string | null;
@@ -261,7 +262,7 @@ export type ValidateWalletV5R1AttemptIdentityResult =
 export function validateWalletV5R1SignedExternalAgainstAttempt(
   input: WalletV5R1AttemptIdentityInput,
 ): ValidateWalletV5R1AttemptIdentityResult {
-  const networkGlobalId = input.networkGlobalId ?? TON_TESTNET_NETWORK_GLOBAL_ID;
+  const networkGlobalId = input.networkGlobalId;
   const decodedResult = decodeWalletV5R1SignedExternal(
     input.signedWalletRequestBoc,
     networkGlobalId,

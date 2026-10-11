@@ -12,6 +12,8 @@ import {
   assertPhase21Ready,
   buildPhase21PayoutConfig,
   evaluatePhase21ManualDispatchRestartSafety,
+  isPhase21CanaryPriorWorkflowSafeToRestart,
+  isPhase21CanaryWithdrawalStateAllowedForResume,
   PHASE21_CANARY_PAYOUT_WITHDRAWAL_ID,
   PHASE21_CANARY_PAYOUT_PUBLIC_ID,
   PHASE21_CANARY_PAYOUT_EXPECTED_GROSS_ATOMIC,
@@ -106,7 +108,11 @@ async function main(): Promise<void> {
         const q = await db.query(sql, [PHASE21_CANARY_PAYOUT_WITHDRAWAL_ID, OUTBOX]);
         ensure(q.rowCount === 1, 'EXACT_ROW');
         const x = q.rows[0];
-        ensure(x.public_id === PHASE21_CANARY_PAYOUT_PUBLIC_ID && x.state === 'APPROVED', 'WITHDRAWAL_STATE');
+        ensure(
+          x.public_id === PHASE21_CANARY_PAYOUT_PUBLIC_ID &&
+            isPhase21CanaryWithdrawalStateAllowedForResume(String(x.state)),
+          'WITHDRAWAL_STATE',
+        );
         ensure(x.gross === PHASE21_CANARY_PAYOUT_EXPECTED_GROSS_ATOMIC.toString(), 'GROSS');
         ensure(x.fee === PHASE21_CANARY_PAYOUT_EXPECTED_FEE_ATOMIC.toString(), 'FEE');
         ensure(x.net === PHASE21_CANARY_PAYOUT_EXPECTED_NET_ATOMIC.toString(), 'NET');
@@ -157,7 +163,7 @@ async function main(): Promise<void> {
     try {
       const prior = await temporal.workflow.getHandle(WORKFLOW).describe();
       const status = statusName(prior.status);
-      ensure(status.includes('TERMINATED') || status === '5', 'EXISTING_WORKFLOW_' + status);
+      ensure(isPhase21CanaryPriorWorkflowSafeToRestart(status), 'EXISTING_WORKFLOW_' + status);
     } catch (error) {
       if (!(error instanceof WorkflowNotFoundError)) throw error;
     }

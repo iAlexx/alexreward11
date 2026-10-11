@@ -24,17 +24,6 @@ const HOT_WALLET_RAW = deriveWalletV5R1AddressRaw({
   networkGlobalId: -3,
 });
 
-// Mainnet-specific, in-memory test adapters. FakeTonChainProvider itself
-// remains Testnet-only and cannot be instantiated as a Mainnet provider.
-function asMainnetProvider(fake: FakeTonChainProvider): TonChainProvider {
-  return new Proxy(fake, {
-    get(target, property, receiver) {
-      if (property === 'networkGlobalId') return TON_MAINNET_NETWORK_GLOBAL_ID;
-      return Reflect.get(target, property, receiver);
-    },
-  });
-}
-
 describe('admitWalletSeqno Mainnet network gates', () => {
   const address = deriveWalletV5R1AddressRaw({
     publicKeyHex: TEST_PUBLIC_KEY_HEX,
@@ -49,14 +38,16 @@ describe('admitWalletSeqno Mainnet network gates', () => {
     primary,
     secondary,
   });
+  const mainnetFake = () =>
+    new FakeTonChainProvider({ networkGlobalId: TON_MAINNET_NETWORK_GLOBAL_ID });
 
   it('admits Mainnet uninitialized Wallet V5R1 with two Mainnet providers only', async () => {
-    const primaryFake = new FakeTonChainProvider();
-    const secondaryFake = new FakeTonChainProvider();
+    const primaryFake = mainnetFake();
+    const secondaryFake = mainnetFake();
     primaryFake.seedUninit(address);
     secondaryFake.seedUninit(address);
     const result = await admitWalletSeqno(input(
-      asMainnetProvider(primaryFake), asMainnetProvider(secondaryFake),
+      primaryFake, secondaryFake,
       TON_MAINNET_NETWORK_GLOBAL_ID
     ));
     expect(result.ok).toBe(true);
@@ -68,8 +59,8 @@ describe('admitWalletSeqno Mainnet network gates', () => {
   });
 
   it('admits Mainnet active Wallet V5R1 with matching code and seqno', async () => {
-    const primaryFake = new FakeTonChainProvider();
-    const secondaryFake = new FakeTonChainProvider();
+    const primaryFake = mainnetFake();
+    const secondaryFake = mainnetFake();
     for (const fake of [primaryFake, secondaryFake]) {
       fake.seedActiveV5R1({
         address, seqno: 5, publicKeyHex: TEST_PUBLIC_KEY_HEX,
@@ -77,7 +68,7 @@ describe('admitWalletSeqno Mainnet network gates', () => {
       });
     }
     const result = await admitWalletSeqno(input(
-      asMainnetProvider(primaryFake), asMainnetProvider(secondaryFake),
+      primaryFake, secondaryFake,
       TON_MAINNET_NETWORK_GLOBAL_ID
     ));
     expect(result.ok).toBe(true);
@@ -88,10 +79,10 @@ describe('admitWalletSeqno Mainnet network gates', () => {
   });
 
   it('rejects Mainnet if either provider is Testnet before any reads', async () => {
-    const primaryFake = new FakeTonChainProvider();
+    const primaryFake = mainnetFake();
     const secondaryFake = new FakeTonChainProvider();
     const result = await admitWalletSeqno(input(
-      asMainnetProvider(primaryFake), secondaryFake,
+      primaryFake, secondaryFake,
       TON_MAINNET_NETWORK_GLOBAL_ID
     ));
     expect(result.ok).toBe(false);

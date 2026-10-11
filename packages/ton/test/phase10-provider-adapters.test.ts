@@ -365,12 +365,30 @@ describe('provider failure handling and selection', () => {
       createTonChainProvider({
         kind: 'toncenter',
         baseUrl: 'https://testnet.toncenter.com/api/v2',
+        networkGlobalId: TON_TESTNET_NETWORK_GLOBAL_ID,
         fetchImpl: tonCenterFetch(),
       }),
     ).toBeInstanceOf(TonCenterTestnetProvider);
-    expect(() => createTonChainProvider({ kind: 'fake', baseUrl: 'test-only' })).toThrow(
+    expect(() =>
+      createTonChainProvider({
+        kind: 'fake',
+        baseUrl: 'test-only',
+        networkGlobalId: TON_TESTNET_NETWORK_GLOBAL_ID,
+      }),
+    ).toThrow(
       /test-only/,
     );
+  });
+
+
+  it('refuses omitted networkGlobalId (no silent Testnet default)', () => {
+    const incomplete = {
+      kind: 'toncenter' as const,
+      baseUrl: 'https://testnet.toncenter.com/api/v2',
+    };
+    expect(() =>
+      createTonChainProvider(incomplete as unknown as Parameters<typeof createTonChainProvider>[0]),
+    ).toThrow(/explicit networkGlobalId|-3|-239/i);
   });
 
   it('creates Mainnet-capable provider adapters only when networkGlobalId=-239 is explicit', () => {

@@ -44,14 +44,36 @@ describe('Phase 10 chain provider', () => {
     expect(health.networkGlobalId).toBe(TON_TESTNET_NETWORK_GLOBAL_ID);
   });
 
-  it('rejects mainnet networkGlobalId at assert and fake construction', () => {
+  it('assertTestnetOnly still rejects Mainnet; FakeTonChainProvider accepts -239', () => {
     expect(() => assertTestnetOnly(TON_MAINNET_NETWORK_GLOBAL_ID)).toThrow(/MAINNET rejected/);
-    expect(
-      () =>
-        new FakeTonChainProvider({
-          networkGlobalId: TON_MAINNET_NETWORK_GLOBAL_ID,
-        }),
-    ).toThrow(/MAINNET rejected/);
+    const mainnet = new FakeTonChainProvider({
+      networkGlobalId: TON_MAINNET_NETWORK_GLOBAL_ID,
+    });
+    expect(mainnet.networkGlobalId).toBe(TON_MAINNET_NETWORK_GLOBAL_ID);
+    expect(() => new FakeTonChainProvider({ networkGlobalId: -123 })).toThrow(
+      /Unsupported FakeTonChainProvider networkGlobalId/,
+    );
+  });
+
+  it('FakeTonChainProvider Mainnet stamps observeJettonTransfer networkGlobalId', async () => {
+    const fake = new FakeTonChainProvider({ networkGlobalId: TON_MAINNET_NETWORK_GLOBAL_ID });
+    fake.seedTransfer({
+      hotWallet: 'EQ_hot',
+      jettonMaster: 'EQ_master',
+      recipient: 'EQ_recv',
+      amountAtomic: '190000',
+      queryId: '42',
+      success: true,
+      bounced: false,
+      proofStage: 'COMPLETE',
+    });
+    const evidence = await fake.observeJettonTransfer({
+      hotWallet: 'EQ_hot',
+      jettonMaster: 'EQ_master',
+      queryId: '42',
+    });
+    expect(evidence?.networkGlobalId).toBe(TON_MAINNET_NETWORK_GLOBAL_ID);
+    expect((await fake.health()).networkGlobalId).toBe(TON_MAINNET_NETWORK_GLOBAL_ID);
   });
 
   it('deprecated HttpTonProvider directs callers to documented adapters', () => {

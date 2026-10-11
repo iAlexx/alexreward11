@@ -21,7 +21,9 @@ import { createHash } from 'node:crypto';
 
 import type { JettonTransferEvidence, TonChainProvider } from '@alex-rewards/ton';
 import {
+  TON_MAINNET_NETWORK_GLOBAL_ID,
   TON_TESTNET_NETWORK_GLOBAL_ID,
+  tonConnectNetworkFromGlobalChainIdentifier,
   validateWalletV5R1SignedExternalAgainstAttempt,
   type DecodedWalletV5R1SignedExternal,
 } from '@alex-rewards/ton';
@@ -376,7 +378,7 @@ function evaluateV5R1ExpiredUnconsumedSeqno(input: {
     canonicalMessageHash: input.snapshot.canonicalMessageHash,
     validUntilUnix: input.snapshot.validUntilUnix,
     hotWalletAddress: input.snapshot.hotWalletAddress,
-    networkGlobalId: TON_TESTNET_NETWORK_GLOBAL_ID,
+    networkGlobalId: input.snapshot.networkGlobalId,
     signedExternalMessageBoc: input.snapshot.signedExternalMessageBoc,
     normalizedExternalMessageHash: input.snapshot.normalizedExternalMessageHash,
     externalMessageCellHash: input.snapshot.externalMessageCellHash,
@@ -500,7 +502,7 @@ export async function reconcileRealWithdrawalAttemptOnly(
     recipient: snapshot.recipient,
     amountAtomic: snapshot.netAmountAtomic,
     queryId: snapshot.queryId,
-    networkGlobalId: TON_TESTNET_NETWORK_GLOBAL_ID,
+    networkGlobalId: snapshot.networkGlobalId,
     senderJettonWallet: snapshot.payoutJettonWallet,
   };
 
@@ -660,7 +662,8 @@ export async function reconcileRealWithdrawalAttemptOnly(
             success: primaryEvidence.success,
             bounced: primaryEvidence.bounced,
             providerKind: String(primaryKind),
-            networkGlobalId: primaryEvidence.networkGlobalId ?? TON_TESTNET_NETWORK_GLOBAL_ID,
+            networkGlobalId:
+              primaryEvidence.networkGlobalId ?? snapshot.networkGlobalId,
             ...(primaryEvidence.senderJettonWallet !== undefined
               ? { senderJettonWallet: primaryEvidence.senderJettonWallet }
               : {}),
@@ -870,6 +873,8 @@ interface ReconcileSnapshot {
   readonly payoutJettonWallet: string;
   readonly jettonMaster: string;
   readonly queryId: string;
+  /** Authoritative TON network global id from networks.global_chain_identifier (-3 or -239). */
+  readonly networkGlobalId: typeof TON_TESTNET_NETWORK_GLOBAL_ID | typeof TON_MAINNET_NETWORK_GLOBAL_ID;
   readonly expectedSeqno: number;
   readonly validUntilUnix: number;
   readonly canonicalMessageHash: string;
@@ -880,6 +885,39 @@ interface ReconcileSnapshot {
   readonly settlementLedgerTxId: string | null;
   readonly confirmedAt: Date | null;
   readonly hasIntendedPayoutProven: boolean;
+}
+
+/**
+ * Map networks.global_chain_identifier (text) to TON networkGlobalId.
+ * Fail-closed: only -3 (Testnet) and -239 (Mainnet) are accepted.
+ */
+export function resolveReconcileNetworkGlobalId(
+  globalChainIdentifier: string | null | undefined,
+): typeof TON_TESTNET_NETWORK_GLOBAL_ID | typeof TON_MAINNET_NETWORK_GLOBAL_ID {
+  const raw = typeof globalChainIdentifier === 'string' ? globalChainIdentifier.trim() : '';
+  if (raw === '') {
+    throw new WithdrawalDomainError(
+      'VALIDATION',
+      'Reconcile-only refused: networks.global_chain_identifier missing',
+    );
+  }
+  let parsed: number;
+  try {
+    parsed = Number(tonConnectNetworkFromGlobalChainIdentifier(raw));
+  } catch {
+    throw new WithdrawalDomainError(
+      'VALIDATION',
+      'Reconcile-only refused: unsupported networks.global_chain_identifier',
+      { details: { globalChainIdentifier: raw } },
+    );
+  }
+  if (parsed === TON_TESTNET_NETWORK_GLOBAL_ID) return TON_TESTNET_NETWORK_GLOBAL_ID;
+  if (parsed === TON_MAINNET_NETWORK_GLOBAL_ID) return TON_MAINNET_NETWORK_GLOBAL_ID;
+  throw new WithdrawalDomainError(
+    'VALIDATION',
+    'Reconcile-only refused: networkGlobalId must be -3 or -239',
+    { details: { networkGlobalId: parsed, globalChainIdentifier: raw } },
+  );
 }
 
 async function loadReconcileSnapshot(
@@ -896,6 +934,7 @@ async function loadReconcileSnapshot(
       payout_jetton_wallet: string;
       jetton_master: string;
       query_id: string;
+      global_chain_identifier: string | null;
       expected_seqno: string;
       valid_until: Date;
       canonical_message_hash: string;
@@ -913,6 +952,7 @@ async function loadReconcileSnapshot(
               hw.payout_jetton_wallet_address AS payout_jetton_wallet,
               a.contract_identity AS jetton_master,
               att.query_id::text AS query_id,
+              n.global_chain_identifier,
               att.expected_seqno::text AS expected_seqno,
               att.valid_until,
               att.canonical_message_hash,
@@ -926,6 +966,7 @@ async function loadReconcileSnapshot(
        JOIN user_wallets uw ON uw.id = w.wallet_id
        JOIN hot_wallets hw ON hw.id = w.hot_wallet_id
        JOIN assets a ON a.id = w.asset_id
+       JOIN networks n ON n.id = w.network_id
        JOIN withdrawal_attempts att
          ON att.id = $2::uuid AND att.withdrawal_id = w.id
        WHERE w.id = $1::uuid`,
@@ -965,6 +1006,8 @@ async function loadReconcileSnapshot(
       [attemptId],
     );
 
+    const networkGlobalId = resolveReconcileNetworkGlobalId(snap.global_chain_identifier);
+
     return {
       withdrawalState: snap.state,
       netAmountAtomic: snap.net_amount_atomic,
@@ -973,6 +1016,7 @@ async function loadReconcileSnapshot(
       payoutJettonWallet: snap.payout_jetton_wallet,
       jettonMaster: snap.jetton_master,
       queryId: snap.query_id,
+      networkGlobalId,
       expectedSeqno: Number(snap.expected_seqno),
       validUntilUnix: Math.floor(new Date(snap.valid_until).getTime() / 1000),
       canonicalMessageHash: snap.canonical_message_hash,

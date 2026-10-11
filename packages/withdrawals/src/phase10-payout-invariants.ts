@@ -138,14 +138,14 @@ export function isCompleteIntendedPayoutProof(
     return false;
   }
 
-  // networkGlobalId must be exactly Testnet (-3); undefined never passes.
+  // networkGlobalId must be Testnet (-3) or Mainnet (-239); undefined never passes.
   const networkGlobalId =
     typeof record.networkGlobalId === 'number'
       ? record.networkGlobalId
       : typeof record.network_global_id === 'number'
         ? record.network_global_id
         : undefined;
-  if (networkGlobalId !== -3) return false;
+  if (networkGlobalId !== -3 && networkGlobalId !== -239) return false;
 
   if (withdrawalId !== expected.withdrawalId) return false;
 

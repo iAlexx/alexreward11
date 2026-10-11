@@ -33,6 +33,23 @@ describe('Phase21 Wallet V5R1 signed external decoder network binding', () => {
     const decoded = decodeWalletV5R1SignedExternal('eA==', -123);
     expect(decoded).toMatchObject({ok: false, code: 'NETWORK_UNSUPPORTED'});
   });
+
+  it('Mainnet BOC fails closed when decoded under Testnet identity', async () => {
+    const signed = await buildTestWalletV5R1SignedExternalBoc({
+      publicKeyHex: pubkey,
+      networkGlobalId: TON_MAINNET_NETWORK_GLOBAL_ID,
+      seqno: 7,
+      validUntil: 1950000000,
+      toAddress: destination,
+    });
+    const decoded = decodeWalletV5R1SignedExternal(
+      signed.signedWalletRequestBocBase64,
+      TON_TESTNET_NETWORK_GLOBAL_ID,
+    );
+    // Wallet id / context binds network; wrong network must not silently PASS as Testnet.
+    expect(decoded.ok).toBe(false);
+  });
+
   it('does not change the Testnet-only fake provider gate', () => {
     expect(TON_TESTNET_NETWORK_GLOBAL_ID).toBe(-3);
     expect(deriveWalletV5R1AddressRaw({

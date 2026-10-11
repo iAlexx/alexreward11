@@ -553,6 +553,7 @@ async function runReadonlyValidateCore(
   const primary =
     options.primaryProvider ??
     createTonChainProvider({
+      networkGlobalId: PHASE10_TON_TESTNET_NETWORK_GLOBAL_ID,
       kind: roles.roles.primary.kind,
       baseUrl: roles.roles.primary.baseUrl,
       ...(roles.roles.primary.apiKey !== null ? { apiKey: roles.roles.primary.apiKey } : {}),
@@ -561,6 +562,7 @@ async function runReadonlyValidateCore(
   const secondary =
     options.secondaryProvider ??
     createTonChainProvider({
+      networkGlobalId: PHASE10_TON_TESTNET_NETWORK_GLOBAL_ID,
       kind: roles.roles.secondary.kind,
       baseUrl: roles.roles.secondary.baseUrl,
       ...(roles.roles.secondary.apiKey !== null ? { apiKey: roles.roles.secondary.apiKey } : {}),

@@ -529,6 +529,14 @@ describe('phase10 pre-commit blocker regressions', () => {
     ).toBe(false);
   });
 
+  it('Mainnet networkGlobalId -239 satisfies complete intended payout proof', () => {
+    const proof = baseIntendedProof({ networkGlobalId: -239 });
+    expect(isCompleteIntendedPayoutProof(proof, baseExpected)).toBe(true);
+    expect(isCompleteIntendedPayoutProof(baseIntendedProof({ networkGlobalId: -1 }), baseExpected)).toBe(
+      false,
+    );
+  });
+
   it('missing secondary evidence fails live acceptance proof', () => {
     const proof = baseIntendedProof({
       secondaryTxIdentity: undefined,

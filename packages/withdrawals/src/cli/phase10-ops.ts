@@ -12,6 +12,7 @@ import {
   createTonChainProvider,
   type TonChainProvider,
   type TonProviderKind,
+  TON_TESTNET_NETWORK_GLOBAL_ID,
 } from '@alex-rewards/ton';
 
 import {
@@ -158,6 +159,7 @@ function tryBuildObserveProvider(worker: ReturnType<typeof loadWorkerConfig>): {
   const kind = kindRaw as TonProviderKind;
   return {
     provider: createTonChainProvider({
+      networkGlobalId: TON_TESTNET_NETWORK_GLOBAL_ID,
       kind,
       baseUrl: url,
       apiKey: worker.TON_PRIMARY_PROVIDER_API_KEY || null,
