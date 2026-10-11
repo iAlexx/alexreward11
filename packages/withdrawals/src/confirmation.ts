@@ -1,5 +1,5 @@
 import type { JettonTransferEvidence } from '@alex-rewards/ton';
-import { TON_TESTNET_NETWORK_GLOBAL_ID } from '@alex-rewards/ton';
+import { TON_MAINNET_NETWORK_GLOBAL_ID, TON_TESTNET_NETWORK_GLOBAL_ID } from '@alex-rewards/ton';
 
 export interface ExpectedJettonPayout {
   readonly hotWallet: string;
@@ -7,7 +7,7 @@ export interface ExpectedJettonPayout {
   readonly recipient: string;
   readonly amountAtomic: string;
   readonly queryId: string;
-  /** Required for full Phase 10 confirmation (Testnet only). */
+  /** Explicit Mainnet network identity is required for Phase 21 confirmation. */
   readonly networkGlobalId?: number;
   /** Expected Hot Wallet Jetton wallet (sender side of TEP-74 transfer). */
   readonly senderJettonWallet?: string;
@@ -44,8 +44,22 @@ export function matchIntendedJettonPayout(
   }
 
   const expectedNetwork = expected.networkGlobalId ?? TON_TESTNET_NETWORK_GLOBAL_ID;
+  if (
+    expectedNetwork !== TON_TESTNET_NETWORK_GLOBAL_ID &&
+    expectedNetwork !== TON_MAINNET_NETWORK_GLOBAL_ID
+  ) {
+    return false;
+  }
+  // Testnet compatibility: older deterministic fixtures omitted network identity.
+  // Phase 21 is stricter: never infer Mainnet from an absent evidence network id.
+  if (
+    expectedNetwork === TON_MAINNET_NETWORK_GLOBAL_ID &&
+    evidence.networkGlobalId === undefined
+  ) {
+    return false;
+  }
   const evidenceNetwork = evidence.networkGlobalId ?? expectedNetwork;
-  if (evidenceNetwork !== expectedNetwork || expectedNetwork !== TON_TESTNET_NETWORK_GLOBAL_ID) {
+  if (evidenceNetwork !== expectedNetwork) {
     return false;
   }
 

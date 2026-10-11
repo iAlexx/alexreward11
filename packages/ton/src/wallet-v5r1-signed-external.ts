@@ -24,7 +24,7 @@ import {
 } from '@ton/core';
 import { WalletContractV5R1 } from '@ton/ton';
 
-import { TON_TESTNET_NETWORK_GLOBAL_ID } from './chain-provider.js';
+import { TON_MAINNET_NETWORK_GLOBAL_ID, TON_TESTNET_NETWORK_GLOBAL_ID } from './chain-provider.js';
 
 /** Official Wallet V5R1 external signed-auth opcode ("sign"). */
 export const WALLET_V5R1_AUTH_SIGNED_EXTERNAL_OPCODE = 0x7369676e;
@@ -49,6 +49,7 @@ export type WalletV5R1SignedExternalDecodeFailure =
   | 'UNSUPPORTED_OPCODE'
   | 'UNSUPPORTED_WALLET_ID'
   | 'NETWORK_NOT_TESTNET'
+  | 'NETWORK_UNSUPPORTED'
   | 'SUBWALLET_UNSUPPORTED';
 
 export type DecodeWalletV5R1SignedExternalResult =
@@ -96,17 +97,20 @@ function loadWalletIdV5R1Client(
 
 /**
  * Decode a persisted Wallet V5R1 auth_signed_external request body BOC.
- * networkGlobalId must be Testnet (-3) — Mainnet is rejected.
+ * Only explicit TON Testnet (-3) and TON Mainnet (-239) identifiers are valid.
  */
 export function decodeWalletV5R1SignedExternal(
   bocBase64: string,
   networkGlobalId: number = TON_TESTNET_NETWORK_GLOBAL_ID,
 ): DecodeWalletV5R1SignedExternalResult {
-  if (networkGlobalId !== TON_TESTNET_NETWORK_GLOBAL_ID) {
+  if (
+    networkGlobalId !== TON_TESTNET_NETWORK_GLOBAL_ID &&
+    networkGlobalId !== TON_MAINNET_NETWORK_GLOBAL_ID
+  ) {
     return {
       ok: false,
-      code: 'NETWORK_NOT_TESTNET',
-      message: 'Wallet V5R1 reconcile decode requires Testnet networkGlobalId=-3',
+      code: 'NETWORK_UNSUPPORTED',
+      message: `Wallet V5R1 signed-external decode unsupported networkGlobalId=${networkGlobalId}`,
     };
   }
   let cell: Cell;

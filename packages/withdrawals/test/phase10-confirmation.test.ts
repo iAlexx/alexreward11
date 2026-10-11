@@ -104,6 +104,23 @@ describe('phase10 confirmation matchIntendedJettonPayout', () => {
     ).toBe(true);
   });
 
+  it('matches Mainnet transfer only with explicit expected and observed -239 identity', () => {
+    const mainnetExpected = { ...expected, networkGlobalId: -239 };
+    const mainnetEvidence = {
+      ...expected, success: true, bounced: false, networkGlobalId: -239,
+      providerKind: 'tonapi', proofStage: 'COMPLETE' as const,
+      hotWalletTxHash: 'hot-tx', jettonWalletTxHash: 'wallet-tx',
+      recipientEvidence: 'recipient-proof',
+    };
+    expect(matchIntendedJettonPayout(mainnetEvidence, mainnetExpected)).toBe(true);
+    expect(matchIntendedJettonPayout(
+      { ...mainnetEvidence, networkGlobalId: -3 }, mainnetExpected
+    )).toBe(false);
+    const { networkGlobalId: _missing, ...unbound } = mainnetEvidence;
+    expect(matchIntendedJettonPayout(unbound, mainnetExpected)).toBe(false);
+    expect(matchIntendedJettonPayout(mainnetEvidence, expected)).toBe(false);
+  });
+
   it('requires complete low-level proof fields from production adapters', () => {
     expect(
       matchIntendedJettonPayout(
