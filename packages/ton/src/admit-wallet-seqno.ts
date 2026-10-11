@@ -13,6 +13,7 @@ import { Address, Cell } from '@ton/core';
 import { WalletContractV5R1 } from '@ton/ton';
 
 import {
+  TON_MAINNET_NETWORK_GLOBAL_ID,
   TON_TESTNET_NETWORK_GLOBAL_ID,
   type TonAccountState,
   type TonAccountStatus,
@@ -23,6 +24,8 @@ import { walletStateInitForSeqno } from './wallet-v5r1-state-init.js';
 
 export type AdmitWalletSeqnoBlockCode =
   | 'NETWORK_NOT_TESTNET'
+  | 'NETWORK_UNSUPPORTED'
+  | 'PROVIDER_NETWORK_MISMATCH'
   | 'SIGNER_REFERENCE_MISMATCH'
   | 'PUBLIC_KEY_INVALID'
   | 'STATEINIT_ADDRESS_MISMATCH'
@@ -153,11 +156,18 @@ export function deriveWalletV5R1AddressRaw(input: {
 export async function admitWalletSeqno(
   input: AdmitWalletSeqnoInput,
 ): Promise<AdmitWalletSeqnoResult> {
-  if (input.networkGlobalId !== TON_TESTNET_NETWORK_GLOBAL_ID) {
+  // Both explicitly approved TON networks are supported, never a third network.
+  // The two independent provider adapters MUST each agree with the selected
+  // network before account/seqno reads. This check is independent of HTTP URL
+  // allowlisting in each provider's constructor.
+  if (
+    input.networkGlobalId !== TON_TESTNET_NETWORK_GLOBAL_ID &&
+    input.networkGlobalId !== TON_MAINNET_NETWORK_GLOBAL_ID
+  ) {
     return {
       ok: false,
-      code: 'NETWORK_NOT_TESTNET',
-      message: `seqno admission requires networkGlobalId=${TON_TESTNET_NETWORK_GLOBAL_ID}`,
+      code: 'NETWORK_UNSUPPORTED',
+      message: `seqno admission unsupported networkGlobalId=${input.networkGlobalId}`,
     };
   }
   if (input.secondary === undefined || input.secondary === null) {
@@ -165,6 +175,16 @@ export async function admitWalletSeqno(
       ok: false,
       code: 'SECONDARY_PROVIDER_REQUIRED',
       message: 'independent secondary provider required for seqno admission',
+    };
+  }
+  if (
+    input.primary.networkGlobalId !== input.networkGlobalId ||
+    input.secondary.networkGlobalId !== input.networkGlobalId
+  ) {
+    return {
+      ok: false,
+      code: 'PROVIDER_NETWORK_MISMATCH',
+      message: 'seqno admission requires both provider networks to match withdrawal networkGlobalId',
     };
   }
 

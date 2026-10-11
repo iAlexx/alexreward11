@@ -8,6 +8,8 @@ import {
   approvedWalletV5R1CodeHash,
   deriveWalletV5R1AddressRaw,
   FakeTonChainProvider,
+  TON_MAINNET_NETWORK_GLOBAL_ID,
+  type TonChainProvider,
   TonProviderHttpError,
   walletStateInitForSeqno,
 } from '../src/index.js';
@@ -20,6 +22,92 @@ const FINGERPRINT = createHash('sha256')
 const HOT_WALLET_RAW = deriveWalletV5R1AddressRaw({
   publicKeyHex: TEST_PUBLIC_KEY_HEX,
   networkGlobalId: -3,
+});
+
+// Mainnet-specific, in-memory test adapters. FakeTonChainProvider itself
+// remains Testnet-only and cannot be instantiated as a Mainnet provider.
+function asMainnetProvider(fake: FakeTonChainProvider): TonChainProvider {
+  return new Proxy(fake, {
+    get(target, property, receiver) {
+      if (property === 'networkGlobalId') return TON_MAINNET_NETWORK_GLOBAL_ID;
+      return Reflect.get(target, property, receiver);
+    },
+  });
+}
+
+describe('admitWalletSeqno Mainnet network gates', () => {
+  const address = deriveWalletV5R1AddressRaw({
+    publicKeyHex: TEST_PUBLIC_KEY_HEX,
+    networkGlobalId: TON_MAINNET_NETWORK_GLOBAL_ID,
+  });
+  const input = (primary: TonChainProvider, secondary: TonChainProvider, networkGlobalId: number) => ({
+    networkGlobalId,
+    hotWalletAddress: address,
+    publicKeyHex: TEST_PUBLIC_KEY_HEX,
+    signerKeyReference: FINGERPRINT,
+    approvedSignerKeyReference: FINGERPRINT,
+    primary,
+    secondary,
+  });
+
+  it('admits Mainnet uninitialized Wallet V5R1 with two Mainnet providers only', async () => {
+    const primaryFake = new FakeTonChainProvider();
+    const secondaryFake = new FakeTonChainProvider();
+    primaryFake.seedUninit(address);
+    secondaryFake.seedUninit(address);
+    const result = await admitWalletSeqno(input(
+      asMainnetProvider(primaryFake), asMainnetProvider(secondaryFake),
+      TON_MAINNET_NETWORK_GLOBAL_ID
+    ));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.seqno).toBe(0);
+      expect(result.requiresStateInit).toBe(true);
+      expect(result.derivedAddressRaw.toLowerCase()).toBe(address.toLowerCase());
+    }
+  });
+
+  it('admits Mainnet active Wallet V5R1 with matching code and seqno', async () => {
+    const primaryFake = new FakeTonChainProvider();
+    const secondaryFake = new FakeTonChainProvider();
+    for (const fake of [primaryFake, secondaryFake]) {
+      fake.seedActiveV5R1({
+        address, seqno: 5, publicKeyHex: TEST_PUBLIC_KEY_HEX,
+        networkGlobalId: TON_MAINNET_NETWORK_GLOBAL_ID,
+      });
+    }
+    const result = await admitWalletSeqno(input(
+      asMainnetProvider(primaryFake), asMainnetProvider(secondaryFake),
+      TON_MAINNET_NETWORK_GLOBAL_ID
+    ));
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.seqno).toBe(5);
+      expect(result.requiresStateInit).toBe(false);
+    }
+  });
+
+  it('rejects Mainnet if either provider is Testnet before any reads', async () => {
+    const primaryFake = new FakeTonChainProvider();
+    const secondaryFake = new FakeTonChainProvider();
+    const result = await admitWalletSeqno(input(
+      asMainnetProvider(primaryFake), secondaryFake,
+      TON_MAINNET_NETWORK_GLOBAL_ID
+    ));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe('PROVIDER_NETWORK_MISMATCH');
+    expect(primaryFake.getAccountStateCallCount(address)).toBe(0);
+    expect(secondaryFake.getAccountStateCallCount(address)).toBe(0);
+  });
+
+  it('rejects unsupported network ids before any provider reads', async () => {
+    const primaryFake = new FakeTonChainProvider();
+    const secondaryFake = new FakeTonChainProvider();
+    const result = await admitWalletSeqno(input(primaryFake, secondaryFake, -123));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe('NETWORK_UNSUPPORTED');
+    expect(primaryFake.getAccountStateCallCount(address)).toBe(0);
+  });
 });
 
 describe('admitWalletSeqno (fail-closed V5R1)', () => {
