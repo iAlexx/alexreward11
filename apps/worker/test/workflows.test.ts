@@ -1,11 +1,22 @@
 import { describe, expect, it } from 'vitest';
 
-import { foundationProbe } from '../src/workflows.js';
+import {
+  FAKE_CHAIN_PAYOUT_ACTIVITY_OPTIONS,
+  REAL_CHAIN_PAYOUT_ACTIVITY_OPTIONS,
+  foundationProbe,
+} from '../src/workflows.js';
 import { toWithdrawalPayoutActivityResult } from '../src/payout-activity-result.js';
 
 describe('foundation Temporal workflow', () => {
   it('is deterministic and contains no business mutation', async () => {
     await expect(foundationProbe('phase-1')).resolves.toBe('foundation-ok:phase-1');
+  });
+});
+
+describe('real-chain payout Temporal retry policy', () => {
+  it('disables automatic retries for real-chain activities only', () => {
+    expect(REAL_CHAIN_PAYOUT_ACTIVITY_OPTIONS.retry.maximumAttempts).toBe(1);
+    expect(FAKE_CHAIN_PAYOUT_ACTIVITY_OPTIONS).not.toHaveProperty('retry');
   });
 });
 

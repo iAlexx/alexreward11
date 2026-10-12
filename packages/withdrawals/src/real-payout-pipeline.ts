@@ -51,8 +51,17 @@ import { settleWithdrawalReservation } from './settlement.js';
 import {
   SignerHttpClient,
   type SignerClientSignResult,
+  type SignerHttpRequestOptions,
   type SignerSigningIdentity,
 } from './signer-client.js';
+import {
+  SIGNER_HTTP_VALID_UNTIL_MARGIN_MS,
+} from './signer-http-timeouts.js';
+import {
+  SIGNING_LATE_COMPLETION_REJECTED,
+  assertMayCommitSignedBoc,
+  classifySigningResumeWithoutBoc,
+} from './signing-authority-guard.js';
 import type { WithdrawalState } from './state-machine.js';
 import { transitionWithdrawal } from './transitions.js';
 import type { JettonTransferEvidence } from '@alex-rewards/ton';
@@ -113,8 +122,11 @@ export interface RealTestnetPayoutPipelineResult {
 }
 
 export interface RealPayoutSignerPort {
-  getSigningIdentity(): Promise<SignerSigningIdentity>;
-  signWithdrawalAttempt(withdrawalAttemptId: string): Promise<SignerClientSignResult>;
+  getSigningIdentity(options?: SignerHttpRequestOptions): Promise<SignerSigningIdentity>;
+  signWithdrawalAttempt(
+    withdrawalAttemptId: string,
+    options?: SignerHttpRequestOptions,
+  ): Promise<SignerClientSignResult>;
 }
 
 export interface RunRealTestnetPayoutPipelineInput {
@@ -157,6 +169,13 @@ export interface RunRealTestnetPayoutPipelineInput {
   readonly seqnoAdmissionRateLimitMaxAttempts?: number;
   /** Test-only: override RATE_LIMITED base backoff ms. */
   readonly seqnoAdmissionRateLimitBaseDelayMs?: number;
+  /**
+   * Activity cancellation signal (Temporal Context.cancellationSignal).
+   * When aborted, Signer HTTP I/O stops and late BOC persist/broadcast is refused.
+   */
+  readonly cancellationSignal?: AbortSignal;
+  /** Test-only: override "now" for valid_until margin checks. */
+  readonly authorityNowMs?: number;
 }
 
 function createProviderFromConfig(
@@ -300,6 +319,7 @@ interface PersistedPipelineAttempt {
   readonly canonicalMessageHash: string;
   readonly broadcastResultState: string;
   readonly dispatchFencingToken: string;
+  readonly validUntil: Date;
   readonly signedExternalMessageBoc: string | null;
   readonly signedWalletRequestBoc: string | null;
   readonly externalMessageCellHash: string | null;
@@ -325,6 +345,7 @@ async function loadPersistedAttempt(
     canonical_message_hash: string;
     broadcast_result_state: string;
     dispatch_fencing_token: string;
+    valid_until: Date;
     signed_external_message_boc: string | null;
     signed_wallet_request_boc: string | null;
     external_message_cell_hash: string | null;
@@ -335,6 +356,7 @@ async function loadPersistedAttempt(
             canonical_message_hash,
             broadcast_result_state::text AS broadcast_result_state,
             dispatch_fencing_token::text AS dispatch_fencing_token,
+            valid_until,
             signed_external_message_boc, signed_wallet_request_boc,
             external_message_cell_hash, normalized_external_message_hash,
             broadcast_submitted_at
@@ -355,6 +377,7 @@ async function loadPersistedAttempt(
         canonicalMessageHash: row.canonical_message_hash,
         broadcastResultState: row.broadcast_result_state,
         dispatchFencingToken: row.dispatch_fencing_token,
+        validUntil: row.valid_until,
         signedExternalMessageBoc: row.signed_external_message_boc,
         signedWalletRequestBoc: row.signed_wallet_request_boc,
         externalMessageCellHash: row.external_message_cell_hash,
@@ -691,6 +714,7 @@ async function resumePersistedPipeline(
   testPath: boolean,
   stagesCompleted: string[],
   existingAttempt: PersistedPipelineAttempt,
+  options: { readonly allowFirstSign?: boolean } = {},
 ): Promise<RealTestnetPayoutPipelineResult> {
   const context = await loadPersistedContext(db, input);
   let attempt = existingAttempt;
@@ -733,9 +757,49 @@ async function resumePersistedPipeline(
     attempt.broadcastSubmittedAt === null &&
     state === 'SIGNING'
   ) {
+    // Cross-activity resume with no durable BOC: never blindly re-issue Signer POST.
+    // Same-activity continuation after attempt creation may perform the first sign.
+    if (options.allowFirstSign !== true) {
+      const resumeClass = classifySigningResumeWithoutBoc({
+        validUntil: attempt.validUntil,
+        ...(input.authorityNowMs !== undefined ? { nowMs: input.authorityNowMs } : {}),
+        validUntilMarginMs: SIGNER_HTTP_VALID_UNTIL_MARGIN_MS,
+      });
+      await withWithdrawalTransaction(db, async (client) => {
+        await updateAttemptBroadcastState(client, {
+          attemptId: attempt.id,
+          broadcastResultState: 'FAILED_PRE_BROADCAST',
+        });
+        await transitionWithdrawal(client, {
+          id: context.withdrawalId,
+          from: 'SIGNING',
+          to: 'FAILED_PRE_BROADCAST',
+        });
+        await releaseLeaseFailedPreBroadcast(client, {
+          hotWalletId: context.hotWalletId,
+          withdrawalId: context.withdrawalId,
+          fencingToken: BigInt(attempt.dispatchFencingToken),
+        });
+      });
+      stagesCompleted.push('signing_resume_no_boc_fail_closed');
+      return {
+        state: 'FAILED_PRE_BROADCAST',
+        attemptId: attempt.id,
+        reason: resumeClass.reason,
+        seqno: Number(attempt.expectedSeqno),
+        stagesCompleted,
+      };
+    }
+
     let signed: SignerClientSignResult;
     try {
-      signed = await signer.signWithdrawalAttempt(attempt.id);
+      signed = await signer.signWithdrawalAttempt(attempt.id, {
+        validUntil: attempt.validUntil,
+        ...(input.cancellationSignal !== undefined
+          ? { signal: input.cancellationSignal }
+          : {}),
+        ...(input.authorityNowMs !== undefined ? { nowMs: input.authorityNowMs } : {}),
+      });
     } catch (error) {
       await withWithdrawalTransaction(db, async (client) => {
         await updateAttemptBroadcastState(client, {
@@ -788,7 +852,47 @@ async function resumePersistedPipeline(
         stagesCompleted,
       };
     }
-    await withWithdrawalTransaction(db, async (client) => {
+
+    const ownerIdentity = hotWalletDispatchOwnerIdentity(context.withdrawalId);
+    const persistOutcome = await withWithdrawalTransaction(db, async (client) => {
+      const authority = await assertMayCommitSignedBoc(client, {
+        withdrawalId: context.withdrawalId,
+        attemptId: attempt.id,
+        hotWalletId: context.hotWalletId,
+        fencingToken: BigInt(attempt.dispatchFencingToken),
+        ownerIdentity,
+        ...(input.cancellationSignal !== undefined
+          ? { cancellationSignal: input.cancellationSignal }
+          : {}),
+        ...(input.authorityNowMs !== undefined ? { nowMs: input.authorityNowMs } : {}),
+        validUntilMarginMs: SIGNER_HTTP_VALID_UNTIL_MARGIN_MS,
+      });
+      if (!authority.ok) {
+        await updateAttemptBroadcastState(client, {
+          attemptId: attempt.id,
+          broadcastResultState: 'FAILED_PRE_BROADCAST',
+        });
+        const current = await client.query<{ state: WithdrawalState }>(
+          `SELECT state FROM withdrawals WHERE id = $1::uuid FOR UPDATE`,
+          [context.withdrawalId],
+        );
+        if (current.rows[0]?.state === 'SIGNING') {
+          await transitionWithdrawal(client, {
+            id: context.withdrawalId,
+            from: 'SIGNING',
+            to: 'FAILED_PRE_BROADCAST',
+          });
+          await releaseLeaseFailedPreBroadcast(client, {
+            hotWalletId: context.hotWalletId,
+            withdrawalId: context.withdrawalId,
+            fencingToken: BigInt(attempt.dispatchFencingToken),
+          });
+        }
+        return {
+          ok: false as const,
+          reason: `${SIGNING_LATE_COMPLETION_REJECTED}:${authority.detail}`,
+        };
+      }
       await assertBlindResendForbidden(client, attempt.id);
       await persistPreBroadcastEvidence(client, {
         attemptId: attempt.id,
@@ -802,7 +906,17 @@ async function resumePersistedPipeline(
         from: 'SIGNING',
         to: 'BROADCASTING',
       });
+      return { ok: true as const };
     });
+    if (!persistOutcome.ok) {
+      return {
+        state: 'FAILED_PRE_BROADCAST',
+        attemptId: attempt.id,
+        reason: persistOutcome.reason,
+        seqno: Number(attempt.expectedSeqno),
+        stagesCompleted,
+      };
+    }
     stagesCompleted.push('persist_signed_boc_before_send');
     crashAt(input, 'AFTER_BOC_PERSISTED');
     attempt = (await loadPersistedAttempt(db, context.withdrawalId))!;
@@ -869,7 +983,16 @@ async function resumePersistedPipeline(
     const resumeOwner = hotWalletDispatchOwnerIdentity(context.withdrawalId);
     const resumeFence = BigInt(attempt.dispatchFencingToken);
     let resumeBroadcastClaimed = false;
-    await withWithdrawalTransaction(db, async (client) => {
+    if (input.cancellationSignal?.aborted === true) {
+      return {
+        state: 'RECONCILE_REQUIRED',
+        attemptId: attempt.id,
+        reason: `${SIGNING_LATE_COMPLETION_REJECTED}:activity_cancelled`,
+        seqno: Number(attempt.expectedSeqno),
+        stagesCompleted,
+      };
+    }
+    const resumeClaim = await withWithdrawalTransaction(db, async (client) => {
       // Same-withdrawal may reacquire if lease expired while still pre-broadcast.
       // Same-owner reclaim keeps fencing_token STABLE (attempt fence is immutable).
       const lease = await acquireHotWalletDispatchLease(client, context.hotWalletId, resumeOwner);
@@ -890,19 +1013,42 @@ async function resumePersistedPipeline(
           },
         );
       }
-      await assertHotWalletDispatchFence(client, {
+      const authority = await assertMayCommitSignedBoc(client, {
+        withdrawalId: context.withdrawalId,
+        attemptId: attempt.id,
         hotWalletId: context.hotWalletId,
-        fencingToken: lease.fencingToken,
+        fencingToken: resumeFence,
         ownerIdentity: resumeOwner,
+        ...(input.cancellationSignal !== undefined
+          ? { cancellationSignal: input.cancellationSignal }
+          : {}),
+        ...(input.authorityNowMs !== undefined ? { nowMs: input.authorityNowMs } : {}),
+        validUntilMarginMs: SIGNER_HTTP_VALID_UNTIL_MARGIN_MS,
       });
+      if (!authority.ok) {
+        return {
+          ok: false as const,
+          reason: `${SIGNING_LATE_COMPLETION_REJECTED}:${authority.detail}`,
+        };
+      }
       const claim = await claimFirstBroadcastSend(client, {
         attemptId: attempt.id,
         fencingToken: resumeFence,
         ambiguityClass: null,
         broadcastResultState: 'UNKNOWN',
       });
-      resumeBroadcastClaimed = claim.claimed;
+      return { ok: true as const, claimed: claim.claimed };
     });
+    if (!resumeClaim.ok) {
+      return {
+        state: 'RECONCILE_REQUIRED',
+        attemptId: attempt.id,
+        reason: resumeClaim.reason,
+        seqno: Number(attempt.expectedSeqno),
+        stagesCompleted,
+      };
+    }
+    resumeBroadcastClaimed = resumeClaim.claimed;
     if (!resumeBroadcastClaimed) {
       stagesCompleted.push('broadcast_claim_lost_observe_only');
       return {
@@ -1217,6 +1363,9 @@ export async function runRealTestnetPayoutPipeline(
     new SignerHttpClient({
       baseUrl: payout.signerBaseUrl,
       serviceToken: payout.signerServiceToken,
+      ...(input.cancellationSignal !== undefined
+        ? { signal: input.cancellationSignal }
+        : {}),
     });
 
   const persistedState = await db.query<{ state: WithdrawalState }>(
@@ -1545,6 +1694,7 @@ export async function runRealTestnetPayoutPipeline(
       testPath,
       stagesCompleted,
       persistedAttempt,
+      { allowFirstSign: true },
     );
   }
 
@@ -1679,7 +1829,10 @@ export async function runRealTestnetPayoutPipeline(
   });
   stagesCompleted.push('approved_withdrawal_loaded');
 
-  const identity = await signer.getSigningIdentity();
+  const identity = await signer.getSigningIdentity({
+    ...(input.cancellationSignal !== undefined ? { signal: input.cancellationSignal } : {}),
+    ...(input.authorityNowMs !== undefined ? { nowMs: input.authorityNowMs } : {}),
+  });
   if (!identity.signingReady) {
     return {
       state: 'BLOCKED',
@@ -1939,10 +2092,14 @@ export async function runRealTestnetPayoutPipeline(
   stagesCompleted.push('immutable_payout_attempt');
   crashAt(input, 'AFTER_ATTEMPT_CREATED');
 
-  // --- Sign (attempt-id only) ---
+  // --- Sign (attempt-id only; first creation path only — resume never re-signs) ---
   let signed: SignerClientSignResult;
   try {
-    signed = await signer.signWithdrawalAttempt(attempt.id);
+    signed = await signer.signWithdrawalAttempt(attempt.id, {
+      validUntil,
+      ...(input.cancellationSignal !== undefined ? { signal: input.cancellationSignal } : {}),
+      ...(input.authorityNowMs !== undefined ? { nowMs: input.authorityNowMs } : {}),
+    });
   } catch (error) {
     await withWithdrawalTransaction(db, async (client) => {
       await updateAttemptBroadcastState(client, {
@@ -2008,12 +2165,46 @@ export async function runRealTestnetPayoutPipeline(
   const ownerIdentity = context.ownerIdentity;
 
   // --- Persist BOC BEFORE external send (NO BLIND RESEND foundation) ---
-  await withWithdrawalTransaction(db, async (client) => {
-    await assertHotWalletDispatchFence(client, {
+  // Late activity completion after timeout/cancel/expiry must not persist.
+  const persistOutcome = await withWithdrawalTransaction(db, async (client) => {
+    const authority = await assertMayCommitSignedBoc(client, {
+      withdrawalId: context.withdrawalId,
+      attemptId: attempt.id,
       hotWalletId: context.hotWalletId,
       fencingToken: context.fencingToken,
       ownerIdentity,
+      ...(input.cancellationSignal !== undefined
+        ? { cancellationSignal: input.cancellationSignal }
+        : {}),
+      ...(input.authorityNowMs !== undefined ? { nowMs: input.authorityNowMs } : {}),
+      validUntilMarginMs: SIGNER_HTTP_VALID_UNTIL_MARGIN_MS,
     });
+    if (!authority.ok) {
+      await updateAttemptBroadcastState(client, {
+        attemptId: attempt.id,
+        broadcastResultState: 'FAILED_PRE_BROADCAST',
+      });
+      const current = await client.query<{ state: WithdrawalState }>(
+        `SELECT state FROM withdrawals WHERE id = $1::uuid FOR UPDATE`,
+        [context.withdrawalId],
+      );
+      if (current.rows[0]?.state === 'SIGNING') {
+        await transitionWithdrawal(client, {
+          id: context.withdrawalId,
+          from: 'SIGNING',
+          to: 'FAILED_PRE_BROADCAST',
+        });
+        await releaseLeaseFailedPreBroadcast(client, {
+          hotWalletId: context.hotWalletId,
+          withdrawalId: context.withdrawalId,
+          fencingToken: context.fencingToken,
+        });
+      }
+      return {
+        ok: false as const,
+        reason: `${SIGNING_LATE_COMPLETION_REJECTED}:${authority.detail}`,
+      };
+    }
     await assertBlindResendForbidden(client, attempt.id);
     await persistPreBroadcastEvidence(client, {
       attemptId: attempt.id,
@@ -2027,26 +2218,60 @@ export async function runRealTestnetPayoutPipeline(
       from: 'SIGNING',
       to: 'BROADCASTING',
     });
+    return { ok: true as const };
   });
+  if (!persistOutcome.ok) {
+    return {
+      state: 'FAILED_PRE_BROADCAST',
+      attemptId: attempt.id,
+      reason: persistOutcome.reason,
+      seqno,
+      stagesCompleted,
+    };
+  }
   stagesCompleted.push('persist_signed_boc_before_send');
   crashAt(input, 'AFTER_BOC_PERSISTED');
 
   // Atomic first-broadcast claim BEFORE sendBoc. Losing contenders must not send.
+  // Re-check authority so a late completion cannot broadcast after cancel/expiry.
   let broadcastClaimed = false;
-  await withWithdrawalTransaction(db, async (client) => {
-    await assertHotWalletDispatchFence(client, {
+  const broadcastGateOutcome = await withWithdrawalTransaction(db, async (client) => {
+    const authority = await assertMayCommitSignedBoc(client, {
+      withdrawalId: context.withdrawalId,
+      attemptId: attempt.id,
       hotWalletId: context.hotWalletId,
       fencingToken: context.fencingToken,
       ownerIdentity,
+      ...(input.cancellationSignal !== undefined
+        ? { cancellationSignal: input.cancellationSignal }
+        : {}),
+      ...(input.authorityNowMs !== undefined ? { nowMs: input.authorityNowMs } : {}),
+      validUntilMarginMs: SIGNER_HTTP_VALID_UNTIL_MARGIN_MS,
     });
+    if (!authority.ok) {
+      return {
+        ok: false as const,
+        reason: `${SIGNING_LATE_COMPLETION_REJECTED}:${authority.detail}`,
+      };
+    }
     const claim = await claimFirstBroadcastSend(client, {
       attemptId: attempt.id,
       fencingToken: context.fencingToken,
       ambiguityClass: null,
       broadcastResultState: 'UNKNOWN',
     });
-    broadcastClaimed = claim.claimed;
+    return { ok: true as const, claimed: claim.claimed };
   });
+  if (!broadcastGateOutcome.ok) {
+    return {
+      state: 'RECONCILE_REQUIRED',
+      attemptId: attempt.id,
+      reason: broadcastGateOutcome.reason,
+      seqno,
+      stagesCompleted,
+    };
+  }
+  broadcastClaimed = broadcastGateOutcome.claimed;
   if (!broadcastClaimed) {
     stagesCompleted.push('broadcast_claim_lost_observe_only');
     return {

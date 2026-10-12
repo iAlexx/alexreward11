@@ -45,6 +45,10 @@ type Scenario = {
   readonly attemptsAfterCrash: number;
   readonly sendsAfterCrash: number;
   readonly sendsAfterRestart: number;
+  /** Expected pipeline result state after automatic resume (Owner recovery otherwise). */
+  readonly recoveredState: string;
+  /** Expected additional Signer POSTs on automatic resume. */
+  readonly signCallsAfterRestart: number;
 };
 
 const scenarios: readonly Scenario[] = [
@@ -55,22 +59,28 @@ const scenarios: readonly Scenario[] = [
     attemptsAfterCrash: 0,
     sendsAfterCrash: 0,
     sendsAfterRestart: 1,
+    recoveredState: 'CONFIRMED',
+    signCallsAfterRestart: 1,
   },
   {
-    name: 'B: pending attempt is reused',
+    name: 'B: attempt created without BOC fails closed (no automatic re-sign)',
     point: 'AFTER_ATTEMPT_CREATED',
     stateAfterCrash: 'SIGNING',
     attemptsAfterCrash: 1,
     sendsAfterCrash: 0,
-    sendsAfterRestart: 1,
+    sendsAfterRestart: 0,
+    recoveredState: 'FAILED_PRE_BROADCAST',
+    signCallsAfterRestart: 0,
   },
   {
-    name: 'C: signed but BOC not persisted re-signs same attempt',
+    name: 'C: signed but BOC not persisted fails closed (no automatic re-sign)',
     point: 'AFTER_SIGNED',
     stateAfterCrash: 'SIGNING',
     attemptsAfterCrash: 1,
     sendsAfterCrash: 0,
-    sendsAfterRestart: 1,
+    sendsAfterRestart: 0,
+    recoveredState: 'FAILED_PRE_BROADCAST',
+    signCallsAfterRestart: 0,
   },
   {
     name: 'D: persisted BOC is submitted once',
@@ -79,6 +89,8 @@ const scenarios: readonly Scenario[] = [
     attemptsAfterCrash: 1,
     sendsAfterCrash: 0,
     sendsAfterRestart: 1,
+    recoveredState: 'CONFIRMED',
+    signCallsAfterRestart: 0,
   },
   {
     name: 'E: submit intent forbids a later send',
@@ -87,6 +99,8 @@ const scenarios: readonly Scenario[] = [
     attemptsAfterCrash: 1,
     sendsAfterCrash: 0,
     sendsAfterRestart: 0,
+    recoveredState: 'CONFIRMED',
+    signCallsAfterRestart: 0,
   },
   {
     name: 'F: accepted send before evidence is never sent twice',
@@ -95,6 +109,8 @@ const scenarios: readonly Scenario[] = [
     attemptsAfterCrash: 1,
     sendsAfterCrash: 1,
     sendsAfterRestart: 1,
+    recoveredState: 'CONFIRMED',
+    signCallsAfterRestart: 0,
   },
   {
     name: 'G: broadcast evidence resumes confirmation',
@@ -103,6 +119,8 @@ const scenarios: readonly Scenario[] = [
     attemptsAfterCrash: 1,
     sendsAfterCrash: 1,
     sendsAfterRestart: 1,
+    recoveredState: 'CONFIRMED',
+    signCallsAfterRestart: 0,
   },
   {
     name: 'H: confirmed before settlement settles once on restart',
@@ -111,6 +129,8 @@ const scenarios: readonly Scenario[] = [
     attemptsAfterCrash: 1,
     sendsAfterCrash: 1,
     sendsAfterRestart: 1,
+    recoveredState: 'CONFIRMED',
+    signCallsAfterRestart: 0,
   },
 ];
 
@@ -336,21 +356,29 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 DB crash/restart recovery', (
       expect(proof.rows[0]?.c).toBeGreaterThanOrEqual(1);
     }
 
+    const signCallsBeforeRestart = signCalls.length;
     const recovered = await runRealTestnetPayoutPipeline(pool, baseInput);
-    expect(recovered.state).toBe('CONFIRMED');
+    expect(recovered.state).toBe(scenario.recoveredState);
     expect(primary.getSendBocCallCount()).toBe(scenario.sendsAfterRestart);
+    expect(signCalls.length - signCallsBeforeRestart).toBe(scenario.signCallsAfterRestart);
 
     const finalAttempts = await pool.query<{ id: string }>(
       `SELECT id FROM withdrawal_attempts
        WHERE withdrawal_id = $1::uuid ORDER BY attempt_number`,
       [withdrawalId],
     );
-    expect(finalAttempts.rowCount).toBe(1);
+    expect(finalAttempts.rowCount).toBe(scenario.attemptsAfterCrash === 0 ? 1 : 1);
     if (firstAttemptId !== undefined) {
       expect(finalAttempts.rows[0]?.id).toBe(firstAttemptId);
     }
-    if (scenario.point === 'AFTER_ATTEMPT_CREATED' || scenario.point === 'AFTER_SIGNED') {
-      expect(signCalls.every((attemptId) => attemptId === finalAttempts.rows[0]?.id)).toBe(true);
+    if (scenario.point === 'AFTER_SIGNED') {
+      // First activity signed once; automatic resume must not sign again.
+      expect(signCalls).toHaveLength(1);
+      expect(signCalls[0]).toBe(finalAttempts.rows[0]?.id);
+    }
+    if (scenario.point === 'AFTER_ATTEMPT_CREATED') {
+      // Crash before first Signer POST; automatic resume must not invent a sign.
+      expect(signCalls).toHaveLength(0);
     }
 
     const settled = await pool.query<{
@@ -366,12 +394,17 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 DB crash/restart recovery', (
        FROM withdrawals w WHERE w.id = $1::uuid`,
       [withdrawalId],
     );
-    expect(settled.rows[0]?.state).toBe('CONFIRMED');
-    expect(settled.rows[0]?.settlement_ledger_tx_id).not.toBeNull();
-    expect(settled.rows[0]?.settlement_count).toBe('1');
+    expect(settled.rows[0]?.state).toBe(scenario.recoveredState);
+    if (scenario.recoveredState === 'CONFIRMED') {
+      expect(settled.rows[0]?.settlement_ledger_tx_id).not.toBeNull();
+      expect(settled.rows[0]?.settlement_count).toBe('1');
+    } else {
+      expect(settled.rows[0]?.settlement_ledger_tx_id).toBeNull();
+      expect(settled.rows[0]?.settlement_count).toBe('0');
+    }
   });
 
-  it('AFTER_SIGNED re-sign of SAME attempt is deterministic (no second attempt)', async () => {
+  it('AFTER_SIGNED without durable BOC fails closed (no automatic re-sign)', async () => {
     const userId = await createTestUser(pool, String(userSequence++));
     await createVerifiedPrimaryWallet(pool, {
       userId,
@@ -528,16 +561,19 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 DB crash/restart recovery', (
     expect(signCalls).toEqual([attemptId]);
 
     const recovered = await runRealTestnetPayoutPipeline(pool, baseInput);
-    expect(recovered.state).toBe('CONFIRMED');
-    expect(signCalls).toEqual([attemptId, attemptId]);
-    expect(normalizedHashes).toEqual([NORMALIZED_HASH, NORMALIZED_HASH]);
+    expect(recovered.state).toBe('FAILED_PRE_BROADCAST');
+    // Automatic resume must never issue a second Signer POST for the same attempt.
+    expect(signCalls).toEqual([attemptId]);
+    expect(normalizedHashes).toEqual([NORMALIZED_HASH]);
 
     const finalAttempts = await pool.query<{
       id: string;
       attempt_number: number;
       normalized_external_message_hash: string | null;
+      signed_external_message_boc: string | null;
     }>(
-      `SELECT id, attempt_number, normalized_external_message_hash
+      `SELECT id, attempt_number, normalized_external_message_hash,
+              signed_external_message_boc
        FROM withdrawal_attempts WHERE withdrawal_id = $1::uuid
        ORDER BY attempt_number`,
       [withdrawalId],
@@ -545,7 +581,8 @@ describe.skipIf(phase7DatabaseUrl === '')('phase10 DB crash/restart recovery', (
     expect(finalAttempts.rowCount).toBe(1);
     expect(finalAttempts.rows[0]?.id).toBe(attemptId);
     expect(finalAttempts.rows[0]?.attempt_number).toBe(1);
-    expect(finalAttempts.rows[0]?.normalized_external_message_hash).toBe(NORMALIZED_HASH);
+    expect(finalAttempts.rows[0]?.signed_external_message_boc).toBeNull();
+    expect(finalAttempts.rows[0]?.normalized_external_message_hash).toBeNull();
     expect(hotWalletId).toBe(baseHotWalletId);
   });
 });

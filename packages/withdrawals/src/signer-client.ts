@@ -1,4 +1,11 @@
 import { WithdrawalDomainError } from './errors.js';
+import {
+  SIGNER_HTTP_IDENTITY_TIMEOUT_MS,
+  SIGNER_HTTP_SIGN_TIMEOUT_MS,
+  SIGNER_HTTP_VALID_UNTIL_MARGIN_MS,
+  fetchTextWithDeadline,
+  resolveSignerHttpTimeoutMs,
+} from './signer-http-timeouts.js';
 
 export interface SignerClientSignResult {
   readonly withdrawalAttemptId: string;
@@ -27,40 +34,94 @@ export interface SignerSigningIdentity {
   readonly custodyState: string;
 }
 
+export interface SignerHttpRequestOptions {
+  readonly signal?: AbortSignal;
+  /** When set, HTTP deadline is capped to leave margin before this instant. */
+  readonly validUntil?: Date;
+  readonly nowMs?: number;
+  readonly timeoutMs?: number;
+  readonly validUntilMarginMs?: number;
+}
+
 export interface SignerClientDeps {
   readonly baseUrl: string;
   readonly serviceToken: string;
   readonly fetchImpl?: typeof fetch;
+  readonly identityTimeoutMs?: number;
+  readonly signTimeoutMs?: number;
+  readonly validUntilMarginMs?: number;
+  /** Default cancellation signal (e.g. Temporal activity cancellation). */
+  readonly signal?: AbortSignal;
 }
 
 function asNonEmptyString(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback;
 }
 
+function parseJsonObject(text: string): Record<string, unknown> {
+  if (text.trim() === '') {
+    return {};
+  }
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+    return {};
+  } catch {
+    return {};
+  }
+}
+
 /**
  * HTTP client for apps/signer.
  * Sign sends only withdrawalAttemptId — never recipient/amount/message bytes.
+ * All requests use bounded deadlines that include response-body consumption.
  */
 export class SignerHttpClient {
   private readonly baseUrl: string;
   private readonly serviceToken: string;
   private readonly fetchImpl: typeof fetch;
+  private readonly identityTimeoutMs: number;
+  private readonly signTimeoutMs: number;
+  private readonly validUntilMarginMs: number;
+  private readonly defaultSignal: AbortSignal | undefined;
 
   constructor(deps: SignerClientDeps) {
     this.baseUrl = deps.baseUrl.replace(/\/$/, '');
     this.serviceToken = deps.serviceToken;
     this.fetchImpl = deps.fetchImpl ?? fetch;
+    this.identityTimeoutMs = deps.identityTimeoutMs ?? SIGNER_HTTP_IDENTITY_TIMEOUT_MS;
+    this.signTimeoutMs = deps.signTimeoutMs ?? SIGNER_HTTP_SIGN_TIMEOUT_MS;
+    this.validUntilMarginMs = deps.validUntilMarginMs ?? SIGNER_HTTP_VALID_UNTIL_MARGIN_MS;
+    this.defaultSignal = deps.signal;
   }
 
-  async getSigningIdentity(): Promise<SignerSigningIdentity> {
-    const response = await this.fetchImpl(`${this.baseUrl}/v1/signing-identity`, {
-      method: 'GET',
-      headers: {
-        accept: 'application/json',
-        authorization: `Bearer ${this.serviceToken}`,
-      },
+  async getSigningIdentity(options: SignerHttpRequestOptions = {}): Promise<SignerSigningIdentity> {
+    const nowMs = options.nowMs ?? Date.now();
+    const timeoutMs = resolveSignerHttpTimeoutMs({
+      nowMs,
+      timeoutMs: options.timeoutMs ?? this.identityTimeoutMs,
+      ...(options.validUntil !== undefined
+        ? { validUntilMs: options.validUntil.getTime() }
+        : {}),
+      marginMs: options.validUntilMarginMs ?? this.validUntilMarginMs,
     });
-    const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+    const identitySignal = options.signal ?? this.defaultSignal;
+    const { response, text } = await fetchTextWithDeadline(
+      this.fetchImpl,
+      `${this.baseUrl}/v1/signing-identity`,
+      {
+        method: 'GET',
+        headers: {
+          accept: 'application/json',
+          authorization: `Bearer ${this.serviceToken}`,
+        },
+        ...(identitySignal !== undefined ? { signal: identitySignal } : {}),
+      },
+      timeoutMs,
+    );
+    const body = parseJsonObject(text);
     if (!response.ok) {
       const code = typeof body.error === 'string' ? body.error : 'SIGNER_HTTP_ERROR';
       const message =
@@ -85,17 +146,36 @@ export class SignerHttpClient {
     };
   }
 
-  async signWithdrawalAttempt(withdrawalAttemptId: string): Promise<SignerClientSignResult> {
-    const response = await this.fetchImpl(`${this.baseUrl}/v1/sign-withdrawal-attempt`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${this.serviceToken}`,
-      },
-      body: JSON.stringify({ withdrawalAttemptId }),
+  async signWithdrawalAttempt(
+    withdrawalAttemptId: string,
+    options: SignerHttpRequestOptions = {},
+  ): Promise<SignerClientSignResult> {
+    const nowMs = options.nowMs ?? Date.now();
+    const timeoutMs = resolveSignerHttpTimeoutMs({
+      nowMs,
+      timeoutMs: options.timeoutMs ?? this.signTimeoutMs,
+      ...(options.validUntil !== undefined
+        ? { validUntilMs: options.validUntil.getTime() }
+        : {}),
+      marginMs: options.validUntilMarginMs ?? this.validUntilMarginMs,
     });
+    const signSignal = options.signal ?? this.defaultSignal;
+    const { response, text } = await fetchTextWithDeadline(
+      this.fetchImpl,
+      `${this.baseUrl}/v1/sign-withdrawal-attempt`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${this.serviceToken}`,
+        },
+        body: JSON.stringify({ withdrawalAttemptId }),
+        ...(signSignal !== undefined ? { signal: signSignal } : {}),
+      },
+      timeoutMs,
+    );
 
-    const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+    const body = parseJsonObject(text);
     if (!response.ok) {
       const code = typeof body.error === 'string' ? body.error : 'SIGNER_HTTP_ERROR';
       const message =

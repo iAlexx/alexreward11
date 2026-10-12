@@ -757,7 +757,7 @@ describeDb('phase21 Mainnet disposable E2E financial validation', () => {
     expect(attempts.rows[0]?.c).toBe(1);
   });
 
-  it('crash after attempt create: resume consumes permit once and settles once', async () => {
+  it('crash after attempt create: resume fails closed (CONSUMED permit, no automatic re-sign)', async () => {
     const w = await prepareQueuedWithdrawal('200000');
     await armPermit(w);
     const { primary, secondary } = seedProviders(w.net, w.withdrawalId);
@@ -774,15 +774,29 @@ describeDb('phase21 Mainnet disposable E2E financial validation', () => {
     await expect(
       runRealTestnetPayoutPipeline(pool, { ...base, crashAfter: 'AFTER_ATTEMPT_CREATED' }),
     ).rejects.toBeInstanceOf(PipelineCrashError);
-    const midPermit = await pool.query<{ status: string }>(
-      `SELECT status::text AS status FROM phase21_manual_dispatch_permits
+    const midPermit = await pool.query<{ status: string; consumed_attempt_id: string | null }>(
+      `SELECT status::text AS status, consumed_attempt_id::text AS consumed_attempt_id
+       FROM phase21_manual_dispatch_permits
        WHERE withdrawal_id = $1::uuid`,
       [w.withdrawalId],
     );
     expect(midPermit.rows[0]?.status).toBe('CONSUMED');
+    expect(midPermit.rows[0]?.consumed_attempt_id).not.toBeNull();
+    // Automatic resume must not re-issue Signer POST; Owner-controlled recovery required.
     const recovered = await runRealTestnetPayoutPipeline(pool, base);
-    expect(recovered.state).toBe('CONFIRMED');
-    expect(primary.getSendBocCallCount()).toBe(1);
+    expect(recovered.state).toBe('FAILED_PRE_BROADCAST');
+    expect(recovered.reason).toMatch(/SIGNING_RESUME_.*OWNER_RECOVERY/);
+    expect(primary.getSendBocCallCount()).toBe(0);
+    const attempts = await pool.query<{
+      c: number;
+      boc: string | null;
+    }>(
+      `SELECT count(*)::int AS c, max(signed_external_message_boc) AS boc
+       FROM withdrawal_attempts WHERE withdrawal_id = $1::uuid`,
+      [w.withdrawalId],
+    );
+    expect(attempts.rows[0]?.c).toBe(1);
+    expect(attempts.rows[0]?.boc).toBeNull();
   });
 
   it('duplicate concurrent pipeline runners: at most one sendBoc', async () => {

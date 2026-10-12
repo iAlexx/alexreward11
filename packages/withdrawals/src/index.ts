@@ -283,8 +283,25 @@ export { SignerHttpClient } from './signer-client.js';
 export type {
   SignerClientDeps,
   SignerClientSignResult,
+  SignerHttpRequestOptions,
   SignerSigningIdentity,
 } from './signer-client.js';
+
+export {
+  SIGNER_HTTP_IDENTITY_TIMEOUT_MS,
+  SIGNER_HTTP_SIGN_TIMEOUT_MS,
+  SIGNER_HTTP_VALID_UNTIL_MARGIN_MS,
+  fetchTextWithDeadline,
+  resolveSignerHttpTimeoutMs,
+} from './signer-http-timeouts.js';
+
+export {
+  SIGNING_LATE_COMPLETION_REJECTED,
+  SIGNING_RESUME_EXPIRED_NO_BOC_OWNER_RECOVERY,
+  SIGNING_RESUME_NO_BOC_OWNER_RECOVERY,
+  assertMayCommitSignedBoc,
+  classifySigningResumeWithoutBoc,
+} from './signing-authority-guard.js';
 
 export {
   assertBlindResendForbidden,

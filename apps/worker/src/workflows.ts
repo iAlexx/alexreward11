@@ -7,6 +7,10 @@ import { proxyActivities } from '@temporalio/workflow';
  * Default remains Phase 7 fake payout when realChainEnabled is not true
  * (preserves existing fake-chain Temporal tests).
  *
+ * Real-chain payout activities (Phase 10 Testnet + Phase 21 Mainnet) use
+ * maximumAttempts: 1 so Temporal never automatically re-invokes signing after a
+ * startToClose timeout or application failure. Fake-chain keeps default retries.
+ *
  * Result preserves optional `reason` / `stagesCompleted` from activities for diagnostics.
  */
 export interface WithdrawalPayoutWorkflowResult {
@@ -25,10 +29,30 @@ export interface WithdrawalPayoutActivities {
   }): Promise<WithdrawalPayoutWorkflowResult>;
 }
 
-const { executeWithdrawalFakePayout, executeWithdrawalTestnetPayout } =
-  proxyActivities<WithdrawalPayoutActivities>({
-    startToCloseTimeout: '5 minutes',
-  });
+/** Fake-chain only — retain Temporal default retry behavior. */
+export const FAKE_CHAIN_PAYOUT_ACTIVITY_OPTIONS = {
+  startToCloseTimeout: '5 minutes',
+} as const;
+
+/**
+ * Real-chain payout (Phase 10 Testnet / Phase 21 Mainnet).
+ * No automatic Temporal retries: a hung Signer HTTP read must not produce a
+ * second sign POST after valid_until (WD-000001 incident).
+ */
+export const REAL_CHAIN_PAYOUT_ACTIVITY_OPTIONS = {
+  startToCloseTimeout: '5 minutes',
+  retry: {
+    maximumAttempts: 1,
+  },
+} as const;
+
+const { executeWithdrawalFakePayout } = proxyActivities<WithdrawalPayoutActivities>(
+  FAKE_CHAIN_PAYOUT_ACTIVITY_OPTIONS,
+);
+
+const { executeWithdrawalTestnetPayout } = proxyActivities<WithdrawalPayoutActivities>(
+  REAL_CHAIN_PAYOUT_ACTIVITY_OPTIONS,
+);
 
 export async function foundationProbe(input: string): Promise<string> {
   return `foundation-ok:${input}`;

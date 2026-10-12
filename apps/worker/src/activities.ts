@@ -1,3 +1,4 @@
+import { Context } from '@temporalio/activity';
 import type { Pool } from 'pg';
 
 import {
@@ -23,6 +24,14 @@ import {
   toWithdrawalPayoutActivityResult,
   type WithdrawalPayoutActivityResult,
 } from './payout-activity-result.js';
+
+function activityCancellationSignal(): AbortSignal | undefined {
+  try {
+    return Context.current().cancellationSignal;
+  } catch {
+    return undefined;
+  }
+}
 
 export type { WithdrawalPayoutActivityResult } from './payout-activity-result.js';
 
@@ -110,6 +119,7 @@ export function createWithdrawalActivities(deps: WithdrawalActivityDeps) {
         assertPhase10Ready(phase10);
       }
 
+      const cancellationSignal = activityCancellationSignal();
       const pipelineInput = {
         withdrawalId: input.withdrawalId,
         engine: deps.config,
@@ -126,6 +136,7 @@ export function createWithdrawalActivities(deps: WithdrawalActivityDeps) {
         },
         ...(isMainnet && phase21 !== undefined ? { phase21 } : {}),
         ...(!isMainnet ? { phase10 } : {}),
+        ...(cancellationSignal !== undefined ? { cancellationSignal } : {}),
       };
       const result = await runRealTestnetPayoutPipeline(deps.pool, pipelineInput);
       return toWithdrawalPayoutActivityResult(result);
