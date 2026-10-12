@@ -931,6 +931,7 @@ export {
   tryBuildPhase21ManualDispatchRelayAuthority,
 } from './phase21-manual-dispatch-permit.js';
 export {
+  evaluatePhase21CanaryFailedPreZeroAttemptRecovery,
   isPhase21CanaryPriorWorkflowSafeToRestart,
   isPhase21CanaryWithdrawalStateAllowedForResume,
 } from './phase21-resume-canary-gates.js';

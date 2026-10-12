@@ -10,6 +10,10 @@
 import { createHash, randomUUID } from 'node:crypto';
 
 import {
+  buildCanonicalSigningMessageAsync,
+  PHASE21_MAINNET_FORWARD_APPROVED_POLICY_TEMPLATE,
+} from '@alex-rewards/signing';
+import {
   FakeTonChainProvider,
   TonProviderHttpError,
   deriveWalletV5R1AddressRaw,
@@ -30,6 +34,7 @@ import {
   applyPhase21MainnetRegistryBootstrap,
   armPhase21ManualDispatchPermit,
   buildPhase21PayoutConfig,
+  evaluatePhase21CanaryFailedPreZeroAttemptRecovery,
   evaluatePhase21ManualDispatchRestartSafety,
   isPhase21CanaryPriorWorkflowSafeToRestart,
   isPhase21CanaryWithdrawalStateAllowedForResume,
@@ -42,6 +47,7 @@ import {
   seedLockedInitialWithdrawalRules,
   withWithdrawalTransaction,
   WITHDRAWAL_PHASE21_MANUAL_DISPATCH_OUTBOX_EVENT,
+  type RealPayoutCanonicalIntent,
   type RealPayoutSignerPort,
 } from '../src/index.js';
 import {
@@ -69,14 +75,21 @@ const HOT_WALLET_RAW = deriveWalletV5R1AddressRaw({
   publicKeyHex: TEST_PUBLIC_KEY_HEX,
   networkGlobalId: TON_MAINNET_NETWORK_GLOBAL_ID,
 });
-const TEST_CANONICAL_HASH = '22'.repeat(32);
-
 const mainnetEngine = localWithdrawalEngineFixtureConfig({
   fakeChainEnabled: false,
   acceptedNetworkCode: 'TON_MAINNET',
 });
 
 const describeDb = phase7DatabaseUrl === '' ? describe.skip : describe;
+
+/** Production Worker/Signer Mainnet canonical hash path (no mocks). */
+async function buildMainnetCanonicalHash(intent: RealPayoutCanonicalIntent): Promise<string> {
+  const built = await buildCanonicalSigningMessageAsync(intent, {
+    phase21MainnetEnabled: true,
+    transferPolicy: PHASE21_MAINNET_FORWARD_APPROVED_POLICY_TEMPLATE,
+  });
+  return built.canonicalMessageHashHex;
+}
 
 function deriveQueryId(withdrawalId: string, attemptNumber: number, salt: string): bigint {
   return (
@@ -457,7 +470,7 @@ describeDb('phase21 Mainnet disposable E2E financial validation', () => {
       secondaryChainProvider: secondary,
       signer: createTestSigner(),
       allowTestExecutionPath: true,
-      buildCanonicalMessageHash: async () => TEST_CANONICAL_HASH,
+      buildCanonicalMessageHash: buildMainnetCanonicalHash,
     });
 
     expect(result.state).toBe('CONFIRMED');
@@ -515,7 +528,7 @@ describeDb('phase21 Mainnet disposable E2E financial validation', () => {
       secondaryChainProvider: secondary,
       signer: createTestSigner(),
       allowTestExecutionPath: true,
-      buildCanonicalMessageHash: async () => TEST_CANONICAL_HASH,
+      buildCanonicalMessageHash: buildMainnetCanonicalHash,
     });
     expect(again.state).toBe('CONFIRMED');
     expect(primary.getSendBocCallCount()).toBe(1);
@@ -553,7 +566,7 @@ describeDb('phase21 Mainnet disposable E2E financial validation', () => {
       secondaryChainProvider: secondary,
       signer: createTestSigner(),
       allowTestExecutionPath: true,
-      buildCanonicalMessageHash: async () => TEST_CANONICAL_HASH,
+      buildCanonicalMessageHash: buildMainnetCanonicalHash,
     });
     expect(result.state).toBe('BLOCKED');
     expect(String(result.reason)).toMatch(/PROVIDER_NETWORK_MISMATCH|NETWORK|seqno|ADMISSION/i);
@@ -577,7 +590,7 @@ describeDb('phase21 Mainnet disposable E2E financial validation', () => {
       secondaryChainProvider: secondary,
       signer: createTestSigner({ fingerprint: 'aa'.repeat(32) }),
       allowTestExecutionPath: true,
-      buildCanonicalMessageHash: async () => TEST_CANONICAL_HASH,
+      buildCanonicalMessageHash: buildMainnetCanonicalHash,
     });
     expect(['BLOCKED', 'FAILED_PRE_BROADCAST']).toContain(result.state);
     expect(primary.getSendBocCallCount()).toBe(0);
@@ -595,7 +608,7 @@ describeDb('phase21 Mainnet disposable E2E financial validation', () => {
       secondaryChainProvider: secondary,
       signer: createTestSigner({ signingReady: false }),
       allowTestExecutionPath: true,
-      buildCanonicalMessageHash: async () => TEST_CANONICAL_HASH,
+      buildCanonicalMessageHash: buildMainnetCanonicalHash,
     });
     expect(result.state).toBe('BLOCKED');
     expect(String(result.reason)).toMatch(/signer|locked|RESOURCE/i);
@@ -623,7 +636,7 @@ describeDb('phase21 Mainnet disposable E2E financial validation', () => {
       seqnoAdmissionRateLimitMaxAttempts: 1,
       seqnoAdmissionRateLimitBaseDelayMs: 0,
       seqnoAdmissionSleepMs: async () => {},
-      buildCanonicalMessageHash: async () => TEST_CANONICAL_HASH,
+      buildCanonicalMessageHash: buildMainnetCanonicalHash,
     });
     expect(['BLOCKED', 'FAILED_PRE_BROADCAST']).toContain(result.state);
     expect(primary.getSendBocCallCount()).toBe(0);
@@ -643,7 +656,7 @@ describeDb('phase21 Mainnet disposable E2E financial validation', () => {
       secondaryChainProvider: secondary,
       signer: createTestSigner(),
       allowTestExecutionPath: true,
-      buildCanonicalMessageHash: async () => TEST_CANONICAL_HASH,
+      buildCanonicalMessageHash: buildMainnetCanonicalHash,
     });
     expect(result.state).not.toBe('CONFIRMED');
     expect(['RECONCILE_REQUIRED', 'CONFIRMING', 'BROADCASTED', 'BLOCKED']).toContain(result.state);
@@ -668,7 +681,7 @@ describeDb('phase21 Mainnet disposable E2E financial validation', () => {
       secondaryChainProvider: secondary,
       signer: createTestSigner(),
       allowTestExecutionPath: true,
-      buildCanonicalMessageHash: async () => TEST_CANONICAL_HASH,
+      buildCanonicalMessageHash: buildMainnetCanonicalHash,
     });
     expect(result.state).not.toBe('CONFIRMED');
     const wd = await pool.query<{ settlement_ledger_tx_id: string | null }>(
@@ -695,7 +708,7 @@ describeDb('phase21 Mainnet disposable E2E financial validation', () => {
       secondaryChainProvider: seeded.secondary,
       signer: createTestSigner(),
       allowTestExecutionPath: true,
-      buildCanonicalMessageHash: async () => TEST_CANONICAL_HASH,
+      buildCanonicalMessageHash: buildMainnetCanonicalHash,
     });
     expect(result.state).not.toBe('CONFIRMED');
     expect(result.state).not.toBe('BROADCASTED');
@@ -720,7 +733,7 @@ describeDb('phase21 Mainnet disposable E2E financial validation', () => {
       secondaryChainProvider: secondary,
       signer: createTestSigner(),
       allowTestExecutionPath: true as const,
-      buildCanonicalMessageHash: async () => TEST_CANONICAL_HASH,
+      buildCanonicalMessageHash: buildMainnetCanonicalHash,
     };
     let crash: unknown;
     try {
@@ -755,7 +768,7 @@ describeDb('phase21 Mainnet disposable E2E financial validation', () => {
       secondaryChainProvider: secondary,
       signer: createTestSigner(),
       allowTestExecutionPath: true as const,
-      buildCanonicalMessageHash: async () => TEST_CANONICAL_HASH,
+      buildCanonicalMessageHash: buildMainnetCanonicalHash,
     };
     await expect(
       runRealTestnetPayoutPipeline(pool, { ...base, crashAfter: 'AFTER_ATTEMPT_CREATED' }),
@@ -783,7 +796,7 @@ describeDb('phase21 Mainnet disposable E2E financial validation', () => {
       secondaryChainProvider: secondary,
       signer: createTestSigner(),
       allowTestExecutionPath: true as const,
-      buildCanonicalMessageHash: async () => TEST_CANONICAL_HASH,
+      buildCanonicalMessageHash: buildMainnetCanonicalHash,
     };
     const [a, b] = await Promise.allSettled([
       runRealTestnetPayoutPipeline(pool, input),
@@ -827,7 +840,7 @@ describeDb('phase21 Mainnet disposable E2E financial validation', () => {
       secondaryChainProvider: secondary,
       signer: createTestSigner(),
       allowTestExecutionPath: true,
-      buildCanonicalMessageHash: async () => TEST_CANONICAL_HASH,
+      buildCanonicalMessageHash: buildMainnetCanonicalHash,
     });
     expect(result.state).toBe('PAUSED');
     expect(primary.getSendBocCallCount()).toBe(0);
@@ -882,7 +895,7 @@ describeDb('phase21 Mainnet disposable E2E financial validation', () => {
       secondaryChainProvider: secondary,
       signer: createTestSigner(),
       allowTestExecutionPath: true,
-      buildCanonicalMessageHash: async () => TEST_CANONICAL_HASH,
+      buildCanonicalMessageHash: buildMainnetCanonicalHash,
     });
     expect(result.state).toBe('CONFIRMED');
     expect(primary.getSendBocCallCount()).toBe(1);
@@ -907,6 +920,136 @@ describeDb('phase21 Mainnet disposable E2E financial validation', () => {
       evaluatePhase21ManualDispatchRestartSafety(client, w.withdrawalId),
     );
     expect(restartAfter.allowDuplicate).toBe(false);
+    await harnessAssertLedgerBalanced(pool);
+  });
+
+  it('WD-000001 FAILED_PRE_BROADCAST recovery: ARMED+0 attempts+no evidence+COMPLETED → CONFIRMED', async () => {
+    // Disposable only — never mutates live WD-000001 / production DB.
+    expect(isPhase21CanaryWithdrawalStateAllowedForResume('FAILED_PRE_BROADCAST')).toBe(true);
+    expect(isPhase21CanaryPriorWorkflowSafeToRestart('COMPLETED')).toBe(true);
+
+    const eligible = evaluatePhase21CanaryFailedPreZeroAttemptRecovery({
+      withdrawalState: 'FAILED_PRE_BROADCAST',
+      permitStatus: 'ARMED',
+      attemptCount: 0,
+      broadcastEvidenceCount: 0,
+      priorWorkflowStatus: 'COMPLETED',
+    });
+    expect(eligible).toEqual({ eligible: true, reason: null });
+
+    expect(
+      evaluatePhase21CanaryFailedPreZeroAttemptRecovery({
+        withdrawalState: 'FAILED_PRE_BROADCAST',
+        permitStatus: 'CONSUMED',
+        attemptCount: 0,
+        broadcastEvidenceCount: 0,
+        priorWorkflowStatus: 'COMPLETED',
+      }).eligible,
+    ).toBe(false);
+    expect(
+      evaluatePhase21CanaryFailedPreZeroAttemptRecovery({
+        withdrawalState: 'FAILED_PRE_BROADCAST',
+        permitStatus: 'ARMED',
+        attemptCount: 1,
+        broadcastEvidenceCount: 0,
+        priorWorkflowStatus: 'COMPLETED',
+      }).eligible,
+    ).toBe(false);
+    expect(
+      evaluatePhase21CanaryFailedPreZeroAttemptRecovery({
+        withdrawalState: 'FAILED_PRE_BROADCAST',
+        permitStatus: 'ARMED',
+        attemptCount: 0,
+        broadcastEvidenceCount: 1,
+        priorWorkflowStatus: 'COMPLETED',
+      }).eligible,
+    ).toBe(false);
+    expect(
+      evaluatePhase21CanaryFailedPreZeroAttemptRecovery({
+        withdrawalState: 'FAILED_PRE_BROADCAST',
+        permitStatus: 'ARMED',
+        attemptCount: 0,
+        broadcastEvidenceCount: 0,
+        priorWorkflowStatus: 'RUNNING',
+      }).eligible,
+    ).toBe(false);
+
+    const w = await prepareQueuedWithdrawal('200000');
+    const armed = await armPermit(w);
+    expect(armed.permit.status).toBe('ARMED');
+
+    // Simulate pre-broadcast failure with zero attempts (hash/admission path).
+    await pool.query(
+      `UPDATE withdrawals SET state = 'FAILED_PRE_BROADCAST'::withdrawal_state WHERE id = $1::uuid`,
+      [w.withdrawalId],
+    );
+    const stateRow = await pool.query<{ state: string }>(
+      `SELECT state::text AS state FROM withdrawals WHERE id = $1::uuid`,
+      [w.withdrawalId],
+    );
+    expect(stateRow.rows[0]?.state).toBe('FAILED_PRE_BROADCAST');
+
+    const attemptsBefore = await pool.query<{
+      c: number;
+      broadcast_evidence: number;
+    }>(
+      `SELECT count(*)::int AS c,
+              count(*) FILTER (
+                WHERE broadcast_started_at IS NOT NULL
+                   OR broadcast_submitted_at IS NOT NULL
+                   OR signed_external_message_boc IS NOT NULL
+                   OR signed_wallet_request_boc IS NOT NULL
+              )::int AS broadcast_evidence
+       FROM withdrawal_attempts WHERE withdrawal_id = $1::uuid`,
+      [w.withdrawalId],
+    );
+    expect(attemptsBefore.rows[0]?.c).toBe(0);
+    expect(attemptsBefore.rows[0]?.broadcast_evidence).toBe(0);
+
+    const recovery = evaluatePhase21CanaryFailedPreZeroAttemptRecovery({
+      withdrawalState: 'FAILED_PRE_BROADCAST',
+      permitStatus: 'ARMED',
+      attemptCount: attemptsBefore.rows[0]!.c,
+      broadcastEvidenceCount: attemptsBefore.rows[0]!.broadcast_evidence,
+      priorWorkflowStatus: 'COMPLETED',
+    });
+    expect(recovery.eligible).toBe(true);
+
+    const restart = await withWithdrawalTransaction(pool, async (client) =>
+      evaluatePhase21ManualDispatchRestartSafety(client, w.withdrawalId),
+    );
+    expect(restart.allowDuplicate).toBe(true);
+    expect(restart.permit?.status).toBe('ARMED');
+
+    const { primary, secondary } = seedProviders(w.net, w.withdrawalId);
+    const result = await runRealTestnetPayoutPipeline(pool, {
+      withdrawalId: w.withdrawalId,
+      phase21: buildPhase21(),
+      engine: mainnetEngine,
+      chainProvider: primary,
+      secondaryChainProvider: secondary,
+      signer: createTestSigner(),
+      allowTestExecutionPath: true,
+      buildCanonicalMessageHash: buildMainnetCanonicalHash,
+    });
+    expect(result.state).toBe('CONFIRMED');
+    expect(primary.getSendBocCallCount()).toBe(1);
+
+    const permit = await pool.query<{ status: string; consumed_attempt_id: string | null }>(
+      `SELECT status::text AS status, consumed_attempt_id::text AS consumed_attempt_id
+       FROM phase21_manual_dispatch_permits WHERE withdrawal_id = $1::uuid`,
+      [w.withdrawalId],
+    );
+    expect(permit.rows[0]?.status).toBe('CONSUMED');
+    expect(permit.rows[0]?.consumed_attempt_id).toBe(result.attemptId);
+
+    const hashRow = await pool.query<{ canonical_message_hash: string }>(
+      `SELECT canonical_message_hash FROM withdrawal_attempts WHERE id = $1::uuid`,
+      [result.attemptId],
+    );
+    expect(hashRow.rows[0]?.canonical_message_hash).toMatch(/^[0-9a-f]{64}$/i);
+    expect(hashRow.rows[0]?.canonical_message_hash.toLowerCase()).not.toBe('22'.repeat(32));
+
     await harnessAssertLedgerBalanced(pool);
   });
 });

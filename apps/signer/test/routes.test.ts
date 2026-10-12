@@ -1,10 +1,14 @@
 import Fastify from 'fastify';
 import { describe, expect, it } from 'vitest';
 
-import { LocalEphemeralSignPort, localSigningFixtureConfig } from '@alex-rewards/signing';
+import {
+  LocalEphemeralSignPort,
+  PHASE21_MAINNET_FORWARD_APPROVED_POLICY_TEMPLATE,
+  localSigningFixtureConfig,
+} from '@alex-rewards/signing';
 import { Pool } from 'pg';
 
-import { isLoopback, registerSignerRoutes } from '../src/routes.js';
+import { isLoopback, registerSignerRoutes, runtimeFromEnv } from '../src/routes.js';
 
 describe('isLoopback local-unlock peer allowlist', () => {
   it('accepts only the exact loopback address forms required by the runtime', () => {
@@ -67,5 +71,41 @@ describe('Phase 9 signer HTTP boundary', () => {
     ).toBe(400);
     await server.close();
     await pool.end();
+  });
+});
+
+describe('runtimeFromEnv Phase 21 Mainnet transfer policy', () => {
+  it('wires PHASE21_MAINNET_FORWARD_APPROVED_POLICY_TEMPLATE when Mainnet enabled', () => {
+    const runtime = runtimeFromEnv({
+      DEPLOYMENT_ENV: 'production',
+      SIGNER_SPIKE_ENABLED: true,
+      SIGNER_KEY_MODE: 'self_hosted_encrypted',
+      SIGNER_NETWORK_CODE: 'TON_MAINNET',
+      SIGNER_NETWORK_GLOBAL_ID: -239,
+      SIGNER_WALLET_VERSION: 'v5R1',
+      SIGNER_WORKCHAIN: 0,
+      SIGNER_EXPECTED_ASSET_SYMBOL: 'USDT',
+      PHASE21_MAINNET_ENABLED: true,
+    });
+    expect(runtime.phase21MainnetEnabled).toBe(true);
+    expect(runtime.mainnetTransferPolicy).toEqual(
+      PHASE21_MAINNET_FORWARD_APPROVED_POLICY_TEMPLATE,
+    );
+  });
+
+  it('keeps mainnetTransferPolicy null when Mainnet disabled', () => {
+    const runtime = runtimeFromEnv({
+      DEPLOYMENT_ENV: 'local',
+      SIGNER_SPIKE_ENABLED: true,
+      SIGNER_KEY_MODE: 'local_ephemeral',
+      SIGNER_NETWORK_CODE: 'TON_TESTNET',
+      SIGNER_NETWORK_GLOBAL_ID: -3,
+      SIGNER_WALLET_VERSION: 'v5R1',
+      SIGNER_WORKCHAIN: 0,
+      SIGNER_EXPECTED_ASSET_SYMBOL: 'USDT',
+      PHASE21_MAINNET_ENABLED: false,
+    });
+    expect(runtime.phase21MainnetEnabled).toBe(false);
+    expect(runtime.mainnetTransferPolicy).toBeNull();
   });
 });

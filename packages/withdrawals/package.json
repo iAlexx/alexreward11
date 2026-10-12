@@ -57,6 +57,7 @@
     "zod": "4.5.4"
   },
   "devDependencies": {
+    "@alex-rewards/signing": "workspace:*",
     "@temporalio/testing": "1.23.0",
     "@temporalio/worker": "1.23.0",
     "@types/pg": "8.23.1",

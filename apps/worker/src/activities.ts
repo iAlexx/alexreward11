@@ -1,6 +1,9 @@
 import type { Pool } from 'pg';
 
-import { buildCanonicalSigningMessageAsync } from '@alex-rewards/signing';
+import {
+  buildCanonicalSigningMessageAsync,
+  PHASE21_MAINNET_FORWARD_APPROVED_POLICY_TEMPLATE,
+} from '@alex-rewards/signing';
 import {
   FakePayoutChain,
   assertPhase10Ready,
@@ -115,6 +118,9 @@ export function createWithdrawalActivities(deps: WithdrawalActivityDeps) {
         >[0]) => {
           const built = await buildCanonicalSigningMessageAsync(intent, {
             phase21MainnetEnabled: isMainnet,
+            ...(isMainnet
+              ? { transferPolicy: PHASE21_MAINNET_FORWARD_APPROVED_POLICY_TEMPLATE }
+              : {}),
           });
           return built.canonicalMessageHashHex;
         },

@@ -11,6 +11,7 @@ import {
   SignerHttpClient,
   assertPhase21Ready,
   buildPhase21PayoutConfig,
+  evaluatePhase21CanaryFailedPreZeroAttemptRecovery,
   evaluatePhase21ManualDispatchRestartSafety,
   isPhase21CanaryPriorWorkflowSafeToRestart,
   isPhase21CanaryWithdrawalStateAllowedForResume,
@@ -70,6 +71,10 @@ async function main(): Promise<void> {
   }));
 
   const pool = new Pool({ connectionString: cfg.DATABASE_URL });
+  let withdrawalState = '';
+  let permitStatus = '';
+  let attemptCount = -1;
+  let broadcastEvidenceCount = -1;
   try {
     const db = await pool.connect();
     try {
@@ -96,7 +101,15 @@ async function main(): Promise<void> {
           "o.payload->>'withdrawalId' AS event_withdrawal,",
           "o.payload->>'permitId' AS event_permit,",
           "o.payload->>'workflowId' AS event_workflow,",
-          '(SELECT count(*)::int FROM withdrawal_attempts a WHERE a.withdrawal_id = w.id) AS attempts',
+          '(SELECT count(*)::int FROM withdrawal_attempts a WHERE a.withdrawal_id = w.id) AS attempts,',
+          `(SELECT count(*) FILTER (
+              WHERE broadcast_started_at IS NOT NULL
+                 OR broadcast_submitted_at IS NOT NULL
+                 OR signed_external_message_boc IS NOT NULL
+                 OR signed_wallet_request_boc IS NOT NULL
+            )::int
+            FROM withdrawal_attempts a WHERE a.withdrawal_id = w.id
+           ) AS broadcast_evidence`,
           'FROM withdrawals w',
           'JOIN user_wallets uw ON uw.id = w.wallet_id',
           'JOIN networks n ON n.id = w.network_id',
@@ -108,9 +121,13 @@ async function main(): Promise<void> {
         const q = await db.query(sql, [PHASE21_CANARY_PAYOUT_WITHDRAWAL_ID, OUTBOX]);
         ensure(q.rowCount === 1, 'EXACT_ROW');
         const x = q.rows[0];
+        withdrawalState = String(x.state);
+        permitStatus = String(x.permit_status);
+        attemptCount = Number(x.attempts);
+        broadcastEvidenceCount = Number(x.broadcast_evidence);
         ensure(
           x.public_id === PHASE21_CANARY_PAYOUT_PUBLIC_ID &&
-            isPhase21CanaryWithdrawalStateAllowedForResume(String(x.state)),
+            isPhase21CanaryWithdrawalStateAllowedForResume(withdrawalState),
           'WITHDRAWAL_STATE',
         );
         ensure(x.gross === PHASE21_CANARY_PAYOUT_EXPECTED_GROSS_ATOMIC.toString(), 'GROSS');
@@ -123,6 +140,7 @@ async function main(): Promise<void> {
         ensure(x.asset_master === PHASE21_CANARY_FROZEN_JETTON_MASTER, 'ASSET_MASTER');
         ensure(x.permit_id === PERMIT && x.permit_status === 'ARMED' &&
           x.consumed_attempt_id === null && x.attempts === 0, 'PERMIT_AND_ATTEMPTS');
+        ensure(x.broadcast_evidence === 0, 'BROADCAST_EVIDENCE');
         ensure(x.permit_gross === x.gross && x.permit_fee === x.fee &&
           x.permit_net === x.net && x.permit_recipient === x.recipient &&
           x.permit_raw_recipient === x.raw_recipient, 'PERMIT_BINDINGS');
@@ -160,12 +178,26 @@ async function main(): Promise<void> {
       connection,
       namespace: cfg.TEMPORAL_NAMESPACE,
     });
+    let priorWorkflowStatus = 'COMPLETED';
     try {
       const prior = await temporal.workflow.getHandle(WORKFLOW).describe();
-      const status = statusName(prior.status);
-      ensure(isPhase21CanaryPriorWorkflowSafeToRestart(status), 'EXISTING_WORKFLOW_' + status);
+      priorWorkflowStatus = statusName(prior.status);
+      ensure(
+        isPhase21CanaryPriorWorkflowSafeToRestart(priorWorkflowStatus),
+        'EXISTING_WORKFLOW_' + priorWorkflowStatus,
+      );
     } catch (error) {
       if (!(error instanceof WorkflowNotFoundError)) throw error;
+    }
+    if (withdrawalState === 'FAILED_PRE_BROADCAST') {
+      const recovery = evaluatePhase21CanaryFailedPreZeroAttemptRecovery({
+        withdrawalState,
+        permitStatus,
+        attemptCount,
+        broadcastEvidenceCount,
+        priorWorkflowStatus,
+      });
+      ensure(recovery.eligible === true, 'FAILED_PRE_RECOVERY_' + String(recovery.reason));
     }
     console.log('PHASE21_TEMPORAL_PREFLIGHT=PASS');
 

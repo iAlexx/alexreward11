@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { HEALTH_CONTRACT_VERSION, type HealthResponse } from '@alex-rewards/contracts';
 import {
   LocalEphemeralSignPort,
+  PHASE21_MAINNET_FORWARD_APPROVED_POLICY_TEMPLATE,
   SignerError,
   deriveWalletV5R1,
   localSigningFixtureConfig,
@@ -246,6 +247,7 @@ export function runtimeFromEnv(config: {
   SIGNER_EXPECTED_ASSET_SYMBOL: string;
   PHASE21_MAINNET_ENABLED?: boolean;
 }): SignerRuntimeConfig {
+  const phase21MainnetEnabled = config.PHASE21_MAINNET_ENABLED === true;
   return localSigningFixtureConfig({
     deploymentEnv: config.DEPLOYMENT_ENV,
     spikeEnabled: config.SIGNER_SPIKE_ENABLED,
@@ -257,6 +259,10 @@ export function runtimeFromEnv(config: {
     walletVersion: config.SIGNER_WALLET_VERSION,
     workchain: config.SIGNER_WORKCHAIN,
     expectedAssetSymbol: config.SIGNER_EXPECTED_ASSET_SYMBOL,
-    phase21MainnetEnabled: config.PHASE21_MAINNET_ENABLED === true,
+    phase21MainnetEnabled,
+    // Identical Owner-approved template used by Worker activities hash builder.
+    mainnetTransferPolicy: phase21MainnetEnabled
+      ? PHASE21_MAINNET_FORWARD_APPROVED_POLICY_TEMPLATE
+      : null,
   });
 }

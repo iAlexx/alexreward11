@@ -865,6 +865,9 @@ importers:
         specifier: 4.5.4
         version: 4.5.4
     devDependencies:
+      '@alex-rewards/signing':
+        specifier: workspace:*
+        version: link:../signing
       '@temporalio/testing':
         specifier: 1.23.0
         version: 1.23.0(@swc/helpers@0.5.23)(esbuild@0.28.2)(lightningcss@1.33.0)(postcss@8.5.26)
