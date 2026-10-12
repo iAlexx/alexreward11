@@ -1027,11 +1027,13 @@ export {
   assertPhase21Gen2TemporalLaunchAck,
   buildPhase21Gen2TemporalLaunchStartOptions,
   evaluatePhase21Gen2LiveDeployShaMatch,
+  evaluatePhase21Gen2PriorWorkflowIdentity,
   evaluatePhase21Gen2TemporalLaunchEligibility,
   planPhase21Gen2TemporalLaunch,
   executePhase21Gen2TemporalLaunch,
 } from './phase21-gen2-temporal-launch.js';
 export type {
+  Phase21Gen2PriorWorkflowObservation,
   Phase21Gen2TemporalLaunchPlanResult,
   Phase21Gen2TemporalLaunchStartOptions,
   Phase21Gen2TemporalStarter,

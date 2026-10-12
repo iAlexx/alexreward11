@@ -8,6 +8,7 @@ import {
   assertPhase21Gen2TemporalLaunchAck,
   buildPhase21Gen2TemporalLaunchStartOptions,
   evaluatePhase21Gen2LiveDeployShaMatch,
+  evaluatePhase21Gen2PriorWorkflowIdentity,
   evaluatePhase21Gen2TemporalLaunchEligibility,
   executePhase21Gen2TemporalLaunch,
   PHASE21_GEN2_TEMPORAL_LAUNCH_ACK,
@@ -16,6 +17,9 @@ import {
   type Phase21Gen2TemporalLaunchPlanResult,
 } from '../src/phase21-gen2-temporal-launch.js';
 import { evaluatePhase21CanaryFailedPreZeroAttemptRecovery } from '../src/phase21-resume-canary-gates.js';
+
+const GEN1_RUN_ID = '01a13154-dc13-739c-92d1-8579627cc06e';
+const GEN2_RUN_ID = '01a2bbbb-cccc-dddd-eeee-ffffffffffff';
 
 describe('phase21 Gen-2 Temporal launch gates', () => {
   const base = {
@@ -34,11 +38,14 @@ describe('phase21 Gen-2 Temporal launch gates', () => {
     deployShaOk: true,
     signerReady: true,
     signerUnlocked: true,
+    expectedGen1RunId: GEN1_RUN_ID,
+    priorWorkflowFound: true,
+    observedPriorRunId: GEN1_RUN_ID,
     priorWorkflowStatus: 'COMPLETED',
     workflowStillRunning: false,
   };
 
-  it('eligible when Gen-2 ARMED + Gen-1 CONSUMED + FAILED_PRE #1 + gates pass', () => {
+  it('eligible when Gen-2 ARMED + Gen-1 CONSUMED + FAILED_PRE #1 + Gen-1 run identity + gates pass', () => {
     expect(evaluatePhase21Gen2TemporalLaunchEligibility(base)).toEqual({
       eligible: true,
       reason: null,
@@ -179,3 +186,143 @@ describe('phase21 Gen-2 Temporal launch gates', () => {
   });
 });
 
+describe('phase21 Gen-2 prior workflow one-shot identity', () => {
+  it('refuses missing prior workflow (WorkflowNotFound fail-closed; never assume COMPLETED)', () => {
+    expect(
+      evaluatePhase21Gen2PriorWorkflowIdentity({
+        expectedGen1RunId: GEN1_RUN_ID,
+        observation: { found: false },
+      }),
+    ).toEqual({
+      ok: false,
+      reason: 'prior_workflow_not_found',
+      priorWorkflowStatus: null,
+      observedRunId: null,
+    });
+    expect(
+      evaluatePhase21Gen2TemporalLaunchEligibility({
+        withdrawalState: 'FAILED_PRE_BROADCAST',
+        gen1PermitStatus: 'CONSUMED',
+        gen2PermitStatus: 'ARMED',
+        gen2AuthorizationGeneration: 2,
+        attemptCount: 1,
+        failedPreAttemptCount: 1,
+        broadcastEvidenceCount: 0,
+        reservationHeld: true,
+        settlementPresent: false,
+        releasePresent: false,
+        chainReconOk: true,
+        globalRelayEnabled: false,
+        deployShaOk: true,
+        signerReady: true,
+        signerUnlocked: true,
+        expectedGen1RunId: GEN1_RUN_ID,
+        priorWorkflowFound: false,
+        observedPriorRunId: null,
+        priorWorkflowStatus: 'COMPLETED', // must not open the gate when history is missing
+        workflowStillRunning: false,
+      }).reason,
+    ).toBe('prior_workflow_not_found');
+  });
+
+  it('accepts correct Gen-1 prior run identity', () => {
+    expect(
+      evaluatePhase21Gen2PriorWorkflowIdentity({
+        expectedGen1RunId: GEN1_RUN_ID,
+        observation: { found: true, runId: GEN1_RUN_ID, status: 'COMPLETED' },
+      }),
+    ).toEqual({
+      ok: true,
+      reason: null,
+      priorWorkflowStatus: 'COMPLETED',
+      observedRunId: GEN1_RUN_ID,
+    });
+  });
+
+  it('refuses already-launched Gen-2 including after COMPLETED (sequential re-launch)', () => {
+    expect(
+      evaluatePhase21Gen2PriorWorkflowIdentity({
+        expectedGen1RunId: GEN1_RUN_ID,
+        observation: { found: true, runId: GEN2_RUN_ID, status: 'COMPLETED' },
+      }).reason,
+    ).toBe('gen2_already_launched_or_run_mismatch');
+    expect(
+      evaluatePhase21Gen2PriorWorkflowIdentity({
+        expectedGen1RunId: GEN1_RUN_ID,
+        observation: { found: true, runId: GEN2_RUN_ID, status: 'RUNNING' },
+      }).reason,
+    ).toBe('gen2_already_launched_or_run_mismatch');
+    expect(
+      evaluatePhase21Gen2TemporalLaunchEligibility({
+        withdrawalState: 'FAILED_PRE_BROADCAST',
+        gen1PermitStatus: 'CONSUMED',
+        gen2PermitStatus: 'ARMED',
+        gen2AuthorizationGeneration: 2,
+        attemptCount: 1,
+        failedPreAttemptCount: 1,
+        broadcastEvidenceCount: 0,
+        reservationHeld: true,
+        settlementPresent: false,
+        releasePresent: false,
+        chainReconOk: true,
+        globalRelayEnabled: false,
+        deployShaOk: true,
+        signerReady: true,
+        signerUnlocked: true,
+        expectedGen1RunId: GEN1_RUN_ID,
+        priorWorkflowFound: true,
+        observedPriorRunId: GEN2_RUN_ID,
+        priorWorkflowStatus: 'COMPLETED',
+        workflowStillRunning: false,
+      }).reason,
+    ).toBe('gen2_already_launched_or_run_mismatch');
+  });
+
+  it('refuses missing/ambiguous expected or observed run identity', () => {
+    expect(
+      evaluatePhase21Gen2PriorWorkflowIdentity({
+        expectedGen1RunId: '',
+        observation: { found: true, runId: GEN1_RUN_ID, status: 'COMPLETED' },
+      }).reason,
+    ).toBe('expected_gen1_run_id_missing');
+    expect(
+      evaluatePhase21Gen2PriorWorkflowIdentity({
+        expectedGen1RunId: GEN1_RUN_ID,
+        observation: { found: true, runId: null, status: 'COMPLETED' },
+      }).reason,
+    ).toBe('prior_run_id_ambiguous');
+    expect(
+      evaluatePhase21Gen2PriorWorkflowIdentity({
+        expectedGen1RunId: GEN1_RUN_ID,
+        observation: { found: true, runId: '   ', status: 'COMPLETED' },
+      }).reason,
+    ).toBe('prior_run_id_ambiguous');
+  });
+
+  it('concurrent launch: RUNNING refused even when Gen-1 runId still matches', () => {
+    expect(
+      evaluatePhase21Gen2TemporalLaunchEligibility({
+        withdrawalState: 'FAILED_PRE_BROADCAST',
+        gen1PermitStatus: 'CONSUMED',
+        gen2PermitStatus: 'ARMED',
+        gen2AuthorizationGeneration: 2,
+        attemptCount: 1,
+        failedPreAttemptCount: 1,
+        broadcastEvidenceCount: 0,
+        reservationHeld: true,
+        settlementPresent: false,
+        releasePresent: false,
+        chainReconOk: true,
+        globalRelayEnabled: false,
+        deployShaOk: true,
+        signerReady: true,
+        signerUnlocked: true,
+        expectedGen1RunId: GEN1_RUN_ID,
+        priorWorkflowFound: true,
+        observedPriorRunId: GEN1_RUN_ID,
+        priorWorkflowStatus: 'RUNNING',
+        workflowStillRunning: true,
+      }).reason,
+    ).toBe('workflow_still_running');
+  });
+});

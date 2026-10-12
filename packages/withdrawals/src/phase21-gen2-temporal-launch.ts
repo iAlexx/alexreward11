@@ -97,6 +97,74 @@ export function evaluatePhase21Gen2LiveDeployShaMatch(input: {
 }
 
 /**
+ * Read-only Gen-1 workflow run identity gate for Gen-2 one-shot Temporal launch.
+ *
+ * ConflictPolicy FAIL only blocks concurrent starts. After a Gen-2 run has started
+ * (and even after it COMPLETED), ALLOW_DUPLICATE would otherwise permit a second
+ * sequential launch. Bind launch to the previously verified Gen-1 runId:
+ * if history is missing, expected identity is absent, or live runId differs —
+ * refuse (fail closed; never assume COMPLETED on WorkflowNotFound).
+ */
+export type Phase21Gen2PriorWorkflowObservation =
+  | { readonly found: false }
+  | {
+      readonly found: true;
+      readonly runId: string | null | undefined;
+      readonly status: string;
+    };
+
+export function evaluatePhase21Gen2PriorWorkflowIdentity(input: {
+  readonly expectedGen1RunId: string | null | undefined;
+  readonly observation: Phase21Gen2PriorWorkflowObservation;
+}): {
+  readonly ok: boolean;
+  readonly reason: string | null;
+  readonly priorWorkflowStatus: string | null;
+  readonly observedRunId: string | null;
+} {
+  const expected = (input.expectedGen1RunId ?? '').trim();
+  if (expected === '') {
+    return {
+      ok: false,
+      reason: 'expected_gen1_run_id_missing',
+      priorWorkflowStatus: null,
+      observedRunId: null,
+    };
+  }
+  if (!input.observation.found) {
+    return {
+      ok: false,
+      reason: 'prior_workflow_not_found',
+      priorWorkflowStatus: null,
+      observedRunId: null,
+    };
+  }
+  const observedRunId = (input.observation.runId ?? '').trim();
+  if (observedRunId === '') {
+    return {
+      ok: false,
+      reason: 'prior_run_id_ambiguous',
+      priorWorkflowStatus: input.observation.status,
+      observedRunId: null,
+    };
+  }
+  if (observedRunId !== expected) {
+    return {
+      ok: false,
+      reason: 'gen2_already_launched_or_run_mismatch',
+      priorWorkflowStatus: input.observation.status,
+      observedRunId,
+    };
+  }
+  return {
+    ok: true,
+    reason: null,
+    priorWorkflowStatus: input.observation.status,
+    observedRunId,
+  };
+}
+
+/**
  * Pure eligibility for Gen-2 Temporal one-shot launch (after Gen-2 permit already ARMED).
  */
 export function evaluatePhase21Gen2TemporalLaunchEligibility(input: {
@@ -115,6 +183,9 @@ export function evaluatePhase21Gen2TemporalLaunchEligibility(input: {
   readonly deployShaOk: boolean;
   readonly signerReady: boolean;
   readonly signerUnlocked: boolean;
+  readonly expectedGen1RunId: string | null | undefined;
+  readonly priorWorkflowFound: boolean;
+  readonly observedPriorRunId: string | null | undefined;
   readonly priorWorkflowStatus: string;
   readonly workflowStillRunning: boolean;
 }): { readonly eligible: boolean; readonly reason: string | null } {
@@ -141,6 +212,20 @@ export function evaluatePhase21Gen2TemporalLaunchEligibility(input: {
   }
   if (input.releasePresent) {
     return { eligible: false, reason: 'already_released' };
+  }
+
+  const identity = evaluatePhase21Gen2PriorWorkflowIdentity({
+    expectedGen1RunId: input.expectedGen1RunId,
+    observation: input.priorWorkflowFound
+      ? {
+          found: true,
+          runId: input.observedPriorRunId,
+          status: input.priorWorkflowStatus,
+        }
+      : { found: false },
+  });
+  if (!identity.ok) {
+    return { eligible: false, reason: identity.reason };
   }
 
   const base = evaluatePhase21Gen2ConsumedFailedPreRecovery({
@@ -213,6 +298,9 @@ export async function planPhase21Gen2TemporalLaunch(
     readonly globalRelayEnabled: boolean;
     readonly signerReady: boolean;
     readonly signerUnlocked: boolean;
+    readonly expectedGen1RunId: string;
+    readonly priorWorkflowFound: boolean;
+    readonly observedPriorRunId: string | null;
     readonly priorWorkflowStatus: string;
     readonly workflowStillRunning: boolean;
     readonly taskQueue: string;
@@ -269,6 +357,34 @@ export async function planPhase21Gen2TemporalLaunch(
     }),
   );
 
+  const identity = evaluatePhase21Gen2PriorWorkflowIdentity({
+    expectedGen1RunId: input.expectedGen1RunId,
+    observation: input.priorWorkflowFound
+      ? {
+          found: true,
+          runId: input.observedPriorRunId,
+          status: input.priorWorkflowStatus,
+        }
+      : { found: false },
+  });
+  checks.push(
+    check(
+      'prior_workflow_identity',
+      identity.ok,
+      identity.ok
+        ? 'live Temporal runId matches verified Gen-1 one-shot launch evidence'
+        : `prior identity refused: ${identity.reason}`,
+      {
+        expected: input.expectedGen1RunId,
+        actual: {
+          found: input.priorWorkflowFound,
+          runId: input.observedPriorRunId,
+          status: input.priorWorkflowStatus,
+        },
+      },
+    ),
+  );
+
   checks.push(
     check(
       'workflow_not_running',
@@ -281,7 +397,7 @@ export async function planPhase21Gen2TemporalLaunch(
   checks.push(
     check(
       'prior_workflow_safe',
-      isPhase21CanaryPriorWorkflowSafeToRestart(input.priorWorkflowStatus),
+      identity.ok && isPhase21CanaryPriorWorkflowSafeToRestart(input.priorWorkflowStatus),
       'prior Temporal status must be closed/safe for ALLOW_DUPLICATE',
       { actual: input.priorWorkflowStatus },
     ),
@@ -488,6 +604,9 @@ export async function planPhase21Gen2TemporalLaunch(
     deployShaOk: sha.ok,
     signerReady: input.signerReady,
     signerUnlocked: input.signerUnlocked,
+    expectedGen1RunId: input.expectedGen1RunId,
+    priorWorkflowFound: input.priorWorkflowFound,
+    observedPriorRunId: input.observedPriorRunId,
     priorWorkflowStatus: input.priorWorkflowStatus,
     workflowStillRunning: input.workflowStillRunning,
   });

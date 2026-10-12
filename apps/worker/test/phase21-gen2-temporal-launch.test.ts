@@ -2,7 +2,8 @@
  * Phase 21 Gen-2 Temporal launch — disposable Temporal integration / regression.
  *
  * Uses TestWorkflowEnvironment only. Never touches production Temporal / Mainnet.
- * Asserts ALLOW_DUPLICATE + FAIL policies, maximumAttempts=1, and refuse-while-running.
+ * Asserts ALLOW_DUPLICATE + FAIL policies, maximumAttempts=1, Gen-1 run identity
+ * one-shot guard, refuse-while-running, and refuse sequential re-launch after Gen-2.
  */
 import { fileURLToPath } from 'node:url';
 
@@ -13,6 +14,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import {
   buildPhase21Gen2TemporalLaunchStartOptions,
+  evaluatePhase21Gen2PriorWorkflowIdentity,
   evaluatePhase21Gen2TemporalLaunchEligibility,
   executePhase21Gen2TemporalLaunch,
   PHASE21_CANARY_PAYOUT_WITHDRAWAL_ID,
@@ -59,13 +61,16 @@ describe('phase21 Gen-2 Temporal launch integration', () => {
         deployShaOk: true,
         signerReady: true,
         signerUnlocked: true,
+        expectedGen1RunId: 'gen1-run',
+        priorWorkflowFound: true,
+        observedPriorRunId: 'gen1-run',
         priorWorkflowStatus: 'COMPLETED',
         workflowStillRunning: false,
       }).reason,
     ).toBe('global_relay_must_remain_off');
   });
 
-  it('ALLOW_DUPLICATE after closed run + ConflictPolicy FAIL while RUNNING', async () => {
+  it('ALLOW_DUPLICATE after Gen-1 closed + ConflictPolicy FAIL while RUNNING + refuse sequential Gen-2 re-launch', async () => {
     const withdrawalId = PHASE21_CANARY_PAYOUT_WITHDRAWAL_ID;
     const taskQueue = `phase21-gen2-launch-${Date.now()}`;
     const opts = buildPhase21Gen2TemporalLaunchStartOptions({ withdrawalId, taskQueue });
@@ -89,7 +94,7 @@ describe('phase21 Gen-2 Temporal launch integration', () => {
     });
 
     await worker.runUntil(async () => {
-      // First closed execution (simulate prior Gen-1 COMPLETED) via REJECT then finish.
+      // Gen-1 closed execution — capture verified run identity for one-shot gate.
       const first = await testEnv.client.workflow.start(withdrawalPayoutWorkflow, {
         taskQueue,
         workflowId: opts.workflowId,
@@ -97,9 +102,22 @@ describe('phase21 Gen-2 Temporal launch integration', () => {
         workflowIdReusePolicy: 'ALLOW_DUPLICATE',
         workflowIdConflictPolicy: 'FAIL',
       });
+      const gen1RunId = first.firstExecutionRunId;
       await first.result();
 
-      // Gen-2 Owner launch: ALLOW_DUPLICATE after COMPLETED.
+      const gen1Describe = await testEnv.client.workflow.getHandle(opts.workflowId).describe();
+      expect(
+        evaluatePhase21Gen2PriorWorkflowIdentity({
+          expectedGen1RunId: gen1RunId,
+          observation: {
+            found: true,
+            runId: gen1Describe.runId,
+            status: gen1Describe.status.name,
+          },
+        }).ok,
+      ).toBe(true);
+
+      // Gen-2 Owner launch: ALLOW_DUPLICATE after COMPLETED Gen-1.
       const plan: Phase21Gen2TemporalLaunchPlanResult = {
         ok: true,
         mode: 'PLAN',
@@ -130,6 +148,9 @@ describe('phase21 Gen-2 Temporal launch integration', () => {
       expect(launched.ok).toBe(true);
       expect(launched.started).toBe(true);
       expect(launched.relayEnabled).toBe(false);
+      const gen2RunId = launched.runId;
+      expect(gen2RunId).toBeTruthy();
+      expect(gen2RunId).not.toBe(gen1RunId);
 
       // While RUNNING, ConflictPolicy FAIL must refuse a second start.
       await expect(
@@ -143,6 +164,54 @@ describe('phase21 Gen-2 Temporal launch integration', () => {
       ).rejects.toBeInstanceOf(WorkflowExecutionAlreadyStartedError);
 
       await testEnv.client.workflow.getHandle(opts.workflowId).result();
+
+      // After Gen-2 COMPLETED, live runId ≠ Gen-1 → sequential re-launch refused.
+      const afterGen2 = await testEnv.client.workflow.getHandle(opts.workflowId).describe();
+      expect(afterGen2.status.name).toBe('COMPLETED');
+      expect(afterGen2.runId).toBe(gen2RunId);
+      expect(
+        evaluatePhase21Gen2PriorWorkflowIdentity({
+          expectedGen1RunId: gen1RunId,
+          observation: {
+            found: true,
+            runId: afterGen2.runId,
+            status: afterGen2.status.name,
+          },
+        }).reason,
+      ).toBe('gen2_already_launched_or_run_mismatch');
+      expect(
+        evaluatePhase21Gen2TemporalLaunchEligibility({
+          withdrawalState: 'FAILED_PRE_BROADCAST',
+          gen1PermitStatus: 'CONSUMED',
+          gen2PermitStatus: 'ARMED',
+          gen2AuthorizationGeneration: 2,
+          attemptCount: 1,
+          failedPreAttemptCount: 1,
+          broadcastEvidenceCount: 0,
+          reservationHeld: true,
+          settlementPresent: false,
+          releasePresent: false,
+          chainReconOk: true,
+          globalRelayEnabled: false,
+          deployShaOk: true,
+          signerReady: true,
+          signerUnlocked: true,
+          expectedGen1RunId: gen1RunId,
+          priorWorkflowFound: true,
+          observedPriorRunId: afterGen2.runId,
+          priorWorkflowStatus: afterGen2.status.name,
+          workflowStillRunning: false,
+        }).reason,
+      ).toBe('gen2_already_launched_or_run_mismatch');
     });
   }, 180_000);
+
+  it('missing prior workflow fails closed (never assumes COMPLETED)', () => {
+    expect(
+      evaluatePhase21Gen2PriorWorkflowIdentity({
+        expectedGen1RunId: '01a13154-dc13-739c-92d1-8579627cc06e',
+        observation: { found: false },
+      }).reason,
+    ).toBe('prior_workflow_not_found');
+  });
 });

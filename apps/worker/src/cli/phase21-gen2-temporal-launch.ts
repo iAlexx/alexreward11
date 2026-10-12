@@ -5,6 +5,10 @@
  * --plan: read-only preflight (DB + signer + Temporal describe + chain recon + deploy SHA)
  * --execute --confirm I_AUTHORIZE_WD_000001_GEN2_TEMPORAL_ONE_SHOT: start exactly one workflow
  *
+ * Requires --expected-gen1-run-id (or PHASE21_GEN2_EXPECTED_GEN1_RUN_ID): verified Gen-1
+ * Temporal run identity. WorkflowNotFound fails closed (never assume COMPLETED). Live
+ * describe runId must match Gen-1; mismatch refuses sequential re-launch after Gen-2.
+ *
  * Never enables global outbox relay. Never signs/broadcasts in this CLI.
  * Requires Gen-2 ARMED (from prior APPLY), Gen-1 CONSUMED, attempt #1 FAILED_PRE no evidence.
  */
@@ -18,6 +22,7 @@ import {
   assertPhase21Ready,
   buildPhase21PayoutConfig,
   evaluatePhase21Gen2LiveDeployShaMatch,
+  evaluatePhase21Gen2PriorWorkflowIdentity,
   executePhase21Gen2TemporalLaunch,
   isPhase21CanaryPriorWorkflowSafeToRestart,
   PHASE21_CANARY_FROZEN_JETTON_MASTER,
@@ -74,6 +79,11 @@ async function main(): Promise<void> {
     process.env.PHASE21_GEN2_EXPECTED_DEPLOY_SHA ??
     '';
   ensure(expectedDeploySha.trim() !== '', 'EXPECTED_DEPLOY_SHA');
+  const expectedGen1RunId =
+    readFlag(argv, '--expected-gen1-run-id') ??
+    process.env.PHASE21_GEN2_EXPECTED_GEN1_RUN_ID ??
+    '';
+  ensure(expectedGen1RunId.trim() !== '', 'EXPECTED_GEN1_RUN_ID');
 
   const cfg = loadWorkerConfig();
   ensure(cfg.PHASE21_MAINNET_ENABLED === true, 'MAINNET_DISABLED');
@@ -125,11 +135,17 @@ async function main(): Promise<void> {
       namespace: cfg.TEMPORAL_NAMESPACE,
     });
     const workflowId = 'withdrawal/' + PHASE21_CANARY_PAYOUT_WITHDRAWAL_ID;
-    let priorWorkflowStatus = 'COMPLETED';
+    // Fail closed: never assume COMPLETED when Temporal history is missing.
+    let priorWorkflowFound = false;
+    let priorWorkflowStatus = '';
+    let observedPriorRunId: string | null = null;
     let workflowStillRunning = false;
     try {
       const prior = await temporal.workflow.getHandle(workflowId).describe();
+      priorWorkflowFound = true;
       priorWorkflowStatus = statusName(prior.status);
+      observedPriorRunId =
+        typeof prior.runId === 'string' && prior.runId.trim() !== '' ? prior.runId.trim() : null;
       workflowStillRunning =
         priorWorkflowStatus.includes('RUNNING') ||
         priorWorkflowStatus === '1' ||
@@ -140,7 +156,23 @@ async function main(): Promise<void> {
       );
     } catch (error) {
       if (!(error instanceof WorkflowNotFoundError)) throw error;
+      priorWorkflowFound = false;
+      priorWorkflowStatus = '';
+      observedPriorRunId = null;
+      workflowStillRunning = false;
     }
+
+    const identity = evaluatePhase21Gen2PriorWorkflowIdentity({
+      expectedGen1RunId,
+      observation: priorWorkflowFound
+        ? {
+            found: true,
+            runId: observedPriorRunId,
+            status: priorWorkflowStatus,
+          }
+        : { found: false },
+    });
+    ensure(identity.ok, 'PRIOR_IDENTITY_' + String(identity.reason).toUpperCase());
 
     const pool = new Pool({ connectionString: cfg.DATABASE_URL });
     try {
@@ -154,6 +186,9 @@ async function main(): Promise<void> {
           globalRelayEnabled: cfg.WORKER_OUTBOX_RELAY_ENABLED === true,
           signerReady,
           signerUnlocked,
+          expectedGen1RunId,
+          priorWorkflowFound,
+          observedPriorRunId,
           priorWorkflowStatus,
           workflowStillRunning,
           taskQueue: cfg.TEMPORAL_TASK_QUEUE,
