@@ -109,3 +109,125 @@ describe('runtimeFromEnv Phase 21 Mainnet transfer policy', () => {
     expect(runtime.mainnetTransferPolicy).toBeNull();
   });
 });
+
+describe('GET /v1/signing-identity Phase 21 Mainnet identity', () => {
+  const serviceToken = 'a-secure-local-token-that-is-long-enough';
+
+  it('rejects unauthenticated requests', async () => {
+    const pool = new Pool({ connectionString: 'postgresql://invalid' });
+    const server = Fastify();
+    await registerSignerRoutes(server, {
+      pool,
+      serviceToken,
+      spikeEnabled: true,
+      signPort: new LocalEphemeralSignPort(),
+      runtime: localSigningFixtureConfig({
+        phase21MainnetEnabled: true,
+        networkCode: 'TON_MAINNET',
+        networkGlobalId: -239,
+        keyMode: 'self_hosted_encrypted',
+        deploymentEnv: 'production',
+        mainnetTransferPolicy: PHASE21_MAINNET_FORWARD_APPROVED_POLICY_TEMPLATE,
+      }),
+    });
+
+    const res = await server.inject({ method: 'GET', url: '/v1/signing-identity' });
+    expect(res.statusCode).toBe(401);
+    expect(res.json()).toMatchObject({ error: 'UNAUTHORIZED' });
+
+    await server.close();
+    await pool.end();
+  });
+
+  it('returns Wallet V5R1 identity when Mainnet networkGlobalId=-239 and Phase 21 is enabled', async () => {
+    const pool = new Pool({ connectionString: 'postgresql://invalid' });
+    const server = Fastify();
+    await registerSignerRoutes(server, {
+      pool,
+      serviceToken,
+      spikeEnabled: true,
+      signPort: new LocalEphemeralSignPort(),
+      runtime: localSigningFixtureConfig({
+        phase21MainnetEnabled: true,
+        networkCode: 'TON_MAINNET',
+        networkGlobalId: -239,
+        keyMode: 'self_hosted_encrypted',
+        deploymentEnv: 'production',
+        mainnetTransferPolicy: PHASE21_MAINNET_FORWARD_APPROVED_POLICY_TEMPLATE,
+      }),
+    });
+
+    const res = await server.inject({
+      method: 'GET',
+      url: '/v1/signing-identity',
+      headers: { authorization: `Bearer ${serviceToken}` },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as {
+      publicKeyHex: string;
+      publicKeyFingerprint: string;
+      walletAddressRaw: string;
+      signingReady: boolean;
+    };
+    expect(body.signingReady).toBe(true);
+    expect(body.publicKeyHex).toMatch(/^[0-9a-f]{64}$/);
+    expect(body.publicKeyFingerprint).toMatch(/^[0-9a-f]+$/);
+    expect(body.walletAddressRaw).toMatch(/^-?[0-9]:[0-9a-fA-F]{64}$/);
+
+    await server.close();
+    await pool.end();
+  });
+
+  it('still rejects Mainnet identity when Phase 21 is disabled', async () => {
+    const pool = new Pool({ connectionString: 'postgresql://invalid' });
+    const server = Fastify();
+    await registerSignerRoutes(server, {
+      pool,
+      serviceToken,
+      spikeEnabled: true,
+      signPort: new LocalEphemeralSignPort(),
+      runtime: localSigningFixtureConfig({
+        phase21MainnetEnabled: false,
+        networkCode: 'TON_MAINNET',
+        networkGlobalId: -239,
+      }),
+    });
+
+    const res = await server.inject({
+      method: 'GET',
+      url: '/v1/signing-identity',
+      headers: { authorization: `Bearer ${serviceToken}` },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({
+      error: 'MAINNET_REJECTED',
+      message: expect.stringMatching(/Phase 9 rejects MAINNET Wallet V5 R1 identity/),
+    });
+
+    await server.close();
+    await pool.end();
+  });
+
+  it('preserves authenticated Testnet identity when Phase 21 is disabled', async () => {
+    const pool = new Pool({ connectionString: 'postgresql://invalid' });
+    const server = Fastify();
+    await registerSignerRoutes(server, {
+      pool,
+      serviceToken,
+      spikeEnabled: true,
+      signPort: new LocalEphemeralSignPort(),
+      runtime: localSigningFixtureConfig(),
+    });
+
+    const res = await server.inject({
+      method: 'GET',
+      url: '/v1/signing-identity',
+      headers: { authorization: `Bearer ${serviceToken}` },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ signingReady: true });
+
+    await server.close();
+    await pool.end();
+  });
+});

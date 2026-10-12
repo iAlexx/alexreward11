@@ -180,6 +180,7 @@ export async function registerSignerRoutes(
         publicKey,
         networkGlobalId: deps.runtime.networkGlobalId,
         workchain: deps.runtime.workchain,
+        phase21MainnetEnabled: deps.runtime.phase21MainnetEnabled,
       });
       return reply.code(200).send({
         publicKeyHex: publicKey.toString('hex'),
