@@ -865,6 +865,9 @@ export {
   type Phase21HotWalletBackupAttestation,
   type Phase21CanaryPayoutApplyConfirmation,
 } from './phase21-ceremony-confirmations.js';
+export { __mintPhase21MainnetRegistryApplyConfirmationForTests } from './phase21-ceremony-confirmations.js';
+export { mintAuthenticatedPhase21OwnerCeremonyTrustForTests } from './test-only/phase21-ceremony-test-hooks.js';
+export { mintAuthenticatedPhase21MainnetRegistryVerificationForTests } from './test-only/phase21-mainnet-registry-verification-test-hooks.js';
 export {
   createPhase21CeremonyVerifiedPool,
   assertPhase21CeremonyVerifiedPool,

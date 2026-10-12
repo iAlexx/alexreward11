@@ -10,7 +10,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src test",
     "test": "vitest run",
-    "start:tailscale": "sh ./scripts/start-tailscale.sh"
+    "start:tailscale": "sh ./scripts/start-tailscale.sh",
+    "test:phase21-e2e": "cross-env PHASE7_WITHDRAWAL_TESTS=1 ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1 ALEX_OWNER_BOOTSTRAP_DISPOSABLE_PRODUCTION_SIM=1 ALEX_PHASE21_CEREMONY_TEST_HOOKS=1 vitest run --fileParallelism=false test/phase21-mainnet-e2e-financial.test.ts"
   },
   "dependencies": {
     "@alex-rewards/config": "workspace:*",
@@ -27,11 +28,14 @@
     "@temporalio/worker": "1.23.0",
     "@temporalio/workflow": "1.23.0",
     "fastify": "5.12.2",
-    "pg": "8.23.0"
+    "pg": "8.23.0",
+    "@alex-rewards/ton": "workspace:*"
   },
   "devDependencies": {
     "@temporalio/testing": "1.23.0",
     "@types/pg": "8.23.1",
-    "tsx": "4.23.13"
+    "tsx": "4.23.13",
+    "cross-env": "7.0.3",
+    "vitest": "4.1.11"
   }
 }

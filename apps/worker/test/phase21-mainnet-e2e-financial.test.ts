@@ -6,6 +6,9 @@
  * - Uses FakeTonChainProvider(-239) + mock RealPayoutSignerPort only.
  * - Never touches production Postgres, Railway, Temporal, or real Mainnet.
  * - Exercises runRealTestnetPayoutPipeline (real production engine path).
+ * - Lives under apps/worker so Turbo stays acyclic (worker depends on both
+ *   @alex-rewards/signing and @alex-rewards/withdrawals; those packages must
+ *   not depend on each other).
  */
 import { createHash, randomUUID } from 'node:crypto';
 
@@ -20,17 +23,10 @@ import {
   TON_MAINNET_NETWORK_GLOBAL_ID,
   TON_TESTNET_NETWORK_GLOBAL_ID,
 } from '@alex-rewards/ton';
-import { Pool } from 'pg';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-
-import { __phase21TestSetApplyEnv } from '../src/phase21-ceremony-apply-gates.js';
-import {
-  __mintPhase21MainnetRegistryApplyConfirmationForTests,
-} from '../src/phase21-ceremony-confirmations.js';
-import { mintAuthenticatedPhase21OwnerCeremonyTrustForTests } from '../src/test-only/phase21-ceremony-test-hooks.js';
-import { mintAuthenticatedPhase21MainnetRegistryVerificationForTests } from '../src/test-only/phase21-mainnet-registry-verification-test-hooks.js';
 import {
   PipelineCrashError,
+  __mintPhase21MainnetRegistryApplyConfirmationForTests,
+  __phase21TestSetApplyEnv,
   applyPhase21MainnetRegistryBootstrap,
   armPhase21ManualDispatchPermit,
   buildPhase21PayoutConfig,
@@ -39,6 +35,8 @@ import {
   isPhase21CanaryPriorWorkflowSafeToRestart,
   isPhase21CanaryWithdrawalStateAllowedForResume,
   localWithdrawalEngineFixtureConfig,
+  mintAuthenticatedPhase21MainnetRegistryVerificationForTests,
+  mintAuthenticatedPhase21OwnerCeremonyTrustForTests,
   PHASE21_CANARY_ATTACHED_GRAM_ATOMIC,
   PHASE21_CANARY_FORWARD_TON_ATOMIC,
   PHASE21_CANARY_FROZEN_JETTON_MASTER,
@@ -49,7 +47,10 @@ import {
   WITHDRAWAL_PHASE21_MANUAL_DISPATCH_OUTBOX_EVENT,
   type RealPayoutCanonicalIntent,
   type RealPayoutSignerPort,
-} from '../src/index.js';
+} from '@alex-rewards/withdrawals';
+import { Pool } from 'pg';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+
 import {
   assertLedgerBalanced as harnessAssertLedgerBalanced,
   createApprovedWithdrawal,
@@ -61,7 +62,7 @@ import {
   resetAndMigrate,
   seedPhase14WithdrawalPolicies,
   truncateWithdrawalTables,
-} from './harness.js';
+} from '../../../packages/withdrawals/test/harness.js';
 
 const JETTON_MASTER = PHASE21_CANARY_FROZEN_JETTON_MASTER;
 const PAYOUT_JETTON_WALLET = '0:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
