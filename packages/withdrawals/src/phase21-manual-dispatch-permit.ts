@@ -61,6 +61,7 @@ export type Phase21ManualDispatchPermitStatus =
 const PERMIT_SELECT_COLUMNS = `
   id::text AS id,
   withdrawal_id::text AS withdrawal_id,
+  authorization_generation,
   public_id,
   authorized_gross_atomic::text AS authorized_gross_atomic,
   authorized_fee_atomic::text AS authorized_fee_atomic,
@@ -86,6 +87,7 @@ const PERMIT_SELECT_COLUMNS = `
 export interface Phase21ManualDispatchPermitRow {
   readonly id: string;
   readonly withdrawalId: string;
+  readonly authorizationGeneration: number;
   readonly publicId: string;
   readonly authorizedGrossAtomic: string;
   readonly authorizedFeeAtomic: string;
@@ -146,6 +148,7 @@ export interface Phase21ManualDispatchRelayAuthorityInput {
 type PermitSqlRow = {
   id: string;
   withdrawal_id: string;
+  authorization_generation: number;
   public_id: string;
   authorized_gross_atomic: string;
   authorized_fee_atomic: string;
@@ -170,6 +173,20 @@ type PermitSqlRow = {
 
 export function phase21CanaryManualDispatchIdempotencyKey(withdrawalId: string): string {
   return `phase21.manual_dispatch.canary:${withdrawalId}`;
+}
+
+/** Generation-scoped idempotency. Gen-1 uses the canary key; Gen>=2 must not collide. */
+export function phase21ManualDispatchGenerationIdempotencyKey(
+  withdrawalId: string,
+  authorizationGeneration: number,
+): string {
+  if (authorizationGeneration < 1) {
+    throw new WithdrawalDomainError('VALIDATION', 'authorizationGeneration must be >= 1');
+  }
+  if (authorizationGeneration === 1) {
+    return phase21CanaryManualDispatchIdempotencyKey(withdrawalId);
+  }
+  return `phase21.manual_dispatch.canary:${withdrawalId}:gen:${authorizationGeneration}`;
 }
 
 export function phase21ManualDispatchAuthorityMissingResources(
@@ -247,6 +264,7 @@ function mapPermitRow(row: PermitSqlRow): Phase21ManualDispatchPermitRow {
   return {
     id: row.id,
     withdrawalId: row.withdrawal_id,
+    authorizationGeneration: Number(row.authorization_generation),
     publicId: row.public_id,
     authorizedGrossAtomic: row.authorized_gross_atomic,
     authorizedFeeAtomic: row.authorized_fee_atomic,
@@ -274,12 +292,33 @@ export async function getPhase21ManualDispatchPermitByWithdrawalId(
   client: PoolClient,
   withdrawalId: string,
 ): Promise<Phase21ManualDispatchPermitRow | null> {
+  // Prefer live ARMED (any generation), else highest generation history row.
   const result = await client.query<PermitSqlRow>(
     `SELECT ${PERMIT_SELECT_COLUMNS}
      FROM phase21_manual_dispatch_permits
      WHERE withdrawal_id = $1::uuid
+     ORDER BY
+       CASE WHEN status = 'ARMED'::phase21_manual_dispatch_permit_status THEN 0 ELSE 1 END,
+       authorization_generation DESC
      LIMIT 1`,
     [withdrawalId],
+  );
+  const row = result.rows[0];
+  return row === undefined ? null : mapPermitRow(row);
+}
+
+export async function getPhase21ManualDispatchPermitByWithdrawalIdAndGeneration(
+  client: PoolClient,
+  withdrawalId: string,
+  authorizationGeneration: number,
+): Promise<Phase21ManualDispatchPermitRow | null> {
+  const result = await client.query<PermitSqlRow>(
+    `SELECT ${PERMIT_SELECT_COLUMNS}
+     FROM phase21_manual_dispatch_permits
+     WHERE withdrawal_id = $1::uuid
+       AND authorization_generation = $2::int
+     LIMIT 1`,
+    [withdrawalId, authorizationGeneration],
   );
   const row = result.rows[0];
   return row === undefined ? null : mapPermitRow(row);
@@ -342,9 +381,10 @@ export async function armPhase21ManualDispatchPermit(
   readonly reused: boolean;
 }> {
   assertBindingsConsistent(input.bindings);
-  const existing = await getPhase21ManualDispatchPermitByWithdrawalId(
+  const existing = await getPhase21ManualDispatchPermitByWithdrawalIdAndGeneration(
     client,
     input.bindings.withdrawalId,
+    1,
   );
   if (existing !== null) {
     if (existing.status === 'CANCELLED') {
@@ -380,21 +420,21 @@ export async function armPhase21ManualDispatchPermit(
   const permitId = randomUUID();
   const insert = await client.query<PermitSqlRow>(
     `INSERT INTO phase21_manual_dispatch_permits (
-       id, withdrawal_id, public_id,
+       id, withdrawal_id, authorization_generation, public_id,
        authorized_gross_atomic, authorized_fee_atomic, authorized_net_atomic,
        authorized_recipient_friendly, authorized_recipient_raw,
        authorized_network_code, authorized_asset_symbol, authorized_jetton_master,
        authorized_attached_gram_atomic, authorized_forward_gram_atomic,
        status, created_by_admin_user_id, idempotency_key, audit_correlation_id
      ) VALUES (
-       $1::uuid, $2::uuid, $3,
+       $1::uuid, $2::uuid, 1, $3,
        $4::bigint, $5::bigint, $6::bigint,
        $7, $8,
        $9, $10, $11,
        $12::bigint, $13::bigint,
        'ARMED'::phase21_manual_dispatch_permit_status, $14::uuid, $15, $16
      )
-     ON CONFLICT (withdrawal_id) DO NOTHING
+     ON CONFLICT (withdrawal_id, authorization_generation) DO NOTHING
      RETURNING ${PERMIT_SELECT_COLUMNS}`,
     [
       permitId,
@@ -428,6 +468,7 @@ export async function armPhase21ManualDispatchPermit(
         permitId: permit.id,
         withdrawalId: permit.withdrawalId,
         publicId: permit.publicId,
+        authorizationGeneration: permit.authorizationGeneration,
         status: permit.status,
         authorizedGrossAtomic: permit.authorizedGrossAtomic,
         authorizedFeeAtomic: permit.authorizedFeeAtomic,
@@ -443,9 +484,10 @@ export async function armPhase21ManualDispatchPermit(
   }
 
   // Concurrent INSERT raced — reuse winner after full binding compare.
-  const raced = await getPhase21ManualDispatchPermitByWithdrawalId(
+  const raced = await getPhase21ManualDispatchPermitByWithdrawalIdAndGeneration(
     client,
     input.bindings.withdrawalId,
+    1,
   );
   if (raced === null) {
     throw new WithdrawalDomainError(
@@ -464,6 +506,228 @@ export async function armPhase21ManualDispatchPermit(
     throw new WithdrawalDomainError(
       'VALIDATION',
       'concurrent Phase 21 manual dispatch permit bindings mismatch',
+      { details: { permitId: raced.id } },
+    );
+  }
+  return { permit: raced, created: false, reused: true };
+}
+
+
+/**
+ * Arm a fresh one-shot permit for authorization_generation >= 2.
+ * Preserves prior CONSUMED generations permanently. Does not mutate Gen-1.
+ * Caller (Gen-2 APPLY) must verify FAILED_PRE-only priors + chain recon before calling.
+ */
+export async function armPhase21ManualDispatchPermitGeneration(
+  client: PoolClient,
+  input: {
+    readonly bindings: Phase21ManualDispatchPermitBindings;
+    readonly authorizationGeneration: number;
+    readonly createdByAdminUserId: string;
+    readonly idempotencyKey: string;
+    readonly auditCorrelationId?: string | null;
+  },
+): Promise<{
+  readonly permit: Phase21ManualDispatchPermitRow;
+  readonly created: boolean;
+  readonly reused: boolean;
+}> {
+  if (!Number.isInteger(input.authorizationGeneration) || input.authorizationGeneration < 2) {
+    throw new WithdrawalDomainError(
+      'VALIDATION',
+      'authorizationGeneration for Gen-2+ arm must be an integer >= 2',
+      { details: { authorizationGeneration: input.authorizationGeneration } },
+    );
+  }
+  assertBindingsConsistent(input.bindings);
+
+  const expectedKey = phase21ManualDispatchGenerationIdempotencyKey(
+    input.bindings.withdrawalId,
+    input.authorizationGeneration,
+  );
+  if (input.idempotencyKey !== expectedKey) {
+    throw new WithdrawalDomainError(
+      'VALIDATION',
+      'Gen-2+ permit idempotency key must match generation-scoped key',
+      {
+        details: {
+          expectedKey,
+          requestedKey: input.idempotencyKey,
+          authorizationGeneration: input.authorizationGeneration,
+        },
+      },
+    );
+  }
+
+  const prior = await getPhase21ManualDispatchPermitByWithdrawalIdAndGeneration(
+    client,
+    input.bindings.withdrawalId,
+    input.authorizationGeneration - 1,
+  );
+  if (prior === null || prior.status !== 'CONSUMED') {
+    throw new WithdrawalDomainError(
+      'VALIDATION',
+      'Gen-2+ arm requires prior authorization generation CONSUMED',
+      {
+        details: {
+          priorGeneration: input.authorizationGeneration - 1,
+          priorStatus: prior?.status ?? null,
+        },
+      },
+    );
+  }
+
+  const liveArmed = await client.query<{ id: string; authorization_generation: number }>(
+    `SELECT id::text AS id, authorization_generation
+     FROM phase21_manual_dispatch_permits
+     WHERE withdrawal_id = $1::uuid
+       AND status = 'ARMED'::phase21_manual_dispatch_permit_status
+     LIMIT 1`,
+    [input.bindings.withdrawalId],
+  );
+  if (liveArmed.rows[0] !== undefined) {
+    const live = liveArmed.rows[0];
+    if (live.authorization_generation !== input.authorizationGeneration) {
+      throw new WithdrawalDomainError(
+        'VALIDATION',
+        'another ARMED permit generation already live for this withdrawal',
+        {
+          details: {
+            livePermitId: live.id,
+            liveGeneration: live.authorization_generation,
+            requestedGeneration: input.authorizationGeneration,
+          },
+        },
+      );
+    }
+  }
+
+  const existing = await getPhase21ManualDispatchPermitByWithdrawalIdAndGeneration(
+    client,
+    input.bindings.withdrawalId,
+    input.authorizationGeneration,
+  );
+  if (existing !== null) {
+    if (existing.status === 'CANCELLED') {
+      throw new WithdrawalDomainError(
+        'VALIDATION',
+        'Phase 21 Gen-2+ permit was cancelled; refuse re-arm without Owner review',
+        { details: { permitId: existing.id, status: existing.status } },
+      );
+    }
+    if (existing.idempotencyKey !== input.idempotencyKey) {
+      throw new WithdrawalDomainError(
+        'VALIDATION',
+        'Phase 21 Gen-2+ permit already exists with different idempotency key',
+        {
+          details: {
+            permitId: existing.id,
+            existingKey: existing.idempotencyKey,
+            requestedKey: input.idempotencyKey,
+          },
+        },
+      );
+    }
+    if (!bindingsMatchExisting(existing, input.bindings)) {
+      throw new WithdrawalDomainError(
+        'VALIDATION',
+        'existing Phase 21 Gen-2+ permit bindings mismatch',
+        { details: { permitId: existing.id } },
+      );
+    }
+    return { permit: existing, created: false, reused: true };
+  }
+
+  const permitId = randomUUID();
+  const insert = await client.query<PermitSqlRow>(
+    `INSERT INTO phase21_manual_dispatch_permits (
+       id, withdrawal_id, authorization_generation, public_id,
+       authorized_gross_atomic, authorized_fee_atomic, authorized_net_atomic,
+       authorized_recipient_friendly, authorized_recipient_raw,
+       authorized_network_code, authorized_asset_symbol, authorized_jetton_master,
+       authorized_attached_gram_atomic, authorized_forward_gram_atomic,
+       status, created_by_admin_user_id, idempotency_key, audit_correlation_id
+     ) VALUES (
+       $1::uuid, $2::uuid, $3::int, $4,
+       $5::bigint, $6::bigint, $7::bigint,
+       $8, $9,
+       $10, $11, $12,
+       $13::bigint, $14::bigint,
+       'ARMED'::phase21_manual_dispatch_permit_status, $15::uuid, $16, $17
+     )
+     ON CONFLICT (withdrawal_id, authorization_generation) DO NOTHING
+     RETURNING ${PERMIT_SELECT_COLUMNS}`,
+    [
+      permitId,
+      input.bindings.withdrawalId,
+      input.authorizationGeneration,
+      input.bindings.publicId,
+      input.bindings.authorizedGrossAtomic.toString(10),
+      input.bindings.authorizedFeeAtomic.toString(10),
+      input.bindings.authorizedNetAtomic.toString(10),
+      input.bindings.authorizedRecipientFriendly,
+      input.bindings.authorizedRecipientRaw,
+      input.bindings.authorizedNetworkCode,
+      input.bindings.authorizedAssetSymbol,
+      input.bindings.authorizedJettonMaster,
+      input.bindings.authorizedAttachedGramAtomic.toString(10),
+      input.bindings.authorizedForwardGramAtomic.toString(10),
+      input.createdByAdminUserId,
+      input.idempotencyKey,
+      input.auditCorrelationId ?? null,
+    ],
+  );
+
+  if (insert.rows[0] !== undefined) {
+    const permit = mapPermitRow(insert.rows[0]);
+    await insertWithdrawalAuditLog(client, {
+      actionType: 'PHASE21_MANUAL_DISPATCH_PERMIT_ARMED',
+      resourceType: 'phase21_manual_dispatch_permit',
+      resourceId: permit.id,
+      adminUserId: input.createdByAdminUserId,
+      actorType: 'ADMIN',
+      afterSnapshot: {
+        permitId: permit.id,
+        withdrawalId: permit.withdrawalId,
+        publicId: permit.publicId,
+        authorizationGeneration: permit.authorizationGeneration,
+        status: permit.status,
+        authorizedGrossAtomic: permit.authorizedGrossAtomic,
+        authorizedFeeAtomic: permit.authorizedFeeAtomic,
+        authorizedNetAtomic: permit.authorizedNetAtomic,
+        authorizedJettonMaster: permit.authorizedJettonMaster,
+        broadcastPerformed: false,
+        signed: false,
+        recoveryGeneration: true,
+      },
+      reason: `Phase 21 Owner-armed Gen-${permit.authorizationGeneration} one-shot manual Mainnet dispatch permit`,
+      traceId: input.auditCorrelationId ?? null,
+    });
+    return { permit, created: true, reused: false };
+  }
+
+  const raced = await getPhase21ManualDispatchPermitByWithdrawalIdAndGeneration(
+    client,
+    input.bindings.withdrawalId,
+    input.authorizationGeneration,
+  );
+  if (raced === null) {
+    throw new WithdrawalDomainError(
+      'VALIDATION',
+      'Phase 21 Gen-2+ permit insert raced and row missing',
+    );
+  }
+  if (raced.idempotencyKey !== input.idempotencyKey) {
+    throw new WithdrawalDomainError(
+      'VALIDATION',
+      'concurrent Phase 21 Gen-2+ permit arming conflict',
+      { details: { permitId: raced.id } },
+    );
+  }
+  if (!bindingsMatchExisting(raced, input.bindings)) {
+    throw new WithdrawalDomainError(
+      'VALIDATION',
+      'concurrent Phase 21 Gen-2+ permit bindings mismatch',
       { details: { permitId: raced.id } },
     );
   }
@@ -841,17 +1105,47 @@ export async function evaluatePhase21ManualDispatchRestartSafety(
   }
 
   if (permit.status === 'ARMED') {
-    const attempts = await client.query<{ attempt_count: number }>(
-      `SELECT count(*)::int AS attempt_count
+    const attempts = await client.query<{
+      attempt_count: number;
+      unsafe_count: number;
+      non_failed_pre_count: number;
+    }>(
+      `SELECT count(*)::int AS attempt_count,
+              count(*) FILTER (
+                WHERE broadcast_result_state::text <> 'FAILED_PRE_BROADCAST'
+                   OR signed_external_message_boc IS NOT NULL
+                   OR signed_wallet_request_boc IS NOT NULL
+                   OR external_message_cell_hash IS NOT NULL
+                   OR normalized_external_message_hash IS NOT NULL
+                   OR signed_message_hash IS NOT NULL
+                   OR broadcast_submitted_at IS NOT NULL
+                   OR (chain_reference IS NOT NULL AND btrim(chain_reference) <> '')
+              )::int AS unsafe_count,
+              count(*) FILTER (
+                WHERE broadcast_result_state::text <> 'FAILED_PRE_BROADCAST'
+              )::int AS non_failed_pre_count
        FROM withdrawal_attempts
        WHERE withdrawal_id = $1::uuid`,
       [withdrawalId],
     );
     const attemptCount = attempts.rows[0]?.attempt_count ?? 0;
-    if (attemptCount > 0) {
-      return { allowDuplicate: false, reason: 'armed_with_attempts', permit };
+    const unsafeCount = attempts.rows[0]?.unsafe_count ?? 0;
+    const nonFailedPreCount = attempts.rows[0]?.non_failed_pre_count ?? 0;
+    if (attemptCount === 0) {
+      return { allowDuplicate: true, reason: null, permit };
     }
-    return { allowDuplicate: true, reason: null, permit };
+    // Gen>=2 Owner recovery: prior FAILED_PRE-only attempts with no BOC/signature/submit.
+    if (
+      permit.authorizationGeneration >= 2 &&
+      nonFailedPreCount === 0 &&
+      unsafeCount === 0
+    ) {
+      return { allowDuplicate: true, reason: null, permit };
+    }
+    if (permit.authorizationGeneration >= 2 && unsafeCount > 0) {
+      return { allowDuplicate: false, reason: 'reconcile_required_no_restart', permit };
+    }
+    return { allowDuplicate: false, reason: 'armed_with_attempts', permit };
   }
 
   // CONSUMED

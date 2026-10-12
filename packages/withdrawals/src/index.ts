@@ -859,10 +859,14 @@ export {
   PHASE21_HOT_WALLET_REGISTER_PHRASE,
   PHASE21_HOT_WALLET_BACKUP_ATTESTATION_PHRASE,
   PHASE21_CANARY_PAYOUT_APPLY_PHRASE,
+  PHASE21_GEN2_RECOVERY_APPLY_PHRASE,
   confirmPhase21ProductionFlagsApplyInteractive,
   confirmPhase21MainnetRegistryApplyInteractive,
   confirmPhase21HotWalletRegisterInteractive,
   confirmPhase21CanaryPayoutApplyInteractive,
+  confirmPhase21Gen2RecoveryApplyInteractive,
+  assertPhase21Gen2RecoveryApplyConfirmation,
+  __mintPhase21Gen2RecoveryApplyConfirmationForTests,
   attestPhase21HotWalletOfflineBackupsInteractive,
   assertPhase21ProductionFlagsApplyConfirmation,
   assertPhase21MainnetRegistryApplyConfirmation,
@@ -881,6 +885,7 @@ export {
   type Phase21HotWalletRegisterConfirmation,
   type Phase21HotWalletBackupAttestation,
   type Phase21CanaryPayoutApplyConfirmation,
+  type Phase21Gen2RecoveryApplyConfirmation,
 } from './phase21-ceremony-confirmations.js';
 export { __mintPhase21MainnetRegistryApplyConfirmationForTests } from './phase21-ceremony-confirmations.js';
 export { mintAuthenticatedPhase21OwnerCeremonyTrustForTests } from './test-only/phase21-ceremony-test-hooks.js';
@@ -939,6 +944,9 @@ export {
 export type { Phase21CanaryPayoutApplyResult } from './phase21-canary-payout-apply.js';
 export {
   armPhase21ManualDispatchPermit,
+  armPhase21ManualDispatchPermitGeneration,
+  getPhase21ManualDispatchPermitByWithdrawalIdAndGeneration,
+  phase21ManualDispatchGenerationIdempotencyKey,
   assertPhase21ManualDispatchLiveBindingsOrThrow,
   bindPhase21ManualDispatchPermitToAttempt,
   consumePhase21ManualDispatchPermit,
@@ -952,6 +960,7 @@ export {
 } from './phase21-manual-dispatch-permit.js';
 export {
   evaluatePhase21CanaryFailedPreZeroAttemptRecovery,
+  evaluatePhase21Gen2ConsumedFailedPreRecovery,
   isPhase21CanaryPriorWorkflowSafeToRestart,
   isPhase21CanaryWithdrawalStateAllowedForResume,
 } from './phase21-resume-canary-gates.js';
@@ -989,3 +998,23 @@ export type {
   Phase21CanaryPayoutPlanResult,
   Phase21CanaryPayoutSignerProbe,
 } from './phase21-canary-payout-plan.js';
+
+export {
+  PHASE21_GEN2_RECOVERY_WITHDRAWAL_ID,
+  PHASE21_GEN2_RECOVERY_PUBLIC_ID,
+  PHASE21_GEN2_AUTHORIZATION_GENERATION,
+  PHASE21_GEN2_CHAIN_RECON_MAX_AGE_MS,
+  evaluatePhase21Gen2ChainReconciliationFreshness,
+  evaluatePhase21Gen2RecoveryEligibility,
+  mintPhase21Gen2IndependentChainReconciliationForTests,
+  planPhase21Gen2Recovery,
+} from './phase21-gen2-recovery-plan.js';
+export type {
+  Phase21Gen2IndependentChainReconciliation,
+  Phase21Gen2RecoveryPlanResult,
+} from './phase21-gen2-recovery-plan.js';
+export {
+  PHASE21_GEN2_RECOVERY_APPLY_ENABLED,
+  applyPhase21Gen2Recovery,
+} from './phase21-gen2-recovery-apply.js';
+export type { Phase21Gen2RecoveryApplyResult } from './phase21-gen2-recovery-apply.js';

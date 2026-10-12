@@ -270,6 +270,7 @@ function mockPlanClient(overrides?: {
         const row = {
           id: String(params?.[0]),
           withdrawal_id: withdrawalId,
+          authorization_generation: 1,
           public_id: String(params?.[2]),
           authorized_gross_atomic: String(params?.[3]),
           authorized_fee_atomic: String(params?.[4]),

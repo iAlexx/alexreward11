@@ -11,7 +11,7 @@
     "lint": "eslint src test",
     "test": "vitest run",
     "start:tailscale": "sh ./scripts/start-tailscale.sh",
-    "test:phase21-e2e": "cross-env PHASE7_WITHDRAWAL_TESTS=1 ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1 ALEX_OWNER_BOOTSTRAP_DISPOSABLE_PRODUCTION_SIM=1 ALEX_PHASE21_CEREMONY_TEST_HOOKS=1 vitest run --fileParallelism=false test/phase21-mainnet-e2e-financial.test.ts"
+    "test:phase21-e2e": "cross-env PHASE7_WITHDRAWAL_TESTS=1 ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1 ALEX_OWNER_BOOTSTRAP_DISPOSABLE_PRODUCTION_SIM=1 ALEX_PHASE21_CEREMONY_TEST_HOOKS=1 vitest run --fileParallelism=false test/phase21-mainnet-e2e-financial.test.ts test/phase21-gen2-recovery-e2e.test.ts"
   },
   "dependencies": {
     "@alex-rewards/config": "workspace:*",

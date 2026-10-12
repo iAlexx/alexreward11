@@ -17,6 +17,8 @@ export const PHASE21_HOT_WALLET_BACKUP_ATTESTATION_PHRASE =
   'I_HAVE_TWO_SHA256_VERIFIED_OFFLINE_HOT_WALLET_BACKUPS' as const;
 export const PHASE21_CANARY_PAYOUT_APPLY_PHRASE =
   'APPLY_LOOTRA_PHASE21_CANARY_MANUAL_DISPATCH_PERMIT' as const;
+export const PHASE21_GEN2_RECOVERY_APPLY_PHRASE =
+  'APPLY_LOOTRA_PHASE21_GEN2_OWNER_RECOVERY_PERMIT' as const;
 
 export type Phase21InteractivePhraseInput = {
   /** Default true. false is honoured only with TEST_HOOKS and an injected readPhrase. */
@@ -55,11 +57,18 @@ export type Phase21CanaryPayoutApplyConfirmation = {
   readonly confirmedAt: string;
 };
 
+export type Phase21Gen2RecoveryApplyConfirmation = {
+  readonly brand: 'Phase21Gen2RecoveryApplyConfirmation';
+  readonly phrase: typeof PHASE21_GEN2_RECOVERY_APPLY_PHRASE;
+  readonly confirmedAt: string;
+};
+
 const productionFlagsBrand = new WeakSet<object>();
 const mainnetRegistryBrand = new WeakSet<object>();
 const hotWalletRegisterBrand = new WeakSet<object>();
 const hotWalletBackupBrand = new WeakSet<object>();
 const canaryPayoutApplyBrand = new WeakSet<object>();
+const gen2RecoveryApplyBrand = new WeakSet<object>();
 
 export class Phase21CeremonyConfirmationError extends Error {
   readonly code: string;
@@ -401,5 +410,63 @@ export function __mintPhase21MainnetRegistryApplyConfirmationForTests(): Phase21
     confirmedAt: new Date().toISOString(),
   };
   mainnetRegistryBrand.add(obj);
+  return obj;
+}
+
+export function isPhase21Gen2RecoveryApplyConfirmation(
+  value: unknown,
+): value is Phase21Gen2RecoveryApplyConfirmation {
+  return typeof value === 'object' && value !== null && gen2RecoveryApplyBrand.has(value);
+}
+
+export function assertPhase21Gen2RecoveryApplyConfirmation(
+  value: unknown,
+): asserts value is Phase21Gen2RecoveryApplyConfirmation {
+  if (!isPhase21Gen2RecoveryApplyConfirmation(value)) {
+    throw new Phase21CeremonyConfirmationError(
+      'APPLY_CONFIRMATION_REQUIRED',
+      'branded Phase21Gen2RecoveryApplyConfirmation required',
+      {},
+    );
+  }
+}
+
+export async function confirmPhase21Gen2RecoveryApplyInteractive(
+  input?: Phase21InteractivePhraseInput,
+): Promise<Phase21Gen2RecoveryApplyConfirmation> {
+  const confirmedAt = await requireExactPhrase({
+    options: input,
+    expected: PHASE21_GEN2_RECOVERY_APPLY_PHRASE,
+    prompt:
+      'FINAL CONFIRMATION — this will ARM a Generation-2 one-shot Phase 21 manual Mainnet dispatch permit for WD-000001 recovery only.\n' +
+      'Gen-1 CONSUMED permit and failed attempt #1 are preserved. Reservation is reused. No global unpause.\n' +
+      'It does NOT broadcast, sign, or unlock the signer.\n' +
+      `Type exactly ${PHASE21_GEN2_RECOVERY_APPLY_PHRASE}: `,
+    failureCode: 'APPLY_CONFIRMATION_FAILED',
+  });
+  const obj: Phase21Gen2RecoveryApplyConfirmation = {
+    brand: 'Phase21Gen2RecoveryApplyConfirmation',
+    phrase: PHASE21_GEN2_RECOVERY_APPLY_PHRASE,
+    confirmedAt,
+  };
+  gen2RecoveryApplyBrand.add(obj);
+  return obj;
+}
+
+/** @internal Test-only mint — requires ALEX_PHASE21_CEREMONY_TEST_HOOKS=1. */
+export function __mintPhase21Gen2RecoveryApplyConfirmationForTests(): Phase21Gen2RecoveryApplyConfirmation {
+  if (!testHooksEnabled()) {
+    throw new Phase21CeremonyConfirmationError(
+      'FORBIDDEN',
+      'gen2 recovery apply confirmation test mint requires ALEX_PHASE21_CEREMONY_TEST_HOOKS=1',
+      {},
+    );
+  }
+  const obj: Phase21Gen2RecoveryApplyConfirmation = {
+    brand: 'Phase21Gen2RecoveryApplyConfirmation',
+    phrase: PHASE21_GEN2_RECOVERY_APPLY_PHRASE,
+    confirmedAt: new Date().toISOString(),
+  };
+  gen2RecoveryApplyBrand.add(obj);
   return obj;
 }

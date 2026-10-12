@@ -75,3 +75,54 @@ export function evaluatePhase21CanaryFailedPreZeroAttemptRecovery(input: {
   }
   return { eligible: true, reason: null };
 }
+
+/**
+ * Owner-gated Gen-2 recovery eligibility after Gen-1 CONSUMED + FAILED_PRE attempt(s).
+ * Requires a live ARMED Gen-2 permit, all prior attempts FAILED_PRE with no evidence,
+ * and a prior Temporal workflow status safe to restart. Does not mutate state.
+ */
+export function evaluatePhase21Gen2ConsumedFailedPreRecovery(input: {
+  readonly withdrawalState: string;
+  readonly gen1PermitStatus: string;
+  readonly gen2PermitStatus: string;
+  readonly gen2AuthorizationGeneration: number;
+  readonly attemptCount: number;
+  readonly failedPreAttemptCount: number;
+  readonly broadcastEvidenceCount: number;
+  readonly priorWorkflowStatus: string;
+}): {
+  readonly eligible: boolean;
+  readonly reason: string | null;
+} {
+  if (
+    input.withdrawalState !== 'FAILED_PRE_BROADCAST' &&
+    input.withdrawalState !== 'QUEUED'
+  ) {
+    return { eligible: false, reason: 'withdrawal_state_not_allowed' };
+  }
+  if (!isPhase21CanaryWithdrawalStateAllowedForResume(input.withdrawalState)) {
+    return { eligible: false, reason: 'withdrawal_state_not_allowed' };
+  }
+  if (input.gen1PermitStatus !== 'CONSUMED') {
+    return { eligible: false, reason: 'gen1_not_consumed' };
+  }
+  if (input.gen2PermitStatus !== 'ARMED') {
+    return { eligible: false, reason: 'gen2_not_armed' };
+  }
+  if (input.gen2AuthorizationGeneration < 2) {
+    return { eligible: false, reason: 'gen2_generation_invalid' };
+  }
+  if (input.attemptCount < 1) {
+    return { eligible: false, reason: 'no_prior_attempt' };
+  }
+  if (input.failedPreAttemptCount !== input.attemptCount) {
+    return { eligible: false, reason: 'non_failed_pre_attempts' };
+  }
+  if (input.broadcastEvidenceCount !== 0) {
+    return { eligible: false, reason: 'broadcast_evidence_exists' };
+  }
+  if (!isPhase21CanaryPriorWorkflowSafeToRestart(input.priorWorkflowStatus)) {
+    return { eligible: false, reason: 'prior_workflow_not_safe' };
+  }
+  return { eligible: true, reason: null };
+}

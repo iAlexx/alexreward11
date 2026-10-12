@@ -116,7 +116,29 @@ function makePermitClient(state: {
         text.includes('AS attempt_count')
       ) {
         const withdrawalId = String(params?.[0]);
-        const count = attempts.filter((a) => a.withdrawal_id === withdrawalId).length;
+        const rows = attempts.filter((a) => a.withdrawal_id === withdrawalId);
+        const count = rows.length;
+        if (text.includes('unsafe_count')) {
+          let unsafe = 0;
+          let nonFailed = 0;
+          for (const a of rows) {
+            const stateName = String(a.broadcast_result_state ?? 'PENDING');
+            if (stateName !== 'FAILED_PRE_BROADCAST') nonFailed += 1;
+            const hasEvidence =
+              a.signed_external_message_boc != null ||
+              a.signed_wallet_request_boc != null ||
+              a.external_message_cell_hash != null ||
+              a.normalized_external_message_hash != null ||
+              a.signed_message_hash != null ||
+              a.broadcast_submitted_at != null ||
+              (a.chain_reference != null && String(a.chain_reference).trim() !== '') ||
+              stateName !== 'FAILED_PRE_BROADCAST';
+            if (hasEvidence) unsafe += 1;
+          }
+          return {
+            rows: [{ attempt_count: count, unsafe_count: unsafe, non_failed_pre_count: nonFailed }],
+          };
+        }
         return { rows: [{ attempt_count: count }] };
       }
       if (
@@ -155,37 +177,71 @@ function makePermitClient(state: {
       }
       if (text.includes('FROM phase21_manual_dispatch_permits') && text.includes('WHERE withdrawal_id')) {
         const id = String(params?.[0]);
-        const row = state.permits.find((p) => p.withdrawal_id === id);
+        let rows = state.permits.filter((p) => p.withdrawal_id === id);
+        if (text.includes('authorization_generation =')) {
+          const gen = Number(params?.[1]);
+          rows = rows.filter((p) => Number(p.authorization_generation ?? 1) === gen);
+        } else if (text.includes('ORDER BY')) {
+          rows = [...rows].sort((a, b) => {
+            const aArmed = a.status === 'ARMED' ? 0 : 1;
+            const bArmed = b.status === 'ARMED' ? 0 : 1;
+            if (aArmed !== bArmed) return aArmed - bArmed;
+            return Number(b.authorization_generation ?? 1) - Number(a.authorization_generation ?? 1);
+          });
+        }
+        const row = rows[0];
         return { rows: row ? [row] : [] };
+      }
+      if (
+        text.includes('FROM phase21_manual_dispatch_permits') &&
+        text.includes("status = 'ARMED'")
+      ) {
+        const id = String(params?.[0]);
+        const row = state.permits.find((p) => p.withdrawal_id === id && p.status === 'ARMED');
+        return {
+          rows: row
+            ? [{ id: row.id, authorization_generation: Number(row.authorization_generation ?? 1) }]
+            : [],
+        };
       }
       if (text.includes('INSERT INTO phase21_manual_dispatch_permits')) {
         const withdrawalId = String(params?.[1]);
-        if (state.permits.some((p) => p.withdrawal_id === withdrawalId)) {
+        const gen2 = text.includes('$3::int');
+        const authorizationGeneration = gen2 ? Number(params?.[2]) : 1;
+        if (
+          state.permits.some(
+            (p) =>
+              p.withdrawal_id === withdrawalId &&
+              Number(p.authorization_generation ?? 1) === authorizationGeneration,
+          )
+        ) {
           return { rows: [] };
         }
+        const off = gen2 ? 1 : 0;
         const row: Row = {
           id: String(params?.[0]),
           withdrawal_id: withdrawalId,
-          public_id: String(params?.[2]),
-          authorized_gross_atomic: String(params?.[3]),
-          authorized_fee_atomic: String(params?.[4]),
-          authorized_net_atomic: String(params?.[5]),
-          authorized_recipient_friendly: String(params?.[6]),
-          authorized_recipient_raw: String(params?.[7]),
-          authorized_network_code: String(params?.[8]),
-          authorized_asset_symbol: String(params?.[9]),
-          authorized_jetton_master: String(params?.[10]),
-          authorized_attached_gram_atomic: String(params?.[11]),
-          authorized_forward_gram_atomic: String(params?.[12]),
+          authorization_generation: authorizationGeneration,
+          public_id: String(params?.[2 + off]),
+          authorized_gross_atomic: String(params?.[3 + off]),
+          authorized_fee_atomic: String(params?.[4 + off]),
+          authorized_net_atomic: String(params?.[5 + off]),
+          authorized_recipient_friendly: String(params?.[6 + off]),
+          authorized_recipient_raw: String(params?.[7 + off]),
+          authorized_network_code: String(params?.[8 + off]),
+          authorized_asset_symbol: String(params?.[9 + off]),
+          authorized_jetton_master: String(params?.[10 + off]),
+          authorized_attached_gram_atomic: String(params?.[11 + off]),
+          authorized_forward_gram_atomic: String(params?.[12 + off]),
           status: 'ARMED',
           consumed_attempt_id: null,
-          created_by_admin_user_id: String(params?.[13]),
+          created_by_admin_user_id: String(params?.[13 + off]),
           created_at: new Date('2026-10-06T00:00:00.000Z'),
           consumed_at: null,
           cancelled_at: null,
           cancel_reason: null,
-          idempotency_key: String(params?.[14]),
-          audit_correlation_id: params?.[15] ?? null,
+          idempotency_key: String(params?.[14 + off]),
+          audit_correlation_id: params?.[15 + off] ?? null,
         };
         state.permits.push(row);
         return { rows: [row] };
@@ -689,6 +745,7 @@ describe('phase21 manual dispatch permit', () => {
           {
             id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
             withdrawal_id: CANARY_BINDINGS.withdrawalId,
+            authorization_generation: 1,
             public_id: CANARY_BINDINGS.publicId,
             authorized_gross_atomic: '200000',
             authorized_fee_atomic: '10000',
@@ -842,6 +899,7 @@ describe('phase21 manual dispatch permit', () => {
     const permitRow: Phase21ManualDispatchPermitRow = {
       id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       withdrawalId: CANARY_BINDINGS.withdrawalId,
+      authorizationGeneration: 1,
       publicId: CANARY_BINDINGS.publicId,
       authorizedGrossAtomic: '200000',
       authorizedFeeAtomic: '10000',
@@ -936,6 +994,7 @@ describe('phase21 manual dispatch permit', () => {
     const permitRow: Phase21ManualDispatchPermitRow = {
       id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       withdrawalId: CANARY_BINDINGS.withdrawalId,
+      authorizationGeneration: 1,
       publicId: CANARY_BINDINGS.publicId,
       authorizedGrossAtomic: '200000',
       authorizedFeeAtomic: '10000',
