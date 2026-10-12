@@ -1018,3 +1018,21 @@ export {
   applyPhase21Gen2Recovery,
 } from './phase21-gen2-recovery-apply.js';
 export type { Phase21Gen2RecoveryApplyResult } from './phase21-gen2-recovery-apply.js';
+
+export {
+  PHASE21_GEN2_TEMPORAL_LAUNCH_ACK,
+  PHASE21_GEN2_TEMPORAL_LAUNCH_WORKFLOW_TYPE,
+  PHASE21_GEN2_TEMPORAL_LAUNCH_REUSE_POLICY,
+  PHASE21_GEN2_TEMPORAL_LAUNCH_CONFLICT_POLICY,
+  assertPhase21Gen2TemporalLaunchAck,
+  buildPhase21Gen2TemporalLaunchStartOptions,
+  evaluatePhase21Gen2LiveDeployShaMatch,
+  evaluatePhase21Gen2TemporalLaunchEligibility,
+  planPhase21Gen2TemporalLaunch,
+  executePhase21Gen2TemporalLaunch,
+} from './phase21-gen2-temporal-launch.js';
+export type {
+  Phase21Gen2TemporalLaunchPlanResult,
+  Phase21Gen2TemporalLaunchStartOptions,
+  Phase21Gen2TemporalStarter,
+} from './phase21-gen2-temporal-launch.js';
