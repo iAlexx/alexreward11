@@ -25,6 +25,9 @@ export function isPhase21CanaryPriorWorkflowSafeToRestart(statusName: string): b
   if (s === '1' || s === '6') return false;
   if (s.includes('RUNNING') || s.includes('CONTINUED_AS_NEW')) return false;
 
+  // Durable Gen-1 terminal path after Temporal retention expiry (not a live status).
+  if (s === 'TEMPORAL_HISTORY_ABSENT_DURABLE_GEN1_TERMINAL') return true;
+
   if (s === '2' || s === '3' || s === '4' || s === '5' || s === '7') return true;
   if (
     s.includes('COMPLETED') ||

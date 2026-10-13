@@ -133,6 +133,7 @@ describe('phase21 Gen-2 Temporal launch integration', () => {
         attemptCount: 1,
         reservationHeld: true,
         globalRelayEnabled: false,
+        priorWorkflowIdentityMode: 'live_gen1_run',
         startOptions: opts,
         broadcastPerformed: false,
         signed: false,
@@ -140,10 +141,22 @@ describe('phase21 Gen-2 Temporal launch integration', () => {
         relayEnabled: false,
       };
 
+      const claimClient = {
+        query: async (sql: string) => {
+          if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') return { rows: [] };
+          if (typeof sql === 'string' && sql.includes('INSERT INTO outbox_events')) {
+            return { rows: [{ id: 'claim-1' }] };
+          }
+          return { rows: [] };
+        },
+      };
+
       const launched = await executePhase21Gen2TemporalLaunch({
         confirmationPhrase: PHASE21_GEN2_TEMPORAL_LAUNCH_ACK,
         plan,
         temporal: testEnv.client,
+        claimClient: claimClient as never,
+        expectedGen1RunId: gen1RunId,
       });
       expect(launched.ok).toBe(true);
       expect(launched.started).toBe(true);
@@ -206,12 +219,34 @@ describe('phase21 Gen-2 Temporal launch integration', () => {
     });
   }, 180_000);
 
-  it('missing prior workflow fails closed (never assumes COMPLETED)', () => {
+  it('missing prior workflow fails closed without durable evidence (never assumes COMPLETED)', () => {
     expect(
       evaluatePhase21Gen2PriorWorkflowIdentity({
         expectedGen1RunId: '01a13154-dc13-739c-92d1-8579627cc06e',
         observation: { found: false },
       }).reason,
     ).toBe('prior_workflow_not_found');
+  });
+
+  it('durable Gen-1 terminal evidence opens gate when Temporal history is absent', () => {
+    expect(
+      evaluatePhase21Gen2PriorWorkflowIdentity({
+        expectedGen1RunId: '01a13154-dc13-739c-92d1-8579627cc06e',
+        observation: { found: false },
+        durableGen1Terminal: {
+          gen1PermitStatus: 'CONSUMED',
+          gen1ConsumedAttemptId: 'attempt-1',
+          attemptCount: 1,
+          failedPreAttemptCount: 1,
+          broadcastEvidenceCount: 0,
+          gen2PermitStatus: 'ARMED',
+          gen2TemporalLaunchClaimAbsent: true,
+        },
+      }),
+    ).toMatchObject({
+      ok: true,
+      identityMode: 'durable_gen1_terminal',
+      priorWorkflowStatus: 'TEMPORAL_HISTORY_ABSENT_DURABLE_GEN1_TERMINAL',
+    });
   });
 });

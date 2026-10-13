@@ -45,6 +45,17 @@ export const PHASE21_GEN2_TEMPORAL_LAUNCH_WORKFLOW_TYPE = 'withdrawalPayoutWorkf
 export const PHASE21_GEN2_TEMPORAL_LAUNCH_REUSE_POLICY = 'ALLOW_DUPLICATE' as const;
 export const PHASE21_GEN2_TEMPORAL_LAUNCH_CONFLICT_POLICY = 'FAIL' as const;
 
+/** Outbox event_type for durable Gen-2 Temporal one-shot claim (never relayed; status DISPATCHED). */
+export const PHASE21_GEN2_TEMPORAL_LAUNCH_CLAIM_EVENT_TYPE =
+  'phase21.gen2_temporal_launch_claim' as const;
+
+export function buildPhase21Gen2TemporalLaunchClaimDedupeKey(input: {
+  readonly withdrawalId: string;
+  readonly gen2PermitId: string;
+}): string {
+  return `withdrawal.phase21_gen2_temporal_launch:${input.withdrawalId}:${input.gen2PermitId}`;
+}
+
 export interface Phase21Gen2TemporalLaunchStartOptions {
   readonly workflowType: typeof PHASE21_GEN2_TEMPORAL_LAUNCH_WORKFLOW_TYPE;
   readonly workflowId: string;
@@ -103,7 +114,13 @@ export function evaluatePhase21Gen2LiveDeployShaMatch(input: {
  * (and even after it COMPLETED), ALLOW_DUPLICATE would otherwise permit a second
  * sequential launch. Bind launch to the previously verified Gen-1 runId:
  * if history is missing, expected identity is absent, or live runId differs —
- * refuse (fail closed; never assume COMPLETED on WorkflowNotFound).
+ * refuse (fail closed; never assume COMPLETED on WorkflowNotFound alone).
+ *
+ * When Temporal history is absent (e.g. 24h namespace retention), a durable DB
+ * terminal-evidence path may open ONLY with Owner-attested expectedGen1RunId plus
+ * Gen-1 CONSUMED / attempt #1 FAILED_PRE zero-evidence / Gen-2 ARMED / launch claim
+ * absent. Missing history never implies "no previous payment" — chain recon remains
+ * mandatory elsewhere.
  */
 export type Phase21Gen2PriorWorkflowObservation =
   | { readonly found: false }
@@ -113,14 +130,53 @@ export type Phase21Gen2PriorWorkflowObservation =
       readonly status: string;
     };
 
+export type Phase21Gen2DurableGen1TerminalEvidence = {
+  readonly gen1PermitStatus: string;
+  readonly gen1ConsumedAttemptId: string | null;
+  readonly attemptCount: number;
+  readonly failedPreAttemptCount: number;
+  readonly broadcastEvidenceCount: number;
+  readonly gen2PermitStatus: string;
+  readonly gen2TemporalLaunchClaimAbsent: boolean;
+};
+
+export type Phase21Gen2PriorWorkflowIdentityMode = 'live_gen1_run' | 'durable_gen1_terminal';
+
+export function evaluatePhase21Gen2DurableGen1TerminalEvidence(
+  evidence: Phase21Gen2DurableGen1TerminalEvidence,
+): { readonly ok: boolean; readonly reason: string | null } {
+  if (evidence.gen1PermitStatus !== 'CONSUMED') {
+    return { ok: false, reason: 'durable_gen1_not_consumed' };
+  }
+  if (evidence.gen1ConsumedAttemptId === null || evidence.gen1ConsumedAttemptId.trim() === '') {
+    return { ok: false, reason: 'durable_gen1_attempt_unbound' };
+  }
+  if (evidence.attemptCount !== 1 || evidence.failedPreAttemptCount !== 1) {
+    return { ok: false, reason: 'durable_attempt_shape_refused' };
+  }
+  if (evidence.broadcastEvidenceCount !== 0) {
+    return { ok: false, reason: 'durable_broadcast_evidence_exists' };
+  }
+  if (evidence.gen2PermitStatus !== 'ARMED') {
+    return { ok: false, reason: 'durable_gen2_not_armed' };
+  }
+  if (evidence.gen2TemporalLaunchClaimAbsent !== true) {
+    return { ok: false, reason: 'durable_gen2_launch_already_claimed' };
+  }
+  return { ok: true, reason: null };
+}
+
 export function evaluatePhase21Gen2PriorWorkflowIdentity(input: {
   readonly expectedGen1RunId: string | null | undefined;
   readonly observation: Phase21Gen2PriorWorkflowObservation;
+  /** Required when observation.found=false; ignored when live Temporal history exists. */
+  readonly durableGen1Terminal?: Phase21Gen2DurableGen1TerminalEvidence | null;
 }): {
   readonly ok: boolean;
   readonly reason: string | null;
   readonly priorWorkflowStatus: string | null;
   readonly observedRunId: string | null;
+  readonly identityMode: Phase21Gen2PriorWorkflowIdentityMode | null;
 } {
   const expected = (input.expectedGen1RunId ?? '').trim();
   if (expected === '') {
@@ -129,14 +185,37 @@ export function evaluatePhase21Gen2PriorWorkflowIdentity(input: {
       reason: 'expected_gen1_run_id_missing',
       priorWorkflowStatus: null,
       observedRunId: null,
+      identityMode: null,
     };
   }
   if (!input.observation.found) {
+    const durable = input.durableGen1Terminal;
+    if (durable === undefined || durable === null) {
+      return {
+        ok: false,
+        reason: 'prior_workflow_not_found',
+        priorWorkflowStatus: null,
+        observedRunId: null,
+        identityMode: null,
+      };
+    }
+    const durableGate = evaluatePhase21Gen2DurableGen1TerminalEvidence(durable);
+    if (!durableGate.ok) {
+      return {
+        ok: false,
+        reason: durableGate.reason,
+        priorWorkflowStatus: null,
+        observedRunId: null,
+        identityMode: null,
+      };
+    }
+    // Never invent COMPLETED — history is absent; durable terminal only.
     return {
-      ok: false,
-      reason: 'prior_workflow_not_found',
-      priorWorkflowStatus: null,
+      ok: true,
+      reason: null,
+      priorWorkflowStatus: 'TEMPORAL_HISTORY_ABSENT_DURABLE_GEN1_TERMINAL',
       observedRunId: null,
+      identityMode: 'durable_gen1_terminal',
     };
   }
   const observedRunId = (input.observation.runId ?? '').trim();
@@ -146,6 +225,7 @@ export function evaluatePhase21Gen2PriorWorkflowIdentity(input: {
       reason: 'prior_run_id_ambiguous',
       priorWorkflowStatus: input.observation.status,
       observedRunId: null,
+      identityMode: null,
     };
   }
   if (observedRunId !== expected) {
@@ -154,6 +234,7 @@ export function evaluatePhase21Gen2PriorWorkflowIdentity(input: {
       reason: 'gen2_already_launched_or_run_mismatch',
       priorWorkflowStatus: input.observation.status,
       observedRunId,
+      identityMode: null,
     };
   }
   return {
@@ -161,6 +242,7 @@ export function evaluatePhase21Gen2PriorWorkflowIdentity(input: {
     reason: null,
     priorWorkflowStatus: input.observation.status,
     observedRunId,
+    identityMode: 'live_gen1_run',
   };
 }
 
@@ -188,6 +270,7 @@ export function evaluatePhase21Gen2TemporalLaunchEligibility(input: {
   readonly observedPriorRunId: string | null | undefined;
   readonly priorWorkflowStatus: string;
   readonly workflowStillRunning: boolean;
+  readonly durableGen1Terminal?: Phase21Gen2DurableGen1TerminalEvidence | null;
 }): { readonly eligible: boolean; readonly reason: string | null } {
   if (input.globalRelayEnabled === true) {
     return { eligible: false, reason: 'global_relay_must_remain_off' };
@@ -223,11 +306,20 @@ export function evaluatePhase21Gen2TemporalLaunchEligibility(input: {
           status: input.priorWorkflowStatus,
         }
       : { found: false },
+    ...(input.priorWorkflowFound
+      ? {}
+      : {
+          durableGen1Terminal: input.durableGen1Terminal ?? null,
+        }),
   });
   if (!identity.ok) {
     return { eligible: false, reason: identity.reason };
   }
 
+  const statusForConsumedGate =
+    identity.identityMode === 'durable_gen1_terminal'
+      ? 'TEMPORAL_HISTORY_ABSENT_DURABLE_GEN1_TERMINAL'
+      : input.priorWorkflowStatus;
   const base = evaluatePhase21Gen2ConsumedFailedPreRecovery({
     withdrawalState: input.withdrawalState,
     gen1PermitStatus: input.gen1PermitStatus,
@@ -236,12 +328,12 @@ export function evaluatePhase21Gen2TemporalLaunchEligibility(input: {
     attemptCount: input.attemptCount,
     failedPreAttemptCount: input.failedPreAttemptCount,
     broadcastEvidenceCount: input.broadcastEvidenceCount,
-    priorWorkflowStatus: input.priorWorkflowStatus,
+    priorWorkflowStatus: statusForConsumedGate,
   });
   if (!base.eligible) {
     return base;
   }
-  if (!isPhase21CanaryPriorWorkflowSafeToRestart(input.priorWorkflowStatus)) {
+  if (!isPhase21CanaryPriorWorkflowSafeToRestart(statusForConsumedGate)) {
     return { eligible: false, reason: 'prior_workflow_not_safe' };
   }
   return { eligible: true, reason: null };
@@ -262,6 +354,7 @@ export interface Phase21Gen2TemporalLaunchPlanResult {
   readonly attemptCount: number;
   readonly reservationHeld: boolean;
   readonly globalRelayEnabled: false | true;
+  readonly priorWorkflowIdentityMode: Phase21Gen2PriorWorkflowIdentityMode | null;
   readonly startOptions: Phase21Gen2TemporalLaunchStartOptions | null;
   readonly broadcastPerformed: false;
   readonly signed: false;
@@ -357,49 +450,12 @@ export async function planPhase21Gen2TemporalLaunch(
     }),
   );
 
-  const identity = evaluatePhase21Gen2PriorWorkflowIdentity({
-    expectedGen1RunId: input.expectedGen1RunId,
-    observation: input.priorWorkflowFound
-      ? {
-          found: true,
-          runId: input.observedPriorRunId,
-          status: input.priorWorkflowStatus,
-        }
-      : { found: false },
-  });
-  checks.push(
-    check(
-      'prior_workflow_identity',
-      identity.ok,
-      identity.ok
-        ? 'live Temporal runId matches verified Gen-1 one-shot launch evidence'
-        : `prior identity refused: ${identity.reason}`,
-      {
-        expected: input.expectedGen1RunId,
-        actual: {
-          found: input.priorWorkflowFound,
-          runId: input.observedPriorRunId,
-          status: input.priorWorkflowStatus,
-        },
-      },
-    ),
-  );
-
   checks.push(
     check(
       'workflow_not_running',
       input.workflowStillRunning === false,
       'refuse Temporal start while withdrawal/{id} is RUNNING',
       { actual: input.workflowStillRunning },
-    ),
-  );
-
-  checks.push(
-    check(
-      'prior_workflow_safe',
-      identity.ok && isPhase21CanaryPriorWorkflowSafeToRestart(input.priorWorkflowStatus),
-      'prior Temporal status must be closed/safe for ALLOW_DUPLICATE',
-      { actual: input.priorWorkflowStatus },
     ),
   );
 
@@ -576,6 +632,26 @@ export async function planPhase21Gen2TemporalLaunch(
           },
         ),
       );
+
+      if (gen2PermitId !== null) {
+        const claimKey = buildPhase21Gen2TemporalLaunchClaimDedupeKey({
+          withdrawalId: input.withdrawalId,
+          gen2PermitId,
+        });
+        const claim = await client.query<{ n: number }>(
+          `SELECT count(*)::int AS n FROM outbox_events WHERE dedupe_key = $1`,
+          [claimKey],
+        );
+        const claimAbsent = (claim.rows[0]?.n ?? 0) === 0;
+        checks.push(
+          check(
+            'gen2_temporal_launch_claim_absent',
+            claimAbsent,
+            'durable Gen-2 Temporal launch claim must be absent (one-shot)',
+            { expected: claimKey, actual: claimAbsent ? 'absent' : 'present' },
+          ),
+        );
+      }
     }
 
     await client.query('ROLLBACK');
@@ -587,6 +663,67 @@ export async function planPhase21Gen2TemporalLaunch(
     }
     throw error;
   }
+
+  const claimAbsentCheck = checks.find((c) => c.id === 'gen2_temporal_launch_claim_absent');
+  const gen2TemporalLaunchClaimAbsent = claimAbsentCheck?.status !== 'FAIL';
+
+  const durableGen1Terminal: Phase21Gen2DurableGen1TerminalEvidence | null = input
+    .priorWorkflowFound
+    ? null
+    : {
+        gen1PermitStatus: gen1PermitStatus ?? '',
+        gen1ConsumedAttemptId,
+        attemptCount,
+        failedPreAttemptCount,
+        broadcastEvidenceCount,
+        gen2PermitStatus: gen2PermitStatus ?? '',
+        gen2TemporalLaunchClaimAbsent,
+      };
+
+  const identity = evaluatePhase21Gen2PriorWorkflowIdentity({
+    expectedGen1RunId: input.expectedGen1RunId,
+    observation: input.priorWorkflowFound
+      ? {
+          found: true,
+          runId: input.observedPriorRunId,
+          status: input.priorWorkflowStatus,
+        }
+      : { found: false },
+    durableGen1Terminal,
+  });
+  checks.push(
+    check(
+      'prior_workflow_identity',
+      identity.ok,
+      identity.ok
+        ? identity.identityMode === 'durable_gen1_terminal'
+          ? 'Temporal history absent; durable Gen-1 terminal evidence + Owner-attested Gen-1 runId accepted (never assumes no payment)'
+          : 'live Temporal runId matches verified Gen-1 one-shot launch evidence'
+        : `prior identity refused: ${identity.reason}`,
+      {
+        expected: input.expectedGen1RunId,
+        actual: {
+          found: input.priorWorkflowFound,
+          runId: input.observedPriorRunId,
+          status: input.priorWorkflowStatus,
+          identityMode: identity.identityMode,
+        },
+      },
+    ),
+  );
+
+  const statusForSafe =
+    identity.identityMode === 'durable_gen1_terminal'
+      ? 'TEMPORAL_HISTORY_ABSENT_DURABLE_GEN1_TERMINAL'
+      : input.priorWorkflowStatus;
+  checks.push(
+    check(
+      'prior_workflow_safe',
+      identity.ok && isPhase21CanaryPriorWorkflowSafeToRestart(statusForSafe),
+      'prior Temporal status must be closed/safe for ALLOW_DUPLICATE (or durable Gen-1 terminal after retention)',
+      { actual: statusForSafe },
+    ),
+  );
 
   const eligibility = evaluatePhase21Gen2TemporalLaunchEligibility({
     withdrawalState,
@@ -609,6 +746,7 @@ export async function planPhase21Gen2TemporalLaunch(
     observedPriorRunId: input.observedPriorRunId,
     priorWorkflowStatus: input.priorWorkflowStatus,
     workflowStillRunning: input.workflowStillRunning,
+    durableGen1Terminal,
   });
   checks.push(
     check(
@@ -637,6 +775,7 @@ export async function planPhase21Gen2TemporalLaunch(
     attemptCount,
     reservationHeld,
     globalRelayEnabled: input.globalRelayEnabled,
+    priorWorkflowIdentityMode: identity.identityMode,
     startOptions: ok
       ? buildPhase21Gen2TemporalLaunchStartOptions({
           withdrawalId: input.withdrawalId,
@@ -663,13 +802,61 @@ export interface Phase21Gen2TemporalStarter {
 }
 
 /**
- * EXECUTE: Owner ACK + prior PLAN ready → start exactly one workflow.
+ * Atomically claim Gen-2 Temporal one-shot launch via unique outbox dedupe_key.
+ * Inserts DISPATCHED (not PENDING) so outbox relays never pick it up.
+ * Returns created=false when claim already exists (refuse repeated start).
+ */
+export async function claimPhase21Gen2TemporalLaunch(input: {
+  readonly client: PoolClient;
+  readonly withdrawalId: string;
+  readonly gen2PermitId: string;
+  readonly expectedGen1RunId: string;
+  readonly identityMode: Phase21Gen2PriorWorkflowIdentityMode | null;
+}): Promise<{ readonly created: boolean; readonly dedupeKey: string }> {
+  const dedupeKey = buildPhase21Gen2TemporalLaunchClaimDedupeKey({
+    withdrawalId: input.withdrawalId,
+    gen2PermitId: input.gen2PermitId,
+  });
+  const payload = {
+    withdrawalId: input.withdrawalId,
+    gen2PermitId: input.gen2PermitId,
+    expectedGen1RunId: input.expectedGen1RunId,
+    identityMode: input.identityMode,
+    workflowId: withdrawalWorkflowId(input.withdrawalId),
+    broadcastPerformed: false,
+    signed: false,
+  };
+  const inserted = await input.client.query<{ id: string }>(
+    `INSERT INTO outbox_events (
+       aggregate_type, aggregate_id, event_type, payload, dedupe_key,
+       status, available_at, dispatched_at
+     ) VALUES (
+       'withdrawal', $1::uuid, $2, $3::jsonb, $4,
+       'DISPATCHED'::outbox_event_status, now(), now()
+     )
+     ON CONFLICT (dedupe_key) DO NOTHING
+     RETURNING id`,
+    [
+      input.withdrawalId,
+      PHASE21_GEN2_TEMPORAL_LAUNCH_CLAIM_EVENT_TYPE,
+      JSON.stringify(payload),
+      dedupeKey,
+    ],
+  );
+  return { created: inserted.rows[0]?.id !== undefined, dedupeKey };
+}
+
+/**
+ * EXECUTE: Owner ACK + prior PLAN ready → durable one-shot claim → start exactly one workflow.
  * Does not enable relay, sign, or broadcast.
  */
 export async function executePhase21Gen2TemporalLaunch(input: {
   readonly confirmationPhrase: string;
   readonly plan: Phase21Gen2TemporalLaunchPlanResult;
   readonly temporal: Phase21Gen2TemporalStarter;
+  /** Required for durable one-shot claim (same DB as PLAN). */
+  readonly claimClient: PoolClient;
+  readonly expectedGen1RunId: string;
 }): Promise<{
   readonly ok: boolean;
   readonly started: boolean;
@@ -718,22 +905,74 @@ export async function executePhase21Gen2TemporalLaunch(input: {
       signed: false,
     };
   }
+  if (input.plan.gen2PermitId === null || input.plan.gen2PermitId.trim() === '') {
+    return {
+      ok: false,
+      started: false,
+      runId: null,
+      workflowId: input.plan.workflowId,
+      refuseCode: 'GEN2_PERMIT_ID_REQUIRED',
+      relayEnabled: false,
+      broadcastPerformed: false,
+      signed: false,
+    };
+  }
+
+  await input.claimClient.query('BEGIN');
+  let claimed = false;
+  try {
+    const claim = await claimPhase21Gen2TemporalLaunch({
+      client: input.claimClient,
+      withdrawalId: input.plan.withdrawalId,
+      gen2PermitId: input.plan.gen2PermitId,
+      expectedGen1RunId: input.expectedGen1RunId,
+      identityMode: input.plan.priorWorkflowIdentityMode,
+    });
+    if (!claim.created) {
+      await input.claimClient.query('ROLLBACK');
+      return {
+        ok: false,
+        started: false,
+        runId: null,
+        workflowId: input.plan.workflowId,
+        refuseCode: 'GEN2_TEMPORAL_ALREADY_CLAIMED',
+        relayEnabled: false,
+        broadcastPerformed: false,
+        signed: false,
+      };
+    }
+    claimed = true;
+    await input.claimClient.query('COMMIT');
+  } catch (error) {
+    try {
+      await input.claimClient.query('ROLLBACK');
+    } catch {
+      // best-effort
+    }
+    throw error;
+  }
 
   const opts = input.plan.startOptions;
-  const handle = await input.temporal.workflow.start(opts.workflowType, {
-    taskQueue: opts.taskQueue,
-    workflowId: opts.workflowId,
-    args: [...opts.args],
-    workflowIdReusePolicy: opts.workflowIdReusePolicy,
-    workflowIdConflictPolicy: opts.workflowIdConflictPolicy,
-  });
-  return {
-    ok: true,
-    started: true,
-    runId: handle.firstExecutionRunId,
-    workflowId: opts.workflowId,
-    relayEnabled: false,
-    broadcastPerformed: false,
-    signed: false,
-  };
+  try {
+    const handle = await input.temporal.workflow.start(opts.workflowType, {
+      taskQueue: opts.taskQueue,
+      workflowId: opts.workflowId,
+      args: [...opts.args],
+      workflowIdReusePolicy: opts.workflowIdReusePolicy,
+      workflowIdConflictPolicy: opts.workflowIdConflictPolicy,
+    });
+    return {
+      ok: true,
+      started: true,
+      runId: handle.firstExecutionRunId,
+      workflowId: opts.workflowId,
+      relayEnabled: false,
+      broadcastPerformed: false,
+      signed: false,
+    };
+  } catch (error) {
+    // Claim remains (fail closed): do not auto-retry or clear claim after ambiguous start.
+    void claimed;
+    throw error;
+  }
 }

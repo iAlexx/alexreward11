@@ -162,17 +162,20 @@ async function main(): Promise<void> {
       workflowStillRunning = false;
     }
 
-    const identity = evaluatePhase21Gen2PriorWorkflowIdentity({
-      expectedGen1RunId,
-      observation: priorWorkflowFound
-        ? {
-            found: true,
-            runId: observedPriorRunId,
-            status: priorWorkflowStatus,
-          }
-        : { found: false },
-    });
-    ensure(identity.ok, 'PRIOR_IDENTITY_' + String(identity.reason).toUpperCase());
+    // Live Temporal identity is enforced inside PLAN. When history is absent
+    // (retention expiry), PLAN may accept durable Gen-1 terminal evidence —
+    // never assume COMPLETED / no-payment from WorkflowNotFound alone.
+    if (priorWorkflowFound) {
+      const identity = evaluatePhase21Gen2PriorWorkflowIdentity({
+        expectedGen1RunId,
+        observation: {
+          found: true,
+          runId: observedPriorRunId,
+          status: priorWorkflowStatus,
+        },
+      });
+      ensure(identity.ok, 'PRIOR_IDENTITY_' + String(identity.reason).toUpperCase());
+    }
 
     const pool = new Pool({ connectionString: cfg.DATABASE_URL });
     try {
@@ -217,12 +220,15 @@ async function main(): Promise<void> {
           confirmationPhrase: PHASE21_GEN2_TEMPORAL_LAUNCH_ACK,
           plan,
           temporal,
+          claimClient: db,
+          expectedGen1RunId,
         });
         ensure(result.ok && result.started, result.refuseCode ?? 'EXECUTE_FAILED');
         console.log('PHASE21_GEN2_TEMPORAL_STARTED=YES');
         console.log('RUN_ID=' + result.runId);
         console.log('WORKFLOW_ID=' + result.workflowId);
         console.log('RELAY_ENABLED=false');
+        console.log('IDENTITY_MODE=' + String(plan.priorWorkflowIdentityMode));
         console.log('DO_NOT_RETRY_OR_RESEND_WITHOUT_RECONCILIATION');
       } finally {
         db.release();
