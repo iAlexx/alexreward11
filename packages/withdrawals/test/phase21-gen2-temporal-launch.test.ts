@@ -3,7 +3,11 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 
-import { PHASE21_CANARY_PAYOUT_WITHDRAWAL_ID } from '../src/phase21-canary-payout-plan.js';
+import {
+  PHASE21_CANARY_PAYOUT_PUBLIC_ID,
+  PHASE21_CANARY_PAYOUT_WITHDRAWAL_ID,
+} from '../src/phase21-canary-payout-plan.js';
+import { mintPhase21Gen2IndependentChainReconciliationForTests } from '../src/phase21-gen2-recovery-plan.js';
 import {
   assertPhase21Gen2TemporalLaunchAck,
   buildPhase21Gen2TemporalLaunchClaimDedupeKey,
@@ -23,6 +27,7 @@ import { evaluatePhase21CanaryFailedPreZeroAttemptRecovery } from '../src/phase2
 
 const GEN1_RUN_ID = '01a13154-dc13-739c-92d1-8579627cc06e';
 const GEN2_RUN_ID = '01a2bbbb-cccc-dddd-eeee-ffffffffffff';
+const GEN2_PERMIT_ID = '6760fcfe-f6eb-41f9-aef9-a2a969fd04ed';
 const DURABLE_OK: Phase21Gen2DurableGen1TerminalEvidence = {
   gen1PermitStatus: 'CONSUMED',
   gen1ConsumedAttemptId: 'attempt-1',
@@ -32,6 +37,65 @@ const DURABLE_OK: Phase21Gen2DurableGen1TerminalEvidence = {
   gen2PermitStatus: 'ARMED',
   gen2TemporalLaunchClaimAbsent: true,
 };
+
+function mockClaimClient(options?: { readonly insertReturnsId?: boolean }) {
+  const insertReturnsId = options?.insertReturnsId ?? true;
+  return {
+    query: vi.fn(async (sql: string) => {
+      if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') return { rows: [] };
+      if (sql.includes('FROM feature_flags') && sql.includes('PAYOUT_DISPATCH_PAUSE')) {
+        return { rows: [{ enabled: true }] };
+      }
+      if (sql.includes('FROM withdrawals') && sql.includes('FOR UPDATE')) {
+        return {
+          rows: [
+            {
+              id: PHASE21_CANARY_PAYOUT_WITHDRAWAL_ID,
+              public_id: PHASE21_CANARY_PAYOUT_PUBLIC_ID,
+              state: 'FAILED_PRE_BROADCAST',
+              reservation_ledger_tx_id: 'res-1',
+              settlement_ledger_tx_id: null,
+              release_ledger_tx_id: null,
+            },
+          ],
+        };
+      }
+      if (sql.includes('FROM phase21_manual_dispatch_permits') && sql.includes('FOR UPDATE')) {
+        return {
+          rows: [
+            {
+              id: 'permit-gen1',
+              authorization_generation: 1,
+              status: 'CONSUMED',
+              consumed_attempt_id: 'attempt-1',
+            },
+            {
+              id: GEN2_PERMIT_ID,
+              authorization_generation: 2,
+              status: 'ARMED',
+              consumed_attempt_id: null,
+            },
+          ],
+        };
+      }
+      if (sql.includes('FROM withdrawal_attempts') && sql.includes('FOR UPDATE')) {
+        return {
+          rows: [
+            {
+              attempt_number: 1,
+              broadcast_result_state: 'FAILED_PRE_BROADCAST',
+              has_evidence: false,
+            },
+          ],
+        };
+      }
+      if (sql.includes('INSERT INTO outbox_events')) {
+        return { rows: insertReturnsId ? [{ id: 'claim-1' }] : [] };
+      }
+      return { rows: [] };
+    }),
+  };
+}
 
 describe('phase21 Gen-2 Temporal launch gates', () => {
   const base = {
@@ -143,7 +207,12 @@ describe('phase21 Gen-2 Temporal launch gates', () => {
     expect(() => assertPhase21Gen2TemporalLaunchAck('WRONG')).toThrow(/OWNER_ACK/);
     assertPhase21Gen2TemporalLaunchAck(PHASE21_GEN2_TEMPORAL_LAUNCH_ACK);
 
-    const start = vi.fn(async () => ({ firstExecutionRunId: 'run-1' }));
+    const start = vi.fn(
+      async (_workflowType: string, opts: Record<string, unknown>) => {
+        void opts;
+        return { firstExecutionRunId: 'run-1' };
+      },
+    );
     const plan: Phase21Gen2TemporalLaunchPlanResult = {
       ok: true,
       mode: 'PLAN',
@@ -154,7 +223,7 @@ describe('phase21 Gen-2 Temporal launch gates', () => {
       checks: [],
       gen1PermitStatus: 'CONSUMED',
       gen1ConsumedAttemptId: 'attempt-1',
-      gen2PermitId: 'permit-2',
+      gen2PermitId: GEN2_PERMIT_ID,
       gen2PermitStatus: 'ARMED',
       attemptCount: 1,
       reservationHeld: true,
@@ -169,16 +238,9 @@ describe('phase21 Gen-2 Temporal launch gates', () => {
       mutated: false,
       relayEnabled: false,
     };
+    const chainReconciliation = mintPhase21Gen2IndependentChainReconciliationForTests();
 
-    const claimClient = {
-      query: vi.fn(async (sql: string) => {
-        if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') return { rows: [] };
-        if (sql.includes('INSERT INTO outbox_events')) {
-          return { rows: [{ id: 'claim-1' }] };
-        }
-        return { rows: [] };
-      }),
-    };
+    const claimClient = mockClaimClient();
 
     const refused = await executePhase21Gen2TemporalLaunch({
       confirmationPhrase: 'NOPE',
@@ -186,6 +248,8 @@ describe('phase21 Gen-2 Temporal launch gates', () => {
       temporal: { workflow: { start } },
       claimClient: claimClient as never,
       expectedGen1RunId: GEN1_RUN_ID,
+      chainReconciliation,
+      deploymentEnvironment: 'PRODUCTION',
     });
     expect(refused.started).toBe(false);
     expect(start).not.toHaveBeenCalled();
@@ -196,6 +260,8 @@ describe('phase21 Gen-2 Temporal launch gates', () => {
       temporal: { workflow: { start } },
       claimClient: claimClient as never,
       expectedGen1RunId: GEN1_RUN_ID,
+      chainReconciliation,
+      deploymentEnvironment: 'PRODUCTION',
     });
     expect(ok).toMatchObject({
       ok: true,
@@ -210,21 +276,76 @@ describe('phase21 Gen-2 Temporal launch gates', () => {
       workflowIdReusePolicy: 'ALLOW_DUPLICATE',
       workflowIdConflictPolicy: 'FAIL',
     });
+    expect(
+      claimClient.query.mock.calls.some(
+        (c) => typeof c[0] === 'string' && c[0].includes('FROM withdrawals') && c[0].includes('FOR UPDATE'),
+      ),
+    ).toBe(true);
 
-    claimClient.query.mockImplementation(async (sql: string) => {
-      if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') return { rows: [] };
-      if (sql.includes('INSERT INTO outbox_events')) return { rows: [] }; // conflict
-      return { rows: [] };
-    });
+    const conflictClient = mockClaimClient({ insertReturnsId: false });
     const claimed = await executePhase21Gen2TemporalLaunch({
+      confirmationPhrase: PHASE21_GEN2_TEMPORAL_LAUNCH_ACK,
+      plan,
+      temporal: { workflow: { start } },
+      claimClient: conflictClient as never,
+      expectedGen1RunId: GEN1_RUN_ID,
+      chainReconciliation,
+      deploymentEnvironment: 'PRODUCTION',
+    });
+    expect(claimed).toMatchObject({ started: false, refuseCode: 'GEN2_TEMPORAL_ALREADY_CLAIMED' });
+    expect(start).toHaveBeenCalledTimes(1);
+  });
+
+  it('EXECUTE refuses when claim-txn revalidation fails (stale recon / pause off)', async () => {
+    const start = vi.fn(
+      async (_workflowType: string, opts: Record<string, unknown>) => {
+        void opts;
+        return { firstExecutionRunId: 'run-1' };
+      },
+    );
+    const plan: Phase21Gen2TemporalLaunchPlanResult = {
+      ok: true,
+      mode: 'PLAN',
+      withdrawalId: PHASE21_CANARY_PAYOUT_WITHDRAWAL_ID,
+      publicId: 'WD-000001',
+      workflowId: `withdrawal/${PHASE21_CANARY_PAYOUT_WITHDRAWAL_ID}`,
+      readyForExecute: true,
+      checks: [],
+      gen1PermitStatus: 'CONSUMED',
+      gen1ConsumedAttemptId: 'attempt-1',
+      gen2PermitId: GEN2_PERMIT_ID,
+      gen2PermitStatus: 'ARMED',
+      attemptCount: 1,
+      reservationHeld: true,
+      globalRelayEnabled: false,
+      priorWorkflowIdentityMode: 'live_gen1_run',
+      startOptions: buildPhase21Gen2TemporalLaunchStartOptions({
+        withdrawalId: PHASE21_CANARY_PAYOUT_WITHDRAWAL_ID,
+        taskQueue: 'tq',
+      }),
+      broadcastPerformed: false,
+      signed: false,
+      mutated: false,
+      relayEnabled: false,
+    };
+    const stale = mintPhase21Gen2IndependentChainReconciliationForTests({
+      performedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+    });
+    const claimClient = mockClaimClient();
+    const refused = await executePhase21Gen2TemporalLaunch({
       confirmationPhrase: PHASE21_GEN2_TEMPORAL_LAUNCH_ACK,
       plan,
       temporal: { workflow: { start } },
       claimClient: claimClient as never,
       expectedGen1RunId: GEN1_RUN_ID,
+      chainReconciliation: stale,
+      deploymentEnvironment: 'PRODUCTION',
     });
-    expect(claimed).toMatchObject({ started: false, refuseCode: 'GEN2_TEMPORAL_ALREADY_CLAIMED' });
-    expect(start).toHaveBeenCalledTimes(1);
+    expect(refused).toMatchObject({
+      started: false,
+      refuseCode: 'CLAIM_CHAIN_RECON_CHAIN_RECON_STALE_OR_FUTURE',
+    });
+    expect(start).not.toHaveBeenCalled();
   });
 });
 

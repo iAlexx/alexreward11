@@ -802,9 +802,147 @@ export interface Phase21Gen2TemporalStarter {
 }
 
 /**
+ * Lock WD-000001 + Gen-2 permit rows and revalidate claim preconditions inside
+ * the caller's open write transaction (must run before outbox claim insert).
+ */
+export async function revalidatePhase21Gen2TemporalLaunchClaimState(input: {
+  readonly client: PoolClient;
+  readonly withdrawalId: string;
+  readonly gen2PermitId: string;
+  readonly chainReconciliation: Phase21Gen2IndependentChainReconciliation;
+  readonly deploymentEnvironment?: 'LOCAL' | 'DEV' | 'STAGING' | 'PRODUCTION';
+  readonly allowNonCanaryWithdrawalIdForTests?: boolean;
+}): Promise<{ readonly ok: true } | { readonly ok: false; readonly refuseCode: string }> {
+  const canaryOk =
+    input.withdrawalId === PHASE21_CANARY_PAYOUT_WITHDRAWAL_ID ||
+    input.allowNonCanaryWithdrawalIdForTests === true;
+  if (!canaryOk) {
+    return { ok: false, refuseCode: 'CLAIM_WITHDRAWAL_NOT_AUTHORIZED' };
+  }
+
+  const recon = evaluatePhase21Gen2ChainReconciliationFreshness(input.chainReconciliation);
+  if (!recon.ok) {
+    return { ok: false, refuseCode: 'CLAIM_CHAIN_RECON_' + String(recon.reason).toUpperCase() };
+  }
+
+  const env = input.deploymentEnvironment ?? 'PRODUCTION';
+  const paused = await isPayoutDispatchPaused(input.client, env);
+  if (paused !== true) {
+    return { ok: false, refuseCode: 'CLAIM_PAYOUT_PAUSE_NOT_ON' };
+  }
+
+  const wd = await input.client.query<{
+    id: string;
+    public_id: string;
+    state: string;
+    reservation_ledger_tx_id: string | null;
+    settlement_ledger_tx_id: string | null;
+    release_ledger_tx_id: string | null;
+  }>(
+    `SELECT id::text AS id, public_id, state::text AS state,
+            reservation_ledger_tx_id::text AS reservation_ledger_tx_id,
+            settlement_ledger_tx_id::text AS settlement_ledger_tx_id,
+            release_ledger_tx_id::text AS release_ledger_tx_id
+     FROM withdrawals
+     WHERE id = $1::uuid
+     FOR UPDATE`,
+    [input.withdrawalId],
+  );
+  const withdrawal = wd.rows[0];
+  if (withdrawal === undefined) {
+    return { ok: false, refuseCode: 'CLAIM_WITHDRAWAL_MISSING' };
+  }
+  if (
+    input.allowNonCanaryWithdrawalIdForTests !== true &&
+    withdrawal.public_id !== PHASE21_CANARY_PAYOUT_PUBLIC_ID
+  ) {
+    return { ok: false, refuseCode: 'CLAIM_PUBLIC_ID_MISMATCH' };
+  }
+  if (withdrawal.state !== 'FAILED_PRE_BROADCAST' && withdrawal.state !== 'QUEUED') {
+    return { ok: false, refuseCode: 'CLAIM_WITHDRAWAL_STATE_REFUSED' };
+  }
+  if (withdrawal.reservation_ledger_tx_id === null) {
+    return { ok: false, refuseCode: 'CLAIM_RESERVATION_NOT_HELD' };
+  }
+  if (withdrawal.settlement_ledger_tx_id !== null) {
+    return { ok: false, refuseCode: 'CLAIM_ALREADY_SETTLED' };
+  }
+  if (withdrawal.release_ledger_tx_id !== null) {
+    return { ok: false, refuseCode: 'CLAIM_ALREADY_RELEASED' };
+  }
+
+  const permits = await input.client.query<{
+    id: string;
+    authorization_generation: number;
+    status: string;
+    consumed_attempt_id: string | null;
+  }>(
+    `SELECT id::text AS id,
+            authorization_generation,
+            status::text AS status,
+            consumed_attempt_id::text AS consumed_attempt_id
+     FROM phase21_manual_dispatch_permits
+     WHERE withdrawal_id = $1::uuid
+     ORDER BY authorization_generation
+     FOR UPDATE`,
+    [input.withdrawalId],
+  );
+  const gen1 = permits.rows.find((p) => Number(p.authorization_generation) === 1);
+  const gen2 = permits.rows.find(
+    (p) => Number(p.authorization_generation) === PHASE21_GEN2_AUTHORIZATION_GENERATION,
+  );
+  if (gen1 === undefined || gen1.status !== 'CONSUMED' || gen1.consumed_attempt_id === null) {
+    return { ok: false, refuseCode: 'CLAIM_GEN1_NOT_CONSUMED' };
+  }
+  if (gen2 === undefined || gen2.status !== 'ARMED' || gen2.id !== input.gen2PermitId) {
+    return { ok: false, refuseCode: 'CLAIM_GEN2_NOT_ARMED' };
+  }
+
+  // Lock attempt rows first (FOR UPDATE cannot combine with aggregates).
+  const attempts = await input.client.query<{
+    attempt_number: number;
+    broadcast_result_state: string;
+    has_evidence: boolean;
+  }>(
+    `SELECT attempt_number,
+            broadcast_result_state::text AS broadcast_result_state,
+            (
+              signed_external_message_boc IS NOT NULL
+              OR signed_wallet_request_boc IS NOT NULL
+              OR external_message_cell_hash IS NOT NULL
+              OR normalized_external_message_hash IS NOT NULL
+              OR signed_message_hash IS NOT NULL
+              OR broadcast_submitted_at IS NOT NULL
+              OR broadcast_started_at IS NOT NULL
+              OR (chain_reference IS NOT NULL AND btrim(chain_reference) <> '')
+            ) AS has_evidence
+     FROM withdrawal_attempts
+     WHERE withdrawal_id = $1::uuid
+     FOR UPDATE`,
+    [input.withdrawalId],
+  );
+  const attemptCount = attempts.rows.length;
+  const failedPre = attempts.rows.filter(
+    (r) => r.broadcast_result_state === 'FAILED_PRE_BROADCAST',
+  ).length;
+  const evidence = attempts.rows.filter((r) => r.has_evidence === true).length;
+  const attempt1FailedPre = attempts.rows.some(
+    (r) =>
+      Number(r.attempt_number) === 1 && r.broadcast_result_state === 'FAILED_PRE_BROADCAST',
+  );
+  if (!(attemptCount === 1 && failedPre === 1 && evidence === 0 && attempt1FailedPre)) {
+    return { ok: false, refuseCode: 'CLAIM_ATTEMPT_SHAPE_REFUSED' };
+  }
+
+  return { ok: true };
+}
+
+/**
  * Atomically claim Gen-2 Temporal one-shot launch via unique outbox dedupe_key.
- * Inserts DISPATCHED (not PENDING) so outbox relays never pick it up.
- * Returns created=false when claim already exists (refuse repeated start).
+ * Caller must BEGIN a write transaction first. This locks/revalidates WD-000001
+ * state, rechecks chain-recon freshness, then inserts DISPATCHED claim
+ * (not PENDING — outbox relays never pick it up). COMMIT is caller's responsibility
+ * and must happen before Temporal start.
  */
 export async function claimPhase21Gen2TemporalLaunch(input: {
   readonly client: PoolClient;
@@ -812,11 +950,34 @@ export async function claimPhase21Gen2TemporalLaunch(input: {
   readonly gen2PermitId: string;
   readonly expectedGen1RunId: string;
   readonly identityMode: Phase21Gen2PriorWorkflowIdentityMode | null;
-}): Promise<{ readonly created: boolean; readonly dedupeKey: string }> {
+  readonly chainReconciliation: Phase21Gen2IndependentChainReconciliation;
+  readonly deploymentEnvironment?: 'LOCAL' | 'DEV' | 'STAGING' | 'PRODUCTION';
+  readonly allowNonCanaryWithdrawalIdForTests?: boolean;
+}): Promise<
+  | { readonly created: true; readonly dedupeKey: string }
+  | { readonly created: false; readonly dedupeKey: string; readonly refuseCode: string }
+> {
   const dedupeKey = buildPhase21Gen2TemporalLaunchClaimDedupeKey({
     withdrawalId: input.withdrawalId,
     gen2PermitId: input.gen2PermitId,
   });
+
+  const revalidated = await revalidatePhase21Gen2TemporalLaunchClaimState({
+    client: input.client,
+    withdrawalId: input.withdrawalId,
+    gen2PermitId: input.gen2PermitId,
+    chainReconciliation: input.chainReconciliation,
+    ...(input.deploymentEnvironment !== undefined
+      ? { deploymentEnvironment: input.deploymentEnvironment }
+      : {}),
+    ...(input.allowNonCanaryWithdrawalIdForTests !== undefined
+      ? { allowNonCanaryWithdrawalIdForTests: input.allowNonCanaryWithdrawalIdForTests }
+      : {}),
+  });
+  if (!revalidated.ok) {
+    return { created: false, dedupeKey, refuseCode: revalidated.refuseCode };
+  }
+
   const payload = {
     withdrawalId: input.withdrawalId,
     gen2PermitId: input.gen2PermitId,
@@ -843,7 +1004,10 @@ export async function claimPhase21Gen2TemporalLaunch(input: {
       dedupeKey,
     ],
   );
-  return { created: inserted.rows[0]?.id !== undefined, dedupeKey };
+  if (inserted.rows[0]?.id === undefined) {
+    return { created: false, dedupeKey, refuseCode: 'GEN2_TEMPORAL_ALREADY_CLAIMED' };
+  }
+  return { created: true, dedupeKey };
 }
 
 /**
@@ -857,6 +1021,11 @@ export async function executePhase21Gen2TemporalLaunch(input: {
   /** Required for durable one-shot claim (same DB as PLAN). */
   readonly claimClient: PoolClient;
   readonly expectedGen1RunId: string;
+  /** Fresh independent chain recon — freshness rechecked inside the claim transaction. */
+  readonly chainReconciliation: Phase21Gen2IndependentChainReconciliation;
+  readonly deploymentEnvironment?: 'LOCAL' | 'DEV' | 'STAGING' | 'PRODUCTION';
+  /** Disposable tests only — production never sets this. */
+  readonly allowNonCanaryWithdrawalIdForTests?: boolean;
 }): Promise<{
   readonly ok: boolean;
   readonly started: boolean;
@@ -927,6 +1096,13 @@ export async function executePhase21Gen2TemporalLaunch(input: {
       gen2PermitId: input.plan.gen2PermitId,
       expectedGen1RunId: input.expectedGen1RunId,
       identityMode: input.plan.priorWorkflowIdentityMode,
+      chainReconciliation: input.chainReconciliation,
+      ...(input.deploymentEnvironment !== undefined
+        ? { deploymentEnvironment: input.deploymentEnvironment }
+        : {}),
+      ...(input.allowNonCanaryWithdrawalIdForTests !== undefined
+        ? { allowNonCanaryWithdrawalIdForTests: input.allowNonCanaryWithdrawalIdForTests }
+        : {}),
     });
     if (!claim.created) {
       await input.claimClient.query('ROLLBACK');
@@ -935,7 +1111,7 @@ export async function executePhase21Gen2TemporalLaunch(input: {
         started: false,
         runId: null,
         workflowId: input.plan.workflowId,
-        refuseCode: 'GEN2_TEMPORAL_ALREADY_CLAIMED',
+        refuseCode: claim.refuseCode,
         relayEnabled: false,
         broadcastPerformed: false,
         signed: false,

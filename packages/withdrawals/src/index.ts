@@ -1032,6 +1032,7 @@ export {
   evaluatePhase21Gen2PriorWorkflowIdentity,
   evaluatePhase21Gen2DurableGen1TerminalEvidence,
   evaluatePhase21Gen2TemporalLaunchEligibility,
+  revalidatePhase21Gen2TemporalLaunchClaimState,
   claimPhase21Gen2TemporalLaunch,
   planPhase21Gen2TemporalLaunch,
   executePhase21Gen2TemporalLaunch,

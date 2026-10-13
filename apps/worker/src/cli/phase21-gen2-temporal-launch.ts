@@ -222,6 +222,8 @@ async function main(): Promise<void> {
           temporal,
           claimClient: db,
           expectedGen1RunId,
+          chainReconciliation,
+          deploymentEnvironment: 'PRODUCTION',
         });
         ensure(result.ok && result.started, result.refuseCode ?? 'EXECUTE_FAILED');
         console.log('PHASE21_GEN2_TEMPORAL_STARTED=YES');

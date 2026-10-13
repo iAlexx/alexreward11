@@ -17,6 +17,8 @@ import {
   evaluatePhase21Gen2PriorWorkflowIdentity,
   evaluatePhase21Gen2TemporalLaunchEligibility,
   executePhase21Gen2TemporalLaunch,
+  mintPhase21Gen2IndependentChainReconciliationForTests,
+  PHASE21_CANARY_PAYOUT_PUBLIC_ID,
   PHASE21_CANARY_PAYOUT_WITHDRAWAL_ID,
   PHASE21_GEN2_TEMPORAL_LAUNCH_ACK,
   type Phase21Gen2TemporalLaunchPlanResult,
@@ -141,9 +143,64 @@ describe('phase21 Gen-2 Temporal launch integration', () => {
         relayEnabled: false,
       };
 
+      const gen2PermitId = 'permit-gen2';
       const claimClient = {
         query: async (sql: string) => {
           if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') return { rows: [] };
+          if (typeof sql === 'string' && sql.includes('FROM feature_flags')) {
+            return { rows: [{ enabled: true }] };
+          }
+          if (typeof sql === 'string' && sql.includes('FROM withdrawals') && sql.includes('FOR UPDATE')) {
+            return {
+              rows: [
+                {
+                  id: withdrawalId,
+                  public_id: PHASE21_CANARY_PAYOUT_PUBLIC_ID,
+                  state: 'FAILED_PRE_BROADCAST',
+                  reservation_ledger_tx_id: 'res-1',
+                  settlement_ledger_tx_id: null,
+                  release_ledger_tx_id: null,
+                },
+              ],
+            };
+          }
+          if (
+            typeof sql === 'string' &&
+            sql.includes('FROM phase21_manual_dispatch_permits') &&
+            sql.includes('FOR UPDATE')
+          ) {
+            return {
+              rows: [
+                {
+                  id: 'permit-gen1',
+                  authorization_generation: 1,
+                  status: 'CONSUMED',
+                  consumed_attempt_id: 'attempt-1',
+                },
+                {
+                  id: gen2PermitId,
+                  authorization_generation: 2,
+                  status: 'ARMED',
+                  consumed_attempt_id: null,
+                },
+              ],
+            };
+          }
+          if (
+            typeof sql === 'string' &&
+            sql.includes('FROM withdrawal_attempts') &&
+            sql.includes('FOR UPDATE')
+          ) {
+            return {
+              rows: [
+                {
+                  attempt_number: 1,
+                  broadcast_result_state: 'FAILED_PRE_BROADCAST',
+                  has_evidence: false,
+                },
+              ],
+            };
+          }
           if (typeof sql === 'string' && sql.includes('INSERT INTO outbox_events')) {
             return { rows: [{ id: 'claim-1' }] };
           }
@@ -157,6 +214,8 @@ describe('phase21 Gen-2 Temporal launch integration', () => {
         temporal: testEnv.client,
         claimClient: claimClient as never,
         expectedGen1RunId: gen1RunId,
+        chainReconciliation: mintPhase21Gen2IndependentChainReconciliationForTests(),
+        deploymentEnvironment: 'PRODUCTION',
       });
       expect(launched.ok).toBe(true);
       expect(launched.started).toBe(true);
