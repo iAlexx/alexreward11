@@ -152,17 +152,16 @@ async function revalidateGen3MutablePreconditions(
   withdrawalId: string,
   bindings: Phase21ManualDispatchPermitBindings,
   allowNonCanary: boolean,
+  deploymentEnvironment: 'LOCAL' | 'DEV' | 'STAGING' | 'PRODUCTION',
 ): Promise<{ ok: true } | { ok: false; reason: string; failed: string[] }> {
   const failed: string[] = [];
 
-  const paused = await isPayoutDispatchPaused(client, 'LOCAL');
-  const pausedProd = await isPayoutDispatchPaused(client, 'PRODUCTION');
-  if (paused !== true && pausedProd !== true) {
-    const pausedDev = await isPayoutDispatchPaused(client, 'DEV');
-    const pausedStaging = await isPayoutDispatchPaused(client, 'STAGING');
-    if (!(paused || pausedProd || pausedDev || pausedStaging)) {
-      failed.push('payout_dispatch_pause');
-    }
+  // Exact-environment pause only: a paused LOCAL/STAGING flag must never satisfy an
+  // unpaused PRODUCTION (or other) ceremony. Re-check under the mutation lock so a
+  // concurrent unpause of the target environment cannot race past PLAN.
+  const paused = await isPayoutDispatchPaused(client, deploymentEnvironment);
+  if (paused !== true) {
+    failed.push('payout_dispatch_pause');
   }
 
   const locked = await client.query<{
@@ -321,10 +320,12 @@ export async function applyPhase21Gen3Recovery(
     });
   }
 
+  const deploymentEnvironment = input.deploymentEnvironment ?? 'LOCAL';
+
   const plan = await planPhase21Gen3Recovery(client, {
     withdrawalId: input.withdrawalId,
     chainReconciliation: input.chainReconciliation,
-    deploymentEnvironment: input.deploymentEnvironment ?? 'LOCAL',
+    deploymentEnvironment,
     allowNonCanaryWithdrawalIdForTests: allowNonCanary,
   });
   const hardFails = plan.checks.filter((c) => c.status === 'FAIL');
@@ -346,6 +347,7 @@ export async function applyPhase21Gen3Recovery(
       input.withdrawalId,
       bindings,
       allowNonCanary,
+      deploymentEnvironment,
     );
     if (!revalidated.ok) {
       await client.query('ROLLBACK');

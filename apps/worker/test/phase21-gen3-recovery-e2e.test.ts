@@ -637,6 +637,7 @@ describeDb('phase21 Gen-3 recovery disposable E2E', () => {
       readonly chainReconciliation?: ReturnType<
         typeof mintPhase21Gen3IndependentChainReconciliationForTests
       >;
+      readonly deploymentEnvironment?: 'LOCAL' | 'DEV' | 'STAGING' | 'PRODUCTION';
     },
   ) {
     const sid = await pool.query<{ sid: string }>(
@@ -657,7 +658,7 @@ describeDb('phase21 Gen-3 recovery disposable E2E', () => {
           overrides?.chainReconciliation ??
           mintPhase21Gen3IndependentChainReconciliationForTests(),
         bindings: bindingsFor(w),
-        deploymentEnvironment: 'LOCAL',
+        deploymentEnvironment: overrides?.deploymentEnvironment ?? 'LOCAL',
         allowNonCanaryWithdrawalIdForTests: true,
       });
     } finally {
@@ -784,6 +785,48 @@ describeDb('phase21 Gen-3 recovery disposable E2E', () => {
 
     const permits = await permitRows(w.withdrawalId);
     expect(permits.some((p) => p.gen === 3)).toBe(false);
+  });
+
+  it('Gen-3 APPLY refuses when PRODUCTION is unpaused even if LOCAL/STAGING pauses are on', async () => {
+    const w = await prepareQueuedWithdrawal('200000');
+    await forceTwoFailedPreAttempts(w);
+
+    // Unsafe compensation scenario: non-PRODUCTION envs remain paused, but the
+    // Owner ceremony target environment (PRODUCTION) is explicitly unpaused.
+    await pool.query(
+      `INSERT INTO feature_flags (flag_key, environment, enabled, description)
+       VALUES
+         ('PAYOUT_DISPATCH_PAUSE', 'LOCAL', true, 'gen3-pause-cross-env-local'),
+         ('PAYOUT_DISPATCH_PAUSE', 'STAGING', true, 'gen3-pause-cross-env-staging'),
+         ('PAYOUT_DISPATCH_PAUSE', 'PRODUCTION', false, 'gen3-pause-cross-env-prod-off')
+       ON CONFLICT (flag_key, environment) DO UPDATE
+         SET enabled = EXCLUDED.enabled, updated_at = now()`,
+    );
+
+    const refused = await applyGen3(w, { deploymentEnvironment: 'PRODUCTION' });
+    expect(refused.ok).toBe(false);
+    expect(refused.applied).toBe(false);
+    expect(refused.refuseCode).toMatch(
+      /GEN3_APPLY_(PRECONDITIONS|REVALIDATION)_FAILED/,
+    );
+    expect(refused.planChecksFailed ?? []).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/payout_dispatch_pause/),
+      ]),
+    );
+    const permits = await permitRows(w.withdrawalId);
+    expect(permits.some((p) => p.gen === 3)).toBe(false);
+
+    // Legitimate disposable LOCAL path must still succeed when LOCAL pause is ON.
+    await pool.query(
+      `UPDATE feature_flags
+       SET enabled = true, updated_at = now()
+       WHERE flag_key = 'PAYOUT_DISPATCH_PAUSE' AND environment = 'LOCAL'`,
+    );
+    const localOk = await applyGen3(w, { deploymentEnvironment: 'LOCAL' });
+    expect(localOk.ok).toBe(true);
+    expect(localOk.applied).toBe(true);
+    expect(localOk.authorizationGeneration).toBe(3);
   });
 
   it('Gen-3 APPLY refuses when signature/broadcast evidence exists on a prior attempt', async () => {
