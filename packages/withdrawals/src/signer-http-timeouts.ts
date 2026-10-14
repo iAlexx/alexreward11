@@ -11,6 +11,8 @@ export const SIGNER_HTTP_SIGN_TIMEOUT_MS = 45_000;
 /** Refuse to start/continue Signer I/O inside this margin of valid_until. */
 export const SIGNER_HTTP_VALID_UNTIL_MARGIN_MS = 30_000;
 
+export type SignerHttpTimeoutPhase = 'HEADERS_TIMEOUT' | 'BODY_TIMEOUT';
+
 export interface ResolveSignerHttpTimeoutInput {
   readonly nowMs: number;
   readonly timeoutMs: number;
@@ -55,10 +57,20 @@ export function isAbortError(error: unknown): boolean {
   return false;
 }
 
+function timeoutPublicMessage(phase: SignerHttpTimeoutPhase, timeoutMs: number): string {
+  if (phase === 'HEADERS_TIMEOUT') {
+    return `SIGNER_HTTP_HEADERS_TIMEOUT: Signer HTTP exceeded ${timeoutMs}ms waiting for response headers`;
+  }
+  return `SIGNER_HTTP_BODY_TIMEOUT: Signer HTTP exceeded ${timeoutMs}ms reading response body`;
+}
+
 /**
  * Fetch + fully consume response text under a hard deadline.
  * Combines caller AbortSignal (activity cancellation) with a local timeout so
  * Temporal activity timeout alone cannot leave undici/fetch hanging forever.
+ *
+ * Distinguishes headers-wait vs body-read stalls for diagnostics (WD-000001
+ * response-loss: Signer returned 200 while Worker could not attribute the phase).
  */
 export async function fetchTextWithDeadline(
   fetchImpl: typeof fetch,
@@ -83,25 +95,43 @@ export async function fetchTextWithDeadline(
     }
   }
 
+  let headersReceived = false;
   try {
     const response = await fetchImpl(url, {
       ...init,
       signal: controller.signal,
     });
+    headersReceived = true;
     const text = await response.text();
     return { response, text };
   } catch (error) {
     if (controller.signal.aborted || isAbortError(error)) {
       const cancelledByUpstream = upstream?.aborted === true;
+      if (cancelledByUpstream) {
+        throw new WithdrawalDomainError(
+          'EXTERNAL_RESOURCE_REQUIRED',
+          'SIGNER_HTTP_CANCELLED: activity cancellation aborted Signer HTTP I/O',
+          {
+            details: {
+              timeoutMs,
+              cancelledByUpstream: true,
+              headersReceived,
+            },
+          },
+        );
+      }
+      const phase: SignerHttpTimeoutPhase = headersReceived
+        ? 'BODY_TIMEOUT'
+        : 'HEADERS_TIMEOUT';
       throw new WithdrawalDomainError(
         'EXTERNAL_RESOURCE_REQUIRED',
-        cancelledByUpstream
-          ? 'SIGNER_HTTP_CANCELLED: activity cancellation aborted Signer HTTP I/O'
-          : `SIGNER_HTTP_TIMEOUT: Signer HTTP exceeded ${timeoutMs}ms including response body`,
+        timeoutPublicMessage(phase, timeoutMs),
         {
           details: {
             timeoutMs,
-            cancelledByUpstream,
+            cancelledByUpstream: false,
+            headersReceived,
+            phase,
           },
         },
       );

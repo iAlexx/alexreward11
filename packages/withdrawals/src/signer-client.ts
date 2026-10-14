@@ -1,4 +1,5 @@
 import { WithdrawalDomainError } from './errors.js';
+import { createSignerHttpFetch } from './signer-http-fetch.js';
 import {
   SIGNER_HTTP_IDENTITY_TIMEOUT_MS,
   SIGNER_HTTP_SIGN_TIMEOUT_MS,
@@ -90,7 +91,11 @@ export class SignerHttpClient {
   constructor(deps: SignerClientDeps) {
     this.baseUrl = deps.baseUrl.replace(/\/$/, '');
     this.serviceToken = deps.serviceToken;
-    this.fetchImpl = deps.fetchImpl ?? fetch;
+    // Signer-only transport: explicit Undici ProxyAgent when HTTP_PROXY is set
+    // (Tailscale userspace). Injected fetchImpl always wins (tests / fakes).
+    this.fetchImpl = createSignerHttpFetch({
+      ...(deps.fetchImpl !== undefined ? { fetchImpl: deps.fetchImpl } : {}),
+    });
     this.identityTimeoutMs = deps.identityTimeoutMs ?? SIGNER_HTTP_IDENTITY_TIMEOUT_MS;
     this.signTimeoutMs = deps.signTimeoutMs ?? SIGNER_HTTP_SIGN_TIMEOUT_MS;
     this.validUntilMarginMs = deps.validUntilMarginMs ?? SIGNER_HTTP_VALID_UNTIL_MARGIN_MS;

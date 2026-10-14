@@ -294,6 +294,13 @@ export {
   fetchTextWithDeadline,
   resolveSignerHttpTimeoutMs,
 } from './signer-http-timeouts.js';
+export type { SignerHttpTimeoutPhase } from './signer-http-timeouts.js';
+
+export {
+  createSignerHttpFetch,
+  resolveSignerHttpProxyUrl,
+} from './signer-http-fetch.js';
+export type { CreateSignerHttpFetchOptions } from './signer-http-fetch.js';
 
 export {
   SIGNING_LATE_COMPLETION_REJECTED,

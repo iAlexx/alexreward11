@@ -4,6 +4,12 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+catalogs:
+  default:
+    undici:
+      specifier: 7.28.0
+      version: 7.28.0
+
 overrides:
   fast-xml-parser: 5.11.1
   fastify: 5.12.2
@@ -870,6 +876,9 @@ importers:
       pg:
         specifier: 8.23.0
         version: 8.23.0
+      undici:
+        specifier: 'catalog:'
+        version: 7.28.0
       zod:
         specifier: 4.5.4
         version: 4.5.4
@@ -5008,6 +5017,10 @@ packages:
 
   undici-types@7.18.2:
     resolution: {integrity: sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w==}
+
+  undici@7.28.0:
+    resolution: {integrity: sha512-cRZYrTDwWznlnRiPjggAGxZXanty6M8RV1ff8Wm4LWXBp7/IG8v5DnOm74DtUBp9OONpK75YlPnIjQqX0dBDtA==}
+    engines: {node: '>=20.18.1'}
 
   unionfs@4.6.0:
     resolution: {integrity: sha512-fJAy3gTHjFi5S3TP5EGdjs/OUMFFvI/ady3T8qVuZfkv8Qi8prV/Q8BuFEgODJslhZTT2z2qdD2lGdee9qjEnA==}
@@ -9382,6 +9395,8 @@ snapshots:
   uint8array-extras@1.5.0: {}
 
   undici-types@7.18.2: {}
+
+  undici@7.28.0: {}
 
   unionfs@4.6.0:
     dependencies:

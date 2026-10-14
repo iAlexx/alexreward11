@@ -46,4 +46,5 @@ catalog:
   fastify: 5.2.1
   ioredis: 6.0.0
   pg: 8.23.0
+  undici: 7.28.0
   vitest: 3.2.4

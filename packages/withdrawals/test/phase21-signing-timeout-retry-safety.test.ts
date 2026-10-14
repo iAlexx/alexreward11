@@ -125,7 +125,8 @@ describe('SignerHttpClient bounded I/O', () => {
 
     await expect(client.signWithdrawalAttempt('00000000-0000-4000-8000-000000000001')).rejects.toMatchObject({
       code: 'EXTERNAL_RESOURCE_REQUIRED',
-      publicMessage: expect.stringContaining('SIGNER_HTTP_TIMEOUT'),
+      publicMessage: expect.stringContaining('SIGNER_HTTP_HEADERS_TIMEOUT'),
+      details: expect.objectContaining({ phase: 'HEADERS_TIMEOUT', headersReceived: false }),
     });
   });
 
@@ -163,7 +164,8 @@ describe('SignerHttpClient bounded I/O', () => {
       WithdrawalDomainError,
     );
     await expect(client.signWithdrawalAttempt('00000000-0000-4000-8000-000000000001')).rejects.toMatchObject({
-      publicMessage: expect.stringMatching(/SIGNER_HTTP_TIMEOUT|SIGNER_HTTP_CANCELLED/),
+      publicMessage: expect.stringContaining('SIGNER_HTTP_BODY_TIMEOUT'),
+      details: expect.objectContaining({ phase: 'BODY_TIMEOUT', headersReceived: true }),
     });
   });
 
