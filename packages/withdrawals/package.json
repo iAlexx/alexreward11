@@ -32,7 +32,7 @@
     "phase10:closure-evaluate": "node dist/cli/phase10-ops.js closure-evaluate",
     "phase21:readiness": "node dist/cli/phase21-ops.js readiness",
     "phase21:preflight": "node dist/cli/phase21-ops.js preflight",
-    "test:phase21": "cross-env ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1 ALEX_OWNER_BOOTSTRAP_DISPOSABLE_PRODUCTION_SIM=1 ALEX_PHASE21_CEREMONY_TEST_HOOKS=1 vitest run test/phase21-config-gate.test.ts test/phase21-expansion-gate.test.ts test/phase21-readiness.test.ts test/phase21-runtime-selection.test.ts test/phase21-external-probes.test.ts test/phase21-tether-metadata-symbol.test.ts test/phase21-withdrawal-request-pause-fail-closed.test.ts test/phase21-production-flag-baseline.test.ts test/phase21-mainnet-registry-bootstrap.test.ts test/phase21-hot-wallet-registration.test.ts test/phase21-hot-wallet-derivation-proof.test.ts test/phase21-mainnet-adapters.test.ts test/phase21-ceremony-gates.test.ts test/phase21-step3b-disposable-db.test.ts test/phase21-provisioning-evidence.test.ts test/phase21-ceremony-owner-admin.test.ts test/phase21-ops-plan-gates.test.ts test/phase21-owner-ceremony-authority.test.ts test/phase21-step4c1-hardening.test.ts test/phase21-step4c2-hardening.test.ts test/phase21-step4c3-forgery-closure.test.ts test/phase21-canary-payout-plan.test.ts test/phase21-canary-payout-db.test.ts test/phase21-canary-payout-json.test.ts test/phase21-manual-dispatch-permit.test.ts test/phase21-manual-dispatch-outbox-relay.test.ts test/phase21-canary-payout-apply.test.ts test/phase21-gen2-recovery.test.ts test/phase21-gen2-temporal-launch.test.ts test/phase21-gen2-temporal-launch-claim-race.db.test.ts test/phase21-signing-timeout-retry-safety.test.ts test/phase21-signer-http-proxy-transport.test.ts",
+    "test:phase21": "cross-env ALEX_OWNER_BOOTSTRAP_TEST_HOOKS=1 ALEX_OWNER_BOOTSTRAP_DISPOSABLE_PRODUCTION_SIM=1 ALEX_PHASE21_CEREMONY_TEST_HOOKS=1 vitest run --fileParallelism=false test/phase21-config-gate.test.ts test/phase21-expansion-gate.test.ts test/phase21-readiness.test.ts test/phase21-runtime-selection.test.ts test/phase21-external-probes.test.ts test/phase21-tether-metadata-symbol.test.ts test/phase21-withdrawal-request-pause-fail-closed.test.ts test/phase21-production-flag-baseline.test.ts test/phase21-mainnet-registry-bootstrap.test.ts test/phase21-hot-wallet-registration.test.ts test/phase21-hot-wallet-derivation-proof.test.ts test/phase21-mainnet-adapters.test.ts test/phase21-ceremony-gates.test.ts test/phase21-step3b-disposable-db.test.ts test/phase21-provisioning-evidence.test.ts test/phase21-ceremony-owner-admin.test.ts test/phase21-ops-plan-gates.test.ts test/phase21-owner-ceremony-authority.test.ts test/phase21-step4c1-hardening.test.ts test/phase21-step4c2-hardening.test.ts test/phase21-step4c3-forgery-closure.test.ts test/phase21-canary-payout-plan.test.ts test/phase21-canary-payout-db.test.ts test/phase21-canary-payout-json.test.ts test/phase21-manual-dispatch-permit.test.ts test/phase21-manual-dispatch-outbox-relay.test.ts test/phase21-canary-payout-apply.test.ts test/phase21-gen2-recovery.test.ts test/phase21-gen2-temporal-launch.test.ts test/phase21-gen2-temporal-launch-claim-race.db.test.ts test/phase21-gen3-recovery.test.ts test/phase21-gen3-temporal-launch.test.ts test/phase21-gen3-temporal-launch-claim-race.db.test.ts test/phase21-signing-timeout-retry-safety.test.ts test/phase21-signer-http-proxy-transport.test.ts",
     "phase21:production-flags:plan": "node dist/cli/phase21-ops.js production-flags:plan",
     "phase21:production-flags:template": "node dist/cli/phase21-ops.js production-flags:template",
     "phase21:production-flags:apply": "node dist/cli/phase21-ops.js production-flags:apply",
@@ -44,7 +44,8 @@
     "phase21:hot-wallet:plan": "node dist/cli/phase21-ops.js hot-wallet:plan",
     "phase21:hot-wallet:register": "node dist/cli/phase21-ops.js hot-wallet:register",
     "phase21:canary-payout": "node dist/cli/phase21-canary-payout.js",
-    "phase21:gen2-recovery": "node dist/cli/phase21-gen2-recovery.js"
+    "phase21:gen2-recovery": "node dist/cli/phase21-gen2-recovery.js",
+    "phase21:gen3-recovery": "node dist/cli/phase21-gen3-recovery.js"
   },
   "dependencies": {
     "@alex-rewards/auth": "workspace:*",
@@ -55,7 +56,7 @@
     "@alex-rewards/ton": "workspace:*",
     "@temporalio/client": "1.23.0",
     "pg": "8.23.0",
-    "undici": "catalog:",
+    "undici": "7.28.0",
     "zod": "4.5.4"
   },
   "devDependencies": {

@@ -1090,3 +1090,31 @@ Source wiring: `@alex-rewards/ton` `PHASE21_OWNER_APPROVED_ATTACHED_GRAM_ATOMIC`
 Canary PLAN reports `status=OWNER_APPROVED` and `attachedGramAtomic="50000000"`. APPLY remains
 disabled. No live payout / broadcast / signer unlock in this wiring step.
 
+
+## ADR-PHASE21-GEN3 - Gen-3 one-shot Mainnet canary recovery (WD-000001)
+
+Decision: after two Owner-authorized attempts for WD-000001 both ended FAILED_PRE_BROADCAST with
+zero signature/broadcast evidence, a third (Generation-3) one-shot recovery is authorized under the
+same frozen bindings (gross 0.20 / fee 0.01 / net 0.19 USDT, recipient
+EQD5XN7uWtm3r1vmzkg3N3zOYtX80OtyVf69IZwpINRXdc3l, TON Mainnet). Code and tests only; no deploy, no
+live arm, no Temporal start, no signing, no broadcast.
+
+- Authorization generation 3; APPLY phrase APPLY_LOOTRA_PHASE21_GEN3_OWNER_RECOVERY_PERMIT;
+  Temporal ACK I_AUTHORIZE_WD_000001_GEN3_TEMPORAL_ONE_SHOT.
+- Gen-1 and Gen-2 permits stay CONSUMED forever; reuse of a prior permit id is refused
+  (GEN3_PRIOR_PERMIT_REUSE_REFUSED / CLAIM_GEN3_PRIOR_PERMIT_REUSE). Gen-3 arms a new permit id.
+- Preconditions: exactly two prior attempts, both FAILED_PRE_BROADCAST, zero persisted
+  signature/broadcast evidence; reservation held; no settlement/release; global payout pause ON;
+  outbox relay OFF; fresh (<= 15 min) dual-provider HIGH-confidence chain reconciliation showing no
+  payment. Signed-but-lost is treated as recoverable only when the DB holds no BOC / message hash /
+  submission timestamp / chain reference; any evidence or non-HIGH recon refuses and requires
+  reconciliation instead of a blind retry.
+- Durable one-shot launch claim: outbox_events row phase21.gen3_temporal_launch_claim with unique
+  dedupe key withdrawal.phase21_gen3_temporal_launch:{withdrawalId}:{gen3PermitId}, inserted and
+  committed before workflow start and never cleared afterwards (ALLOW_DUPLICATE + conflict FAIL).
+  The Gen-2 claim must still be present (DISPATCHED) and the Gen-3 claim absent before claiming.
+- Prior workflow identity binds to the verified Gen-2 runId. When Temporal history has expired, a
+  durable DB-terminal path (TEMPORAL_HISTORY_ABSENT_DURABLE_GEN2_TERMINAL) may open the gate using
+  Gen-1 + Gen-2 CONSUMED permits bound to distinct attempts, the two-FAILED_PRE attempt shape with
+  zero evidence, and the durable Gen-2 launch claim. Missing history alone never implies COMPLETED.
+- Outcome: at most one additional attempt (#3), one signing, at most one broadcast.

@@ -867,6 +867,7 @@ export {
   PHASE21_HOT_WALLET_BACKUP_ATTESTATION_PHRASE,
   PHASE21_CANARY_PAYOUT_APPLY_PHRASE,
   PHASE21_GEN2_RECOVERY_APPLY_PHRASE,
+  PHASE21_GEN3_RECOVERY_APPLY_PHRASE,
   confirmPhase21ProductionFlagsApplyInteractive,
   confirmPhase21MainnetRegistryApplyInteractive,
   confirmPhase21HotWalletRegisterInteractive,
@@ -874,6 +875,10 @@ export {
   confirmPhase21Gen2RecoveryApplyInteractive,
   assertPhase21Gen2RecoveryApplyConfirmation,
   __mintPhase21Gen2RecoveryApplyConfirmationForTests,
+  confirmPhase21Gen3RecoveryApplyInteractive,
+  assertPhase21Gen3RecoveryApplyConfirmation,
+  isPhase21Gen3RecoveryApplyConfirmation,
+  __mintPhase21Gen3RecoveryApplyConfirmationForTests,
   attestPhase21HotWalletOfflineBackupsInteractive,
   assertPhase21ProductionFlagsApplyConfirmation,
   assertPhase21MainnetRegistryApplyConfirmation,
@@ -893,6 +898,7 @@ export {
   type Phase21HotWalletBackupAttestation,
   type Phase21CanaryPayoutApplyConfirmation,
   type Phase21Gen2RecoveryApplyConfirmation,
+  type Phase21Gen3RecoveryApplyConfirmation,
 } from './phase21-ceremony-confirmations.js';
 export { __mintPhase21MainnetRegistryApplyConfirmationForTests } from './phase21-ceremony-confirmations.js';
 export { mintAuthenticatedPhase21OwnerCeremonyTrustForTests } from './test-only/phase21-ceremony-test-hooks.js';
@@ -1052,3 +1058,58 @@ export type {
   Phase21Gen2TemporalLaunchStartOptions,
   Phase21Gen2TemporalStarter,
 } from './phase21-gen2-temporal-launch.js';
+
+export {
+  PHASE21_GEN3_RECOVERY_WITHDRAWAL_ID,
+  PHASE21_GEN3_RECOVERY_PUBLIC_ID,
+  PHASE21_GEN3_AUTHORIZATION_GENERATION,
+  PHASE21_GEN3_REQUIRED_PRIOR_ATTEMPT_COUNT,
+  PHASE21_GEN3_CHAIN_RECON_MAX_AGE_MS,
+  PHASE21_GEN3_TEMPORAL_HISTORY_ABSENT_STATUS,
+  evaluatePhase21Gen3ChainReconciliationFreshness,
+  evaluatePhase21Gen3RecoveryEligibility,
+  evaluatePhase21Gen3ConsumedFailedPreRecovery,
+  isPhase21Gen3PriorWorkflowSafeToRestart,
+  isPhase21Gen3AttemptShapeAccepted,
+  readPhase21Gen3AttemptShape,
+  readPhase21Gen2TemporalLaunchClaimPresent,
+  mintPhase21Gen3IndependentChainReconciliationForTests,
+  planPhase21Gen3Recovery,
+} from './phase21-gen3-recovery-plan.js';
+export type {
+  Phase21Gen3IndependentChainReconciliation,
+  Phase21Gen3RecoveryPlanResult,
+  Phase21Gen3AttemptShape,
+} from './phase21-gen3-recovery-plan.js';
+export {
+  PHASE21_GEN3_RECOVERY_APPLY_ENABLED,
+  applyPhase21Gen3Recovery,
+} from './phase21-gen3-recovery-apply.js';
+export type { Phase21Gen3RecoveryApplyResult } from './phase21-gen3-recovery-apply.js';
+
+export {
+  PHASE21_GEN3_TEMPORAL_LAUNCH_ACK,
+  PHASE21_GEN3_TEMPORAL_LAUNCH_WORKFLOW_TYPE,
+  PHASE21_GEN3_TEMPORAL_LAUNCH_REUSE_POLICY,
+  PHASE21_GEN3_TEMPORAL_LAUNCH_CONFLICT_POLICY,
+  PHASE21_GEN3_TEMPORAL_LAUNCH_CLAIM_EVENT_TYPE,
+  assertPhase21Gen3TemporalLaunchAck,
+  buildPhase21Gen3TemporalLaunchStartOptions,
+  buildPhase21Gen3TemporalLaunchClaimDedupeKey,
+  evaluatePhase21Gen3LiveDeployShaMatch,
+  evaluatePhase21Gen3PriorWorkflowIdentity,
+  evaluatePhase21Gen3DurableGen2TerminalEvidence,
+  evaluatePhase21Gen3TemporalLaunchEligibility,
+  revalidatePhase21Gen3TemporalLaunchClaimState,
+  claimPhase21Gen3TemporalLaunch,
+  planPhase21Gen3TemporalLaunch,
+  executePhase21Gen3TemporalLaunch,
+} from './phase21-gen3-temporal-launch.js';
+export type {
+  Phase21Gen3PriorWorkflowObservation,
+  Phase21Gen3DurableGen2TerminalEvidence,
+  Phase21Gen3PriorWorkflowIdentityMode,
+  Phase21Gen3TemporalLaunchPlanResult,
+  Phase21Gen3TemporalLaunchStartOptions,
+  Phase21Gen3TemporalStarter,
+} from './phase21-gen3-temporal-launch.js';
