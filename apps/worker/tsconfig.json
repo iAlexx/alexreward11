@@ -10,6 +10,9 @@
     "test/**/*.ts"
   ],
   "exclude": [
-    "test/phase21-mainnet-e2e-financial.test.ts"
+    "test/phase21-mainnet-e2e-financial.test.ts",
+    "test/phase21-gen2-recovery-e2e.test.ts",
+    "test/phase21-gen3-recovery-e2e.test.ts",
+    "test/phase21-gen4-recovery-e2e.test.ts"
   ]
 }

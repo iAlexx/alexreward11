@@ -11,6 +11,7 @@ import {
 } from './outbox.js';
 import {
   evaluatePhase21ManualDispatchRestartSafety,
+  getPhase21ManualDispatchPermitById,
   type Phase21ManualDispatchRelayAuthority,
 } from './phase21-manual-dispatch-permit.js';
 import { WITHDRAWAL_CONFIRMED_OUTBOX_EVENT } from './public-payout-outbox.js';
@@ -496,6 +497,86 @@ export interface ProcessPhase21ManualDispatchOutboxBatchOptions {
   readonly limit?: number;
 }
 
+const PERMIT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Fail-closed permit classification BEFORE restart-safety / any Temporal start.
+ *
+ * - payload.permitId is mandatory (missing/invalid -> dead letter).
+ * - Lock order matches Gen-3/Gen-4 APPLY: withdrawal row FOR UPDATE first, then existing
+ *   permit rows. Permit-row locks alone do not block phantom INSERT of a new generation;
+ *   the shared withdrawal lock serializes with APPLY arming.
+ * - The permit must exist and belong to the event's withdrawal.
+ * - authorization_generation >= 3 rows are AUDIT-ONLY: Gen-3/Gen-4 recoveries launch exclusively
+ *   through the Owner Temporal one-shot claim, so a PENDING manual_dispatch row for them must
+ *   never start a workflow even when the relay is accidentally enabled.
+ * - Once ANY Gen>=3 permit exists for the withdrawal, historical Gen-1/2 manual_dispatch events
+ *   are superseded and must not auto-launch (restart-safety alone prefers the newest ARMED row).
+ * - Generations 1 and 2 keep the existing restart-safety path when no Gen>=3 authorization exists.
+ * - Caller must still require restart-safety.permit.id === eventPermitId (cross-check).
+ */
+async function evaluatePhase21ManualDispatchEventPermitGate(
+  client: PoolClient,
+  event: WithdrawalApprovedOutboxEvent,
+  withdrawalId: string,
+): Promise<
+  | { readonly ok: true; readonly eventPermitId: string }
+  | { readonly ok: false; readonly reason: string }
+> {
+  const rawPermitId = event.payload.permitId;
+  if (typeof rawPermitId !== 'string' || !PERMIT_ID_PATTERN.test(rawPermitId.trim())) {
+    return { ok: false, reason: 'phase21_manual_dispatch_permit_id_required' };
+  }
+  const eventPermitId = rawPermitId.trim();
+
+  // 1) Shared predicate lock with Gen-3/Gen-4 APPLY (FOR UPDATE OF w) — closes phantom INSERT.
+  const wd = await client.query<{ id: string }>(
+    `SELECT id::text AS id
+     FROM withdrawals
+     WHERE id = $1::uuid
+     FOR UPDATE`,
+    [withdrawalId],
+  );
+  if (wd.rows[0] === undefined) {
+    return { ok: false, reason: 'phase21_manual_dispatch_missing_withdrawal_for_event' };
+  }
+
+  // 2) Existing permit rows (stable read of generations under the withdrawal lock).
+  await client.query(
+    `SELECT id
+     FROM phase21_manual_dispatch_permits
+     WHERE withdrawal_id = $1::uuid
+     FOR UPDATE`,
+    [withdrawalId],
+  );
+
+  const permit = await getPhase21ManualDispatchPermitById(client, eventPermitId);
+  if (permit === null || permit.withdrawalId !== withdrawalId) {
+    return { ok: false, reason: 'phase21_manual_dispatch_missing_permit_for_event' };
+  }
+  if (permit.authorizationGeneration >= 3) {
+    return {
+      ok: false,
+      reason: `phase21_gen${permit.authorizationGeneration}_manual_dispatch_audit_only_use_owner_temporal_launch_claim`,
+    };
+  }
+
+  const newer = await client.query<{ gen_ge3: number }>(
+    `SELECT count(*) FILTER (WHERE authorization_generation >= 3)::int AS gen_ge3
+     FROM phase21_manual_dispatch_permits
+     WHERE withdrawal_id = $1::uuid`,
+    [withdrawalId],
+  );
+  if ((newer.rows[0]?.gen_ge3 ?? 0) > 0) {
+    return {
+      ok: false,
+      reason: 'phase21_stale_manual_dispatch_superseded_by_newer_generation_authorization',
+    };
+  }
+
+  return { ok: true, eventPermitId };
+}
+
 /**
  * Claim PENDING withdrawal.phase21_manual_dispatch events and restart
  * withdrawal/{id} with ALLOW_DUPLICATE only under exact Phase21 Mainnet authority
@@ -533,9 +614,32 @@ export async function processWithdrawalPhase21ManualDispatchOutboxBatch(
         const withdrawalId = resolveWithdrawalId(event);
         const workflowId = resolveWorkflowId(event, withdrawalId);
 
+        const permitGate = await evaluatePhase21ManualDispatchEventPermitGate(
+          client,
+          event,
+          withdrawalId,
+        );
+        if (!permitGate.ok) {
+          await markOutboxDeadLetter(client, event.id, permitGate.reason);
+          deadLetter += 1;
+          continue;
+        }
+
+        // Restart-safety selects ARMED / highest generation independently of the outbox payload.
+        // Under the withdrawal+permit FOR UPDATE locks from the gate above, require exact permit-id
+        // match so a stale Gen-1/2 event cannot authorize a Temporal start against a newer Gen-N row.
         const safety = await evaluatePhase21ManualDispatchRestartSafety(client, withdrawalId);
         if (!safety.allowDuplicate) {
           await markOutboxDeadLetter(client, event.id, safety.reason);
+          deadLetter += 1;
+          continue;
+        }
+        if (safety.permit === null || safety.permit.id !== permitGate.eventPermitId) {
+          await markOutboxDeadLetter(
+            client,
+            event.id,
+            'phase21_manual_dispatch_restart_safety_permit_mismatch',
+          );
           deadLetter += 1;
           continue;
         }

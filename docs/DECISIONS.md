@@ -1118,3 +1118,60 @@ live arm, no Temporal start, no signing, no broadcast.
   Gen-1 + Gen-2 CONSUMED permits bound to distinct attempts, the two-FAILED_PRE attempt shape with
   zero evidence, and the durable Gen-2 launch claim. Missing history alone never implies COMPLETED.
 - Outcome: at most one additional attempt (#3), one signing, at most one broadcast.
+
+## ADR-PHASE21-GEN4 - Gen-4 one-shot Mainnet canary recovery (WD-000001)
+
+Decision: after three Owner-authorized attempts for WD-000001 all ended FAILED_PRE_BROADCAST with
+zero signature/broadcast evidence, a Generation-4 local recovery **implementation** (PLAN/APPLY/
+Temporal-launch modules, tests, and safety gates) is approved for Owner code review under the same
+frozen bindings as Gen-3. This ADR does **not** authorize a Gen-4 financial Mainnet transaction,
+live permit APPLY, Temporal EXECUTE, signing, or broadcast. Gen-4 mirrors Gen-3 with strengthened
+gates. Gen-1/2/3 logic is unchanged.
+
+- Authorization generation 4; APPLY phrase APPLY_LOOTRA_PHASE21_GEN4_OWNER_RECOVERY_PERMIT;
+  Temporal ACK I_AUTHORIZE_WD_000001_GEN4_TEMPORAL_ONE_SHOT; claim event
+  phase21.gen4_temporal_launch_claim; dedupe key
+  withdrawal.phase21_gen4_temporal_launch:{withdrawalId}:{gen4PermitId}. Required prior attempts: 3.
+- Gen-1/2/3 permits stay CONSUMED forever; reuse of any prior permit id is refused.
+- Gen-3 launch claim BINDING (not mere presence): exact dedupe key, DISPATCHED, aggregate/payload
+  fields (withdrawal, Gen-3 permit, generation 3, workflowId, broadcastPerformed=false), Gen-3 permit
+  CONSUMED bound to attempt #3, and attempt #3 FAILED_PRE_BROADCAST with a query_id.
+  verifyPhase21Gen3TemporalLaunchClaimBinding and readPhase21Gen3TemporalLaunchClaimPresent are new
+  add-only exports of the Gen-3 module; Gen-3 gate semantics are untouched.
+- Independent chain reconciliation is bound to toncenter + tonapi, the canary hot wallet, recipient,
+  USDT master, net amount and the three prior query_ids (must equal the DB attempts by
+  attempt_number, rechecked under the attempt-row FOR UPDATE locks).
+- readPhase21Gen4AttemptShape (3 attempts, all FAILED_PRE, zero evidence, #1/#2/#3 each FAILED_PRE)
+  is read in APPLY revalidation and Temporal claim revalidation AFTER the attempt rows are locked.
+- APPLY arms generation 4 and enqueues the audit-only outbox row only; it never writes the launch
+  claim and never starts Temporal. The Owner Temporal one-shot claim is the launch path.
+- Temporal identity binds to expectedGen3RunId; when history has expired the durable path
+  TEMPORAL_HISTORY_ABSENT_DURABLE_GEN3_TERMINAL requires Gen-1/2/3 CONSUMED, the bound Gen-3 claim
+  and the three-FAILED_PRE shape. maximumAttempts stays in the workflow definition.
+- Outbox relay hardening (processWithdrawalPhase21ManualDispatchOutboxBatch): events without a
+  permitId, or whose permit generation is >= 3, are dead-lettered (reason
+  phase21_genN_manual_dispatch_audit_only_use_owner_temporal_launch_claim) before any restart-safety
+  Temporal start. Gen-1/2 relay behavior is unchanged.
+- Scope of authorization (Owner Gen-4 final corrections): this ADR and the Owner authorization behind
+  it cover **local Gen-4 implementation and test/safety gates only**. They do NOT authorize a Gen-4
+  financial Mainnet transaction, permit APPLY, Temporal EXECUTE, signing, or broadcast; each of those
+  still needs its own explicit Owner approval at execution time.
+- Exact permit->attempt_number bindings: verifyPhase21Gen4ExactPermitAttemptBindings requires exactly
+  one attempt row each for attempt_number 1/2/3 and Gen-1 consumed_attempt_id = attempt #1, Gen-2 =
+  #2, Gen-3 = #3 (reasons attempt_rows_incomplete, genN_not_bound_to_attempt_N). It is enforced in PLAN
+  (gen1/2/3_bound_to_attempt_N), in APPLY revalidation and in Temporal claim revalidation (refuse code
+  CLAIM_GENN_NOT_BOUND_TO_ATTEMPT_N), the latter two AFTER the attempt rows are locked FOR UPDATE; the
+  Temporal PLAN DB section uses the same helper. "Distinct attempts" alone is no longer sufficient.
+- External provider attestation is mandatory: chain recon JSON labels (confidence HIGH,
+  providersIndependent) alone are INSUFFICIENT proof that Toncenter + TonAPI observations occurred.
+  The recon must carry externalProviderObservationAttestation (exact kind + phrase
+  I_ATTEST_WD_000001_GEN4_INDEPENDENT_TONCENTER_TONAPI_NO_PAYMENT, toncenter/tonapi, two distinct
+  digests >= 16 chars, attestedAt within the 15 minute recon window). Residual: the digests are
+  Owner-attested tooling fingerprints, not cryptographic TLS bindings to the providers; the Owner must
+  still run independent recon tooling before any financial EXECUTE.
+- Temporal PLAN vs EXECUTE signer split: PLAN may PASS (ok=true) while the Signer is LOCKED (check
+  signer_unlocked_for_execute FAIL is excluded from the safety verdict; eligibility is evaluated with
+  signerGate=deferred) but readyForExecute stays false. EXECUTE requires signerReady + signerUnlocked
+  (refuse SIGNER_NOT_READY_FOR_EXECUTE) AND plan.readyForExecute (else PLAN_NOT_READY); the worker CLI
+  requires UNLOCKED + signingReady only in --execute mode.
+- Outcome: at most one additional attempt (#4), one signing, at most one broadcast.

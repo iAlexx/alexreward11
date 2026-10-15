@@ -324,6 +324,25 @@ export async function getPhase21ManualDispatchPermitByWithdrawalIdAndGeneration(
   return row === undefined ? null : mapPermitRow(row);
 }
 
+/**
+ * Load a permit by its primary key (any generation / status). Used by the outbox relay to
+ * classify audit-only (Gen>=3) manual_dispatch rows before any Temporal start.
+ */
+export async function getPhase21ManualDispatchPermitById(
+  client: PoolClient,
+  permitId: string,
+): Promise<Phase21ManualDispatchPermitRow | null> {
+  const result = await client.query<PermitSqlRow>(
+    `SELECT ${PERMIT_SELECT_COLUMNS}
+     FROM phase21_manual_dispatch_permits
+     WHERE id = $1::uuid
+     LIMIT 1`,
+    [permitId],
+  );
+  const row = result.rows[0];
+  return row === undefined ? null : mapPermitRow(row);
+}
+
 function assertBindingsConsistent(bindings: Phase21ManualDispatchPermitBindings): void {
   if (
     bindings.authorizedGrossAtomic !==

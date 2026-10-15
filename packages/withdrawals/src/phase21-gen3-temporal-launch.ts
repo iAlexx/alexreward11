@@ -1232,3 +1232,167 @@ export async function executePhase21Gen3TemporalLaunch(input: {
     throw error;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Gen-4 support helpers (ADD-ONLY; Gen-3 gate semantics above are unchanged).
+// ---------------------------------------------------------------------------
+
+/**
+ * Durable Gen-3 Temporal one-shot claim must exist for this exact permit (DISPATCHED).
+ * Presence only — Gen-4 gates use {@link verifyPhase21Gen3TemporalLaunchClaimBinding}.
+ */
+export async function readPhase21Gen3TemporalLaunchClaimPresent(
+  client: Pick<PoolClient, 'query'>,
+  input: { readonly withdrawalId: string; readonly gen3PermitId: string },
+): Promise<boolean> {
+  const key = buildPhase21Gen3TemporalLaunchClaimDedupeKey(input);
+  const claim = await client.query<{ n: number }>(
+    `SELECT count(*)::int AS n
+     FROM outbox_events
+     WHERE dedupe_key = $1
+       AND status = 'DISPATCHED'::outbox_event_status`,
+    [key],
+  );
+  return (claim.rows[0]?.n ?? 0) === 1;
+}
+
+export type Phase21Gen3TemporalLaunchClaimBindingResult =
+  | {
+      readonly ok: true;
+      readonly claimEventId: string;
+      readonly dedupeKey: string;
+      readonly gen3PermitId: string;
+      readonly gen3ConsumedAttemptId: string;
+      readonly attempt3Id: string;
+      readonly attempt3QueryId: string;
+    }
+  | { readonly ok: false; readonly reason: string };
+
+/**
+ * Strong Gen-3 launch claim binding for Gen-4 PLAN / APPLY / Temporal (mere presence is
+ * NOT sufficient). Read-only; safe inside READ ONLY and FOR UPDATE transactions.
+ *
+ * Requires:
+ *   - Gen-3 permit exists for THIS withdrawal, generation 3, status CONSUMED, bound to an attempt;
+ *   - exactly one outbox row with the exact Gen-3 claim dedupe key for THIS withdrawal + permit,
+ *     event_type phase21.gen3_temporal_launch_claim, status DISPATCHED, aggregate = withdrawal;
+ *   - payload: withdrawalId, gen3PermitId, authorizationGeneration === 3, workflowId ===
+ *     withdrawal/{id}, broadcastPerformed === false (fields the Gen-3 claim wrote);
+ *   - attempt #3 exists exactly once, id === gen3.consumedAttemptId, FAILED_PRE_BROADCAST,
+ *     with a persisted query_id.
+ */
+export async function verifyPhase21Gen3TemporalLaunchClaimBinding(
+  client: PoolClient,
+  input: { readonly withdrawalId: string },
+): Promise<Phase21Gen3TemporalLaunchClaimBindingResult> {
+  const gen3 = await getPhase21ManualDispatchPermitByWithdrawalIdAndGeneration(
+    client,
+    input.withdrawalId,
+    PHASE21_GEN3_AUTHORIZATION_GENERATION,
+  );
+  if (gen3 === null) return { ok: false, reason: 'gen3_permit_missing' };
+  if (gen3.withdrawalId !== input.withdrawalId) {
+    return { ok: false, reason: 'gen3_permit_wrong_withdrawal' };
+  }
+  if (gen3.authorizationGeneration !== PHASE21_GEN3_AUTHORIZATION_GENERATION) {
+    return { ok: false, reason: 'gen3_permit_wrong_generation' };
+  }
+  if (gen3.status !== 'CONSUMED') return { ok: false, reason: 'gen3_not_consumed' };
+  if (gen3.consumedAttemptId === null || gen3.consumedAttemptId.trim() === '') {
+    return { ok: false, reason: 'gen3_attempt_unbound' };
+  }
+
+  const dedupeKey = buildPhase21Gen3TemporalLaunchClaimDedupeKey({
+    withdrawalId: input.withdrawalId,
+    gen3PermitId: gen3.id,
+  });
+  const claim = await client.query<{
+    id: string;
+    aggregate_id: string | null;
+    aggregate_type: string;
+    event_type: string;
+    status: string;
+    payload: unknown;
+  }>(
+    `SELECT id::text AS id,
+            aggregate_id::text AS aggregate_id,
+            aggregate_type,
+            event_type,
+            status::text AS status,
+            payload
+     FROM outbox_events
+     WHERE dedupe_key = $1`,
+    [dedupeKey],
+  );
+  if (claim.rows.length === 0) return { ok: false, reason: 'gen3_launch_claim_missing' };
+  if (claim.rows.length !== 1) return { ok: false, reason: 'gen3_launch_claim_ambiguous' };
+  const row = claim.rows[0]!;
+  if (row.event_type !== PHASE21_GEN3_TEMPORAL_LAUNCH_CLAIM_EVENT_TYPE) {
+    return { ok: false, reason: 'gen3_launch_claim_wrong_event_type' };
+  }
+  if (row.status !== 'DISPATCHED') {
+    return { ok: false, reason: 'gen3_launch_claim_not_dispatched' };
+  }
+  if (row.aggregate_type !== 'withdrawal' || row.aggregate_id !== input.withdrawalId) {
+    return { ok: false, reason: 'gen3_launch_claim_wrong_aggregate' };
+  }
+
+  const payload =
+    typeof row.payload === 'string'
+      ? (JSON.parse(row.payload) as Record<string, unknown>)
+      : (row.payload as Record<string, unknown> | null);
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+    return { ok: false, reason: 'gen3_launch_claim_payload_invalid' };
+  }
+  if (payload.withdrawalId !== input.withdrawalId) {
+    return { ok: false, reason: 'gen3_launch_claim_payload_wrong_withdrawal' };
+  }
+  if (payload.gen3PermitId !== gen3.id) {
+    return { ok: false, reason: 'gen3_launch_claim_payload_wrong_permit' };
+  }
+  if (payload.authorizationGeneration !== PHASE21_GEN3_AUTHORIZATION_GENERATION) {
+    return { ok: false, reason: 'gen3_launch_claim_payload_wrong_generation' };
+  }
+  if (payload.workflowId !== withdrawalWorkflowId(input.withdrawalId)) {
+    return { ok: false, reason: 'gen3_launch_claim_payload_wrong_workflow' };
+  }
+  if (payload.broadcastPerformed !== false) {
+    return { ok: false, reason: 'gen3_launch_claim_payload_broadcast_flag' };
+  }
+
+  const attempts = await client.query<{
+    id: string;
+    broadcast_result_state: string;
+    query_id: string | null;
+  }>(
+    `SELECT id::text AS id,
+            broadcast_result_state::text AS broadcast_result_state,
+            query_id::text AS query_id
+     FROM withdrawal_attempts
+     WHERE withdrawal_id = $1::uuid
+       AND attempt_number = 3`,
+    [input.withdrawalId],
+  );
+  if (attempts.rows.length === 0) return { ok: false, reason: 'attempt3_missing' };
+  if (attempts.rows.length !== 1) return { ok: false, reason: 'attempt3_ambiguous' };
+  const attempt3 = attempts.rows[0]!;
+  if (attempt3.id !== gen3.consumedAttemptId) {
+    return { ok: false, reason: 'gen3_attempt_not_attempt3' };
+  }
+  if (attempt3.broadcast_result_state !== 'FAILED_PRE_BROADCAST') {
+    return { ok: false, reason: 'attempt3_not_failed_pre' };
+  }
+  if (attempt3.query_id === null || attempt3.query_id.trim() === '') {
+    return { ok: false, reason: 'attempt3_query_id_missing' };
+  }
+
+  return {
+    ok: true,
+    claimEventId: row.id,
+    dedupeKey,
+    gen3PermitId: gen3.id,
+    gen3ConsumedAttemptId: gen3.consumedAttemptId,
+    attempt3Id: attempt3.id,
+    attempt3QueryId: attempt3.query_id,
+  };
+}

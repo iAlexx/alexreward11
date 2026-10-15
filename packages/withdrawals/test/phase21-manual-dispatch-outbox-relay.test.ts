@@ -30,6 +30,9 @@ type EvidenceRow = {
   ambiguous: number;
   confirmed: number;
   failed_pre_only: number;
+  /** Restart-safety aggregate aliases (optional; mock returns them when set). */
+  unsafe_count?: number;
+  non_failed_pre_count?: number;
 };
 
 type OutboxEventState = {
@@ -59,10 +62,13 @@ function makePermitRow(input: {
   withdrawalId: string;
   status: 'ARMED' | 'CONSUMED' | 'CANCELLED';
   consumedAttemptId?: string | null;
+  authorizationGeneration?: number;
+  id?: string;
 }): Row {
   return {
-    id: PERMIT_ID,
+    id: input.id ?? PERMIT_ID,
     withdrawal_id: input.withdrawalId,
+    authorization_generation: input.authorizationGeneration ?? 1,
     public_id: 'p21-canary',
     authorized_gross_atomic: '1000000',
     authorized_fee_atomic: '0',
@@ -81,7 +87,10 @@ function makePermitRow(input: {
     consumed_at: input.status === 'CONSUMED' ? new Date('2026-10-06T00:01:00.000Z') : null,
     cancelled_at: input.status === 'CANCELLED' ? new Date('2026-10-06T00:02:00.000Z') : null,
     cancel_reason: input.status === 'CANCELLED' ? 'owner_cancel' : null,
-    idempotency_key: `phase21.manual_dispatch.canary:${input.withdrawalId}`,
+    idempotency_key:
+      (input.authorizationGeneration ?? 1) === 1
+        ? `phase21.manual_dispatch.canary:${input.withdrawalId}`
+        : `phase21.manual_dispatch.canary:${input.withdrawalId}:gen:${input.authorizationGeneration}`,
     audit_correlation_id: null,
   };
 }
@@ -89,6 +98,7 @@ function makePermitRow(input: {
 function makeOutboxEvent(input: {
   id: string;
   withdrawalId: string;
+  permitId?: string | null;
 }): OutboxEventState {
   return {
     id: input.id,
@@ -97,7 +107,7 @@ function makeOutboxEvent(input: {
     payload: {
       withdrawalId: input.withdrawalId,
       workflowId: withdrawalWorkflowId(input.withdrawalId),
-      permitId: PERMIT_ID,
+      ...(input.permitId === null ? {} : { permitId: input.permitId ?? PERMIT_ID }),
       phase21ManualDispatch: true,
     },
     attempts: 0,
@@ -193,10 +203,66 @@ function makeMockPool(state: {
 
       if (
         sql.includes('FROM phase21_manual_dispatch_permits') &&
+        sql.includes('WHERE id = $1::uuid')
+      ) {
+        const permitId = String(params?.[0]);
+        const row = state.permits.find((p) => p.id === permitId);
+        return { rows: row ? [row] : [] };
+      }
+
+      // Relay gate: shared withdrawal-row lock with Gen-3/Gen-4 APPLY (before permits).
+      if (
+        sql.includes('FROM withdrawals') &&
+        sql.includes('WHERE id = $1::uuid') &&
+        sql.includes('FOR UPDATE') &&
+        !sql.includes('JOIN')
+      ) {
+        const withdrawalId = String(params?.[0]);
+        return { rows: [{ id: withdrawalId }] };
+      }
+
+      // Relay gate: lock all permits for the withdrawal (FOR UPDATE).
+      if (
+        sql.includes('FROM phase21_manual_dispatch_permits') &&
+        sql.includes('WHERE withdrawal_id = $1::uuid') &&
+        sql.includes('FOR UPDATE') &&
+        !sql.includes('authorization_generation')
+      ) {
+        const withdrawalId = String(params?.[0]);
+        const rows = state.permits.filter((p) => p.withdrawal_id === withdrawalId);
+        return { rows: rows.map((p) => ({ id: p.id })) };
+      }
+
+      // Relay gate: count Gen>=3 authorizations for supersession check.
+      if (
+        sql.includes('FROM phase21_manual_dispatch_permits') &&
+        sql.includes('authorization_generation >= 3') &&
+        sql.includes('AS gen_ge3')
+      ) {
+        const withdrawalId = String(params?.[0]);
+        const genGe3 = state.permits.filter(
+          (p) =>
+            p.withdrawal_id === withdrawalId && Number(p.authorization_generation) >= 3,
+        ).length;
+        return { rows: [{ gen_ge3: genGe3 }] };
+      }
+
+      if (
+        sql.includes('FROM phase21_manual_dispatch_permits') &&
         sql.includes('WHERE withdrawal_id')
       ) {
         const withdrawalId = String(params?.[0]);
-        const row = state.permits.find((p) => p.withdrawal_id === withdrawalId);
+        // Mirror production: prefer ARMED, else highest authorization_generation.
+        const rows = state.permits
+          .filter((p) => p.withdrawal_id === withdrawalId)
+          .slice()
+          .sort((a, b) => {
+            const aArmed = a.status === 'ARMED' ? 0 : 1;
+            const bArmed = b.status === 'ARMED' ? 0 : 1;
+            if (aArmed !== bArmed) return aArmed - bArmed;
+            return Number(b.authorization_generation) - Number(a.authorization_generation);
+          });
+        const row = rows[0];
         return { rows: row ? [row] : [] };
       }
 
@@ -946,6 +1012,371 @@ describe('phase21 manual dispatch outbox relay fail-closed', () => {
       authority,
     });
     expect(starter.starts[0]!.realChainEnabled).toBe(true);
+  });
+
+  it('Gen-2 ARMED permit still dispatches (Gen-1/2 path unchanged)', async () => {
+    const authority = buildValidAuthority();
+    const state = {
+      events: [makeOutboxEvent({ id: EVENT_ID, withdrawalId: WID })],
+      permits: [makePermitRow({ withdrawalId: WID, status: 'ARMED', authorizationGeneration: 2 })],
+      evidenceByWithdrawal: { [WID]: zeroEvidence() },
+    };
+    const { pool } = makeMockPool(state);
+    const starter = recordingStarter({ priorStatus: 'COMPLETED' });
+    const batch = await processWithdrawalPhase21ManualDispatchOutboxBatch(pool, {
+      client: starter,
+      taskQueue: 'tq',
+      authority,
+    });
+    expect(batch).toEqual({ claimed: 1, dispatched: 1, retried: 0, deadLetter: 0 });
+    expect(starter.starts).toHaveLength(1);
+    expect(starter.starts[0]!.reusePolicy).toBe('ALLOW_DUPLICATE');
+    expect(state.events[0]!.status).toBe('DISPATCHED');
+  });
+
+  it('Gen-3 ARMED + PENDING manual_dispatch + authority present → DEAD_LETTER audit-only, zero start', async () => {
+    const authority = buildValidAuthority();
+    const state = {
+      events: [makeOutboxEvent({ id: EVENT_ID, withdrawalId: WID })],
+      permits: [makePermitRow({ withdrawalId: WID, status: 'ARMED', authorizationGeneration: 3 })],
+      evidenceByWithdrawal: { [WID]: zeroEvidence() },
+    };
+    const { pool } = makeMockPool(state);
+    const starter = recordingStarter({ priorStatus: 'COMPLETED' });
+    const batch = await processWithdrawalPhase21ManualDispatchOutboxBatch(pool, {
+      client: starter,
+      taskQueue: 'tq',
+      authority,
+    });
+    expect(batch).toEqual({ claimed: 1, dispatched: 0, retried: 0, deadLetter: 1 });
+    expect(starter.starts).toHaveLength(0);
+    expect(state.events[0]!.status).toBe('DEAD_LETTER');
+    expect(state.events[0]!.last_error_redacted).toContain(
+      'phase21_gen3_manual_dispatch_audit_only_use_owner_temporal_launch_claim',
+    );
+  });
+
+  it('Gen-4 ARMED + PENDING manual_dispatch + authority present → DEAD_LETTER audit-only, zero start', async () => {
+    const authority = buildValidAuthority();
+    const state = {
+      events: [makeOutboxEvent({ id: EVENT_ID, withdrawalId: WID })],
+      permits: [makePermitRow({ withdrawalId: WID, status: 'ARMED', authorizationGeneration: 4 })],
+      evidenceByWithdrawal: { [WID]: zeroEvidence() },
+    };
+    const { pool } = makeMockPool(state);
+    const starter = recordingStarter({ priorStatus: 'COMPLETED' });
+    const batch = await processWithdrawalPhase21ManualDispatchOutboxBatch(pool, {
+      client: starter,
+      taskQueue: 'tq',
+      authority,
+    });
+    expect(batch).toEqual({ claimed: 1, dispatched: 0, retried: 0, deadLetter: 1 });
+    expect(starter.starts).toHaveLength(0);
+    expect(state.events[0]!.status).toBe('DEAD_LETTER');
+    expect(state.events[0]!.last_error_redacted).toContain(
+      'phase21_gen4_manual_dispatch_audit_only_use_owner_temporal_launch_claim',
+    );
+  });
+
+  it('Gen>=3 audit-only dead letter applies even when the Gen-2 relay would be restart-safe (stray Gen-3 row, no evidence)', async () => {
+    const authority = buildValidAuthority();
+    const state = {
+      events: [
+        makeOutboxEvent({ id: EVENT_ID, withdrawalId: WID }),
+        makeOutboxEvent({ id: EVENT_ID2, withdrawalId: WID2, permitId: 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa' }),
+      ],
+      permits: [
+        makePermitRow({ withdrawalId: WID, status: 'ARMED', authorizationGeneration: 3 }),
+        makePermitRow({
+          withdrawalId: WID2,
+          status: 'ARMED',
+          authorizationGeneration: 2,
+          id: 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa',
+        }),
+      ],
+      evidenceByWithdrawal: { [WID]: zeroEvidence(), [WID2]: zeroEvidence() },
+    };
+    const { pool } = makeMockPool(state);
+    const starter = recordingStarter({ priorStatus: 'COMPLETED' });
+    const batch = await processWithdrawalPhase21ManualDispatchOutboxBatch(pool, {
+      client: starter,
+      taskQueue: 'tq',
+      authority,
+    });
+    expect(batch).toEqual({ claimed: 2, dispatched: 1, retried: 0, deadLetter: 1 });
+    expect(starter.starts).toHaveLength(1);
+    expect(starter.starts[0]!.workflowId).toBe(withdrawalWorkflowId(WID2));
+    expect(state.events[0]!.status).toBe('DEAD_LETTER');
+    expect(state.events[1]!.status).toBe('DISPATCHED');
+  });
+
+  it('stale Gen-2 PENDING + Gen-4 ARMED + 3 clean FAILED_PRE → DEAD_LETTER superseded, zero Temporal starts', async () => {
+    const authority = buildValidAuthority();
+    const gen2PermitId = '22222222-2222-4222-8222-222222222222';
+    const gen4PermitId = '44444444-4444-4444-8444-444444444444';
+    const threeCleanFailedPre: EvidenceRow = {
+      attempt_count: 3,
+      signature_evidence: 0,
+      submitted: 0,
+      chain_ref: 0,
+      ambiguous: 0,
+      confirmed: 0,
+      failed_pre_only: 3,
+      unsafe_count: 0,
+      non_failed_pre_count: 0,
+    };
+    const state = {
+      events: [
+        makeOutboxEvent({ id: EVENT_ID, withdrawalId: WID, permitId: gen2PermitId }),
+      ],
+      permits: [
+        makePermitRow({
+          withdrawalId: WID,
+          status: 'CONSUMED',
+          authorizationGeneration: 2,
+          id: gen2PermitId,
+          consumedAttemptId: ATTEMPT_ID,
+        }),
+        makePermitRow({
+          withdrawalId: WID,
+          status: 'ARMED',
+          authorizationGeneration: 4,
+          id: gen4PermitId,
+        }),
+      ],
+      evidenceByWithdrawal: { [WID]: threeCleanFailedPre },
+    };
+    const { pool } = makeMockPool(state);
+    const starter = recordingStarter({ priorStatus: 'COMPLETED' });
+    const batch = await processWithdrawalPhase21ManualDispatchOutboxBatch(pool, {
+      client: starter,
+      taskQueue: 'tq',
+      authority,
+    });
+    expect(batch).toEqual({ claimed: 1, dispatched: 0, retried: 0, deadLetter: 1 });
+    expect(starter.starts).toHaveLength(0);
+    expect(state.events[0]!.status).toBe('DEAD_LETTER');
+    expect(state.events[0]!.last_error_redacted).toContain(
+      'phase21_stale_manual_dispatch_superseded_by_newer_generation_authorization',
+    );
+  });
+
+  it('stale Gen-1 PENDING after Gen-3 exists → DEAD_LETTER superseded, zero starts', async () => {
+    const authority = buildValidAuthority();
+    const gen1PermitId = '11111111-1111-4111-8111-111111111111';
+    const gen3PermitId = '33333333-3333-4333-8333-333333333333';
+    const state = {
+      events: [makeOutboxEvent({ id: EVENT_ID, withdrawalId: WID, permitId: gen1PermitId })],
+      permits: [
+        makePermitRow({
+          withdrawalId: WID,
+          status: 'CONSUMED',
+          authorizationGeneration: 1,
+          id: gen1PermitId,
+          consumedAttemptId: ATTEMPT_ID,
+        }),
+        makePermitRow({
+          withdrawalId: WID,
+          status: 'ARMED',
+          authorizationGeneration: 3,
+          id: gen3PermitId,
+        }),
+      ],
+      evidenceByWithdrawal: {
+        [WID]: {
+          attempt_count: 2,
+          signature_evidence: 0,
+          submitted: 0,
+          chain_ref: 0,
+          ambiguous: 0,
+          confirmed: 0,
+          failed_pre_only: 2,
+          unsafe_count: 0,
+          non_failed_pre_count: 0,
+        },
+      },
+    };
+    const { pool } = makeMockPool(state);
+    const starter = recordingStarter({ priorStatus: 'COMPLETED' });
+    const batch = await processWithdrawalPhase21ManualDispatchOutboxBatch(pool, {
+      client: starter,
+      taskQueue: 'tq',
+      authority,
+    });
+    expect(batch).toEqual({ claimed: 1, dispatched: 0, retried: 0, deadLetter: 1 });
+    expect(starter.starts).toHaveLength(0);
+    expect(state.events[0]!.last_error_redacted).toContain(
+      'phase21_stale_manual_dispatch_superseded_by_newer_generation_authorization',
+    );
+  });
+
+  it('genuine current Gen-2 event with no Gen>=3 permit → existing Gen-2 dispatch preserved', async () => {
+    const authority = buildValidAuthority();
+    const gen2PermitId = '22222222-2222-4222-8222-222222222222';
+    const state = {
+      events: [makeOutboxEvent({ id: EVENT_ID, withdrawalId: WID, permitId: gen2PermitId })],
+      permits: [
+        makePermitRow({
+          withdrawalId: WID,
+          status: 'ARMED',
+          authorizationGeneration: 2,
+          id: gen2PermitId,
+        }),
+      ],
+      evidenceByWithdrawal: { [WID]: zeroEvidence() },
+    };
+    const { pool } = makeMockPool(state);
+    const starter = recordingStarter({ priorStatus: 'COMPLETED' });
+    const batch = await processWithdrawalPhase21ManualDispatchOutboxBatch(pool, {
+      client: starter,
+      taskQueue: 'tq',
+      authority,
+    });
+    expect(batch).toEqual({ claimed: 1, dispatched: 1, retried: 0, deadLetter: 0 });
+    expect(starter.starts).toHaveLength(1);
+    expect(state.events[0]!.status).toBe('DISPATCHED');
+  });
+
+  it('restart-safety permit mismatch: stale Gen-1 event vs current Gen-2 ARMED (no Gen>=3) → DEAD_LETTER, zero starts', async () => {
+    // Requirement 1 without supersession: event.permitId must equal restart-safety's selected permit.
+    const authority = buildValidAuthority();
+    const gen1PermitId = '11111111-1111-4111-8111-111111111111';
+    const gen2PermitId = '22222222-2222-4222-8222-222222222222';
+    const state = {
+      events: [makeOutboxEvent({ id: EVENT_ID, withdrawalId: WID, permitId: gen1PermitId })],
+      permits: [
+        makePermitRow({
+          withdrawalId: WID,
+          status: 'CONSUMED',
+          authorizationGeneration: 1,
+          id: gen1PermitId,
+          consumedAttemptId: ATTEMPT_ID,
+        }),
+        makePermitRow({
+          withdrawalId: WID,
+          status: 'ARMED',
+          authorizationGeneration: 2,
+          id: gen2PermitId,
+        }),
+      ],
+      evidenceByWithdrawal: { [WID]: zeroEvidence() },
+    };
+    const { pool } = makeMockPool(state);
+    const starter = recordingStarter({ priorStatus: 'COMPLETED' });
+    const batch = await processWithdrawalPhase21ManualDispatchOutboxBatch(pool, {
+      client: starter,
+      taskQueue: 'tq',
+      authority,
+    });
+    expect(batch).toEqual({ claimed: 1, dispatched: 0, retried: 0, deadLetter: 1 });
+    expect(starter.starts).toHaveLength(0);
+    expect(state.events[0]!.last_error_redacted).toContain(
+      'phase21_manual_dispatch_restart_safety_permit_mismatch',
+    );
+  });
+
+  it('concurrent Gen>=3 authorization visible under withdrawal FOR UPDATE prevents Gen-2 auto-launch', async () => {
+    // Simulates APPLY arming Gen-4 while holding the shared withdrawal row lock.
+    const authority = buildValidAuthority();
+    const gen2PermitId = '22222222-2222-4222-8222-222222222222';
+    const gen4PermitId = '44444444-4444-4444-8444-444444444444';
+    const state = {
+      events: [makeOutboxEvent({ id: EVENT_ID, withdrawalId: WID, permitId: gen2PermitId })],
+      permits: [
+        makePermitRow({
+          withdrawalId: WID,
+          status: 'ARMED',
+          authorizationGeneration: 2,
+          id: gen2PermitId,
+        }),
+      ],
+      evidenceByWithdrawal: { [WID]: zeroEvidence() },
+    };
+    const { pool, client } = makeMockPool(state);
+    type MockQuery = (text: string, params?: readonly unknown[]) => Promise<{ rows: unknown[] }>;
+    const originalQuery = (client.query as unknown as MockQuery).bind(client);
+    let lockedWithdrawal = false;
+    (client as unknown as { query: MockQuery }).query = async (text, params) => {
+      const sql = String(text).replace(/\s+/g, ' ');
+      if (
+        sql.includes('FROM withdrawals') &&
+        sql.includes('FOR UPDATE') &&
+        !sql.includes('JOIN') &&
+        !lockedWithdrawal
+      ) {
+        lockedWithdrawal = true;
+        // Concurrent APPLY-style arm becomes visible once the shared withdrawal lock is held.
+        const gen2 = state.permits.find((p) => p.id === gen2PermitId);
+        if (gen2) {
+          gen2.status = 'CONSUMED';
+          gen2.consumed_attempt_id = ATTEMPT_ID;
+        }
+        state.permits.push(
+          makePermitRow({
+            withdrawalId: WID,
+            status: 'ARMED',
+            authorizationGeneration: 4,
+            id: gen4PermitId,
+          }),
+        );
+      }
+      return originalQuery(text, params);
+    };
+
+    const starter = recordingStarter({ priorStatus: 'COMPLETED' });
+    const batch = await processWithdrawalPhase21ManualDispatchOutboxBatch(pool, {
+      client: starter,
+      taskQueue: 'tq',
+      authority,
+    });
+    expect(lockedWithdrawal).toBe(true);
+    expect(batch).toEqual({ claimed: 1, dispatched: 0, retried: 0, deadLetter: 1 });
+    expect(starter.starts).toHaveLength(0);
+    expect(state.events[0]!.last_error_redacted).toContain(
+      'phase21_stale_manual_dispatch_superseded_by_newer_generation_authorization',
+    );
+  });
+
+  it('missing payload.permitId → DEAD_LETTER phase21_manual_dispatch_permit_id_required, zero start', async () => {
+    const authority = buildValidAuthority();
+    const state = {
+      events: [makeOutboxEvent({ id: EVENT_ID, withdrawalId: WID, permitId: null })],
+      permits: [makePermitRow({ withdrawalId: WID, status: 'ARMED' })],
+      evidenceByWithdrawal: { [WID]: zeroEvidence() },
+    };
+    const { pool } = makeMockPool(state);
+    const starter = recordingStarter({ priorStatus: 'COMPLETED' });
+    const batch = await processWithdrawalPhase21ManualDispatchOutboxBatch(pool, {
+      client: starter,
+      taskQueue: 'tq',
+      authority,
+    });
+    expect(batch).toEqual({ claimed: 1, dispatched: 0, retried: 0, deadLetter: 1 });
+    expect(starter.starts).toHaveLength(0);
+    expect(state.events[0]!.last_error_redacted).toContain(
+      'phase21_manual_dispatch_permit_id_required',
+    );
+  });
+
+  it('non-UUID payload.permitId → DEAD_LETTER permit_id_required (no DB lookup, zero start)', async () => {
+    const authority = buildValidAuthority();
+    const state = {
+      events: [makeOutboxEvent({ id: EVENT_ID, withdrawalId: WID, permitId: 'not-a-uuid' })],
+      permits: [makePermitRow({ withdrawalId: WID, status: 'ARMED' })],
+      evidenceByWithdrawal: { [WID]: zeroEvidence() },
+    };
+    const { pool } = makeMockPool(state);
+    const starter = recordingStarter();
+    const batch = await processWithdrawalPhase21ManualDispatchOutboxBatch(pool, {
+      client: starter,
+      taskQueue: 'tq',
+      authority,
+    });
+    expect(batch.deadLetter).toBe(1);
+    expect(starter.starts).toHaveLength(0);
+    expect(state.events[0]!.last_error_redacted).toContain(
+      'phase21_manual_dispatch_permit_id_required',
+    );
   });
 
   it('Mainnet authority fails closed when fakeChainEnabled is undefined or null', () => {
