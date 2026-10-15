@@ -1,5 +1,7 @@
 import http from 'node:http';
+import { createRequire } from 'node:module';
 import { once } from 'node:events';
+import { readFileSync } from 'node:fs';
 import { Readable } from 'node:stream';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
 
@@ -11,6 +13,8 @@ import {
   setGlobalDispatcher,
 } from 'undici';
 import { afterEach, describe, expect, it } from 'vitest';
+
+const requireFromHere = createRequire(import.meta.url);
 
 import {
   SignerHttpClient,
@@ -80,21 +84,48 @@ async function listen(server: Server): Promise<StartedHttp> {
   };
 }
 
-async function startSyntheticOrigin(body: string): Promise<StartedHttp & { readonly hits: number }> {
-  const state = { hits: 0 };
+async function startSyntheticOrigin(
+  body: string,
+  options: { readonly postDelayMs?: number } = {},
+): Promise<StartedHttp & { readonly hits: number; readonly getHits: number }> {
+  const state = { hits: 0, getHits: 0 };
+  const postDelayMs = options.postDelayMs ?? 0;
   const server = http.createServer((req: IncomingMessage, res: ServerResponse) => {
     // Intentionally NOT /v1/sign-withdrawal-attempt — synthetic only.
+    if (req.method === 'GET' && req.url === '/v1/synthetic-signing-identity') {
+      state.getHits += 1;
+      const identity = JSON.stringify({
+        publicKeyHex: 'ab'.repeat(32),
+        publicKeyFingerprint: 'cd'.repeat(32),
+        walletAddressRaw: `0:${'11'.repeat(32)}`,
+        signingReady: true,
+        custodyState: 'UNLOCKED',
+      });
+      res.writeHead(200, {
+        'content-type': 'application/json',
+        'content-length': Buffer.byteLength(identity),
+      });
+      res.end(identity);
+      return;
+    }
     if (req.method === 'POST' && req.url === '/v1/synthetic-signer-response') {
       state.hits += 1;
       const chunks: Buffer[] = [];
       req.on('data', (c: Buffer) => chunks.push(c));
       req.on('end', () => {
-        res.writeHead(200, {
-          'content-type': 'application/json',
-          'content-length': Buffer.byteLength(body),
-          'x-synthetic-signer': '1',
-        });
-        res.end(body);
+        const send = (): void => {
+          res.writeHead(200, {
+            'content-type': 'application/json',
+            'content-length': Buffer.byteLength(body),
+            'x-synthetic-signer': '1',
+          });
+          res.end(body);
+        };
+        if (postDelayMs > 0) {
+          setTimeout(send, postDelayMs);
+        } else {
+          send();
+        }
       });
       return;
     }
@@ -107,17 +138,28 @@ async function startSyntheticOrigin(body: string): Promise<StartedHttp & { reado
     get hits() {
       return state.hits;
     },
+    get getHits() {
+      return state.getHits;
+    },
   };
 }
+
+type ProxyForwardRecord = {
+  readonly method: string;
+  readonly url: string;
+  readonly connection?: string;
+  /** Client ephemeral TCP port observed by the proxy (proves reuse vs new connect). */
+  readonly remotePort: number;
+};
 
 /**
  * Minimal absolute-form HTTP forward proxy (Tailscale outbound-http-proxy shape).
  * CONNECT returns 405 so forced tunneling fails fast.
  */
 async function startForwardHttpProxy(): Promise<
-  StartedHttp & { readonly forwarded: Array<{ method: string; url: string }> }
+  StartedHttp & { readonly forwarded: ProxyForwardRecord[] }
 > {
-  const forwarded: Array<{ method: string; url: string }> = [];
+  const forwarded: ProxyForwardRecord[] = [];
   const server = http.createServer((clientReq, clientRes) => {
     if (clientReq.method === 'CONNECT') {
       clientRes.writeHead(405, { connection: 'close' });
@@ -130,7 +172,14 @@ async function startForwardHttpProxy(): Promise<
       clientRes.end('expected absolute-form URL');
       return;
     }
-    forwarded.push({ method: clientReq.method ?? 'GET', url: targetUrl });
+    const connectionHeader = clientReq.headers.connection;
+    const remotePort = clientReq.socket.remotePort ?? 0;
+    forwarded.push({
+      method: clientReq.method ?? 'GET',
+      url: targetUrl,
+      remotePort,
+      ...(typeof connectionHeader === 'string' ? { connection: connectionHeader } : {}),
+    });
     const upstream = new URL(targetUrl);
     const headers: http.OutgoingHttpHeaders = { ...clientReq.headers, host: upstream.host };
     delete headers['proxy-connection'];
@@ -453,6 +502,170 @@ describe('phase21 Signer HTTP proxy transport (synthetic, no live signer)', () =
       publicMessage: expect.stringContaining('SIGNER_HTTP_BODY_TIMEOUT'),
       details: expect.objectContaining({ phase: 'BODY_TIMEOUT', headersReceived: true }),
     });
+  });
+
+  it('sends Connection: close on every proxied Signer request', async () => {
+    const body = buildSyntheticSignerSignBody(SYNTHETIC_BODY_TARGET_BYTES);
+    const origin = await startSyntheticOrigin(body);
+    const proxy = await startForwardHttpProxy();
+    cleanups.push(() => origin.close(), () => proxy.close());
+    const fetchImpl = createSignerHttpFetch({
+      proxyUrl: `http://127.0.0.1:${proxy.port}`,
+    });
+    await fetchTextWithDeadline(
+      fetchImpl,
+      `${origin.baseUrl}/v1/synthetic-signer-response`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: 'Bearer test-token' },
+        body: '{"probe":"close"}',
+      },
+      5_000,
+    );
+    expect(proxy.forwarded.length).toBe(1);
+    expect(proxy.forwarded[0]?.connection?.toLowerCase()).toBe('close');
+  });
+
+  it('Connection: close opens a new TCP remotePort for GET then POST (no keep-alive reuse)', async () => {
+    const body = buildSyntheticSignerSignBody(SYNTHETIC_BODY_TARGET_BYTES);
+    const origin = await startSyntheticOrigin(body);
+    const proxy = await startForwardHttpProxy();
+    cleanups.push(() => origin.close(), () => proxy.close());
+    const fetchImpl = createSignerHttpFetch({
+      proxyUrl: `http://127.0.0.1:${proxy.port}`,
+    });
+
+    await fetchTextWithDeadline(
+      fetchImpl,
+      `${origin.baseUrl}/v1/synthetic-signing-identity`,
+      { method: 'GET', headers: { accept: 'application/json' } },
+      5_000,
+    );
+    await fetchTextWithDeadline(
+      fetchImpl,
+      `${origin.baseUrl}/v1/synthetic-signer-response`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{"probe":"ports"}',
+      },
+      5_000,
+    );
+
+    expect(proxy.forwarded).toHaveLength(2);
+    expect(proxy.forwarded[0]?.connection?.toLowerCase()).toBe('close');
+    expect(proxy.forwarded[1]?.connection?.toLowerCase()).toBe('close');
+    expect(proxy.forwarded[0]?.remotePort).toBeGreaterThan(0);
+    expect(proxy.forwarded[1]?.remotePort).toBeGreaterThan(0);
+    // Distinct ephemeral client ports ⇒ TCP session was not reused.
+    expect(proxy.forwarded[0]?.remotePort).not.toBe(proxy.forwarded[1]?.remotePort);
+  });
+
+  it('undici@7.28.0 Http1ProxyWrapper does not forward connections/pipelining to the internal proxy Client', () => {
+    // Proven from installed undici source (not a hypothesis).
+    const proxyAgentPath = requireFromHere.resolve('undici/lib/dispatcher/proxy-agent.js');
+    const src = readFileSync(proxyAgentPath, 'utf8');
+    expect(src).toContain('class Http1ProxyWrapper');
+    expect(src).toMatch(/this\.#client = factory\(proxyUrl, \{ connect \}\)/);
+    expect(src).toMatch(/this\.#client = new Client\(proxyUrl, \{ connect \}\)/);
+    // Factory call site only passes `{ connect }` — opts.connections / opts.pipelining are dropped.
+    expect(src).not.toMatch(/factory\(proxyUrl, \{\s*connect,\s*connections/);
+  });
+
+  it('ProxyAgent connections:1 + pipelining:0 alone do not send Connection: close', async () => {
+    const body = buildSyntheticSignerSignBody(SYNTHETIC_BODY_TARGET_BYTES);
+    const origin = await startSyntheticOrigin(body);
+    const proxy = await startForwardHttpProxy();
+    cleanups.push(() => origin.close(), () => proxy.close());
+
+    const agent = new ProxyAgent({
+      uri: `http://127.0.0.1:${proxy.port}`,
+      proxyTunnel: false,
+      connections: 1,
+      pipelining: 0,
+    });
+    cleanups.push(async () => {
+      await agent.close();
+    });
+
+    const res = await undiciFetch(`${origin.baseUrl}/v1/synthetic-signer-response`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{"probe":"no-close-header"}',
+      dispatcher: agent,
+    });
+    await res.text();
+
+    expect(proxy.forwarded).toHaveLength(1);
+    expect(proxy.forwarded[0]?.connection?.toLowerCase()).not.toBe('close');
+  });
+
+  it('GET then repeated delayed ~3KB POSTs complete headers+body via ProxyAgent', { timeout: 60_000 }, async () => {
+    // Mirrors attempt #3 shape: identity GET succeeds, then sign POST returns ~2780B after work.
+    const body = buildSyntheticSignerSignBody(SYNTHETIC_BODY_TARGET_BYTES);
+    const origin = await startSyntheticOrigin(body, { postDelayMs: 75 });
+    const proxy = await startForwardHttpProxy();
+    cleanups.push(() => origin.close(), () => proxy.close());
+    const fetchImpl = createSignerHttpFetch({
+      proxyUrl: `http://127.0.0.1:${proxy.port}`,
+    });
+
+    for (let i = 0; i < 20; i++) {
+      const identity = await fetchTextWithDeadline(
+        fetchImpl,
+        `${origin.baseUrl}/v1/synthetic-signing-identity`,
+        { method: 'GET', headers: { accept: 'application/json' } },
+        5_000,
+      );
+      expect(identity.response.status).toBe(200);
+      expect(identity.text).toContain('signingReady');
+
+      const signed = await fetchTextWithDeadline(
+        fetchImpl,
+        `${origin.baseUrl}/v1/synthetic-signer-response`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ n: i }),
+        },
+        5_000,
+      );
+      expect(signed.response.status).toBe(200);
+      expect(signed.text.length).toBe(body.length);
+      expect(signed.text).toBe(body);
+    }
+    expect(origin.getHits).toBe(20);
+    expect(origin.hits).toBe(20);
+    expect(proxy.forwarded.every((f) => f.connection?.toLowerCase() === 'close')).toBe(true);
+  });
+
+  it('concurrent delayed ~3KB POSTs each return full body under deadline', { timeout: 30_000 }, async () => {
+    const body = buildSyntheticSignerSignBody(SYNTHETIC_BODY_TARGET_BYTES);
+    const origin = await startSyntheticOrigin(body, { postDelayMs: 50 });
+    const proxy = await startForwardHttpProxy();
+    cleanups.push(() => origin.close(), () => proxy.close());
+    const fetchImpl = createSignerHttpFetch({
+      proxyUrl: `http://127.0.0.1:${proxy.port}`,
+    });
+    const results = await Promise.all(
+      Array.from({ length: 12 }, (_, i) =>
+        fetchTextWithDeadline(
+          fetchImpl,
+          `${origin.baseUrl}/v1/synthetic-signer-response`,
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ n: i }),
+          },
+          5_000,
+        ),
+      ),
+    );
+    for (const r of results) {
+      expect(r.response.status).toBe(200);
+      expect(r.text).toBe(body);
+    }
+    expect(origin.hits).toBe(12);
   });
 
   it('does not alter SignerHttpClient safety parsing for a normal injected response', async () => {

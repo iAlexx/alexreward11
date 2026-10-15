@@ -9,6 +9,8 @@ fail() {
 [ -n "${TAILSCALE_AUTHKEY:-}" ] || fail "TAILSCALE_AUTHKEY is required"
 
 TS_SOCKET="${TAILSCALE_SOCKET:-/tmp/lootra-tailscaled.sock}"
+# Tailscale officially supports HTTP proxy + SOCKS5 on the same listen address
+# (protocol demux). Keep a single loopback port unless Owner directs otherwise.
 TS_PROXY_ADDR="${TAILSCALE_PROXY_ADDR:-127.0.0.1:1055}"
 TS_HOSTNAME="${TAILSCALE_HOSTNAME:-lootra-railway-worker}"
 TS_LOG="${TAILSCALE_LOG_FILE:-/tmp/lootra-tailscaled.log}"
@@ -90,6 +92,8 @@ unset TAILSCALE_AUTHKEY
 
 # Node 24 built-in proxy support is enabled only for HTTP. HTTPS provider calls
 # remain direct; the signer is intentionally HTTP over the encrypted Tailnet.
+# Signer HTTP client uses explicit Undici ProxyAgent (proxyTunnel:false) +
+# Connection: close against HTTP_PROXY (see packages/withdrawals signer-http-fetch).
 export NODE_USE_ENV_PROXY=1
 export HTTP_PROXY="http://$TS_PROXY_ADDR"
 export http_proxy="$HTTP_PROXY"

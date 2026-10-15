@@ -26,6 +26,37 @@ export function resolveSignerHttpProxyUrl(
   return trimmed === '' ? null : trimmed;
 }
 
+function mergeConnectionCloseHeaders(init: RequestInit | undefined): Record<string, string> {
+  const merged: Record<string, string> = {};
+  const raw = init?.headers;
+  if (raw !== undefined && raw !== null) {
+    if (Array.isArray(raw)) {
+      for (const tuple of raw) {
+        merged[String(tuple[0]).toLowerCase()] = String(tuple[1]);
+      }
+    } else if (typeof (raw as { forEach?: unknown }).forEach === 'function') {
+      (raw as { forEach: (cb: (value: string, key: string) => void) => void }).forEach(
+        (value, key) => {
+          merged[String(key).toLowerCase()] = String(value);
+        },
+      );
+    } else {
+      for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+        if (value === undefined) continue;
+        merged[key.toLowerCase()] = Array.isArray(value)
+          ? value.map(String).join(', ')
+          : String(value);
+      }
+    }
+  }
+  // undici@7.28.0 non-tunnel ProxyAgent (proxyTunnel:false) uses Http1ProxyWrapper,
+  // which builds its internal Client/Pool as factory(proxyUrl, { connect }) only —
+  // ProxyAgent `connections` / `pipelining` do NOT propagate to that internal dispatcher.
+  // Connection: close is the request-level control that actually reaches the proxy socket.
+  merged.connection = 'close';
+  return merged;
+}
+
 /**
  * Signer-scoped fetch that routes through an explicit Undici ProxyAgent when an
  * HTTP proxy is configured.
@@ -36,6 +67,12 @@ export function resolveSignerHttpProxyUrl(
  * Explicit ProxyAgent + `proxyTunnel: false` keeps absolute-form HTTP forwarding
  * (required for Tailscale `--outbound-http-proxy-listen`) scoped only to Signer
  * calls — no global dispatcher mutation.
+ *
+ * Attempt #3: identity GET succeeded, then sign POST hit SIGNER_HTTP_HEADERS_TIMEOUT.
+ * Defensible mitigation retained here: force `Connection: close` so the Worker→proxy
+ * TCP session is not kept alive across Signer calls (proven in transport tests).
+ * Shared HTTP+SOCKS on one Tailscale listen port is official Tailscale behavior and
+ * is not treated as a proven root cause.
  */
 export function createSignerHttpFetch(
   options: CreateSignerHttpFetchOptions = {},
@@ -58,7 +95,8 @@ export function createSignerHttpFetch(
 
   const proxiedFetch: typeof fetch = async (input, init) => {
     const response = await undiciFetch(input as Parameters<typeof undiciFetch>[0], {
-      ...(init as UndiciRequestInit | undefined),
+      ...(init as unknown as UndiciRequestInit | undefined),
+      headers: mergeConnectionCloseHeaders(init),
       dispatcher: agent,
     });
     return response as unknown as Response;
